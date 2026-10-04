@@ -51,14 +51,14 @@ test('a reason with mentions, markdown, newlines and backticks shows as one iner
   const gate = run(openAsk('B7', T0), [ballot(MAYA, 0, 'A', T0 + MINUTE, hostile)]);
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.deepEqual(c.embeds[0].fields[3], { name: 'Maya, part 1',
-    value: '@everyone \\<@123> \\<@&9> \\*\\*bold\\*\\* \\_it\\_ \\~\\~gone\\~\\~ \\|\\|spoiler\\|\\| \\`code\\` \\`\\`\\`block\\`\\`\\` \\# heading \\- list \\[x\\](https://a.b) \\<t:1:R> \\<:e:1>' });
+    value: '@everyone @123 @&9 \\*\\*bold\\*\\* \\_it\\_ \\~\\~gone\\~\\~ \\|\\|spoiler\\|\\| code block # heading - list \\[x\\](https:// a.b) t:1:R :e:1' });
   assert.equal(safe('a\r\n\t b   c '), 'a b c');
   // A hostile display name is made inert the same way, everywhere a name shows.
   const names = new Map([[MAYA, '**@everyone** <@1>']]);
   const named = card(gate, ASKS.B7, { ...PEOPLE, names });
-  assert.match(named.embeds[0].fields[0].value, /1 vote \(\\\*\\\*@everyone\\\*\\\* \\<@1>\)/);
+  assert.match(named.embeds[0].fields[0].value, /1 vote \(\\\*\\\*@everyone\\\*\\\* @1\)/);
   assert.equal(note('closed', run(openAsk('G5', T0), [{ type: 'press', by: MAYA, option: 'A', at: T0, via: 'discord' }]), names).content,
-    'Already answered by \\*\\*@everyone\\*\\* \\<@1>: A');
+    'Already answered by \\*\\*@everyone\\*\\* @1: A');
 });
 
 test('at the limit a tied part shows tie-break buttons for the tied options only; decided parts are provisional', () => {

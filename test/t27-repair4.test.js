@@ -214,18 +214,17 @@ test('F-T27-31: safe keeps only the three subdivision flags (England, Scotland, 
   assert.doesNotMatch(safe(flag('abcdef').repeat(3)), /[\u{E0020}-\u{E007E}]/u);
 });
 
-test('F-T27-32: the selectors stay only on an emoji, a keycap or a Han ideograph; U+034F goes; a stack of marks is cut to 3', () => {
+test('F-T27-32: the selectors stay only inside an RGI emoji (a red heart, a keycap, a pirate flag); a stack of marks is cut to 3', () => {
   assert.equal(safe('*️⃣'), '\\*️⃣'); // the keycap stays; the markdown escape is the only change
-  for (const kept of ['❤️', '☠️', '✈︎', '1️⃣', '#️⃣', '中\u{E0100}', '葛\u{E0101}', '❤️\u200d🔥', '🏴\u200d☠️', FAMILY, SCOTLAND, 'a\u0301\u0308\u0323b']) assert.equal(safe(kept), kept, JSON.stringify(kept));
+  for (const kept of ['❤️', '☠️', '1️⃣', '#️⃣', '❤️\u200d🔥', '🏴\u200d☠️', FAMILY, SCOTLAND, 'a\u0301\u0308\u0323b']) assert.equal(safe(kept), kept, JSON.stringify(kept));
   assert.equal(safe('a\ufe0fb'), 'ab'); // kept on 56e5910
   assert.equal(safe('a\ufe0e\ufe0fb'), 'ab');
   assert.equal(safe('a\ufe00\ufe01\ufe02\ufe03\ufe0eb'), 'ab');
   assert.equal(safe('a\u{E0100}\u{E0101}\u{E01EF}b'), 'ab');
-  assert.equal(safe('a\u034fb'), 'ab');
   assert.equal(safe('\ufe0f\ufe0e\u{E0100}\u034f'), '');
-  assert.equal(safe('😀\ufe0f\ufe0f'), '😀\ufe0f'); // a second selector is not directly after the emoji
+  assert.equal(safe('😀\ufe0f\ufe0f'), '😀'); // a selector that no RGI emoji needs goes (F-T27-42)
   assert.equal(safe('1\u{E0100}'), '1'); // an ideographic selector after a digit goes
-  assert.equal(safe('a\u{1F3F4}\ufe0f\u200d☠\ufe0f'), 'a\u{1F3F4}\ufe0f\u200d☠\ufe0f');
+  assert.equal(safe('a\u{1F3F4}\ufe0f\u200d☠\ufe0f'), 'a\u{1F3F4}☠\ufe0f'); // not the pirate flag: a selector too many, so the joiner goes too
   // A bit channel of selectors between letters is gone; the letters stay.
   const bits = '0110100001101001';
   assert.equal(safe([...bits].map((b) => `a${b === '1' ? '\ufe00' : '\ufe01'}`).join('')), 'a'.repeat(16));
@@ -233,7 +232,7 @@ test('F-T27-32: the selectors stay only on an emoji, a keycap or a Han ideograph
   // Marks: at most 3 on one base character; 500 marks on an A give 3.
   assert.equal(safe(`A${'\u0301\u0302\u0303\u0304\u0305'.repeat(100)}`), 'A\u0301\u0302\u0303');
   assert.equal(safe(`A${'\u0301'.repeat(3)}B${'\u0301'.repeat(4)}`), `A${'\u0301'.repeat(3)}B${'\u0301'.repeat(3)}`);
-  assert.equal(safe(`${'\u0301'.repeat(499)}A`), '\u0301\u0301\u0301A');
+  assert.equal(safe(`${'\u0301'.repeat(499)}A`), 'A'); // a mark before any letter goes (F-T27-40)
   assert.equal(safe('\u0301'.repeat(499)), '');
   assert.equal(safe('👩🏽\u200d🚀'), '👩🏽\u200d🚀'); // a skin tone is not a mark
 });
@@ -262,9 +261,8 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
 
 test('F-T27-30 to F-T27-33: the README states the premise of safe, the budget order and the fallback name', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  for (const line of ['safe for the people who read Discord', 'B3 cleans the text for the chief again, with an allow-list', 'England, Scotland and Wales',
-    'at most 3 combining marks on one character', 'drops the oldest reason fields', 'cuts the voter lists', 'then the why, then the option labels, then the question',
-    'The keys, the counts and "The chief recommends A" never shrink', 'The single card shrinks the same way', '"member …6789" (the last 4 digits of its id) or "member"']) {
+  for (const line of ["cleaned by B3's own allow-list", 'at most 3 combining marks on a letter', 'drops the oldest reason fields', 'cuts the voter lists', 'then the why, then the option labels, then the question',
+    'The keys, the counts and "The chief recommends A" never shrink', 'The single card shrinks the same way', '"member …6789" (the last 4 digits of an id of 4 or more digits) or "member"']) {
     assert.ok(readme.includes(line), line);
   }
   assert.ok(!readme.includes('cannot spell hidden ASCII to a model'));

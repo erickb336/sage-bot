@@ -66,9 +66,11 @@ const ended = await press(JON, 'end!:B9', clock(15, 28, 20), undefined, true); /
 moment('10-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a lead.', 'B9', { note: ended });
 send('B9', { type: 'withdraw', by: ERICK, at: clock(15, 30) }); ctx.now = clock(15, 30);
 moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
-// 12: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9).
+// 12: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9), and display names
+// at Discord's 32-character limit, so that the budget drops the oldest reasons and the description counts them (F-T27-35).
 {
-  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: ['Erick', 'Maya', 'Jon', 'Ana', 'Lea'][i], roles: [CONFIG.driverRole] }));
+  const names = ['Erick Alexander Benitez-Castillo', 'Maya Lindqvist-Oyelaran Nkemelu', 'Jon Kristoffer Vandenbroucke Jr', 'Ana Lucía Fernández de la Vega', 'Lea Marguerite Schönberg-Dubois'];
+  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: names[i], roles: [CONFIG.driverRole] }));
   const parts = Array.from({ length: 4 }, () => ['A', 'B', 'C']);
   const ask = { kind: 'batch', task: 'T12', title: 'Four questions, every reason at 500 characters', parts: parts.map((_, i) => ({
     question: `Question ${i + 1} of the batch?`, why: 'A is the smallest change.', recommended: 'A', options: { A: 'Option A', B: 'Option B', C: 'Option C' } })) };
@@ -81,8 +83,8 @@ moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button i
   }
   ctx.now = clock(16, 21);
   const c = cardOf('B12', big);
-  moments.push({ file: '12-five-by-four-limits', title: 'A team of 5, 4 parts, a 500-character reason from everyone on every part',
-    about: `Each reason shows cut to 200 characters; the gate keeps the full text. ${c.embeds[0].fields.length} fields of 25; ${embedLength(c.embeds[0])} characters of 6000.`,
+  moments.push({ file: '12-five-by-four-limits', title: 'A team of 5 with 32-character names, 4 parts, a 500-character reason from everyone on every part',
+    about: `Each reason shows cut to 200 characters; the gate keeps the full text. The oldest reasons go first, and the description counts them. ${c.embeds[0].fields.length} fields of 25; ${embedLength(c.embeds[0])} characters of 6000.`,
     now: ctx.now, card: c });
 }
 
