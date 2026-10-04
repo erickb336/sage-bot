@@ -103,9 +103,7 @@ export function step(gate, event, holders, leads) {
   const settled = gate.phase === 'voting' && event.at >= gate.endsAt
     ? endVoting({ ...gate, lastAt: gate.endsAt }, null, people.holders, gate.endsAt)
     : { gate, effects: [] };
-  const next = event.type === 'tick' ? { gate: settled.gate, effects: [] }
-    : settled.gate.phase === 'closed' ? ignore(settled.gate, event, 'closed')
-    : apply(settled.gate, event, people);
+  const next = event.type === 'tick' ? { gate: settled.gate, effects: [] } : apply(settled.gate, event, people);
   // The gate's time moves on only with an event that applies; a refused event leaves it as it was.
   const applied = !next.effects.some((e) => e.type === 'ignored');
   // A step that ends withdrawn reports only its close: nothing that the time limit settled on the way counts.
@@ -137,14 +135,16 @@ function idSet(ids) {
 }
 
 function apply(gate, event, { holders, leads }) {
+  // A person without the role always gets 'not-holder', whatever the phase; a withdraw needs only the asker.
+  if (event.type !== 'withdraw' && !holders.has(event.by)) return ignore(gate, event, 'not-holder');
+  if (gate.phase === 'closed') return ignore(gate, event, 'closed');
   if (event.type === 'withdraw') {
     return event.by === gate.askedBy ? withdraw(gate) : ignore(gate, event, 'not-asker');
   }
-  if (event.type === 'press') return gate.kind === 'single' ? answer(gate, event, holders) : vote(gate, event, holders);
+  if (event.type === 'press') return gate.kind === 'single' ? answer(gate, event) : vote(gate, event);
   // A lead action: end or tiebreak. Only on a batch, only from Discord, only from a lead who is also a holder.
   if (gate.kind !== 'batch') return ignore(gate, event, 'wrong-kind');
   if (event.via !== 'discord') return ignore(gate, event, 'lead-needs-discord');
-  if (!holders.has(event.by)) return ignore(gate, event, 'not-holder');
   if (!leads.has(event.by)) return ignore(gate, event, 'not-lead');
   if (event.type === 'end') {
     return gate.phase === 'voting' ? endVoting(gate, event.by, holders, event.at) : ignore(gate, event, 'closed');
@@ -153,16 +153,14 @@ function apply(gate, event, { holders, leads }) {
 }
 
 /** A single gate: the first answer from a holder is final. */
-function answer(gate, event, holders) {
-  if (!holders.has(event.by)) return ignore(gate, event, 'not-holder');
+function answer(gate, event) {
   if (!gate.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
   return close(gate, { status: 'answered', option: event.option, by: event.by, via: event.via });
 }
 
 /** A batch ballot: the last ballot of each holder on each part counts. */
-function vote(gate, event, holders) {
+function vote(gate, event) {
   if (gate.phase !== 'voting') return ignore(gate, event, 'closed');
-  if (!holders.has(event.by)) return ignore(gate, event, 'not-holder');
   const part = Number.isInteger(event.part) ? gate.parts[event.part] : undefined;
   if (!part) return ignore(gate, event, 'unknown-part');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
@@ -174,12 +172,13 @@ function vote(gate, event, holders) {
   return { gate: { ...gate, parts }, effects: [] };
 }
 
-/** End the batch vote: each part goes to the option with the most votes cast; a tie stays open. */
+/** End the batch vote: each part goes to the option with the most votes cast; a tie, or no votes, stays open. */
 function endVoting(gate, by, holders, at) {
   const effects = [{ type: 'vote-ended', by }];
   const parts = gate.parts.map((part, i) => {
-    const tied = leaders(part, holders);
-    if (tied.length !== 1) return { ...part, tied };
+    const { top, tied } = leaders(part, holders);
+    // With zero votes, every option is tied, also the only option of a part.
+    if (top === 0 || tied.length !== 1) return { ...part, tied };
     const [option] = tied;
     effects.push({ type: 'decided', part: i, option, how: 'votes' });
     return { ...part, outcome: { status: 'decided', option, how: 'votes' } };
@@ -205,12 +204,12 @@ function finish(gate, effects) {
     : { gate, effects };
 }
 
-/** The options with the most ballots of current holders; with zero ballots, every option is tied. */
+/** The most ballots of current holders on one option, and the options with that many. */
 function leaders(part, holders) {
   const counts = new Map(part.options.map((o) => [o, 0]));
   for (const [by, { option }] of ballotsOf(part)) if (holders.has(by)) counts.set(option, counts.get(option) + 1);
   const top = Math.max(...counts.values());
-  return part.options.filter((o) => counts.get(o) === top);
+  return { top, tied: part.options.filter((o) => counts.get(o) === top) };
 }
 
 /**
@@ -282,13 +281,16 @@ function gateProblem(g) {
   const ended = g.votingEndedAt;
   if (ended !== null && !(inTime(ended) && ended <= g.endsAt)) return 'votingEndedAt is not a time';
   if (!Array.isArray(g.parts) || g.parts.length === 0) return 'no parts';
+  // Every ballot comes before the time limit: a ballot at or after it ends the vote first.
+  const ballotTime = (t) => inTime(t) && t < g.endsAt;
   for (const part of g.parts) {
-    const problem = partProblem(part, inTime);
+    const problem = partProblem(part, ballotTime);
     if (problem) return problem;
   }
   const open = g.parts.filter((p) => p.outcome.status === 'open');
   const all = open.length === g.parts.length;
-  const ok = g.phase === 'voting' ? status === 'open' && ended === null && all && open.every((p) => !p.tied)
+  // A voting gate has seen no event at or after its time limit: such an event ends the vote.
+  const ok = g.phase === 'voting' ? status === 'open' && ended === null && g.lastAt < g.endsAt && all && open.every((p) => !p.tied)
     : g.phase === 'tied' ? status === 'open' && ended !== null && open.length > 0 && open.every((p) => p.tied)
     : g.phase === 'closed' && (status === 'withdrawn' ? all : status === 'decided' && ended !== null && open.length === 0);
   return ok ? '' : 'the phase and the outcomes do not match';
