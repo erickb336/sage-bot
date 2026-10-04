@@ -52,15 +52,15 @@ test('F-T27-19: the form submit of a space-only reason updates the card with no 
   assert.equal(ballotsOf(b.gate('B9').parts[0]).get(MAYA).reason, ' ');
 });
 
-test('F-T27-19, F-T27-22 d, F-T27-29: a holder whose name is empty, or only hiding characters, shows as "member …" and the last 4 of the id; no field is empty', () => {
+test('F-T27-19, F-T27-22 d, F-T27-29, F-T27-33: a holder whose name is empty, or only hiding characters, shows as "member" (the sample ids have no digits); no field is empty', () => {
   const names = new Map([[MAYA, ''], [JON, '​‮'], [ERICK, 'Erick']]);
   const gate = apply(openAsk('B9', T0), ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes'), ballot(JON, 1, 'B', T0 + MINUTE));
   const [embed] = card(gate, ASKS.B9, { ...PEOPLE, names }).embeds;
-  assert.deepEqual(embed.fields.at(-1), { name: 'member …maya, part 1', value: 'yes' });
-  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member …-jon\)/);
-  assert.match(embed.fields[0].value, /Not voted: Erick, member …-jon/);
+  assert.deepEqual(embed.fields.at(-1), { name: 'member, part 1', value: 'yes' });
+  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member\)/);
+  assert.match(embed.fields[0].value, /Not voted: Erick, member/);
   const answered = apply(openAsk('G5', T0), { type: 'press', by: MAYA, option: 'A', at: T0 + MINUTE, via: 'discord' });
-  assert.match(card(answered, ASKS.G5, { ...PEOPLE, names }).embeds[0].description, /Answered by member …maya /);
+  assert.match(card(answered, ASKS.G5, { ...PEOPLE, names }).embeds[0].description, /Answered by member at /);
 });
 
 test('F-T27-20: when Discord refuses the reply after the store, handle resolves with the new gate, the effects and replyError', async () => {

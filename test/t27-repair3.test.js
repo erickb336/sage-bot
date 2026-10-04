@@ -52,7 +52,9 @@ test('F-T27-24: safe removes every format, control and blank-looking character b
     if (!hidden.test(ch)) { visible += ch; continue; }
     const hex = `U+${cp.toString(16).toUpperCase()}`;
     assert.equal(safe(ch), '', `${hex} alone`);
-    const between = /\p{M}/u.test(ch) || ch === '\u200c' || ch === '\u200d' ? `a${ch}b` : /\s/u.test(ch) && !/\p{Cf}/u.test(ch) ? 'a b' : 'ab'; // the BOM is a space to JS and a format character to Unicode: it goes
+    // A mark stays on its letter, except a variation selector or U+034F (F-T27-32); the BOM is a space to JS and a format character to Unicode: it goes.
+    const selector = /[\u034f\ufe00-\ufe0f\u{E0100}-\u{E01EF}]/u.test(ch);
+    const between = (/\p{M}/u.test(ch) && !selector) || ch === '\u200c' || ch === '\u200d' ? `a${ch}b` : /\s/u.test(ch) && !/\p{Cf}/u.test(ch) ? 'a b' : 'ab';
     assert.equal(safe(`a${ch}b`), between, `${hex} between letters`);
   }
   // Every other code point (letters, digits, symbols, emoji, private use and unassigned) stays: safe only adds escaping backslashes.
@@ -90,8 +92,8 @@ test('F-T27-25: a visibly empty reason (joiners, tags, word joiners or combining
   const names = new Map([...PEOPLE.names, [MAYA, '\u200d\u200d'], [JON, '\u0301\u0301']]);
   const gate = apply(openAsk('B9', T0), PEOPLE, ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes'), ballot(JON, 1, 'B', T0 + MINUTE));
   const [embed] = card(gate, ASKS.B9, { ...PEOPLE, names }).embeds;
-  assert.deepEqual(embed.fields.at(-1), { name: 'member …maya, part 1', value: 'yes' });
-  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member …-jon\)/);
+  assert.deepEqual(embed.fields.at(-1), { name: 'member, part 1', value: 'yes' });
+  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member\)/);
 });
 
 test('F-T27-28: the 200-character cut keeps a flag or a family emoji whole or drops it whole, never a half', () => {

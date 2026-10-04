@@ -58,7 +58,7 @@ function team(nHolders, nParts) {
   return ctx;
 }
 
-test('F-T27-9: 5 holders, 4 parts and 500-character reasons fit Discord: 24 fields, under 6000, each reason cut to 200 with …', async () => {
+test('F-T27-9, F-T27-30: 5 holders, 4 parts and 500-character reasons fit Discord: the newest reasons at 200 characters, the oldest go', async () => {
   const ctx = team(5, 4);
   for (let p = 0; p < 4; p++) for (let h = 0; h < 5; h++) {
     ctx.now += 1000;
@@ -67,17 +67,20 @@ test('F-T27-9: 5 holders, 4 parts and 500-character reasons fit Discord: 24 fiel
   const gate = ctx.gates.get('B7').gate;
   assert.equal(ballotsOf(gate.parts[3]).get('h4').reason.length, 500); // the gate keeps the full text
   const [embed] = card(gate, ctx.ask, ctx.people).embeds;
-  assert.equal(embed.fields.length, 24);
   assert.ok(embedLength(embed) <= 6000, `embed length ${embedLength(embed)}`);
+  // 20 reasons of 200 characters do not fit beside 4 parts, so the oldest one (h0 on part 1) goes; the 19 newest show whole at 200.
   const reasons = embed.fields.slice(4);
-  assert.equal(reasons.length, 20);
-  for (const f of reasons) assert.ok(f.value.length <= 200 && f.value.endsWith('…'), f.value.length);
+  assert.equal(embed.fields.length, 23);
+  assert.deepEqual(reasons.map((f) => f.name), [1, 2, 3, 4].flatMap((p) => [0, 1, 2, 3, 4].map((h) => `Holder Number ${h}, part ${p}`)).slice(1));
+  for (const f of reasons) assert.ok(f.value.length === 200 && f.value.endsWith('…'), f.value.length);
   assert.ok(embed.fields.every((f) => f.name.length <= 256 && f.value.length <= 1024));
-  // 32-character names (Discord's longest) with markdown: the reasons shrink below 200 until the embed fits.
+  // 32-character names (Discord's longest) with markdown: more of the oldest reasons go; the shown ones still have their 200 characters.
   const names = new Map([...ctx.people.names].map(([id]) => [id, '*'.repeat(32)]));
   const [wide] = card(gate, ctx.ask, { ...ctx.people, names }).embeds;
   assert.ok(embedLength(wide) <= 6000, `embed length ${embedLength(wide)}`);
-  assert.ok(wide.fields.slice(4).every((f) => f.value.length < 200 && f.value.endsWith('…')));
+  assert.ok(wide.fields.length < 23 && wide.fields.length > 10, `${wide.fields.length} fields`);
+  assert.ok(wide.fields.slice(4).every((f) => f.value.length === 200 && f.value.endsWith('…')));
+  assert.equal(wide.fields.at(-1).value, '34'.repeat(100).slice(0, 199) + '…'); // the newest reason, h4 on part 4
 });
 
 test('F-T27-9: a card that cannot be built leaves the stored gate as it was', async () => {
