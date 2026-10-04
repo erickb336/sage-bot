@@ -8,7 +8,9 @@ import { handle, peopleOf } from '../src/handle.js';
 import { card } from '../src/cards.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { step } from '../src/vote.js';
+import { embedLength } from 'discord.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, clock, openAsk } from '../examples/sample.js';
+import { openGate } from '../src/vote.js';
 
 const OUT = new URL('../design/b2/', import.meta.url);
 const people = peopleOf(MEMBERS, CONFIG);
@@ -16,13 +18,13 @@ const gates = new Map();
 const ctx = { gates, people, clock: () => ctx.now, now: 0 };
 const open = (id, at) => gates.set(id, { gate: openAsk(id, at), ask: ASKS[id] });
 const send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, people.holders, people.leads).gate, ask: ASKS[id] });
-async function press(user, customId, at, fields) {
+async function press(user, customId, at, fields, ephemeral) {
   ctx.now = at;
-  const i = fakeInteraction({ user, customId, fields });
+  const i = fakeInteraction({ user, customId, fields, ephemeral });
   await handle(i, ctx);
   return i.replies[0];
 }
-const cardOf = (id) => card(gates.get(id).gate, gates.get(id).ask, people);
+const cardOf = (id, ctx_ = ctx) => card(ctx_.gates.get(id).gate, ctx_.gates.get(id).ask, ctx_.people);
 const moments = [];
 const moment = (file, title, about, id, extra = {}) => moments.push({ file, title, about, now: ctx.now, card: cardOf(id), ...extra });
 
@@ -60,10 +62,29 @@ const notLead = await press(MAYA, 'end:B9', clock(15, 28, 10));
 moment('08-not-a-lead', 'Maya is not a lead and presses End vote now', 'Discord shows every button to everyone; only a lead can end the vote.', 'B9', { note: notLead });
 const noRole = await press(SAM, 'press:B9:0:0', clock(15, 29));
 moment('09-no-role-note', 'Sam has no role and presses a button', 'The tally does not change; only Sam sees the note.', 'B9', { note: noRole });
-const ended = await press(JON, 'end!:B9', clock(15, 28, 20));
+const ended = await press(JON, 'end!:B9', clock(15, 28, 20), undefined, true); // from the private confirm
 moment('10-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a lead.', 'B9', { note: ended });
 send('B9', { type: 'withdraw', by: ERICK, at: clock(15, 30) }); ctx.now = clock(15, 30);
 moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
+// 12: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9).
+{
+  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: ['Erick', 'Maya', 'Jon', 'Ana', 'Lea'][i], roles: [CONFIG.driverRole] }));
+  const parts = Array.from({ length: 4 }, () => ['A', 'B', 'C']);
+  const ask = { kind: 'batch', task: 'T12', title: 'Four questions, every reason at 500 characters', parts: parts.map((_, i) => ({
+    question: `Question ${i + 1} of the batch?`, why: 'A is the smallest change.', recommended: 'A', options: { A: 'Option A', B: 'Option B', C: 'Option C' } })) };
+  const big = { gates: new Map([['B12', { gate: openGate({ id: 'B12', kind: 'batch', parts, askedBy: members[0].id, at: clock(16, 0) }), ask }]]),
+    people: peopleOf(members, CONFIG), clock: () => big.now, now: clock(16, 0) };
+  const words = 'The reason text of one holder on one part, 500 characters long, as the form allows at most. ';
+  for (let p = 0; p < 4; p++) for (const [h, m] of members.entries()) {
+    big.now = clock(16, 1 + p * 5 + h);
+    await handle(fakeInteraction({ user: m.id, customId: `reason:B12:${p}:${h % 3}`, fields: { reason: `${m.name}, part ${p + 1}: ${words.repeat(6)}`.slice(0, 500) } }), big);
+  }
+  ctx.now = clock(16, 21);
+  const c = cardOf('B12', big);
+  moments.push({ file: '12-five-by-four-limits', title: 'A team of 5, 4 parts, a 500-character reason from everyone on every part',
+    about: `Each reason shows cut to 200 characters; the gate keeps the full text. ${c.embeds[0].fields.length} fields of 25; ${embedLength(c.embeds[0])} characters of 6000.`,
+    now: ctx.now, card: c });
+}
 
 // Rendering: a Discord-like look, enough to judge the copy and the states.
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
