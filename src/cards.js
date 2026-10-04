@@ -20,22 +20,43 @@ const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'itali
 /** Discord's limits on one embed. A reason shows on the card cut to REASON_ON_CARD characters; the gate keeps the full text. */
 const EMBED_MAX = 6000;
 const FIELDS_MAX = 25;
+const TITLE_MAX = 256;
+const FIELD_NAME_MAX = 256;
+const FIELD_VALUE_MAX = 1024;
 const REASON_ON_CARD = 200;
 
 /**
- * The characters that hide or reorder text (F-T27-11): bidi controls and marks, the zero-width space, the BOM and the soft hyphen.
- * Not the joiners U+200C and U+200D or the tag characters U+E0020 to U+E007F: a family emoji, a Persian word and a subdivision flag need them.
+ * The characters that `safe` removes, by Unicode rule, not by list (F-T27-24): every format character (\p{Cf}: bidi controls,
+ * zero-width space, BOM, soft hyphen, word joiner, tag characters, …), every control (\p{Cc}) that is not whitespace, every lone
+ * surrogate (\p{Cs}), and the five letters that look blank (the Hangul fillers, the half-width filler and the empty braille cell).
+ * Group 1 is kept: a subdivision flag (U+1F3F4, 3 to 6 tag digits or lowercase letters, the shape of a subdivision id, U+E007F),
+ * and a joiner (U+200C, U+200D) between two visible characters (a letter, a mark, a pictograph or a skin tone). So a family emoji, a Persian
+ * word and the Scotland flag stay whole, while tag characters anywhere else cannot spell hidden ASCII.
  */
-const HIDING = /[\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const HIDDEN = /(\u{1F3F4}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{3,6}\u{E007F}|(?<=[\p{L}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}])[\u200c\u200d](?=[\p{L}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}]))|\p{Cf}|(?!\s)\p{Cc}|\p{Cs}|[\u115f\u1160\u3164\uffa0\u2800]/gu;
+/** Text with nothing visible: only combining marks and spaces (the hidden characters are already removed). */
+const VISIBLY_EMPTY = /^[\p{M} ]*$/u;
 /**
- * Untrusted text as one inert line: hiding characters removed, markdown and every `[` and `]` escaped (no masked link),
- * `<` escaped (no mention, timestamp or emoji code), whitespace folded. The result can be '' (only spaces or hiding characters):
- * a caller never puts '' in a field, because Discord refuses an empty field value (F-T27-19).
+ * Untrusted text as one inert line: hidden characters removed (HIDDEN), markdown and every `[` and `]` escaped (no masked link),
+ * `<` escaped (no mention, timestamp or emoji code), whitespace folded. A visibly empty text gives '' (F-T27-25): a reason of ''
+ * gets no field, because Discord refuses an empty field value (F-T27-19), and a name of '' falls back (see `who`).
  */
-export const safe = (text) => escapeMarkdown(String(text).replace(HIDING, ''), ESCAPE_ALL)
-  .replace(/[<[\]]/g, '\\$&').replace(/\s+/g, ' ').trim();
-/** `text` cut to `max` characters, the last one "…"; a cut never leaves half of a surrogate pair. */
-const cut = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1).replace(/[\ud800-\udbff]$/, '')}…`;
+export function safe(text) {
+  const line = escapeMarkdown(String(text).replace(HIDDEN, (m, keep) => keep ?? ''), ESCAPE_ALL)
+    .replace(/[<[\]]/g, '\\$&').replace(/\s+/g, ' ').trim();
+  return VISIBLY_EMPTY.test(line) ? '' : line;
+}
+const GRAPHEMES = new Intl.Segmenter();
+/** `text` cut to at most `max` characters, the last one "…"; the cut never splits a grapheme cluster: a flag or a family emoji is kept whole or dropped whole (F-T27-28). */
+function cut(text, max) {
+  if (text.length <= max) return text;
+  let end = 0;
+  for (const { index, segment } of GRAPHEMES.segment(text)) {
+    if (index + segment.length > max - 1) break;
+    end = index + segment.length;
+  }
+  return `${text.slice(0, end)}…`;
+}
 /** `text` cut at the last space before `max` characters, then "…", so no word is cut in half; one long word is cut like `cut` (F-T27-23). */
 const cutAtWord = (text, max) => {
   if (text.length <= max) return text;
@@ -44,10 +65,29 @@ const cutAtWord = (text, max) => {
 };
 /** A Discord timestamp: `t` shows hh:mm in the viewer's zone; `R` shows a live countdown ("in 18 minutes"). */
 export const stamp = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
-/** A person's name made safe; the id when the name is missing or safe makes it empty, and 'unknown' when the id is empty too. */
-const who = (id, names) => safe(names.get(id) ?? '') || safe(id) || 'unknown';
+/** A person's name made safe; "member …6789" (the last 4 characters of the id) when the name is missing or visibly empty, never the raw id (F-T27-29). */
+const who = (id, names) => safe(names.get(id) ?? '') || `member …${id.slice(-4)}`;
 const label = (p, key) => p.options[key] ?? key;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** `items` joined with ', ' within `cap` characters, the rest as "and N more"; the first item always shows. */
+function list(items, cap) {
+  let out = items[0];
+  let i = 1;
+  while (i < items.length && `${out}, ${items[i]}`.length <= cap) out = `${out}, ${items[i++]}`;
+  return i < items.length ? `${out} and ${items.length - i} more` : out;
+}
+/**
+ * `build(cap)` with the largest cap, from `cap` down to 1, whose result `measure`s at most `max`: each round the cap falls by the
+ * overshoot spread over the `n` texts that it cuts. So a part field and a card with reasons always fit Discord's limits (F-T27-27).
+ */
+function fit(build, measure, max, n, cap) {
+  let out = build(cap);
+  for (let over = measure(out) - max; over > 0 && cap > 1; over = measure(out) - max) {
+    cap = Math.max(1, cap - Math.ceil(over / n));
+    out = build(cap);
+  }
+  return out;
+}
 
 /** The custom_id of a button or modal: the action, the gate id and, for an option, the part and option indexes. Never the option text. */
 export const customId = (action, gateId, part, index) => [action, gateId, part, index].filter((x) => x !== undefined).join(':');
@@ -88,7 +128,7 @@ export function card(gate, ask, { holders, names }) {
 
 const button = (id, text, style, { chosen = false, disabled = false } = {}) => new ButtonBuilder().setCustomId(id)
   .setLabel(cut(text, 80)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
-const optionLine = (p, key, extra) => `**${key}.** ${label(p, key)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
+const optionLine = (p, key, extra, cap = Infinity) => `**${key}.** ${cutAtWord(label(p, key), cap)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
 
 function single(gate, ask, names) {
   const [p] = ask.parts;
@@ -96,7 +136,7 @@ function single(gate, ask, names) {
   const status = o.status === 'answered'
     ? `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${label(p, o.option)}. Final.**`
     : o.status === 'withdrawn' ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Nothing to answer.` : '';
-  const embed = new EmbedBuilder().setTitle(`Question ${gate.id} · ${ask.task} ${ask.title}`).setDescription([
+  const embed = new EmbedBuilder().setTitle(cut(`Question ${gate.id} · ${ask.task} ${ask.title}`, TITLE_MAX)).setDescription([
     `**${p.question}**`, '',
     ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '')), '',
     `**Why recommended:** ${p.why}`,
@@ -128,25 +168,26 @@ function batch(gate, ask, holders, names) {
       const value = b.reason && safe(b.reason);
       if (value) reasons.push({ name: `${who(id, names)}, part ${n}`, value, at: b.at });
     }
-    const named = (ids) => ids.map((id) => who(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')).join(', ');
+    const named = (ids, cap) => list(ids.map((id) => who(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')), cap);
     const notYet = [...holders].filter((id) => !ballots.has(id));
     const o = part.outcome;
     const state = withdrawn ? ''
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by a ${LEAD}`}`
       : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
-    const value = [
-      ...part.options.map((k) => optionLine(p, k, ` · ${plural(counts.get(k).length, 'vote')}${counts.get(k).length ? ` (${named(counts.get(k))})` : ''}`)),
-      `The chief recommends ${p.recommended}: ${p.why}`,
-      `Voted: ${voted.length ? named(voted.map(([id]) => id)) : 'nobody yet'} · Not voted: ${notYet.length ? named(notYet) : 'nobody'}`,
+    // The labels, the why and the voter lists shrink together until the field value fits in 1024 characters, whatever the ask holds (F-T27-27).
+    const value = fit((cap) => [
+      ...part.options.map((k) => optionLine(p, k, ` · ${plural(counts.get(k).length, 'vote')}${counts.get(k).length ? ` (${named(counts.get(k), cap)})` : ''}`, cap)),
+      `The chief recommends ${p.recommended}: ${cutAtWord(p.why, cap)}`,
+      `Voted: ${voted.length ? named(voted.map(([id]) => id), cap) : 'nobody yet'} · Not voted: ${notYet.length ? named(notYet, cap) : 'nobody'}`,
       ...(state ? [state] : []),
-    ].join('\n');
+    ].join('\n'), (text) => text.length, FIELD_VALUE_MAX, part.options.length + 3, FIELD_VALUE_MAX);
     const breakable = !voting && !withdrawn && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
       ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${LEAD} only)`, ButtonStyle.Danger) : null)
       : button(customId('press', gate.id, i, j), `Part ${n}, ${k}: ${label(p, k)}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
         { chosen: o.status === 'decided' && o.option === k, disabled: !voting })).filter(Boolean)));
-    return { name: `Part ${n} · ${p.question}`, value };
+    return { name: cutAtWord(`Part ${n} · ${p.question}`, FIELD_NAME_MAX), value };
   });
   if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${LEAD} only)`, ButtonStyle.Danger)));
   const ended = gate.votingEndedAt === null ? ''
@@ -160,26 +201,22 @@ function batch(gate, ask, holders, names) {
     : `${ended}Closed: every part is decided. ${ask.task} goes on.`;
   // The newest reasons that fit in 25 fields, each cut to REASON_ON_CARD; the cut shrinks until the embed is under 6000.
   const shown = reasons.sort((a, b) => a.at - b.at).slice(Math.max(0, reasons.length - (FIELDS_MAX - fields.length)));
-  const build = (cap) => new EmbedBuilder().setTitle(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`).setDescription(description)
+  const build = (cap) => new EmbedBuilder().setTitle(cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, TITLE_MAX)).setDescription(description)
     .addFields(...fields, ...shown.map(({ name, value }) => ({ name, value: cut(value, cap) })))
     .setFooter({ text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for a ${LEAD} · ` +
       `Who votes: every ${DRIVER}, one vote per part · Reason: optional, after a press` });
-  let cap = REASON_ON_CARD;
-  let embed = build(cap);
-  for (let over = embedLength(embed.data) - EMBED_MAX; over > 0 && cap > 1 && shown.length; over = embedLength(embed.data) - EMBED_MAX) {
-    cap = Math.max(1, cap - Math.ceil(over / shown.length));
-    embed = build(cap);
-  }
-  return { embed, rows };
+  return { embed: fit(build, (e) => embedLength(e.data), EMBED_MAX, shown.length, REASON_ON_CARD), rows };
 }
 
+/** The form title, 45 characters at most: "Your vote counts: A. …"; when that does not fit, the option alone, cut at a word (F-T27-29). */
+const title = (option) => `Your vote counts: ${option}`.length <= 45 ? `Your vote counts: ${option}` : cutAtWord(option, 45);
 /** The form after a batch press: an optional reason of at most REASON_MAX characters. */
 export function reasonModal(gate, ask, part, index) {
   const key = gate.parts[part].options[index];
   const input = new TextInputBuilder().setCustomId('reason').setLabel(`Reason for part ${part + 1} (optional)`)
     .setStyle(TextInputStyle.Paragraph).setMaxLength(REASON_MAX).setRequired(false)
     .setPlaceholder('Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.');
-  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(cutAtWord(`Your vote counts: ${key}. ${label(ask.parts[part], key)}`, 45))
+  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(title(`${key}. ${label(ask.parts[part], key)}`))
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 

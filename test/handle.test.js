@@ -66,7 +66,7 @@ test('a batch press counts at once and opens the reason modal; the modal submit 
   const pressed = await b.press(JON, 'press:B7:1:1');
   assert.deepEqual(pressed.replies.map((r) => r.kind), ['modal']);
   assert.equal(pressed.reply.custom_id, 'reason:B7:1:1');
-  assert.equal(pressed.reply.title, "Your vote counts: B. 04/10/2026 (the user's…"); // cut at a word within 45 characters (F-T27-18, F-T27-23)
+  assert.equal(pressed.reply.title, "B. 04/10/2026 (the user's locale)"); // the prefix goes first when the full title does not fit in 45 characters (F-T27-18, F-T27-29)
   assert.deepEqual(pressed.reply.components[0].components[0], {
     type: 4, custom_id: 'reason', label: 'Reason for part 2 (optional)', style: 2, max_length: 500, required: false,
     placeholder: 'Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.',

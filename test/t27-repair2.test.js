@@ -52,15 +52,15 @@ test('F-T27-19: the form submit of a space-only reason updates the card with no 
   assert.equal(ballotsOf(b.gate('B9').parts[0]).get(MAYA).reason, ' ');
 });
 
-test('F-T27-19, F-T27-22 d: a holder whose name is empty, or only hiding characters, shows as the id; no field is empty', () => {
+test('F-T27-19, F-T27-22 d, F-T27-29: a holder whose name is empty, or only hiding characters, shows as "member …" and the last 4 of the id; no field is empty', () => {
   const names = new Map([[MAYA, ''], [JON, '​‮'], [ERICK, 'Erick']]);
   const gate = apply(openAsk('B9', T0), ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes'), ballot(JON, 1, 'B', T0 + MINUTE));
   const [embed] = card(gate, ASKS.B9, { ...PEOPLE, names }).embeds;
-  assert.deepEqual(embed.fields.at(-1), { name: 'sample-maya, part 1', value: 'yes' });
-  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(sample-jon\)/);
-  assert.match(embed.fields[0].value, /Not voted: Erick, sample-jon/);
+  assert.deepEqual(embed.fields.at(-1), { name: 'member …maya, part 1', value: 'yes' });
+  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member …-jon\)/);
+  assert.match(embed.fields[0].value, /Not voted: Erick, member …-jon/);
   const answered = apply(openAsk('G5', T0), { type: 'press', by: MAYA, option: 'A', at: T0 + MINUTE, via: 'discord' });
-  assert.match(card(answered, ASKS.G5, { ...PEOPLE, names }).embeds[0].description, /Answered by sample-maya /);
+  assert.match(card(answered, ASKS.G5, { ...PEOPLE, names }).embeds[0].description, /Answered by member …maya /);
 });
 
 test('F-T27-20: when Discord refuses the reply after the store, handle resolves with the new gate, the effects and replyError', async () => {
@@ -117,12 +117,12 @@ test('F-T27-21: one 500-character reason on a small card shows exactly 200 chara
   assert.equal(value.slice(0, 199), 'word '.repeat(100).trim().slice(0, 199));
 });
 
-test('F-T27-21: Cancel on a gate that no longer votes replies with the closed note, not "The vote goes on"', async () => {
+test('F-T27-21, F-T27-29: Cancel on a gate that no longer votes says that the vote ended meanwhile, not "The vote goes on"', async () => {
   const b = bridge(['B9', 'B7'], T0);
   b.send('B9', { type: 'tick', at: clock(15, 1) });
   b.now = clock(15, 2);
   const tied = await b.press(JON, 'cancel:B9', undefined, true);
-  assert.deepEqual(tied.replies, [{ kind: 'update', content: 'The vote on B9 ended at <t:1791126060:t>. Your press did not count.', ...PRIVATE, components: [] }]);
+  assert.deepEqual(tied.replies, [{ kind: 'update', content: 'The vote on B9 ended at <t:1791126060:t> meanwhile. Nothing to cancel.', ...PRIVATE, components: [] }]);
   assert.deepEqual(tied.effects, []);
   b.send('B7', { type: 'withdraw', by: ERICK, at: b.now });
   const withdrawn = await b.press(JON, 'cancel:B7', undefined, true);
@@ -133,12 +133,12 @@ test('F-T27-21: Cancel on a gate that no longer votes replies with the closed no
   assert.equal(single.reply.content, 'This is a single question, not a vote: there is nothing to end and no tie to break.');
 });
 
-test('F-T27-23: the form title cuts at the last space before 45 characters and keeps the key whole', () => {
-  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 0).title, 'Your vote counts: A. Only the columns…');
-  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'Your vote counts: C. Visible columns, plus…');
+test('F-T27-23, F-T27-29: the form title drops its prefix first, then cuts at the last space before 45 characters and keeps the key whole', () => {
+  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 0).title, 'A. Only the columns visible in the table');
+  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'C. Visible columns, plus an "Include hidden…');
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 1).title, 'Your vote counts: B. No');
   const ask = { ...ASKS.B9, parts: [{ ...ASKS.B9.parts[0], options: { A: 'x'.repeat(60), B: 'No' } }, ASKS.B9.parts[1]] };
-  assert.equal(reasonModal(openAsk('B9', T0), ask, 0, 0).title, `Your vote counts: A. ${'x'.repeat(23)}…`);
+  assert.equal(reasonModal(openAsk('B9', T0), ask, 0, 0).title, `A. ${'x'.repeat(41)}…`);
   assert.equal(reasonModal(openAsk('B9', T0), ask, 0, 0).title.length, 45);
 });
 
