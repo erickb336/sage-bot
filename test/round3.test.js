@@ -46,17 +46,15 @@ test('F-T1-42: step throws a TypeError for a missing or wrong gate, with a clear
   assert.equal(step(saved, event, [MAYA], []).gate.outcome.option, 'A');
 });
 
-test('F-T1-43: 10,000 voters on one part finish in under 2 s, and step leaves its input unchanged', () => {
+// Changed by F-T1-50: no speed target; the team is 2-5 people. The 10,000 voters must only finish without error.
+test('F-T1-43: 10,000 voters on one part (holders as a Set) finish without error, and step leaves its input unchanged', () => {
   const voters = Array.from({ length: 10_000 }, (_, i) => `sample-u${i}`);
   const holders = new Set([...voters, LEA]);
-  const start = performance.now();
   let gate = batch([['A', 'B']]);
   const first = gate;
   const snapshot = JSON.stringify(first);
   voters.forEach((by, i) => { gate = step(gate, ballot(by, i % 3 ? 'A' : 'B', i / 1000), holders, [LEA]).gate; });
   const out = step(gate, tick(30), holders, [LEA]);
-  const ms = performance.now() - start;
-  assert.ok(ms < 2000, `took ${ms.toFixed(0)} ms`);
   assert.deepEqual(out.effects.slice(1), [{ type: 'decided', part: 0, option: 'A', how: 'votes' }, { type: 'closed', outcome: { status: 'decided' } }]);
   assert.equal(JSON.stringify(first), snapshot);
   // An earlier gate still gives its own result: with only the first voter (B), B wins.

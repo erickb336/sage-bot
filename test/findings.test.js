@@ -326,9 +326,10 @@ test('F-T1-35: nextReminderAt gives null for a time that is not a safe integer',
 
 // F-T1-36: a withdraw cancels the whole gate; no part is decided.
 
-test('F-T1-36: a withdraw at the time limit, with no tick before it, decides no part', () => {
-  const r = run(batch(), [[ballot(MAYA, 'A', 0), THREE], [{ type: 'withdraw', by: ERICK, at: T0 + 30 * MINUTE }, THREE]]);
-  assert.deepEqual(r.effects, [{ type: 'closed', outcome: { status: 'withdrawn' } }]);
+// Changed by F-T1-52: the time limit settles first, so this withdraw cancels only because the part is tied.
+test('F-T1-36: a withdraw at the time limit, with no tick before it and a tied part, cancels the whole gate', () => {
+  const r = run(batch(), [[{ type: 'withdraw', by: ERICK, at: T0 + 30 * MINUTE }, THREE]]);
+  assert.deepEqual(r.effects, [{ type: 'vote-ended', by: null }, { type: 'closed', outcome: { status: 'withdrawn' } }]);
   assert.deepEqual(r.gate.parts.map((p) => p.outcome), [{ status: 'open' }]);
 });
 

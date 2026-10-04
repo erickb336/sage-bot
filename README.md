@@ -23,12 +23,22 @@ This version has only the vote rules (task B1). It has no Discord connection yet
 | Reason | Optional on a batch ballot, at most 500 characters. Cleaning: NFKC; remove invisible format characters and variation selectors; a newline or control character becomes a space; remove invisible fillers (Hangul fillers, the grapheme joiner, the blank Braille cell); remove `<`, `>`, backticks and their lookalikes, also with a combining stroke through them. « » stay. A reason that cleans to nothing is dropped. |
 | Terminal answer | The owner's answer at the terminal counts as the first answer on a single gate, and as one ballot in a batch. It counts only from a holder: the bridge always includes the owner in holders. |
 | Outcome | Single: open, answered (option, who, and via Discord or the terminal), or withdrawn. Batch: each part is open or decided (by votes or by a lead's tie-break); the batch closes when every part is decided. |
-| Withdraw | The person who asked may withdraw the gate. A withdraw while any part is still open cancels the whole gate: no part of a withdrawn batch stays decided, also when the vote already decided it. Once a gate closes as decided, a withdraw has no effect. |
-| Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
+| Withdraw | The person who asked may withdraw the gate. A withdraw while any part is still open cancels the whole gate: no part of a withdrawn batch stays decided, also when the vote already decided it. Once a gate closes as decided, a withdraw has no effect. A withdraw at or after the time limit, with no tick before it, comes after the limit: the vote ends first, so the withdraw has no effect when the vote decided every part. |
+| Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate, as `nextReminderAt` and `parseGate` do. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
 
 ## The API
 
 Import the functions from `src/vote.js`. All times are whole milliseconds (safe integers) from the bridge's own clock.
+
+It also exports these constants, all in ms except the last:
+
+| Constant | Value |
+| --- | --- |
+| `MINUTE` | 60,000 |
+| `HOUR` | 60 minutes |
+| `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote |
+| `REMINDER_EVERY` | 2 hours |
+| `REASON_MAX` | 500: the most characters in a ballot reason |
 
 ### openGate({ id, kind, options, parts, askedBy, at })
 
@@ -52,12 +62,12 @@ It throws:
 
 Applies one event to a gate and returns `{ gate, effects }`. It does not change its input gate.
 
-- `gate`: a gate from `openGate` or an earlier `step` (also after a JSON round trip).
+- `gate`: a gate from `openGate`, an earlier `step` or `parseGate`.
 - `holders`: the ids that may answer and vote. `leads`: the ids with the sage-lead role. Each is any iterable of strings: an Array, a Set or a Map's `keys()`. Anything else, also a string, counts as empty. For long lists, pass a Set: `step` then uses it as it is.
 
 `step` never throws for odd events: it ignores them, with the reason. It throws a TypeError for a missing or wrong gate.
 
-**The bridge must send a tick at `gate.endsAt`.** The vote also ends at the first event (other than a withdraw) at or after that time.
+**The bridge must send a tick at `gate.endsAt`.** The vote also ends at the first event at or after that time, before the event applies.
 
 ### The events
 
@@ -106,11 +116,21 @@ The `why` codes:
 | `outcome` | `{ status: 'open' }`, `{ status: 'answered', option, by, via }` or `{ status: 'withdrawn' }` | `{ status: 'open' }`, `{ status: 'decided' }` or `{ status: 'withdrawn' }` |
 | other | `options` | `endsAt`, `votingEndedAt`, `parts` |
 
-Each part of a batch has `options`, `outcome` (`{ status: 'open' }` or `{ status: 'decided', option, how }`) and, after the vote ended with no single leader, `tied` (the tied options). The final answers of a decided batch are the parts' outcomes. To read the ballots that count on a part, call `ballotsOf(part)`: it returns a Map from id to `{ option, at, via, reason? }`, the last ballot of each person.
+Each part of a batch has `options`, `outcome` (`{ status: 'open' }` or `{ status: 'decided', option, how }`) and, after the vote ended with no single leader, `tied` (the tied options). The final answers of a decided batch are the parts' outcomes; the parts of a withdrawn batch show `{ status: 'open' }` and keep their ballots. The open outcomes and the ballots are frozen. To read the ballots that count on a part, call `ballotsOf(part)`: it returns a Map from id to `{ option, at, via, reason? }`, the last ballot of each person.
+
+A gate is plain JSON: it keeps one ballot per person on each part, so its size grows with the people, not with the presses, and its depth stays the same.
+
+### parseGate(value)
+
+Checks a loaded gate and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, a reason that is not cleaned, or a time that is not a safe integer or is later than `lastAt`. `step` and `nextReminderAt` make the same check.
 
 ### nextReminderAt(gate, now)
 
-Returns the next reminder strictly after `now`, as `{ at, to }`, or `null` when no reminder is due. `to` is `'holders'` for a single gate with no answer, and `'leads'` for a batch with tied parts. It returns `null` for a `now` that is not a safe integer.
+Returns the next reminder strictly after `now`, as `{ at, to }`, or `null` when no reminder is due. `to` is `'holders'` for a single gate with no answer, and `'leads'` for a batch with tied parts. It returns `null` for a `now` that is not a safe integer, and throws a TypeError for a missing or wrong gate.
+
+### cleanReason(text)
+
+Returns `text` cleaned as the Reason rule says. `step` cleans each ballot reason with it.
 
 ### An example
 
