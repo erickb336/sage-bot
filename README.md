@@ -43,6 +43,8 @@ It also exports these constants, all in ms except the last:
 | `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote |
 | `REMINDER_EVERY` | 2 hours |
 | `REASON_MAX` | 500: the most characters (code points) in a ballot reason; a longer one is cut |
+| `MAX_OPTIONS` | 5: the most options of a single gate or of one batch part (one row of Discord buttons) |
+| `MAX_BALLOTS` | 1000: the most voters on one part; the next new voter gets `full` |
 
 ### openGate({ id, kind, options, parts, askedBy, at })
 
@@ -60,7 +62,7 @@ Makes a new gate.
 It throws:
 
 - a RangeError for a kind other than `'single'` or `'batch'`, or for an `at` that is not a safe integer;
-- a TypeError for a missing `id` or `askedBy`, or for empty or duplicate options or parts.
+- a TypeError for a missing `id` or `askedBy`, or for empty or duplicate options or parts, or for more than `MAX_OPTIONS` (5) options in one list.
 
 ### step(gate, event, holders, leads)
 
@@ -113,6 +115,7 @@ The `why` codes:
 | `not-tied` | A tie-break while the vote is open, or on a decided part. |
 | `not-tied-option` | A tie-break for an option that is not among the tied leaders of the part. |
 | `closed` | The gate or the vote is already closed. |
+| `full` | The part already has `MAX_BALLOTS` voters, and `by` is not one of them. |
 
 ### The gate and its outcome
 
@@ -133,7 +136,7 @@ A gate is plain JSON: it keeps one ballot per person on each part, so its size g
 
 ### parseGate(value)
 
-Checks a loaded gate, freezes it all through and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, a reason that is empty, longer than 500 characters or has a lone surrogate, or a time that is not a safe integer or is later than `lastAt`. `step` and `nextReminderAt` make the same check.
+Checks a loaded gate, freezes it all through and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, more than `MAX_BALLOTS` ballots or `MAX_OPTIONS` options on a part, a reason that is empty, longer than 500 characters or has a lone surrogate, or a time that is not a safe integer or is later than `lastAt`. `step` and `nextReminderAt` make the same check.
 
 ### nextReminderAt(gate, now)
 

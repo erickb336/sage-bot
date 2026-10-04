@@ -18,6 +18,10 @@ export const HOUR = 60 * MINUTE;
 export const BATCH_LIMIT = 30 * MINUTE;
 export const REMINDER_EVERY = 2 * HOUR;
 export const REASON_MAX = 500;
+/** The most options of a single gate or of one batch part: Discord holds 5 buttons in a row, and a card uses one row per part (F-T28-18). */
+export const MAX_OPTIONS = 5;
+/** The most ballots on one part: one per person, so a part never grows past this many voters, whatever the holder list holds (F-T28-11). */
+export const MAX_BALLOTS = 1000;
 
 const KINDS = new Set(['single', 'batch']);
 const EVENT_TYPES = new Set(['press', 'end', 'tiebreak', 'withdraw', 'tick']);
@@ -34,7 +38,7 @@ const freeze = (x) => {
 };
 /** A ballot reason as B1 stores it: lone surrogates become U+FFFD, then a cut to REASON_MAX code points. */
 const reasonOf = (text) => Array.from(text.toWellFormed()).slice(0, REASON_MAX).join('');
-const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && new Set(x).size === x.length;
+const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPTIONS && x.every(isId) && new Set(x).size === x.length;
 
 /**
  * @typedef {{ option: string, at: number, via: 'discord' | 'terminal', reason?: string }} Ballot
@@ -54,7 +58,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && ne
  *   | { type: 'withdraw', by: string, at: number }
  *   | { type: 'tick', at: number }} Event
  * @typedef {'not-holder' | 'not-lead' | 'lead-needs-discord' | 'not-asker' | 'unknown-option' | 'unknown-part'
- *   | 'wrong-kind' | 'not-tied' | 'not-tied-option' | 'closed' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
+ *   | 'wrong-kind' | 'not-tied' | 'not-tied-option' | 'closed' | 'full' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
  * @typedef {{ type: 'vote-ended', by: string | null }
  *   | { type: 'decided', part: number, option: string, how: 'votes' | 'lead-tiebreak' }
  *   | { type: 'closed', outcome: Gate['outcome'] }
@@ -64,7 +68,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && ne
 /**
  * Open a gate. A single gate has one list of options; a batch has parts, each a list of options.
  * Throws on a gate it refuses: a kind other than single or batch, no id or askedBy,
- * a time that is not a safe integer (ms), or empty or duplicate options or parts.
+ * a time that is not a safe integer (ms), or empty or duplicate options or parts, or more than MAX_OPTIONS options in one list.
  * @returns {Gate}
  */
 export function openGate({ id, kind, options, parts, askedBy, at }) {
@@ -166,6 +170,7 @@ function vote(gate, event, holders) {
   const part = Number.isInteger(event.part) ? gate.parts[event.part] : undefined;
   if (!part) return ignore(gate, event, 'unknown-part');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
+  if (part.ballots.length >= MAX_BALLOTS && !part.ballots.some(([by]) => by === event.by)) return ignore(gate, event, 'full');
   const reason = event.reason === undefined ? '' : reasonOf(event.reason);
   const ballot = { option: event.option, at: event.at, via: event.via, ...(reason && { reason }) };
   // One ballot per person: the new one replaces the person's earlier one.
@@ -303,6 +308,7 @@ function partProblem(part, inTime) {
     && (o.how === 'votes' || (o.how === 'lead-tiebreak' && part.tied?.includes(o.option)));
   if (!decided && !(keysAre(o, ['status']) && o.status === 'open')) return 'a part has no valid outcome';
   if (!Array.isArray(part.ballots)) return 'a part has no ballots';
+  if (part.ballots.length > MAX_BALLOTS) return 'a part has more ballots than MAX_BALLOTS';
   const seen = new Set();
   for (const entry of part.ballots) {
     const [by, b] = Array.isArray(entry) && entry.length === 2 ? entry : [];

@@ -77,7 +77,7 @@ const GRAPHEMES = new Intl.Segmenter();
  * dropped whole (F-T27-28). When the first cluster alone is too long (a chain of conjuncts), the cut is by code point, never through a
  * surrogate pair, so that the reader still sees the start of the text (F-T27-45).
  */
-function cut(text, max) {
+export function cut(text, max) {
   if (text.length <= max) return text;
   let end = 0;
   for (const { index, segment } of GRAPHEMES.segment(text)) {
@@ -328,6 +328,7 @@ const NOTES = {
   'wrong-kind': () => 'This is a single question, not a vote: there is nothing to end and no tie to break.',
   'not-tied': () => 'This part is not tied, so there is no tie to break.',
   'not-tied-option': () => 'Only one of the tied options can break the tie.',
+  full: () => 'This part already has the most voters it can count. Your press did not count.',
   closed: (g, names) => g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
     : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${who(g.askedBy, names)}. Nothing to answer.`
     : `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your press did not count.`,

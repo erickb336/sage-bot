@@ -42,12 +42,15 @@ test('F-T1-50: one voter who presses 10,000 times on one part saves, reloads and
   assert.deepEqual(reloadAndEnd(gate, HOLDERS).gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'votes' });
 });
 
-test('F-T1-50: 10,000 voters who press once each on one part save, reload and decide', () => {
+// Changed by F-T28-11: a part counts at most MAX_BALLOTS (1000) voters; the voter after that gets 'full', and an earlier voter may still change the vote.
+test('F-T1-50, F-T28-11: 10,000 voters who press once each on one part save, reload and decide; the part keeps 1000 ballots', () => {
   const voters = Array.from({ length: 10_000 }, (_, i) => `sample-u${i}`);
   const holders = new Set(voters);
   let gate = batch([['A', 'B']]);
   voters.forEach((by, i) => { gate = step(gate, ballot(by, i % 3 ? 'A' : 'B', T0 + i), holders, []).gate; });
-  assert.equal(ballotsOf(gate.parts[0]).size, 10_000);
+  assert.equal(ballotsOf(gate.parts[0]).size, 1000);
+  assert.deepEqual(step(gate, ballot('sample-u5000', 'A', T0 + 10_000), holders, []).effects, [{ type: 'ignored', by: 'sample-u5000', why: 'full' }]);
+  assert.equal(ballotsOf(step(gate, ballot('sample-u0', 'A', T0 + 10_000), holders, []).gate.parts[0]).get('sample-u0').option, 'A');
   assert.deepEqual(reloadAndEnd(gate, holders).gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'votes' });
 });
 
