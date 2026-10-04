@@ -10,16 +10,19 @@ This version has only the vote rules (task B1). It has no Discord connection yet
 
 | Case | Rule |
 | --- | --- |
-| Who counts | Only a holder: a Discord user id on the holder list that the bridge passes in. The Discord admin gives and removes the role; there is no vote on it. Each id counts once. |
-| Kinds | Normal: question, merge, autopilot, deploy. Critical: delete-data, publish, force-push. Any other kind is refused. |
-| Normal gate | The first answer wins. For 10 minutes any holder may object (Object, or a different press). The first answerer may change their answer; this restarts the 10 minutes. An objection makes a vote, which closes at a strict majority of the holders. |
-| Critical gate | Every holder must say yes. One No rejects it. Only a press from Discord counts. |
-| Holder list changes | The vote rule runs again on every event, so a change of the list can close a vote. Nothing is approved with no holders. |
-| Tie | Never acts and never takes a default. The vote has no deadline. |
-| Reminder | Every 2 hours, while nobody has answered a normal gate and while a vote is open. |
-| Changed vote | The last ballot of each person counts. |
-| Reason | Optional, at most 500 characters. Cleaning: NFKC; remove invisible format characters and variation selectors; a newline or control character becomes a space; remove `<`, `>`, backticks and their lookalikes. A reason that cleans to nothing is dropped. |
-| Terminal answer | The owner's answer at the terminal counts as one press on a normal gate. It is refused on a critical gate. |
+| Who counts | Only a holder: a Discord user id on the holder list that the bridge passes in with each event. The Discord admin gives and removes the role; there is no vote on it. Each id counts once. |
+| Leads | A separate list of ids with the sage-lead role, which the admin gives. The bridge passes it in with each event. A lead action counts only from Discord, never from the terminal. |
+| Kinds | Two only: single and batch. Any other kind is refused. |
+| Single gate | One question with options. The first answer from a holder is final at once. A later press is ignored. |
+| Batch gate | The task's one batch of product questions, as parts, each with its own options. It is a vote: every holder may vote on each part, and the last ballot of each person on each part counts. |
+| Time limit | A batch vote ends 30 minutes after it opens (at 29:59.999 it is still open). Each part goes to the option with the most votes cast; people who did not vote do not count. |
+| Tie | A part with a tie, or with no votes, stays open. Only a lead decides it, by choosing one of its options. |
+| End early | A lead may end a batch vote at any time. The parts are then decided as at the time limit. |
+| Holder list changes | A holder added to the list counts at once. A removed holder's ballot does not count at the time limit. Nothing is decided with no holders. |
+| Reminder | A single gate with no answer: to the holders every 2 hours from opening. A batch with tied parts: to the leads every 2 hours after its vote ended. |
+| Reason | Optional on a batch ballot, at most 500 characters. Cleaning: NFKC; remove invisible format characters and variation selectors; a newline or control character becomes a space; remove `<`, `>`, backticks and their lookalikes. A reason that cleans to nothing is dropped. |
+| Terminal answer | The owner's answer at the terminal counts as the first answer on a single gate, and as one ballot in a batch. |
+| Outcome | Single: open, answered (option and who), or withdrawn. Batch: each part is open or decided (by votes or by a lead's tie-break); the batch closes when every part is decided. |
 | Withdraw | The person who asked may withdraw the gate. |
 | Odd input | `openGate` throws on a gate it refuses. `step` never throws: an odd event, a time that is not finite, or a time earlier than the last one is ignored, with the reason. |
 
