@@ -28,3 +28,32 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
     showModal: record('modal'),
   };
 }
+
+/**
+ * A fake channel and guild for the bridge (src/bridge.js): the port `{ post, edit, members }` with a record of every message.
+ * `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts` lists the posted payloads
+ * in order. `members` is the list that `members()` gives, as src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
+ * @param {{ id: string, name: string, roles: string[], bot?: boolean }[]} members
+ */
+export function fakeDiscord(members) {
+  const messages = new Map();
+  const posts = [];
+  let next = 900000000000000000n;
+  return {
+    members: () => members,
+    messages,
+    posts,
+    /** The latest payload of a message. */
+    latest: (id) => messages.get(id).at(-1),
+    async post(payload) {
+      const id = String(next++);
+      messages.set(id, [structuredClone(payload)]);
+      posts.push(structuredClone(payload));
+      return id;
+    },
+    async edit(id, payload) {
+      if (!messages.has(id)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
+      messages.get(id).push(structuredClone(payload));
+    },
+  };
+}
