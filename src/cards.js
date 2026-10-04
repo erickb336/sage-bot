@@ -22,44 +22,61 @@ const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 
 const REASON_ON_CARD = 200;
 
 /**
- * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42). The cards are for people; no model reads them.
+ * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42, F-T27-46, F-T27-48). The cards are for people; no model reads them.
  * 1. A whole RGI emoji sequence (`\p{RGI_Emoji}`: a family, a skin tone, a keycap, a flag, FE0F where an emoji needs it) stays as it is.
- * 2. Any other character stays only when it is a letter, a number, punctuation or a symbol that is not a pictograph (not `<`, `>` or a
- *    backtick, and not one of the five letters that look blank), a space (every white space folds to one space), one of at most 3 marks on a
- *    letter, or a joiner (U+200C, U+200D) between a letter (or its mark, such as a virama) and a letter of a joining script: Arabic, Syriac,
- *    the Indic scripts, Myanmar or Khmer.
+ * 2. Any other character stays only when it is a letter (not one of the four Hangul fillers that look blank), a number, punctuation or a
+ *    symbol (also a bare pictograph such as ™ or ✔; not a backtick or the blank Braille cell), a space (every white space folds to one
+ *    space), a mark on a letter (at most 3 non-spacing marks, `\p{Mn}`, on one letter; a spacing or enclosing mark takes its own room and
+ *    does not count), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
+ *    or Khmer) when the next character is also of one (a Persian word, a Hindi or Bengali conjunct) or the joiner follows a mark (a final
+ *    virama, as in a Malayalam legacy chillu); never two joiners in a row.
  * 3. Everything else goes: every format character, variation selector, control, private-use and unassigned code point, a lone surrogate, a
  *    mark on anything but a letter, a joiner anywhere else.
  */
-const TOKEN = /\p{RGI_Emoji}|./gsv; // the longest RGI sequence at each position, else one code point
+const TOKEN = /\p{RGI_Emoji}|./ysv; // the longest RGI sequence at each position, else one code point
 const EMOJI = /^\p{RGI_Emoji}$/v;
 const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
 const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
-const BASE = /^[[\p{N}\p{P}\p{S}]--[<>\x60\u2800\p{Extended_Pictographic}]]$/v;
+const STACKING = /^\p{Mn}$/u; // a non-spacing mark piles on the letter: 3 at most, so no "zalgo" stack grows past the line
+const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800]]$/v;
 const SPACE = /^\p{White_Space}$/u;
 const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}\p{scx=Bengali}\p{scx=Gurmukhi}\p{scx=Gujarati}\p{scx=Oriya}\p{scx=Tamil}\p{scx=Telugu}\p{scx=Kannada}\p{scx=Malayalam}\p{scx=Sinhala}\p{scx=Myanmar}\p{scx=Khmer}]]$/v;
 /**
- * Untrusted text as one inert line: the allow-list above, then Discord markdown escaped (discord.js `escapeMarkdown`), every `[` and `]`
- * escaped (no masked link), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
+ * Untrusted text as one inert line: the allow-list above, then Discord markdown escaped (discord.js `escapeMarkdown`), every `[`, `]`, `<`
+ * and `>` escaped (no masked link, mention, timestamp, emoji code or quote; "A > B" and "x <= y" keep their meaning), a leading `-#`
+ * escaped (no subtext), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
  * gets no field, because Discord refuses an empty field value, and a name of '' falls back (see `who`).
  */
 export function safe(text) {
   const s = String(text);
   let out = '';
-  let marks = 0; // how many more marks the last kept letter takes
-  for (const { 0: t, index } of s.matchAll(TOKEN)) {
-    const next = String.fromCodePoint(s.codePointAt(index + t.length) ?? 32);
-    const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(out.at(-1) ?? '') && LETTER.test(next) && JOINING.test(next);
-    const keep = EMOJI.test(t) || LETTER.test(t) || BASE.test(t) || joiner || (marks > 0 && MARK.test(t)) ? t : SPACE.test(t) ? ' ' : '';
+  let last = ' '; // the last kept character, so that the joiner rule never reads the growing `out` (F-T27-45)
+  let onLetter = false; // whether a mark may follow: the last kept is a letter, or a mark or joiner on one
+  let stacked = 0; // the non-spacing marks on that letter so far
+  for (let index = 0, t; index < s.length; index += t.length) {
+    TOKEN.lastIndex = index;
+    t = TOKEN.exec(s)[0];
+    const letter = LETTER.test(t);
+    const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(last)
+      && (MARK.test(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
+    const mark = onLetter && MARK.test(t) && (stacked < 3 || !STACKING.test(t));
+    const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark ? t : SPACE.test(t) ? ' ' : '';
     if (!keep) continue;
-    marks = LETTER.test(t) ? 3 : MARK.test(t) ? marks - 1 : 0;
+    if (letter) [onLetter, stacked] = [true, 0];
+    else if (mark) stacked += STACKING.test(t) ? 1 : 0;
+    else if (!joiner) onLetter = false;
+    last = keep;
     out += keep;
   }
   // One line first, so that the heading and list escapes see the start of the text.
-  return escapeMarkdown(out.replace(/ +/g, ' ').trim(), ESCAPE_ALL).replace(/[[\]]/g, '\\$&').replace(/:\/\/(?=\S)/g, ':// ');
+  return escapeMarkdown(out.replace(/ +/g, ' ').trim(), ESCAPE_ALL).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// ');
 }
 const GRAPHEMES = new Intl.Segmenter();
-/** `text` cut to at most `max` characters, the last one "…"; the cut never splits a grapheme cluster: a flag or a family emoji is kept whole or dropped whole (F-T27-28). */
+/**
+ * `text` cut to at most `max` characters, the last one "…"; the cut never splits a grapheme cluster: a flag or a family emoji is kept whole or
+ * dropped whole (F-T27-28). When the first cluster alone is too long (a chain of conjuncts), the cut is by code point, never through a
+ * surrogate pair, so that the reader still sees the start of the text (F-T27-45).
+ */
 function cut(text, max) {
   if (text.length <= max) return text;
   let end = 0;
@@ -67,6 +84,7 @@ function cut(text, max) {
     if (index + segment.length > max - 1) break;
     end = index + segment.length;
   }
+  if (end === 0) end = max - 1 - (/[\uD800-\uDBFF]/.test(text[max - 2] ?? '') ? 1 : 0);
   return `${text.slice(0, end)}…`;
 }
 /** `text` cut at the last space before `max` characters, then "…", so no word is cut in half; one long word is cut like `cut` (F-T27-23). */

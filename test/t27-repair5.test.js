@@ -31,7 +31,7 @@ function build(names, reasons, { parts = 1 } = {}) {
 
 test('F-T27-39: no URL with a scheme stays clickable: every "://" is broken to ":// "; www. and a bare domain are text already', () => {
   assert.equal(safe('see https://evil.example/claim-prize now'), 'see https:// evil.example/claim-prize now');
-  assert.equal(safe('<https://evil.example>'), 'https:// evil.example');
+  assert.equal(safe('<https://evil.example>'), '\\<https:// evil.example\\>');
   assert.equal(safe('[click](https://evil.example)'), '\\[click\\](https:// evil.example)');
   assert.equal(safe('http://a http://b steam://run/1'), 'http:// a http:// b steam:// run/1');
   assert.equal(safe('https://'), 'https://'); // no host: nothing to break
@@ -72,23 +72,27 @@ test('F-T27-42: a selector stays only inside an RGI emoji; a leading ">" cannot 
   assert.equal(safe('#\ufe0f*\ufe0f'), '#\\*');
   assert.equal(safe('1\ufe0f\u20e3 #\ufe0f\u20e3 *\ufe0f\u20e3'), '1\ufe0f\u20e3 #\ufe0f\u20e3 \\*\ufe0f\u20e3'); // the keycaps are RGI
   assert.equal(safe('😀\ufe0e😀'), '😀😀');
-  assert.equal(safe('©\ufe0f ❤\ufe0f ©'), '©\ufe0f ❤\ufe0f'); // a text-presentation pictograph is not kept on its own
-  assert.equal(safe('> hidden quote'), 'hidden quote');
-  assert.equal(safe('>>> all of it'), 'all of it');
+  assert.equal(safe('©\ufe0f ❤\ufe0f ©'), '©\ufe0f ❤\ufe0f ©'); // a bare pictograph stays since round 6; its selector stays only in the RGI pair
+  assert.equal(safe('> hidden quote'), '\\> hidden quote'); // escaped since round 6, so the text keeps its `>`
+  assert.equal(safe('>>> all of it'), '\\>\\>\\> all of it');
   assert.equal(safe('   # heading'), '\\# heading'); // on 5d39b82 the fold came after the escape, so 3 spaces hid the heading
   assert.equal(safe('\n- list'), '\\- list');
-  assert.equal(safe('<@123> <#4> <t:0:R> <:x:1> `code`'), '@123 #4 t:0:R :x:1 code'); // nothing that Discord renders as markup
+  assert.equal(safe('<@123> <#4> <t:0:R> <:x:1> `code`'), '\\<@123\\> \\<#4\\> \\<t:0:R\\> \\<:x:1\\> code'); // nothing that Discord renders as markup
 });
 
-test('F-T27-39 to F-T27-42: the sweep over all of Unicode: safe keeps exactly the allow-list, alone and between letters, and never empties a visible text', () => {
+test('F-T27-39 to F-T27-42, F-T27-46: the sweep over all of Unicode: safe keeps exactly the allow-list, alone and between letters, caps the stacked marks and never empties a visible text', () => {
   // The rules as the README states them, written here again so that the code cannot drift from them.
   const EMOJI = /^\p{RGI_Emoji}$/v;
   const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
-  const BASE = /^[[\p{N}\p{P}\p{S}]--[<>\x60\u2800\p{Extended_Pictographic}]]$/v;
+  const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800]]$/v;
   const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
+  const STACKING = /^\p{Mn}$/u;
   const SPACE = /^\p{White_Space}$/u;
-  // Every character of an output is an RGI emoji, a letter (ℹ, U+2139, is a letter and a pictograph), a number, punctuation, a mark, a joiner, a space or a symbol that is not a pictograph.
-  const ALLOWED = /^(?:\p{RGI_Emoji}|[[\p{L}--[\u115F\u1160\u3164\uFFA0]][\p{N}\p{P}\u200c\u200d ][\p{M}--\p{Variation_Selector}][\p{S}--[<>\x60\u2800\p{Extended_Pictographic}]]])*$/v;
+  // Every character of an output is an RGI emoji, a letter, a number, punctuation, a mark, a joiner, a space or a symbol (not a backtick or the blank
+  // Braille cell): so no format character (no tag outside a flag), no variation selector outside an RGI emoji, no control or unassigned code point.
+  const ALLOWED = /^(?:\p{RGI_Emoji}|[[\p{L}--[\u115F\u1160\u3164\uFFA0]][\p{N}\p{P}\u200c\u200d ][\p{M}--\p{Variation_Selector}][\p{S}--[\x60\u2800]]])*$/v;
+  // With the escape pairs gone (`\<`, `\[`, `\\`), no `<`, `>` or backtick is left: none can render as a mention, a timestamp, a quote or code.
+  const plain = (s) => s.replace(/\\[\s\S]/g, '');
   const counts = { visible: 0, mark: 0, space: 0, hidden: 0 };
   for (let cp = 0; cp <= 0x10ffff; cp++) {
     const ch = String.fromCodePoint(cp);
@@ -97,6 +101,8 @@ test('F-T27-39 to F-T27-42: the sweep over all of Unicode: safe keeps exactly th
     const between = safe(`a${ch}b`);
     assert.match(alone, ALLOWED, `${hex} alone`);
     assert.match(between, ALLOWED, `${hex} between letters`);
+    assert.doesNotMatch(plain(between), /[<>\x60]/, `${hex} unescaped`);
+    assert.doesNotMatch(safe(`a://${ch}b`), /\w:\/\/\S/, `${hex} in a URL`);
     if (EMOJI.test(ch) || LETTER.test(ch) || BASE.test(ch)) {
       counts.visible++;
       assert.equal(unescaped(alone), unescaped(ch), `${hex} alone`);
@@ -105,6 +111,8 @@ test('F-T27-39 to F-T27-42: the sweep over all of Unicode: safe keeps exactly th
       counts.mark++;
       assert.equal(alone, '', `${hex} alone`);
       assert.equal(between, `a${ch}b`, `${hex} between letters`);
+      // On one letter at most 3 non-spacing marks stay (F-T27-46); a spacing or enclosing mark takes its own room, so every one stays.
+      assert.equal(safe(`a${ch.repeat(5)}`), `a${ch.repeat(STACKING.test(ch) ? 3 : 5)}`, `${hex} stacked`);
     } else if (SPACE.test(ch)) {
       counts.space++;
       assert.equal(alone, '', `${hex} alone`);
@@ -190,6 +198,6 @@ test('F-T27-35 to F-T27-42: the README states the allow-list, the dropped-reason
     'an id of 4 or more digits', 'still stores the ballot and shows the reason form', 'B3 refuses an ask with more than 4 parts']) {
     assert.ok(readme.includes(line), line);
   }
-  for (const gone of ['model could decode', 'newest first to go', 'B3 cleans the text for the chief again', 'every format character (Unicode `Cf`', 'escapes `<`', 'for an id without digits'])
+  for (const gone of ['model could decode', 'newest first to go', 'B3 cleans the text for the chief again', 'every format character (Unicode `Cf`', 'for an id without digits'])
     assert.ok(!readme.includes(gone), gone);
 });
