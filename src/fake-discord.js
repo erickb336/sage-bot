@@ -5,13 +5,14 @@ import { MessageFlags, MessageFlagsBitField } from 'discord.js';
 /**
  * An interaction-like object. `replies` records each answer as `{ kind, ...payload }`,
  * with kind 'reply' (a message, private when its flags say so), 'update' (the message with the buttons) or 'modal'.
- * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean }} o
+ * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean, refuse?: Error }} o
  *   `fields` are the modal's inputs by custom_id; a button press has none. `ephemeral` says that the pressed message
- *   was private (the lead's confirm), as discord.js shows it in `interaction.message.flags`.
+ *   was private (the lead's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
+ *   reply rejects with that error and records nothing, as Discord does for an unknown interaction (F-T27-20).
  */
-export function fakeInteraction({ user, customId, fields, ephemeral = false }) {
+export function fakeInteraction({ user, customId, fields, ephemeral = false, refuse }) {
   const replies = [];
-  const record = (kind) => async (payload) => { replies.push(structuredClone({ kind, ...payload })); };
+  const record = (kind) => async (payload) => { if (refuse) throw refuse; replies.push(structuredClone({ kind, ...payload })); };
   return {
     user: { id: user },
     customId,

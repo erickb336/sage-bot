@@ -37,6 +37,8 @@ function fieldOf(interaction, id) {
  * The caller (B3) acts on a `closed` effect, and edits the card message when the gate changed but the reply
  * was not the card: after "End vote now", or when a reason modal was dismissed.
  * The reply is built before the new gate is stored, so a reply that cannot be built leaves the gate as it was.
+ * When Discord refuses the reply after the store (an unknown interaction, a network error), the result also has
+ * `replyError`, with the new gate and the effects: the vote counted, and B3 must act on the effects and edit the card (F-T27-20).
  * @param {{ user: { id: string }, customId: string, message?: { flags: { has(flag: number): boolean } },
  *   fields?: { getTextInputValue(id: string): string },
  *   reply(o: object): Promise<unknown>, update(o: object): Promise<unknown>, showModal(o: object): Promise<unknown> }} interaction
@@ -55,7 +57,9 @@ export async function handle(interaction, { gates, people, clock }) {
   const { gate, ask } = entry;
   const by = interaction.user.id;
   if (action === 'cancel') {
-    await interaction.update({ ...ephemeral('Cancelled. The vote goes on.'), components: [] });
+    // A confirm exists only for a batch vote; after the vote ended, the cancel says so instead of "The vote goes on" (F-T27-21).
+    const text = gate.kind === 'single' ? note('wrong-kind') : gate.phase === 'voting' ? ephemeral('Cancelled. The vote goes on.') : note('closed', gate, people.names);
+    await interaction.update({ ...text, components: [] });
     return { gate, effects: [] };
   }
   // The option comes from the gate, never from the custom_id: a forged part or index is refused here.
@@ -87,6 +91,6 @@ export async function handle(interaction, { gates, people, clock }) {
     : action === 'press' && gate.kind === 'batch' ? [interaction.showModal, reasonModal(out.gate, ask, part, index)] // the vote counts already
     : [interaction.update, card(out.gate, ask, people)];
   gates.set(id.gateId, { gate: out.gate, ask });
-  await send.call(interaction, payload);
+  try { await send.call(interaction, payload); } catch (replyError) { return { gate: out.gate, effects: out.effects, replyError }; }
   return { gate: out.gate, effects: out.effects };
 }
