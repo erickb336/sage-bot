@@ -25,7 +25,7 @@ test('F-T27-46: only non-spacing marks count toward the cap of 3, so Burmese and
   assert.equal(safe('بًٌٍّ'), 'بًٌٍ'); // 4 non-spacing marks on one letter: 3 stay
   assert.equal(safe(`a${'\u0301\u0302\u0303\u0304\u0305'.repeat(100)}`), 'a\u0301\u0302\u0303');
   assert.equal(safe(`a${'\u0301\u200d'.repeat(249)}`), 'a\u0301\u0301\u0301'); // a joiner does not reset the count
-  assert.equal(safe(`क${'ा'.repeat(5)}`), `क${'ा'.repeat(5)}`); // a spacing mark takes its own room
+  assert.equal(safe(`क${'ा'.repeat(5)}`), `क${'ा'.repeat(4)}`); // a spacing mark does not count toward the 3, but has its own cap of 4 (F-T27-50)
   assert.equal(safe(`a${'\u20e3'.repeat(4)}`), `a${'\u20e3'.repeat(4)}`); // an enclosing mark does not count
   assert.equal(safe('\u0301\u093e\u20e3'), ''); // a mark on nothing still goes
   // On the card: the Burmese name is whole in the voter list and the reason field.
@@ -85,11 +85,12 @@ test('F-T27-45: a leading -# is escaped; a first grapheme longer than the cut is
   const shown = build(['Maya', 'Jon'], [chain]).fields[1].value;
   assert.equal(shown.length, 200);
   assert.ok(shown.startsWith('क्\u200dक्') && shown.endsWith('…'), shown);
-  // One grapheme of astral code points (a Kaithi letter with 150 spacing vowel signs): the cut never leaves a lone surrogate.
-  const astral = `\u{1108D}${'\u{110B0}'.repeat(150)}`;
+  // One grapheme with astral code points (a conjunct chain with a musical mark U+1D167 on each letter, a high surrogate at index 198):
+  // the cut never leaves a lone surrogate. (A Kaithi letter with 150 spacing signs keeps only 4 since F-T27-50.)
+  const astral = `क${'्\u{1D167}क'.repeat(80)}`;
   const cutAstral = build(['Maya', 'Jon'], [astral]).fields[1].value;
   assert.ok(cutAstral.isWellFormed() && cutAstral.length <= 200 && cutAstral.length >= 199, `${cutAstral.length}`);
-  assert.ok(cutAstral.startsWith('\u{1108D}\u{110B0}') && cutAstral.endsWith('…'));
+  assert.ok(cutAstral.startsWith('क्\u{1D167}क') && cutAstral.endsWith('…'));
 });
 
 test('F-T27-45: the joiner check is linear: 1 MB of conjuncts in well under a second each, not tens of seconds', () => {
@@ -106,7 +107,7 @@ test('F-T27-45: the joiner check is linear: 1 MB of conjuncts in well under a se
 test('F-T27-47, F-T27-38: the README states the `<` and `>` escape, the kept symbols, the mark rule and no fixed count of shown reasons; the premise stays', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   for (const line of ['a person reads on the card, and nothing else reads it', 'every `[`, `]`, `<` and `>` (no masked link, mention, timestamp, emoji code or quote',
-    'a bare pictograph such as ™, ©, ✔ or ⚠', 'a spacing or enclosing mark takes its own room and does not count', 'a leading `-#` (no subtext)',
+    'a bare pictograph such as ™, ©, ✔ or ⚠', 'they do not count toward the 3, so Burmese ကျော် stays whole', 'a leading `-#` (no subtext)',
     'how many depends on the names and on the ask\'s texts', 'or when the joiner follows a mark such as a final virama']) {
     assert.ok(readme.includes(line), line);
   }

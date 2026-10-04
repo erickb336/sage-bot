@@ -84,13 +84,13 @@ test('F-T27-39 to F-T27-42, F-T27-46: the sweep over all of Unicode: safe keeps 
   // The rules as the README states them, written here again so that the code cannot drift from them.
   const EMOJI = /^\p{RGI_Emoji}$/v;
   const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
-  const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800]]$/v;
+  const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;
   const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
   const STACKING = /^\p{Mn}$/u;
   const SPACE = /^\p{White_Space}$/u;
-  // Every character of an output is an RGI emoji, a letter, a number, punctuation, a mark, a joiner, a space or a symbol (not a backtick or the blank
-  // Braille cell): so no format character (no tag outside a flag), no variation selector outside an RGI emoji, no control or unassigned code point.
-  const ALLOWED = /^(?:\p{RGI_Emoji}|[[\p{L}--[\u115F\u1160\u3164\uFFA0]][\p{N}\p{P}\u200c\u200d ][\p{M}--\p{Variation_Selector}][\p{S}--[\x60\u2800]]])*$/v;
+  // Every character of an output is an RGI emoji, a letter, a number, punctuation, a mark, a joiner, a space or a symbol (not a backtick, the blank
+  // Braille cell or the null notehead): so no format character (no tag outside a flag), no variation selector outside an RGI emoji, no control or unassigned code point.
+  const ALLOWED = /^(?:\p{RGI_Emoji}|[[\p{L}--[\u115F\u1160\u3164\uFFA0]][\p{N}\p{P}\u200c\u200d ][\p{M}--\p{Variation_Selector}][\p{S}--[\x60\u2800\u{1D159}]]])*$/v;
   // With the escape pairs gone (`\<`, `\[`, `\\`), no `<`, `>` or backtick is left: none can render as a mention, a timestamp, a quote or code.
   const plain = (s) => s.replace(/\\[\s\S]/g, '');
   const counts = { visible: 0, mark: 0, space: 0, hidden: 0 };
@@ -111,8 +111,8 @@ test('F-T27-39 to F-T27-42, F-T27-46: the sweep over all of Unicode: safe keeps 
       counts.mark++;
       assert.equal(alone, '', `${hex} alone`);
       assert.equal(between, `a${ch}b`, `${hex} between letters`);
-      // On one letter at most 3 non-spacing marks stay (F-T27-46); a spacing or enclosing mark takes its own room, so every one stays.
-      assert.equal(safe(`a${ch.repeat(5)}`), `a${ch.repeat(STACKING.test(ch) ? 3 : 5)}`, `${hex} stacked`);
+      // On one letter at most 3 non-spacing marks stay (F-T27-46) and at most 4 spacing or enclosing marks (F-T27-50).
+      assert.equal(safe(`a${ch.repeat(5)}`), `a${ch.repeat(STACKING.test(ch) ? 3 : 4)}`, `${hex} stacked`);
     } else if (SPACE.test(ch)) {
       counts.space++;
       assert.equal(alone, '', `${hex} alone`);
