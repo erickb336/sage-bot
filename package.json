@@ -1,0 +1,12 @@
+{
+  "name": "sage-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The sage bridge: posts sage gates to Discord as cards and gives the final answers back to sage.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "node scripts/syntax.mjs && node --test test/"
+  },
+  "license": "UNLICENSED"
+}
