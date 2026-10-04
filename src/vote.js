@@ -20,7 +20,7 @@ const EVENT_TYPES = new Set(['press', 'end', 'tiebreak', 'withdraw', 'tick']);
 const VIAS = new Set(['discord', 'terminal']);
 const OPEN = { status: 'open' };
 const isId = (x) => typeof x === 'string' && x !== '';
-const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId);
+const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && new Set(x).size === x.length;
 
 /**
  * @typedef {{ option: string, at: number, via: 'discord' | 'terminal', reason?: string }} Ballot
@@ -39,7 +39,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId);
  *   | { type: 'withdraw', by: string, at: number }
  *   | { type: 'tick', at: number }} Event
  * @typedef {'not-holder' | 'not-lead' | 'lead-needs-discord' | 'not-asker' | 'unknown-option' | 'unknown-part'
- *   | 'wrong-kind' | 'not-tied' | 'no-holders' | 'closed' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
+ *   | 'wrong-kind' | 'not-tied' | 'closed' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
  * @typedef {{ type: 'vote-ended', by: string | null }
  *   | { type: 'decided', part: number, option: string, how: 'votes' | 'lead-tiebreak' }
  *   | { type: 'closed', outcome: Gate['outcome'] }
@@ -49,20 +49,20 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId);
 /**
  * Open a gate. A single gate has one list of options; a batch has parts, each a list of options.
  * Throws on a gate it refuses: a kind other than single or batch, no id or askedBy,
- * a time that is not finite, or empty options or parts.
+ * a time that is not a safe integer (ms), or empty or duplicate options or parts.
  * @returns {Gate}
  */
 export function openGate({ id, kind, options, parts, askedBy, at }) {
   if (!KINDS.has(kind)) throw new RangeError('openGate: unknown gate kind');
   if (!isId(id) || !isId(askedBy)) throw new TypeError('openGate: a gate needs an id and askedBy');
-  if (!Number.isFinite(at)) throw new RangeError('openGate: a gate needs a finite time');
+  if (!Number.isSafeInteger(at)) throw new RangeError('openGate: a gate needs a time in whole ms');
   const base = { id, kind, askedBy, openedAt: at, lastAt: at, outcome: OPEN };
   if (kind === 'single') {
-    if (!isOptions(options)) throw new TypeError('openGate: a single gate needs a non-empty list of options');
+    if (!isOptions(options)) throw new TypeError('openGate: a single gate needs a non-empty list of unique options');
     return { ...base, phase: 'open', options: [...options] };
   }
   if (!(Array.isArray(parts) && parts.length > 0 && parts.every(isOptions))) {
-    throw new TypeError('openGate: a batch needs a non-empty list of parts, each with a non-empty list of options');
+    throw new TypeError('openGate: a batch needs a non-empty list of parts, each with a non-empty list of unique options');
   }
   return {
     ...base, phase: 'voting', endsAt: at + BATCH_LIMIT, votingEndedAt: null,
@@ -82,22 +82,23 @@ export function step(gate, event, holders, leads) {
   const why = refusal(gate, event);
   if (why) return { gate, effects: [ignored(event, why)] };
   const people = { holders: idSet(holders), leads: idSet(leads) };
-  const timed = { ...gate, lastAt: event.at };
   // A batch vote ends at its time limit, before the event that reaches it applies.
-  const settled = timed.phase === 'voting' && event.at >= timed.endsAt
-    ? endVoting(timed, null, people.holders, timed.endsAt)
-    : { gate: timed, effects: [] };
-  if (event.type === 'tick') return settled;
-  const next = settled.gate.phase === 'closed'
-    ? ignore(settled.gate, event, 'closed')
+  // A withdraw cancels the gate, so it ends no vote and decides no part.
+  const settled = gate.phase === 'voting' && event.type !== 'withdraw' && event.at >= gate.endsAt
+    ? endVoting({ ...gate, lastAt: gate.endsAt }, null, people.holders, gate.endsAt)
+    : { gate, effects: [] };
+  const next = event.type === 'tick' ? { gate: settled.gate, effects: [] }
+    : settled.gate.phase === 'closed' ? ignore(settled.gate, event, 'closed')
     : apply(settled.gate, event, people);
-  return { gate: next.gate, effects: [...settled.effects, ...next.effects] };
+  // The gate's time moves on only with an event that applies; a refused event leaves it as it was.
+  const applied = !next.effects.some((e) => e.type === 'ignored');
+  return { gate: applied ? { ...next.gate, lastAt: event.at } : next.gate, effects: [...settled.effects, ...next.effects] };
 }
 
 /** Why an event is refused before it touches the gate, or null. Time never goes back. */
 function refusal(gate, event) {
   if (typeof event !== 'object' || event === null || !EVENT_TYPES.has(event.type)) return 'bad-event';
-  if (!Number.isFinite(event.at)) return 'bad-time';
+  if (!Number.isSafeInteger(event.at)) return 'bad-time';
   if (event.at < gate.lastAt) return 'out-of-order';
   if (event.type === 'tick') return null;
   if (!isId(event.by)) return 'bad-event';
@@ -115,17 +116,18 @@ function idSet(ids) {
 
 function apply(gate, event, { holders, leads }) {
   if (event.type === 'withdraw') {
-    return event.by === gate.askedBy ? close(gate, { status: 'withdrawn' }) : ignore(gate, event, 'not-asker');
+    return event.by === gate.askedBy ? withdraw(gate) : ignore(gate, event, 'not-asker');
   }
   if (event.type === 'press') return gate.kind === 'single' ? answer(gate, event, holders) : vote(gate, event, holders);
-  // A lead action: end or tiebreak. Only on a batch, only from Discord, only from a lead.
+  // A lead action: end or tiebreak. Only on a batch, only from Discord, only from a lead who is also a holder.
   if (gate.kind !== 'batch') return ignore(gate, event, 'wrong-kind');
   if (event.via !== 'discord') return ignore(gate, event, 'lead-needs-discord');
+  if (!holders.has(event.by)) return ignore(gate, event, 'not-holder');
   if (!leads.has(event.by)) return ignore(gate, event, 'not-lead');
   if (event.type === 'end') {
     return gate.phase === 'voting' ? endVoting(gate, event.by, holders, event.at) : ignore(gate, event, 'closed');
   }
-  return tiebreak(gate, event, holders);
+  return tiebreak(gate, event);
 }
 
 /** A single gate: the first answer from a holder is final. */
@@ -161,13 +163,12 @@ function endVoting(gate, by, holders, at) {
   return finish({ ...gate, phase: 'tied', votingEndedAt: at, parts }, effects);
 }
 
-/** A lead picks one option of an open part after the vote ended. Nothing is decided with no holders. */
-function tiebreak(gate, event, holders) {
+/** A lead picks one option of an open part after the vote ended. */
+function tiebreak(gate, event) {
   const part = Number.isInteger(event.part) ? gate.parts[event.part] : undefined;
   if (!part) return ignore(gate, event, 'unknown-part');
   if (gate.phase !== 'tied' || part.outcome.status !== 'open') return ignore(gate, event, 'not-tied');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
-  if (holders.size === 0) return ignore(gate, event, 'no-holders');
   const parts = gate.parts.with(event.part, { ...part, outcome: { status: 'decided', option: event.option, how: 'lead-tiebreak' } });
   return finish({ ...gate, parts }, [{ type: 'decided', part: event.part, option: event.option, how: 'lead-tiebreak' }]);
 }
@@ -190,6 +191,12 @@ function leader(part, holders) {
   return leaders.length === 1 ? leaders[0][0] : null;
 }
 
+/** The asker cancels the gate: it closes as withdrawn, and no part of a batch stays decided. */
+function withdraw(gate) {
+  const parts = gate.parts?.map((part) => ({ ...part, outcome: OPEN }));
+  return close(parts ? { ...gate, parts } : gate, { status: 'withdrawn' });
+}
+
 function close(gate, outcome, effects = []) {
   return { gate: { ...gate, phase: 'closed', outcome }, effects: [...effects, { type: 'closed', outcome }] };
 }
@@ -203,13 +210,14 @@ function ignored(event, why) {
 }
 
 /**
- * The next reminder after `now`, or null:
+ * The next reminder after `now`, or null (also for a `now` that is not a safe integer):
  * a single gate with no answer reminds the holders every 2 hours from opening;
  * a batch with tied parts after its vote ended reminds the leads every 2 hours from that end.
  * @returns {{ at: number, to: 'holders' | 'leads' } | null}
  */
 export function nextReminderAt(gate, now) {
   let from, to;
+  if (!Number.isSafeInteger(now)) return null;
   if (gate.phase === 'open') [from, to] = [gate.openedAt, 'holders'];
   else if (gate.phase === 'tied') [from, to] = [gate.votingEndedAt, 'leads'];
   else return null;
@@ -217,20 +225,25 @@ export function nextReminderAt(gate, now) {
   return { at: from + (done + 1) * REMINDER_EVERY, to };
 }
 
-/** Characters that look like < > or a backtick and that NFKC does not map to them. */
-const LOOKALIKES = '‹›〈〉⟨⟩⟪⟫《》〈〉'
-  + '❬❭❮❯❰❱⧼⧽˂˃ᐸᐳˋ‵';
+/** Characters that look like < > or a backtick and that NFKC does not map to them. « » stay: they are quotes. */
+const LOOKALIKES = '‹›〈〉⟨⟩⟪⟫《》❬❭❮❯❰❱⧼⧽⦅⦆≮≯≪≫⩽⩾◁▷◅▻ˋ‵'
+  + '\u02C2-\u02C5\u02F1\u02F2\u1405\u140A\u1431\u1433\u1438\u143A\u1440\u{1F890}-\u{1F8FF}';
+/** Combining overlays that draw a stroke through < or > (NFKC makes < with U+0338 into ≮). */
+const OVERLAYS = /[\u0338\u20D2\u20D3\u20E5]/gu;
 
 /**
  * Clean a ballot reason, in this order:
- * NFKC; remove format characters (zero-width, bidi, U+FEFF, tags), variation selectors and lone surrogates;
+ * remove combining overlays; NFKC; remove format characters (zero-width, bidi, U+FEFF, tags), variation selectors,
+ * lone surrogates and invisible fillers;
  * map control characters, line and paragraph separators and newlines (CRLF as one) to a space;
  * remove < > ` and their lookalikes; collapse spaces; trim; cut to 500 characters (code points).
  * @param {string} text
  */
 export function cleanReason(text) {
-  const clean = text.normalize('NFKC')
-    .replace(/[\p{Cf}\u{E0000}-\u{E007F}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\p{Cs}]/gu, '')
+  const clean = text.replace(OVERLAYS, '').normalize('NFKC')
+    // Format characters, tags, variation selectors, lone surrogates, and invisible fillers that are not format characters
+    // (Hangul fillers U+115F U+1160 U+3164 U+FFA0, the grapheme joiner U+034F, the blank Braille cell U+2800).
+    .replace(/[\p{Cf}\u{E0000}-\u{E007F}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\p{Cs}\u115F\u1160\u3164\uFFA0\u034F\u2800]/gu, '')
     .replace(/\r\n|[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ')
     .replace(new RegExp(`[<>\`${LOOKALIKES}]`, 'gu'), '')
     .replace(/ {2,}/g, ' ')

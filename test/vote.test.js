@@ -7,8 +7,9 @@ const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
 const JON = 'sample-jon';
 const SAM = 'sample-sam'; // not on the holder list
-const LEA = 'sample-lea'; // a lead, not a holder
+const LEA = 'sample-lea'; // a lead and a holder who does not vote
 const THREE = [ERICK, MAYA, JON];
+const HOLDERS = [...THREE, LEA];
 const LEADS = [LEA];
 const T0 = Date.UTC(2026, 9, 4, 12, 0); // sample time
 
@@ -24,7 +25,7 @@ const withdraw = (by, min) => ({ type: 'withdraw', by, at: at(min) });
 const tick = (min) => ({ type: 'tick', at: at(min) });
 
 /** Apply the events in order; return the last gate and all effects. */
-function run(gate, events, holders = THREE, leads = LEADS) {
+function run(gate, events, holders = HOLDERS, leads = LEADS) {
   const effects = [];
   for (const event of events) {
     const out = step(gate, event, holders, leads);
@@ -114,7 +115,7 @@ const cases = [
   },
   {
     rule: 'batch: a non-holder ballot counts for nothing',
-    gate: batch, events: [ballot(MAYA, 0, 'A', 0), ballot(SAM, 0, 'B', 1), ballot(LEA, 0, 'B', 2), tick(30)],
+    gate: batch, events: [ballot(MAYA, 0, 'A', 0), ballot(SAM, 0, 'B', 1), tick(30)],
     phase: 'tied', outcome: OPEN, parts: [votes('A'), OPEN],
   },
   {
@@ -194,9 +195,9 @@ const cases = [
     effects: [{ type: 'closed', outcome: { status: 'withdrawn' } }, { type: 'ignored', by: MAYA, why: 'closed' }],
   },
   {
-    rule: 'withdraw by the person who asked closes a tied batch as withdrawn',
+    rule: 'withdraw by the person who asked closes a tied batch as withdrawn; no part stays decided',
     gate: batch, events: [ballot(MAYA, 0, 'A', 0), tick(30), withdraw(ERICK, 40)],
-    phase: 'closed', outcome: { status: 'withdrawn' }, parts: [votes('A'), OPEN],
+    phase: 'closed', outcome: { status: 'withdrawn' }, parts: [OPEN, OPEN],
   },
   {
     rule: 'withdraw by anyone else is ignored',
