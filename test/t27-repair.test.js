@@ -32,8 +32,8 @@ function bridge(ids, at, people = PEOPLE) {
 }
 
 test('F-T27-8: every masked link is escaped, also the second and the third', () => {
-  assert.equal(safe('see [a](http://x.example) and [b](http://y.example)'), 'see \\[a\\](http://x.example) and \\[b\\](http://y.example)');
-  assert.equal(safe('[1](http://a) [2](<http://b>) [3](http://c)'), '\\[1\\](http://a) \\[2\\](\\<http://b>) \\[3\\](http://c)');
+  assert.equal(safe('see [a](http://x.example) and [b](http://y.example)'), 'see \\[a\\](http:// x.example) and \\[b\\](http:// y.example)');
+  assert.equal(safe('[1](http://a) [2](<http://b>) [3](http://c)'), '\\[1\\](http:// a) \\[2\\](http:// b) \\[3\\](http:// c)');
   assert.doesNotMatch(safe('[x](http://a) [y](http://b)'), /[^\\]\]\(/);
   assert.equal(safe('plain ] and [ alone'), 'plain \\] and \\[ alone');
 });

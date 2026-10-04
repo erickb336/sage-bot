@@ -1,6 +1,6 @@
 // The cards, the reason modal, the end-vote confirm and the private notes of the sage bridge,
 // as the JSON that Discord takes (discord.js builders). Pure functions of a gate, its ask and the people.
-// No Client, no network. The names and the ballot reasons are untrusted text: `safe` makes them inert.
+// No Client, no network. The names and the ballot reasons are untrusted text: `safe` keeps only what a person needs to read.
 // Times are Discord timestamps (<t:…:t>), so each viewer's Discord shows them in the viewer's own zone,
 // and the 30-minute countdown (<t:…:R>) runs live with no edit of the card.
 import {
@@ -18,34 +18,45 @@ const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x
 const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
   'codeBlockContent', 'inlineCodeContent', 'escape', 'heading', 'bulletedList', 'numberedList'].map((k) => [k, true]));
 /** Discord's limits on one message, in characters (fields: a count). A reason shows on the card cut to REASON_ON_CARD characters; the gate keeps the full text. */
-const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 2048, name: 256, value: 1024, button: 80, modal: 45 };
+const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 2048, name: 256, value: 1024, button: 80, modal: 45, content: 2000 };
 const REASON_ON_CARD = 200;
 
 /**
- * The characters that `safe` removes, by Unicode rule, not by list (F-T27-24): every format character (\p{Cf}: bidi controls,
- * zero-width space, BOM, soft hyphen, word joiner, tag characters, …), every control (\p{Cc}) that is not whitespace, every lone
- * surrogate (\p{Cs}), the five letters that look blank (the Hangul fillers, the half-width filler and the empty braille cell),
- * every variation selector (U+FE00 to U+FE0F, U+E0100 to U+E01EF) and the combining grapheme joiner U+034F (F-T27-32).
- * Group 1 is kept: the three subdivision flags of the emoji list (England, Scotland and Wales: U+1F3F4, the tag letters gbeng, gbsct or
- * gbwls, U+E007F; any other tag sequence goes, F-T27-31), a joiner (U+200C, U+200D) between two visible characters (a letter, a mark,
- * a pictograph or a skin tone), the emoji selectors U+FE0E and U+FE0F directly after a pictograph or a keycap base (a digit, # or *), and an
- * ideographic selector directly after a Han ideograph. So a family emoji, a Persian word, a red heart, a keycap and the Scotland flag stay
- * whole, while tag characters and selectors anywhere else cannot carry hidden text.
+ * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42). The cards are for people; no model reads them.
+ * 1. A whole RGI emoji sequence (`\p{RGI_Emoji}`: a family, a skin tone, a keycap, a flag, FE0F where an emoji needs it) stays as it is.
+ * 2. Any other character stays only when it is a letter, a number, punctuation or a symbol that is not a pictograph (not `<`, `>` or a
+ *    backtick, and not one of the five letters that look blank), a space (every white space folds to one space), one of at most 3 marks on a
+ *    letter, or a joiner (U+200C, U+200D) between a letter (or its mark, such as a virama) and a letter of a joining script: Arabic, Syriac,
+ *    the Indic scripts, Myanmar or Khmer.
+ * 3. Everything else goes: every format character, variation selector, control, private-use and unassigned code point, a lone surrogate, a
+ *    mark on anything but a letter, a joiner anywhere else.
  */
-const HIDDEN = /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}|(?<=[\p{L}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}])[\u200c\u200d](?=[\p{L}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}])|(?<=[\p{Extended_Pictographic}0-9#*])[\ufe0e\ufe0f]|(?<=\p{Script=Han})[\u{E0100}-\u{E01EF}])|\p{Cf}|(?!\s)\p{Cc}|\p{Cs}|[\u115f\u1160\u3164\uffa0\u2800\u034f\ufe00-\ufe0f\u{E0100}-\u{E01EF}]/gu;
-/** A combining mark after three on one base character: a stack of marks is cut to 3 (F-T27-32). */
-const MARK_OVERFLOW = /(?<=\p{M}{3})\p{M}/gu;
-/** Text with nothing visible: only combining marks and spaces (the hidden characters are already removed). */
-const VISIBLY_EMPTY = /^[\p{M} ]*$/u;
+const TOKEN = /\p{RGI_Emoji}|./gsv; // the longest RGI sequence at each position, else one code point
+const EMOJI = /^\p{RGI_Emoji}$/v;
+const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
+const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
+const BASE = /^[[\p{N}\p{P}\p{S}]--[<>\x60\u2800\p{Extended_Pictographic}]]$/v;
+const SPACE = /^\p{White_Space}$/u;
+const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}\p{scx=Bengali}\p{scx=Gurmukhi}\p{scx=Gujarati}\p{scx=Oriya}\p{scx=Tamil}\p{scx=Telugu}\p{scx=Kannada}\p{scx=Malayalam}\p{scx=Sinhala}\p{scx=Myanmar}\p{scx=Khmer}]]$/v;
 /**
- * Untrusted text as one inert line: hidden characters removed (HIDDEN), markdown and every `[` and `]` escaped (no masked link),
- * `<` escaped (no mention, timestamp or emoji code), whitespace folded. A visibly empty text gives '' (F-T27-25): a reason of ''
- * gets no field, because Discord refuses an empty field value (F-T27-19), and a name of '' falls back (see `who`).
+ * Untrusted text as one inert line: the allow-list above, then Discord markdown escaped (discord.js `escapeMarkdown`), every `[` and `]`
+ * escaped (no masked link), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
+ * gets no field, because Discord refuses an empty field value, and a name of '' falls back (see `who`).
  */
 export function safe(text) {
-  const line = escapeMarkdown(String(text).replace(HIDDEN, (m, keep) => keep ?? '').replace(MARK_OVERFLOW, ''), ESCAPE_ALL)
-    .replace(/[<[\]]/g, '\\$&').replace(/\s+/g, ' ').trim();
-  return VISIBLY_EMPTY.test(line) ? '' : line;
+  const s = String(text);
+  let out = '';
+  let marks = 0; // how many more marks the last kept letter takes
+  for (const { 0: t, index } of s.matchAll(TOKEN)) {
+    const next = String.fromCodePoint(s.codePointAt(index + t.length) ?? 32);
+    const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(out.at(-1) ?? '') && LETTER.test(next) && JOINING.test(next);
+    const keep = EMOJI.test(t) || LETTER.test(t) || BASE.test(t) || joiner || (marks > 0 && MARK.test(t)) ? t : SPACE.test(t) ? ' ' : '';
+    if (!keep) continue;
+    marks = LETTER.test(t) ? 3 : MARK.test(t) ? marks - 1 : 0;
+    out += keep;
+  }
+  // One line first, so that the heading and list escapes see the start of the text.
+  return escapeMarkdown(out.replace(/ +/g, ' ').trim(), ESCAPE_ALL).replace(/[[\]]/g, '\\$&').replace(/:\/\/(?=\S)/g, ':// ');
 }
 const GRAPHEMES = new Intl.Segmenter();
 /** `text` cut to at most `max` characters, the last one "…"; the cut never splits a grapheme cluster: a flag or a family emoji is kept whole or dropped whole (F-T27-28). */
@@ -238,7 +249,8 @@ function batch(gate, ask, holders, names) {
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
     title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
-    description,
+    // The dropped reasons leave one line that never shrinks (F-T27-35).
+    description: plan.reasons < reasons.length ? `${description}\n${plural(reasons.length - plan.reasons, 'more reason')}; the chief has them all` : description,
     fields: [...parts.map((field) => field(plan)), ...reasons.slice(reasons.length - plan.reasons).map(({ name, value }) => ({ name, value }))],
     footer,
   });
@@ -260,18 +272,23 @@ export function reasonModal(gate, ask, part, index) {
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 
-/** The private confirm before a lead ends a batch vote: what each part gets with the votes so far. */
+/** The private confirm before a lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters. */
 export function confirmEnd(gate, { holders, names }) {
-  const lines = gate.parts.map((part, i) => {
-    const counts = tally(part, holders);
+  const tallies = gate.parts.map((part) => tally(part, holders));
+  const text = (cap) => [`**End ${gate.id} now?**`, ...tallies.map((counts, i) => {
     const { top, tied } = leaders(counts);
     return top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
-      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${counts.get(tied[0]).map((id) => who(id, names)).join(', ')}).`
+      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${list(counts.get(tied[0]).map((id) => who(id, names)), cap)}).`
       : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until a ${LEAD} breaks the tie.`;
-  });
+  }), 'Nobody can vote after this.'].join('\n');
+  // A team of 2 to 5 always fits whole; for a far larger team the voter lists shrink to "and N more", the overshoot spread over the parts (F-T27-36).
+  let content = text(Infinity);
+  for (let cap = Infinity; content.length > LIMIT.content && cap > 1; content = text(cap)) {
+    cap = Math.max(1, Math.min(cap, content.length) - Math.ceil((content.length - LIMIT.content) / gate.parts.length));
+  }
   const row = new ActionRowBuilder().addComponents(
     button(customId('cancel', gate.id), 'Cancel', ButtonStyle.Secondary), button(customId('end!', gate.id), 'End vote now', ButtonStyle.Danger));
-  return { ...ephemeral([`**End ${gate.id} now?**`, ...lines, 'Nobody can vote after this.'].join('\n')), components: [row.toJSON()] };
+  return { ...ephemeral(content), components: [row.toJSON()] };
 }
 
 /** The private note for a `why` code of the vote rules (or the bridge's own `unknown-gate`). */

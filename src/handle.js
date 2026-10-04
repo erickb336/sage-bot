@@ -32,14 +32,15 @@ function fieldOf(interaction, id) {
 
 /**
  * Handle one interaction. `gates` maps a gate id to `{ gate, ask }`; the handler sets the new gate there.
- * It answers the interaction (an updated card, a modal, a confirm or a private note) and returns `{ gate, effects }`:
- * `gate` is the gate after the event (null for an unknown gate) and `effects` are the vote rules' effects.
+ * It answers the interaction (an updated card, a modal, a confirm or a private note) and returns `{ gate, effects, stored }`:
+ * `gate` is the gate after the event (null for an unknown gate), `effects` are the vote rules' effects, and `stored` is true
+ * when the event changed the gate and the new gate is in `gates` (a press that counts gives `effects: []` and `stored: true`).
  * The caller (B3) acts on a `closed` effect, and edits the card message when the gate changed but the reply
  * was not the card: after "End vote now", or when a reason modal was dismissed.
  * The reply is built before the new gate is stored, so a reply that cannot be built leaves the gate as it was.
  * When Discord refuses the reply (an unknown interaction, a network error), `handle` never rejects: the result also has
- * `replyError`, beside the gate and the effects as they are after the store (F-T27-20, F-T27-28). Beside an 'ignored' effect,
- * or with nothing stored, it means that nothing changed. `handle` rejects only for a programming error: a wrong `interaction`
+ * `replyError`, beside the gate, the effects and `stored` as they are after the store (F-T27-20, F-T27-28, F-T27-37). With
+ * `stored: false` nothing changed. `handle` rejects only for a programming error: a wrong `interaction`
  * (no `user`, no `reply`) or `ctx` (no `gates`, `people` or `clock`), or `card`'s RangeError for an ask of more than 4 parts.
  * @param {{ user: { id: string }, customId: string, message?: { flags: { has(flag: number): boolean } },
  *   fields?: { getTextInputValue(id: string): string },
@@ -47,15 +48,15 @@ function fieldOf(interaction, id) {
  * @param {{ gates: Map<string, { gate: import('./vote.js').Gate, ask: object }>, people: ReturnType<typeof peopleOf>, clock: () => number }} ctx
  */
 export async function handle(interaction, ctx) {
-  const { send, payload, gate, effects } = decide(interaction, ctx);
-  try { await send.call(interaction, payload); } catch (replyError) { return { gate, effects, replyError }; }
-  return { gate, effects };
+  const { send, payload, ...result } = decide(interaction, ctx);
+  try { await send.call(interaction, payload); } catch (replyError) { return { ...result, replyError }; }
+  return result;
 }
 
-/** The reply to one interaction (`send` and its `payload`) and the result of `handle`, with the new gate stored in `gates`. */
+/** The reply to one interaction (`send` and its `payload`) and the result of `handle` (`gate`, `effects`, `stored`), with the new gate stored in `gates`. */
 function decide(interaction, { gates, people, clock }) {
-  const reply = (payload, gate, effects = []) => ({ send: interaction.reply, payload, gate, effects });
-  const update = (payload, gate, effects = []) => ({ send: interaction.update, payload, gate, effects });
+  const reply = (payload, gate, effects = []) => ({ send: interaction.reply, payload, gate, effects, stored: false });
+  const update = (payload, gate, effects = []) => ({ send: interaction.update, payload, gate, effects, stored: false });
   const id = parseCustomId(interaction.customId);
   const entry = id && gates.get(id.gateId);
   const { action, part, index } = id ?? {};
@@ -90,6 +91,7 @@ function decide(interaction, { gates, people, clock }) {
     : action === 'end!' ? update({ ...ephemeral(`You ended the vote on ${gate.id} at ${stamp(base.at)}.`), components: [] }, out.gate, out.effects)
     : action === 'press' && gate.kind === 'batch' ? { send: interaction.showModal, payload: reasonModal(out.gate, ask, part, index), gate: out.gate, effects: out.effects } // the vote counts already
     : update(card(out.gate, ask, people), out.gate, out.effects);
+  // `stored`: the vote rules changed the gate and the new gate is in `gates` (F-T27-37). An ignored event leaves the same gate.
   gates.set(id.gateId, { gate: out.gate, ask });
-  return result;
+  return { ...result, stored: out.gate !== gate };
 }

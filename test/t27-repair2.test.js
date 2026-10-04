@@ -104,7 +104,8 @@ test('F-T27-20: when Discord refuses the reply after the store, handle resolves 
 });
 
 test('F-T27-11: safe keeps the joiners and the tag characters (a family emoji, a Persian word, a subdivision flag), and removes the hiding characters', () => {
-  for (const kept of ['👨‍👩‍👧', 'می‌خواهم', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'a‌b‍c']) assert.equal(safe(kept), kept);
+  for (const kept of ['👨‍👩‍👧', 'می‌خواهم', '🏴󠁧󠁢󠁥󠁮󠁧󠁿']) assert.equal(safe(kept), kept);
+  assert.equal(safe('a‌b‍c'), 'abc'); // a joiner between Latin letters goes (F-T27-40: only a joining script keeps one)
   assert.equal(safe('‪a‫b‬c‭d‮e⁦f⁧g⁨h⁩i​j﻿k­l‎m‏n؜o'), 'abcdefghijklmno');
 });
 
