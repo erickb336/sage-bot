@@ -125,7 +125,7 @@ test('the reason modal and the end confirm carry the limits and the custom ids; 
   const gate = openAsk('B7', T0);
   const modal = reasonModal(gate, ASKS.B7, 2, 1);
   assert.equal(modal.custom_id, 'reason:B7:2:1');
-  assert.equal(modal.title, 'Your vote counts: B. The report title and…'); // cut at a word within Discord's 45 characters (F-T27-18, F-T27-23)
+  assert.equal(modal.title, 'B. The report title and the date'); // the prefix goes first when the full title does not fit in 45 characters (F-T27-18, F-T27-29)
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 0).title, 'Your vote counts: A. Yes, under the button');
   assert.equal(modal.components[0].components[0].max_length, 500);
   const confirm = confirmEnd(run(gate, [ballot(ERICK, 1, 'A', T0 + MINUTE), ballot(JON, 1, 'B', T0 + MINUTE)]), PEOPLE);

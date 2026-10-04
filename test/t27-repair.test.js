@@ -163,7 +163,7 @@ test('F-T27-16: with every part tied the card does not call the other parts prov
 });
 
 test('F-T27-18: the form title shows the option within 45 characters; Cancel comes first; an early end says so on the card', () => {
-  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'Your vote counts: C. Visible columns, plus…'); // at a word (F-T27-23)
+  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'C. Visible columns, plus an "Include hidden…'); // at a word, without the prefix (F-T27-23, F-T27-29)
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 1).title, 'Your vote counts: B. No');
   assert.deepEqual(confirmEnd(openAsk('B9', T0), PEOPLE).components[0].components.map((c) => c.label), ['Cancel', 'End vote now']);
   const early = step(openAsk('B9', T0), { type: 'end', by: JON, at: clock(14, 50), via: 'discord' }, PEOPLE.holders, PEOPLE.leads).gate;
