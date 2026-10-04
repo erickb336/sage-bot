@@ -6,7 +6,9 @@
 //   ({ gate, effects } = step(gate, event, holders, leads));
 //
 // `holders` are the Discord user ids that may answer and vote; `leads` are the ids with the
-// sage-lead role. The bridge passes both in with each event. Anyone else counts for nothing.
+// sage-lead role. The bridge passes both in with each event, as any iterable of strings
+// (an Array, a Set, or a Map's keys()); anything else counts as empty. Anyone else counts for nothing.
+// See the README for the full API.
 // The bridge sends a tick at `gate.endsAt` so that a batch vote ends on time.
 
 export const MINUTE = 60_000;
@@ -24,11 +26,13 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && ne
 
 /**
  * @typedef {{ option: string, at: number, via: 'discord' | 'terminal', reason?: string }} Ballot
+ * @typedef {{ by: string, ballot: Ballot, prev: BallotList } | null} BallotList  newest first; read it with ballotsOf
  * @typedef {{ status: 'open' } | { status: 'decided', option: string, how: 'votes' | 'lead-tiebreak' }} PartOutcome
- * @typedef {{ options: string[], ballots: Record<string, Ballot>, outcome: PartOutcome }} Part
+ * @typedef {{ options: string[], ballots: BallotList, outcome: PartOutcome, tied?: string[] }} Part
  * @typedef {{ id: string, kind: 'single', askedBy: string, openedAt: number, lastAt: number,
  *   phase: 'open' | 'closed', options: string[],
- *   outcome: { status: 'open' } | { status: 'answered', option: string, by: string } | { status: 'withdrawn' } }} SingleGate
+ *   outcome: { status: 'open' } | { status: 'answered', option: string, by: string, via: 'discord' | 'terminal' }
+ *     | { status: 'withdrawn' } }} SingleGate
  * @typedef {{ id: string, kind: 'batch', askedBy: string, openedAt: number, lastAt: number,
  *   phase: 'voting' | 'tied' | 'closed', endsAt: number, votingEndedAt: number | null, parts: Part[],
  *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate
@@ -39,7 +43,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && ne
  *   | { type: 'withdraw', by: string, at: number }
  *   | { type: 'tick', at: number }} Event
  * @typedef {'not-holder' | 'not-lead' | 'lead-needs-discord' | 'not-asker' | 'unknown-option' | 'unknown-part'
- *   | 'wrong-kind' | 'not-tied' | 'closed' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
+ *   | 'wrong-kind' | 'not-tied' | 'not-tied-option' | 'closed' | 'bad-event' | 'bad-time' | 'out-of-order'} Why
  * @typedef {{ type: 'vote-ended', by: string | null }
  *   | { type: 'decided', part: number, option: string, how: 'votes' | 'lead-tiebreak' }
  *   | { type: 'closed', outcome: Gate['outcome'] }
@@ -66,19 +70,21 @@ export function openGate({ id, kind, options, parts, askedBy, at }) {
   }
   return {
     ...base, phase: 'voting', endsAt: at + BATCH_LIMIT, votingEndedAt: null,
-    parts: parts.map((opts) => ({ options: [...opts], ballots: {}, outcome: OPEN })),
+    parts: parts.map((opts) => ({ options: [...opts], ballots: null, outcome: OPEN })),
   };
 }
 
 /**
- * Apply one event to a gate. Never throws on an odd event: it is ignored, with the reason.
+ * Apply one event to a gate. Never throws for an odd event: it is ignored, with the reason.
+ * Throws a TypeError for a missing or wrong gate (not made by openGate or step).
  * @param {Gate} gate
  * @param {Event} event
- * @param {string[]} holders
- * @param {string[]} leads
+ * @param {Iterable<string>} holders
+ * @param {Iterable<string>} leads
  * @returns {{ gate: Gate, effects: Effect[] }}
  */
 export function step(gate, event, holders, leads) {
+  if (!isGate(gate)) throw new TypeError('step: the first argument must be a gate from openGate or step');
   const why = refusal(gate, event);
   if (why) return { gate, effects: [ignored(event, why)] };
   const people = { holders: idSet(holders), leads: idSet(leads) };
@@ -109,9 +115,16 @@ function refusal(gate, event) {
   return typeof event.option === 'string' && reasonOk ? null : 'bad-event';
 }
 
-/** A list of ids as a set of unique, non-empty strings. */
+/** The shape of a gate that openGate or step made (also after a JSON round trip). */
+function isGate(gate) {
+  if (typeof gate !== 'object' || gate === null || !isId(gate.id) || !Number.isSafeInteger(gate.lastAt)) return false;
+  return gate.kind === 'single' ? Array.isArray(gate.options) : gate.kind === 'batch' && Array.isArray(gate.parts);
+}
+
+/** Any iterable of ids as a set; a Set is used as it is. A string or a non-iterable counts as empty. */
 function idSet(ids) {
-  return new Set(Array.isArray(ids) ? ids.filter(isId) : []);
+  if (ids instanceof Set) return ids;
+  return typeof ids !== 'string' && typeof ids?.[Symbol.iterator] === 'function' ? new Set(ids) : new Set();
 }
 
 function apply(gate, event, { holders, leads }) {
@@ -134,7 +147,7 @@ function apply(gate, event, { holders, leads }) {
 function answer(gate, event, holders) {
   if (!holders.has(event.by)) return ignore(gate, event, 'not-holder');
   if (!gate.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
-  return close(gate, { status: 'answered', option: event.option, by: event.by });
+  return close(gate, { status: 'answered', option: event.option, by: event.by, via: event.via });
 }
 
 /** A batch ballot: the last ballot of each holder on each part counts. */
@@ -147,7 +160,8 @@ function vote(gate, event, holders) {
   const ballot = { option: event.option, at: event.at, via: event.via };
   const reason = event.reason === undefined ? '' : cleanReason(event.reason);
   if (reason) ballot.reason = reason;
-  const parts = gate.parts.with(event.part, { ...part, ballots: { ...part.ballots, [event.by]: ballot } });
+  // O(1): the new ballot goes at the head of the part's list; the earlier list is shared, not copied.
+  const parts = gate.parts.with(event.part, { ...part, ballots: { by: event.by, ballot, prev: part.ballots } });
   return { gate: { ...gate, parts }, effects: [] };
 }
 
@@ -155,8 +169,9 @@ function vote(gate, event, holders) {
 function endVoting(gate, by, holders, at) {
   const effects = [{ type: 'vote-ended', by }];
   const parts = gate.parts.map((part, i) => {
-    const option = leader(part, holders);
-    if (option === null) return part;
+    const tied = leaders(part, holders);
+    if (tied.length !== 1) return { ...part, tied };
+    const [option] = tied;
     effects.push({ type: 'decided', part: i, option, how: 'votes' });
     return { ...part, outcome: { status: 'decided', option, how: 'votes' } };
   });
@@ -169,6 +184,7 @@ function tiebreak(gate, event) {
   if (!part) return ignore(gate, event, 'unknown-part');
   if (gate.phase !== 'tied' || part.outcome.status !== 'open') return ignore(gate, event, 'not-tied');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
+  if (!part.tied.includes(event.option)) return ignore(gate, event, 'not-tied-option');
   const parts = gate.parts.with(event.part, { ...part, outcome: { status: 'decided', option: event.option, how: 'lead-tiebreak' } });
   return finish({ ...gate, parts }, [{ type: 'decided', part: event.part, option: event.option, how: 'lead-tiebreak' }]);
 }
@@ -180,15 +196,23 @@ function finish(gate, effects) {
     : { gate, effects };
 }
 
-/** The option with the most ballots of current holders, or null on a tie (zero ballots is a tie). */
-function leader(part, holders) {
-  const counts = new Map();
-  for (const h of holders) {
-    if (Object.hasOwn(part.ballots, h)) counts.set(part.ballots[h].option, (counts.get(part.ballots[h].option) ?? 0) + 1);
-  }
-  const top = Math.max(0, ...counts.values());
-  const leaders = [...counts].filter(([, n]) => n === top);
-  return leaders.length === 1 ? leaders[0][0] : null;
+/** The options with the most ballots of current holders; with zero ballots, every option is tied. */
+function leaders(part, holders) {
+  const counts = new Map(part.options.map((o) => [o, 0]));
+  for (const [by, { option }] of ballotsOf(part)) if (holders.has(by)) counts.set(option, counts.get(option) + 1);
+  const top = Math.max(...counts.values());
+  return part.options.filter((o) => counts.get(o) === top);
+}
+
+/**
+ * The ballots that count on a part of a batch: the last ballot of each person, as a Map from id to Ballot.
+ * @param {Part} part
+ * @returns {Map<string, Ballot>}
+ */
+export function ballotsOf(part) {
+  const last = new Map();
+  for (let node = part.ballots; node; node = node.prev) if (!last.has(node.by)) last.set(node.by, node.ballot);
+  return last;
 }
 
 /** The asker cancels the gate: it closes as withdrawn, and no part of a batch stays decided. */

@@ -1,7 +1,7 @@
 // Table-driven tests of the vote rules. SAMPLE DATA: every id here is a made-up sample, not a real Discord id.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openGate, step, nextReminderAt, cleanReason, MINUTE, BATCH_LIMIT } from '../src/vote.js';
+import { openGate, step, ballotsOf, nextReminderAt, cleanReason, MINUTE, BATCH_LIMIT } from '../src/vote.js';
 
 const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
@@ -38,7 +38,7 @@ function run(gate, events, holders = HOLDERS, leads = LEADS) {
 const OPEN = { status: 'open' };
 const votes = (option) => ({ status: 'decided', option, how: 'votes' });
 const lead = (option) => ({ status: 'decided', option, how: 'lead-tiebreak' });
-const answered = (option, by) => ({ status: 'answered', option, by });
+const answered = (option, by, via = 'discord') => ({ status: 'answered', option, by, via });
 
 const cases = [
   // Single gate.
@@ -62,7 +62,7 @@ const cases = [
   {
     rule: 'single: the owner\'s terminal answer is the first answer',
     gate: single, events: [press(ERICK, 'A', 0, { via: 'terminal' }), press(MAYA, 'B', 1)],
-    phase: 'closed', outcome: answered('A', ERICK),
+    phase: 'closed', outcome: answered('A', ERICK, 'terminal'),
   },
   {
     rule: 'single: a press for an option the gate does not have is ignored',
@@ -231,7 +231,7 @@ for (const [name, input, expected] of reasons) {
 
 test('a ballot keeps its cleaned reason', () => {
   const r = run(batch(), [ballot(MAYA, 0, 'B', 0, { reason: 'ok\n<b>' })]);
-  assert.equal(r.gate.parts[0].ballots[MAYA].reason, 'ok b');
+  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).reason, 'ok b');
 });
 
 const reminders = [

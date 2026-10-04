@@ -2,7 +2,7 @@
 // (single gates and 30-minute batch votes). SAMPLE DATA: every id here is a made-up sample, not a real Discord id.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openGate, step, cleanReason, nextReminderAt, MINUTE } from '../src/vote.js';
+import { openGate, step, ballotsOf, cleanReason, nextReminderAt, MINUTE } from '../src/vote.js';
 
 const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
@@ -47,7 +47,7 @@ test('F-T1-23: a holder added to the list counts at once, with no vote', () => {
   const r = run(single(), [[press(SAM, 'A', 0), THREE], [press(SAM, 'A', 1), FOUR]]);
   assert.deepEqual(r.effects, [
     { type: 'ignored', by: SAM, why: 'not-holder' },
-    { type: 'closed', outcome: { status: 'answered', option: 'A', by: SAM } },
+    { type: 'closed', outcome: { status: 'answered', option: 'A', by: SAM, via: 'discord' } },
   ]);
 });
 
@@ -147,7 +147,7 @@ for (const [name, input, expected] of reasons) {
 
 test('F-T1-17: a ballot keeps the reason with the newline as a space', () => {
   const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: 'line one\nline two' }), THREE]]);
-  assert.equal(r.gate.parts[0].ballots[MAYA].reason, 'line one line two');
+  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).reason, 'line one line two');
 });
 
 // F-T1-19 and F-T1-26: caller time.
@@ -165,7 +165,7 @@ test('F-T1-26: an event earlier than the last accepted time is ignored', () => {
   // Maya's ballot at minute 4 comes after her ballot at minute 5: it does not replace it.
   const r = run(batch(), [[ballot(MAYA, 'B', 5), THREE], [ballot(MAYA, 'A', 4), THREE]]);
   assert.deepEqual(r.effects, [{ type: 'ignored', by: MAYA, why: 'out-of-order' }]);
-  assert.equal(r.gate.parts[0].ballots[MAYA].option, 'B');
+  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).option, 'B');
 });
 
 test('F-T1-26: a late ballot stamped before the limit does not count after a tick ended the vote', () => {
@@ -201,7 +201,7 @@ test('F-T1-22: a withdraw without by is ignored as a bad event', () => {
 
 test('F-T1-25: a reason that cleans to nothing leaves no reason on the ballot', () => {
   const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: ' <>` \n' }), THREE]]);
-  assert.deepEqual(r.gate.parts[0].ballots[MAYA], { option: 'B', at: T0, via: 'discord' });
+  assert.deepEqual(ballotsOf(r.gate.parts[0]).get(MAYA), { option: 'B', at: T0, via: 'discord' });
 });
 
 // F-T1-27: counts kept on a plain object read inherited keys such as "constructor".
@@ -275,19 +275,19 @@ test('F-T1-31: reason removes Hangul fillers, the grapheme joiner and the blank 
 
 test('F-T1-31: a reason made only of invisible characters is dropped', () => {
   const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: 'ㅤᅟᅠﾠ͏⠀' }), THREE]]);
-  assert.deepEqual(r.gate.parts[0].ballots[MAYA], { option: 'B', at: T0, via: 'discord' });
+  assert.deepEqual(ballotsOf(r.gate.parts[0]).get(MAYA), { option: 'B', at: T0, via: 'discord' });
 });
 
 // F-T1-33: a refused event does not move the gate's time.
 
 test('F-T1-33: a refused press with a far-future time does not freeze a single gate', () => {
   const r = run(single(), [[press(SAM, 'A', 1e6), THREE], [press(MAYA, 'Z', 2e6), THREE], [press(MAYA, 'A', 5), THREE]]);
-  assert.deepEqual(r.gate.outcome, { status: 'answered', option: 'A', by: MAYA });
+  assert.deepEqual(r.gate.outcome, { status: 'answered', option: 'A', by: MAYA, via: 'discord' });
 });
 
 test('F-T1-33: a refused ballot does not freeze a batch vote', () => {
   const r = run(batch(), [[ballot(SAM, 'A', 20), THREE], [ballot(MAYA, 'Z', 25), THREE], [ballot(MAYA, 'A', 5), THREE]]);
-  assert.equal(r.gate.parts[0].ballots[MAYA].option, 'A');
+  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).option, 'A');
   assert.deepEqual(r.effects.map((e) => e.why), ['not-holder', 'unknown-option']);
 });
 
