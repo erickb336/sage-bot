@@ -21,7 +21,7 @@ This version has the vote rules (task B1) and the Discord layer: the cards, the 
 | Holder list changes | A holder added to the list counts at once. A removed holder's ballot does not count at the time limit. Nothing is decided with no holders. |
 | Reminder | A single gate with no answer: to the holders every 2 hours from opening. A batch with tied parts: to the leads every 2 hours after its vote ended, also when a lead ended it early. |
 | Reason | Optional on a batch ballot, at most 500 characters (Unicode code points). A longer reason is cut to 500, with no error. The cut never splits an emoji or another character of two UTF-16 units; a lone surrogate becomes U+FFFD. An empty reason means no reason. B1 does not clean a reason in any other way (see below). |
-| Terminal answer | The owner's answer at the terminal counts as the first answer on a single gate, and as one ballot in a batch. It counts only from a holder: the bridge always includes the owner in holders. |
+| Terminal answer | The owner's answer at the terminal counts as the first answer on a single gate, and as one ballot in a batch. It counts only from a holder: the owner needs the sage-driver role like everyone else. |
 | Outcome | Single: open, answered (option, who, and via Discord or the terminal), or withdrawn. Batch: each part is open or decided (by votes or by a lead's tie-break); the batch closes when every part is decided. |
 | Withdraw | The person who asked may withdraw the gate. A withdraw while any part is still open cancels the whole gate: no part of a withdrawn batch stays decided, also when the vote already decided it. A step that ends withdrawn gives only the `'closed'` effect, also when the time limit passed before it. Once a gate closes as decided, a withdraw has no effect. A withdraw at or after the time limit, with no tick before it, comes after the limit: the vote ends first, so the withdraw has no effect when the vote decided every part. |
 | Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate, as `nextReminderAt` and `parseGate` do. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
@@ -195,7 +195,7 @@ A single question has one part, with an optional `default`. `examples/sample.js`
 
 ### peopleOf(members, config)
 
-Builds `{ holders, leads, names }` from the guild members (`{ id, name, roles }`, with `roles` a list of role ids) and the config `{ driverRole, leadRole, ownerId }`. A holder has the sage-driver role; a lead has the sage-lead role; the owner is always a holder. The bridge passes `holders` and `leads` to the vote rules, which also need a lead to be a holder.
+Builds `{ holders, leads, names }` from the guild members (`{ id, name, roles, bot }`, with `roles` a list of role ids and `bot` discord.js's `member.user.bot`) and the config `{ driverRole, leadRole }`. The holders are exactly the members with the sage-driver role, and the leads exactly the members with the sage-lead role: the owner is not added by default, and a bot is neither, whatever its roles. The bridge passes `holders` and `leads` to the vote rules, which also need a lead to be a holder.
 
 ### card(gate, ask, people)
 
@@ -205,16 +205,16 @@ The card of a gate as `{ embeds, components, allowedMentions }`. Times are Disco
 | --- | --- |
 | Single, open | The question, the options with Recommended and Default, the rule, one button per option. |
 | Single, answered | "Answered by Maya at 14:22: A. … Final." The buttons are off; the chosen one is green. |
-| Batch, voting | "Closes at 15:01 (in 18 minutes)". Per part: each option with its votes and voters ("Erick (terminal), Jon"), the chief's recommendation, "Voted: … · Not voted: …", and "Ahead: A", "Even so far" or "No votes yet". Each reason as one line. A button per option of each part, and "End vote now (sage-lead only)". |
-| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." A tied part shows "Tied: A, B at 1 vote each." and a tie-break button for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 votes of 3". |
+| Batch, voting | "Closes at 15:01 (in 18 minutes)". Per part: each option with its votes and voters ("Erick (terminal), Jon"), the chief's recommendation, "Voted: … · Not voted: …", and "Ahead: A", "Even so far" or "No votes yet". Each reason as one line, cut to 200 characters. A button per option of each part, "Part 1, A: Only the columns visible in the table" (cut to 80 characters), and "End vote now (sage-lead only)". |
+| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." (with every part tied: "2 parts are tied: they wait for a sage-lead. T7 waits."). After a lead's early end: "Ended early at 15:28 by a sage-lead, with the votes so far." A tied part shows "Tied: A, B at 1 vote each." and a button "Part 2, break the tie: A (sage-lead only)" for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 of 3 votes". |
 | Batch, decided | "Voting ended at 15:01. Closed: every part is decided. T7 goes on." Every button is off. |
 | Withdrawn | "Withdrawn by Erick at 15:30. Closed: nothing is decided." Every button is off. |
 
 The words "Voting ended at" are for the vote; "Closed" is only for a decided or withdrawn gate. The card says "tie broken by a sage-lead" without the name, because the gate does not store it; the chief's message in the thread names the lead (B3, from the `tiebreak` event).
 
-**Untrusted text.** A reason and a display name can hold mentions, markdown, newlines and backticks. `safe` makes them inert: it escapes Discord markdown (discord.js `escapeMarkdown` with every option), escapes `<` so that no mention, timestamp or emoji code renders, and folds whitespace to one line. Every message also carries `allowedMentions: { parse: [] }`, so nothing pings anyone. The reason form sets `max_length` to 500. B3 still cleans reasons before they reach the chief.
+**Untrusted text.** A reason and a display name can hold mentions, markdown, masked links, newlines, backticks and invisible characters. `safe` makes them inert: it removes format characters (zero-width and bidi controls, Unicode `Cf`), escapes Discord markdown (discord.js `escapeMarkdown`) and every `[` and `]` (so no masked link survives, not the second one either), escapes `<` so that no mention, timestamp or emoji code renders, and folds whitespace to one line. Every message also carries `allowedMentions: { parse: [] }`, so nothing pings anyone. The reason form sets `max_length` to 500. B3 still cleans reasons before they reach the chief.
 
-**Discord's limits.** One message holds 5 rows of buttons and an embed holds 25 fields. A card uses one row per part, one more while the vote is open, and one field per part and per reason. `card` throws a RangeError for more than 5 rows; a batch has at most 4 parts while the vote is open, 5 after.
+**Discord's limits.** One message holds 5 rows of buttons; an embed holds 25 fields and 6000 characters in all. A card uses one row per part, one more while the vote is open, and one field per part and per reason. `card` throws a RangeError for more than 5 rows: a batch has at most 4 parts while the vote is open, 5 after. The card shows each reason cut to 200 characters (the gate keeps the full 500), the newest reasons that fit in 25 fields, and it cuts the reasons further when the embed would pass 6000 characters (discord.js `embedLength`). A team of 5 with 4 parts and the longest reasons fits. `handle` builds its reply before it stores the new gate, so a card that cannot be built leaves the gate as it was.
 
 ### handle(interaction, { gates, people, clock })
 
@@ -224,7 +224,8 @@ Takes one interaction (a button press or the reason form) and answers it. `gates
 | --- | --- |
 | `interaction.user.id` | `by`, always. |
 | `interaction.customId` | The action, the gate id, and the part and option indexes. Never the option text. The option comes from the gate: a forged gate, part, index or option text gets a private note and no event. |
-| `interaction.fields` | The reason of the form, as typed; the vote rules cut it to 500 characters. |
+| `interaction.fields` | The reason of the form (input id `reason`), as typed; the vote rules cut it to 500 characters. A `reason:` id with no fields, or without that field, gets a private note and no event. |
+| `interaction.message.flags` | Only for `end!:` and `cancel:`: they count only from the lead's private confirm (the Ephemeral flag). From any other message they are unknown buttons: a private note, and the card does not change. |
 | The injected `clock()` | `at`, always. Not the interaction's data. |
 | nothing | `via` is always `'discord'`. |
 
@@ -234,15 +235,23 @@ The custom_id grammar: `press:<gate>:<part>:<index>`, `reason:<gate>:<part>:<ind
 | --- | --- |
 | An option of a single question | The updated card. A later press: the private note "Already answered by Maya: A". |
 | An option of a batch part | The vote counts at once; the reply is the reason form (optional, 500 characters). Its submit replaces the ballot with the reason and updates the card. A dismissed form sends nothing: the ballot stays, and B3 edits the card at its next chance. |
-| End vote now, by a lead who is a holder | A private confirm: what each part gets with the votes so far, with "End vote now" and "Cancel". The confirmed end runs through the vote rules; the reply updates the private confirm, so B3 edits the card. |
+| End vote now | The end runs through the vote rules first, without a store. When they would refuse it (not a lead, a single question, the vote ended, closed or withdrawn, or past the time limit by the clock), the reply is that refusal's private note, so the confirm never shows false facts. Otherwise a private confirm: what each part gets with the votes so far ("Part 1 goes to A: 2 of 3 votes (Erick, Jon)."), with "Cancel" and "End vote now". The confirmed end runs through the vote rules; the reply updates the private confirm, so B3 edits the card. |
 | A tie-break button, by a lead | The updated card. |
 | Anything the vote rules ignore | A private note for its `why` code. Every code has one; a non-holder gets "Your press did not count. Only people with the sage-driver role can answer or vote. You can still read this thread." |
 
 Discord shows every button of a message to everyone, so a non-lead sees "End vote now" and the tie-break buttons too; a press gets the private note "Only a sage-lead can do this." B3 must: call `parseGate` on each loaded gate; send the tick at `gate.endsAt` and the withdraw from sage through `step`; and edit the card message with `card(...)` whenever the gate changed but the reply was not the card (after a confirmed end, a dismissed form, a tick or a withdraw).
 
+### The fake layer
+
+`src/fake-discord.js` exports `fakeInteraction({ user, customId, fields, ephemeral })`: an interaction-like object for the tests and the preview, with the shape that `handle` reads and a `replies` list that records every answer as `{ kind, ...payload }` (kind `'reply'`, `'update'` or `'modal'`).
+
+- `user`: the user id; `customId`: the button's or form's custom id.
+- `fields`: the form's inputs by input id, only for a form submit; the reason form has one input, `'reason'`. A button press has no `fields`, as in discord.js, and `getTextInputValue('reason')` throws for a missing input, as in discord.js.
+- `ephemeral`: true when the pressed message was private (the lead's confirm); it sets the Ephemeral flag of `message.flags`.
+
 ### The preview
 
-`node scripts/preview.mjs` renders the card JSON of the design's eleven moments to `design/b2/index.html` with sample data. With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder.
+`node scripts/preview.mjs` renders the card JSON of the design's eleven moments, plus a card of a team of 5 with 4 parts and 500-character reasons, to `design/b2/index.html` with sample data. With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder.
 
 ## Run the checks
 

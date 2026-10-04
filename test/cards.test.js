@@ -37,9 +37,10 @@ test('an open batch card: a live countdown, the tally per part with voters and n
   assert.match(embed.fields[2].value, /Voted: nobody yet · Not voted: Erick, Maya, Jon\nNo votes yet$/);
   assert.deepEqual(embed.fields[3], { name: 'Jon, part 2', value: 'Our EU customers read day/month first.' });
   assert.deepEqual(buttons(c), [
-    ['press:B7:0:0 Part 1 · A s1', 'press:B7:0:1 Part 1 · B s2', 'press:B7:0:2 Part 1 · C s2'],
-    ['press:B7:1:0 Part 2 · A s1', 'press:B7:1:1 Part 2 · B s2', 'press:B7:1:2 Part 2 · C s2'],
-    ['press:B7:2:0 Part 3 · A s1', 'press:B7:2:1 Part 3 · B s2'],
+    ['press:B7:0:0 Part 1, A: Only the columns visible in the table s1', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2',
+      'press:B7:0:2 Part 1, C: Visible columns, plus an "Include hidden fields" box s2'],
+    ['press:B7:1:0 Part 2, A: 2026-10-04 (ISO) s1', "press:B7:1:1 Part 2, B: 04/10/2026 (the user's locale) s2", 'press:B7:1:2 Part 2, C: Both, in two columns s2'],
+    ['press:B7:2:0 Part 3, A: reports-2026-10-04.csv s1', 'press:B7:2:1 Part 3, B: The report title and the date s2'],
     ['end:B7 End vote now (sage-lead only) s4'],
   ]);
   assert.deepEqual(c.allowedMentions, { parse: [] });
@@ -50,7 +51,7 @@ test('a reason with mentions, markdown, newlines and backticks shows as one iner
   const gate = run(openAsk('B7', T0), [ballot(MAYA, 0, 'A', T0 + MINUTE, hostile)]);
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.deepEqual(c.embeds[0].fields[3], { name: 'Maya, part 1',
-    value: '@everyone \\<@123> \\<@&9> \\*\\*bold\\*\\* \\_it\\_ \\~\\~gone\\~\\~ \\|\\|spoiler\\|\\| \\`code\\` \\`\\`\\`block\\`\\`\\` \\# heading \\- list \\[x](https://a.b) \\<t:1:R> \\<:e:1>' });
+    value: '@everyone \\<@123> \\<@&9> \\*\\*bold\\*\\* \\_it\\_ \\~\\~gone\\~\\~ \\|\\|spoiler\\|\\| \\`code\\` \\`\\`\\`block\\`\\`\\` \\# heading \\- list \\[x\\](https://a.b) \\<t:1:R> \\<:e:1>' });
   assert.equal(safe('a\r\n\t b   c '), 'a b c');
   // A hostile display name is made inert the same way, everywhere a name shows.
   const names = new Map([[MAYA, '**@everyone** <@1>']]);
@@ -69,20 +70,21 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   ]);
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
-  assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 votes of 3$/);
+  assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 of 3 votes$/);
   assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\.$/);
-  assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 votes of 3$/);
+  assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 of 3 votes$/);
   assert.deepEqual(buttons(c), [
-    ['press:B7:0:0 Part 1 · A s3 off', 'press:B7:0:1 Part 1 · B s2 off', 'press:B7:0:2 Part 1 · C s2 off'],
-    ['tiebreak:B7:1:0 Part 2 · break the tie: A s4', 'tiebreak:B7:1:1 Part 2 · break the tie: B s4'],
-    ['press:B7:2:0 Part 3 · A s3 off', 'press:B7:2:1 Part 3 · B s2 off'],
+    ['press:B7:0:0 Part 1, A: Only the columns visible in the table s3 off', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2 off',
+      'press:B7:0:2 Part 1, C: Visible columns, plus an "Include hidden fields" box s2 off'],
+    ['tiebreak:B7:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B7:1:1 Part 2, break the tie: B (sage-lead only) s4'],
+    ['press:B7:2:0 Part 3, A: reports-2026-10-04.csv s3 off', 'press:B7:2:1 Part 3, B: The report title and the date s2 off'],
   ]);
-  // A part with no votes offers every option to the lead, and the lead's early end reads "Voting ended at", not "closed".
+  // A part with no votes offers every option to the lead, and the lead's early end says so (F-T27-18), not "closed".
   const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
-  assert.equal(e.embeds[0].description, `Voting ended at <t:${ts(T0 + 2 * MINUTE)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
+  assert.equal(e.embeds[0].description, `Ended early at <t:${ts(T0 + 2 * MINUTE)}:t> by a sage-lead, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
   assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\.$/);
-  assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2 · break the tie: A s4', 'tiebreak:B9:1:1 Part 2 · break the tie: B s4']);
+  assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (sage-lead only) s4']);
 });
 
 test('a withdrawn batch says who withdrew it and when, decides nothing and disables every button', () => {
@@ -91,7 +93,8 @@ test('a withdrawn batch says who withdrew it and when, decides nothing and disab
   assert.equal(c.embeds[0].description, `**Withdrawn by Erick at <t:${ts(clock(15, 20))}:t>.** Closed: nothing is decided.`);
   assert.match(c.embeds[0].fields[0].value, /Voted: Erick, Jon · Not voted: Maya$/);
   assert.doesNotMatch(c.embeds[0].fields[0].value, /Decided|Provisional|Ahead/);
-  assert.deepEqual(buttons(c), [['press:B9:0:0 Part 1 · A s1 off', 'press:B9:0:1 Part 1 · B s2 off'], ['press:B9:1:0 Part 2 · A s1 off', 'press:B9:1:1 Part 2 · B s2 off']]);
+  assert.deepEqual(buttons(c), [['press:B9:0:0 Part 1, A: An example report and a "Create report" button s1 off', 'press:B9:0:1 Part 1, B: Only a "Create report" button s2 off'],
+    ['press:B9:1:0 Part 2, A: Yes, under the button s1 off', 'press:B9:1:1 Part 2, B: No s2 off']]);
   // A withdraw after the limit, with a tied part, reads the same way.
   const late = run(openAsk('B9', T0), [{ type: 'withdraw', by: ERICK, at: END + MINUTE }]);
   assert.equal(card(late, ASKS.B9, PEOPLE).embeds[0].description, `**Withdrawn by Erick at <t:${ts(END + MINUTE)}:t>.** Closed: nothing is decided.`);
@@ -122,7 +125,7 @@ test('the reason modal and the end confirm carry the limits and the custom ids; 
   const gate = openAsk('B7', T0);
   const modal = reasonModal(gate, ASKS.B7, 2, 1);
   assert.equal(modal.custom_id, 'reason:B7:2:1');
-  assert.equal(modal.title, 'Your vote counts: B'); // the full title is over Discord's 45 characters
+  assert.equal(modal.title, 'Your vote counts: B. The report title and th…'); // cut to Discord's 45 characters (F-T27-18)
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 0).title, 'Your vote counts: A. Yes, under the button');
   assert.equal(modal.components[0].components[0].max_length, 500);
   const confirm = confirmEnd(run(gate, [ballot(ERICK, 1, 'A', T0 + MINUTE), ballot(JON, 1, 'B', T0 + MINUTE)]), PEOPLE);

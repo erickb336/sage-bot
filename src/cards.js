@@ -5,7 +5,7 @@
 // and the 30-minute countdown (<t:…:R>) runs live with no edit of the card.
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, ModalBuilder,
-  TextInputBuilder, TextInputStyle, escapeMarkdown,
+  TextInputBuilder, TextInputStyle, embedLength, escapeMarkdown,
 } from 'discord.js';
 import { ballotsOf, REASON_MAX } from './vote.js';
 
@@ -14,11 +14,22 @@ export const LEAD = 'sage-lead';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
 const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x8a8a8a };
+// Not `maskedLink`: it escapes only the first link. `safe` escapes every `[` and `]` itself (F-T27-8).
 const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
-  'codeBlockContent', 'inlineCodeContent', 'escape', 'heading', 'bulletedList', 'numberedList', 'maskedLink'].map((k) => [k, true]));
+  'codeBlockContent', 'inlineCodeContent', 'escape', 'heading', 'bulletedList', 'numberedList'].map((k) => [k, true]));
+/** Discord's limits on one embed. A reason shows on the card cut to REASON_ON_CARD characters; the gate keeps the full text. */
+const EMBED_MAX = 6000;
+const FIELDS_MAX = 25;
+const REASON_ON_CARD = 200;
 
-/** Untrusted text as one inert line: markdown escaped, `<` escaped (no mention, timestamp or emoji code), newlines folded. */
-export const safe = (text) => escapeMarkdown(String(text), ESCAPE_ALL).replaceAll('<', '\\<').replace(/\s+/g, ' ').trim();
+/**
+ * Untrusted text as one inert line: format characters (zero-width, bidi controls) removed (F-T27-11), markdown and
+ * every `[` and `]` escaped (no masked link), `<` escaped (no mention, timestamp or emoji code), whitespace folded.
+ */
+export const safe = (text) => escapeMarkdown(String(text).replace(/\p{Cf}/gu, ''), ESCAPE_ALL)
+  .replace(/[<[\]]/g, '\\$&').replace(/\s+/g, ' ').trim();
+/** `text` cut to `max` characters, the last one "…"; a cut never leaves half of a surrogate pair. */
+const cut = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1).replace(/[\ud800-\udbff]$/, '')}…`;
 /** A Discord timestamp: `t` shows hh:mm in the viewer's zone; `R` shows a live countdown ("in 18 minutes"). */
 export const stamp = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 const who = (id, names) => safe(names.get(id) ?? id);
@@ -63,7 +74,7 @@ export function card(gate, ask, { holders, names }) {
 }
 
 const button = (id, text, style, { chosen = false, disabled = false } = {}) => new ButtonBuilder().setCustomId(id)
-  .setLabel(text.slice(0, 80)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
+  .setLabel(cut(text, 80)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
 const optionLine = (p, key, extra) => `**${key}.** ${label(p, key)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
 
 function single(gate, ask, names) {
@@ -104,7 +115,7 @@ function batch(gate, ask, holders, names) {
     const notYet = [...holders].filter((id) => !ballots.has(id));
     const o = part.outcome;
     const state = withdrawn ? ''
-      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${plural(counts.get(o.option).length, 'vote')} of ${holders.size}` : `tie broken by a ${LEAD}`}`
+      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by a ${LEAD}`}`
       : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const value = [
@@ -115,23 +126,33 @@ function batch(gate, ask, holders, names) {
     ].join('\n');
     const breakable = !voting && !withdrawn && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
-      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n} · break the tie: ${k}`, ButtonStyle.Danger) : null)
-      : button(customId('press', gate.id, i, j), `Part ${n} · ${k}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
+      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${LEAD} only)`, ButtonStyle.Danger) : null)
+      : button(customId('press', gate.id, i, j), `Part ${n}, ${k}: ${label(p, k)}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
         { chosen: o.status === 'decided' && o.option === k, disabled: !voting })).filter(Boolean)));
     return { name: `Part ${n} · ${p.question}`, value };
   });
   if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${LEAD} only)`, ButtonStyle.Danger)));
-  const ended = gate.votingEndedAt === null ? '' : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
+  const ended = gate.votingEndedAt === null ? ''
+    : gate.votingEndedAt < gate.endsAt ? `Ended early at ${stamp(gate.votingEndedAt)} by a ${LEAD}, with the votes so far. `
+    : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
   const description = withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
     : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote on each part; change your vote until the vote ends. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
     : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for a ${LEAD}. ` +
-      `The other parts are provisional, and ${ask.task} waits.`
+      `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is decided. ${ask.task} goes on.`;
-  const embed = new EmbedBuilder().setTitle(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`).setDescription(description)
-    .addFields(...fields, ...reasons.sort((a, b) => a.at - b.at).map(({ name, value }) => ({ name, value })))
+  // The newest reasons that fit in 25 fields, each cut to REASON_ON_CARD; the cut shrinks until the embed is under 6000.
+  const shown = reasons.sort((a, b) => a.at - b.at).slice(Math.max(0, reasons.length - (FIELDS_MAX - fields.length)));
+  const build = (cap) => new EmbedBuilder().setTitle(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`).setDescription(description)
+    .addFields(...fields, ...shown.map(({ name, value }) => ({ name, value: cut(value, cap) })))
     .setFooter({ text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for a ${LEAD} · ` +
       `Who votes: every ${DRIVER}, one vote per part · Reason: optional, after a press` });
+  let cap = REASON_ON_CARD;
+  let embed = build(cap);
+  for (let over = embedLength(embed.data) - EMBED_MAX; over > 0 && cap > 1 && shown.length; over = embedLength(embed.data) - EMBED_MAX) {
+    cap = Math.max(1, cap - Math.ceil(over / shown.length));
+    embed = build(cap);
+  }
   return { embed, rows };
 }
 
@@ -141,8 +162,7 @@ export function reasonModal(gate, ask, part, index) {
   const input = new TextInputBuilder().setCustomId('reason').setLabel(`Reason for part ${part + 1} (optional)`)
     .setStyle(TextInputStyle.Paragraph).setMaxLength(REASON_MAX).setRequired(false)
     .setPlaceholder('Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.');
-  const full = `Your vote counts: ${key}. ${label(ask.parts[part], key)}`;
-  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(full.length <= 45 ? full : `Your vote counts: ${key}`)
+  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(cut(`Your vote counts: ${key}. ${label(ask.parts[part], key)}`, 45))
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 
@@ -152,11 +172,11 @@ export function confirmEnd(gate, { holders, names }) {
     const counts = tally(part, holders);
     const { top, tied } = leaders(counts);
     return top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
-      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${plural(top, 'vote')} of ${holders.size} (${counts.get(tied[0]).map((id) => who(id, names)).join(', ')}).`
+      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${counts.get(tied[0]).map((id) => who(id, names)).join(', ')}).`
       : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until a ${LEAD} breaks the tie.`;
   });
   const row = new ActionRowBuilder().addComponents(
-    button(customId('end!', gate.id), 'End vote now', ButtonStyle.Danger), button(customId('cancel', gate.id), 'Cancel', ButtonStyle.Secondary));
+    button(customId('cancel', gate.id), 'Cancel', ButtonStyle.Secondary), button(customId('end!', gate.id), 'End vote now', ButtonStyle.Danger));
   return { ...ephemeral([`**End ${gate.id} now?**`, ...lines, 'Nobody can vote after this.'].join('\n')), components: [row.toJSON()] };
 }
 

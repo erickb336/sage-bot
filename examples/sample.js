@@ -2,17 +2,18 @@
 // from the approved T1 design. No real Discord ids, no real accounts.
 import { openGate } from '../src/vote.js';
 
-export const CONFIG = { driverRole: 'role-sample-driver', leadRole: 'role-sample-lead', ownerId: 'sample-erick' };
+export const CONFIG = { driverRole: 'role-sample-driver', leadRole: 'role-sample-lead' };
 const { driverRole, leadRole } = CONFIG;
 
-/** The guild members as the bridge sees them: id, display name and role ids. */
+/** The guild members as the bridge sees them: id, display name, role ids and whether the account is a bot. */
 export const MEMBERS = [
   { id: 'sample-erick', name: 'Erick', roles: [driverRole, leadRole] },
   { id: 'sample-maya', name: 'Maya', roles: [driverRole] },
   { id: 'sample-jon', name: 'Jon', roles: [driverRole, leadRole] },
   { id: 'sample-sam', name: 'Sam', roles: [] },
+  { id: 'sample-bridge', name: 'sage bridge', roles: [driverRole, leadRole], bot: true },
 ];
-export const [ERICK, MAYA, JON, SAM] = MEMBERS.map((m) => m.id);
+export const [ERICK, MAYA, JON, SAM, BRIDGE] = MEMBERS.map((m) => m.id);
 
 /**
  * An ask: what the card shows about a gate, beside the gate itself. B3 builds it from sage's logbook.
