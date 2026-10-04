@@ -141,7 +141,9 @@ console.log(`wrote ${new URL('index.html', OUT).pathname} with ${moments.length}
 
 if (process.argv.includes('--shots')) {
   const { chromium } = await import('playwright-core');
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  // --disable-gpu: the software raster path draws the rounded corner of the embed border the same on every cold start;
+  // the GPU path moved 2 pixels of shot 01 by one shade in 1 run of 12, so the shots were not byte-identical (F-T27-22).
+  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--disable-gpu'] });
   const pg = await browser.newPage({ viewport: { width: 900, height: 900 }, deviceScaleFactor: 2 });
   await pg.goto(new URL('index.html', OUT).href);
   for (const [i, m] of moments.entries()) {
