@@ -2,7 +2,7 @@
 
 sage-bot is the sage bridge. It is a Discord app that runs on the owner's Mac. It will post sage's gates as cards with buttons, check the voters' roles, record answers and votes, and give the final answers back to sage's logbook with `sage gate answer`.
 
-This version has only the vote rules (task B1). It has no Discord connection yet. The Discord layer and the cards (B2), the bridge service (B3) and the threads (B5) come later.
+This version has the vote rules (task B1) and the Discord layer: the cards, the reason form and the private notes (task B2). It has no Discord connection yet: no Client, no login, no token. The bridge service (B3) and the threads (B5) come later.
 
 ## The vote rules
 
@@ -100,15 +100,15 @@ The `why` codes:
 
 | `why` | Meaning |
 | --- | --- |
-| `bad-event` | The event is not an object, has an unknown type, or a field is missing or of the wrong type. |
-| `bad-time` | `at` is not a safe integer. |
+| `bad-event` | The event is not an object, has an unknown type, or `by`, `via`, `option` or `reason` is missing or of the wrong type. |
+| `bad-time` | `at` is missing or not a safe integer. |
 | `out-of-order` | `at` is earlier than the last applied event. |
 | `not-holder` | `by` is not a holder. |
 | `not-lead` | `by` is a holder but not a lead. |
 | `lead-needs-discord` | A lead action came from the terminal. |
 | `not-asker` | A withdraw from someone other than the asker. |
 | `unknown-option` | The gate or part does not have this option. |
-| `unknown-part` | The batch does not have this part. |
+| `unknown-part` | The batch does not have this part, or `part` is missing or not an integer. |
 | `wrong-kind` | An `end` or `tiebreak` on a single gate. |
 | `not-tied` | A tie-break while the vote is open, or on a decided part. |
 | `not-tied-option` | A tie-break for an option that is not among the tied leaders of the part. |
@@ -177,12 +177,79 @@ It prints:
 closed {"status":"decided"}
 ```
 
+## The Discord layer
+
+`src/cards.js` and `src/handle.js` turn a gate into Discord JSON and a Discord interaction into an event for the vote rules. They use the builders of discord.js (pinned to one exact version) for the shapes, and nothing else of it: no Client, no login, no network. `src/fake-discord.js` makes an interaction-like object that records its replies, so the tests and the preview run with no Discord account.
+
+### The ask
+
+A card needs the gate and its ask: what sage asked, in words. B3 builds the ask from sage's logbook. `kind` and the option keys match the gate; the labels are only for the card.
+
+```js
+{ kind: 'batch', task: 'T7', title: 'CSV export for reports', parts: [
+  { question: 'How do dates look in the file?', why: 'A sorts well.', recommended: 'A', options: { A: '2026-10-04 (ISO)', B: '04/10/2026' } },
+] }
+```
+
+A single question has one part, with an optional `default`. `examples/sample.js` holds sample asks, members and a config, and `openAsk` opens the gate of an ask.
+
+### peopleOf(members, config)
+
+Builds `{ holders, leads, names }` from the guild members (`{ id, name, roles }`, with `roles` a list of role ids) and the config `{ driverRole, leadRole, ownerId }`. A holder has the sage-driver role; a lead has the sage-lead role; the owner is always a holder. The bridge passes `holders` and `leads` to the vote rules, which also need a lead to be a holder.
+
+### card(gate, ask, people)
+
+The card of a gate as `{ embeds, components, allowedMentions }`. Times are Discord timestamps, so each viewer's Discord shows them in the viewer's own zone, and the 30-minute countdown runs live with no edit of the card.
+
+| State | The card |
+| --- | --- |
+| Single, open | The question, the options with Recommended and Default, the rule, one button per option. |
+| Single, answered | "Answered by Maya at 14:22: A. … Final." The buttons are off; the chosen one is green. |
+| Batch, voting | "Closes at 15:01 (in 18 minutes)". Per part: each option with its votes and voters ("Erick (terminal), Jon"), the chief's recommendation, "Voted: … · Not voted: …", and "Ahead: A", "Even so far" or "No votes yet". Each reason as one line. A button per option of each part, and "End vote now (sage-lead only)". |
+| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." A tied part shows "Tied: A, B at 1 vote each." and a tie-break button for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 votes of 3". |
+| Batch, decided | "Voting ended at 15:01. Closed: every part is decided. T7 goes on." Every button is off. |
+| Withdrawn | "Withdrawn by Erick at 15:30. Closed: nothing is decided." Every button is off. |
+
+The words "Voting ended at" are for the vote; "Closed" is only for a decided or withdrawn gate. The card says "tie broken by a sage-lead" without the name, because the gate does not store it; the chief's message in the thread names the lead (B3, from the `tiebreak` event).
+
+**Untrusted text.** A reason and a display name can hold mentions, markdown, newlines and backticks. `safe` makes them inert: it escapes Discord markdown (discord.js `escapeMarkdown` with every option), escapes `<` so that no mention, timestamp or emoji code renders, and folds whitespace to one line. Every message also carries `allowedMentions: { parse: [] }`, so nothing pings anyone. The reason form sets `max_length` to 500. B3 still cleans reasons before they reach the chief.
+
+**Discord's limits.** One message holds 5 rows of buttons and an embed holds 25 fields. A card uses one row per part, one more while the vote is open, and one field per part and per reason. `card` throws a RangeError for more than 5 rows; a batch has at most 4 parts while the vote is open, 5 after.
+
+### handle(interaction, { gates, people, clock })
+
+Takes one interaction (a button press or the reason form) and answers it. `gates` is a Map from gate id to `{ gate, ask }`; the handler sets the new gate there. It returns `{ gate, effects }`: the gate after the event (null for an unknown card) and the vote rules' effects.
+
+| The interaction reads | What the handler does |
+| --- | --- |
+| `interaction.user.id` | `by`, always. |
+| `interaction.customId` | The action, the gate id, and the part and option indexes. Never the option text. The option comes from the gate: a forged gate, part, index or option text gets a private note and no event. |
+| `interaction.fields` | The reason of the form, as typed; the vote rules cut it to 500 characters. |
+| The injected `clock()` | `at`, always. Not the interaction's data. |
+| nothing | `via` is always `'discord'`. |
+
+The custom_id grammar: `press:<gate>:<part>:<index>`, `reason:<gate>:<part>:<index>` (the form), `tiebreak:<gate>:<part>:<index>`, `end:<gate>` (the confirm), `end!:<gate>` (the confirmed end), `cancel:<gate>`. A single question uses part 0.
+
+| Press | The reply |
+| --- | --- |
+| An option of a single question | The updated card. A later press: the private note "Already answered by Maya: A". |
+| An option of a batch part | The vote counts at once; the reply is the reason form (optional, 500 characters). Its submit replaces the ballot with the reason and updates the card. A dismissed form sends nothing: the ballot stays, and B3 edits the card at its next chance. |
+| End vote now, by a lead who is a holder | A private confirm: what each part gets with the votes so far, with "End vote now" and "Cancel". The confirmed end runs through the vote rules; the reply updates the private confirm, so B3 edits the card. |
+| A tie-break button, by a lead | The updated card. |
+| Anything the vote rules ignore | A private note for its `why` code. Every code has one; a non-holder gets "Your press did not count. Only people with the sage-driver role can answer or vote. You can still read this thread." |
+
+Discord shows every button of a message to everyone, so a non-lead sees "End vote now" and the tie-break buttons too; a press gets the private note "Only a sage-lead can do this." B3 must: call `parseGate` on each loaded gate; send the tick at `gate.endsAt` and the withdraw from sage through `step`; and edit the card message with `card(...)` whenever the gate changed but the reply was not the card (after a confirmed end, a dismissed form, a tick or a withdraw).
+
+### The preview
+
+`node scripts/preview.mjs` renders the card JSON of the design's eleven moments to `design/b2/index.html` with sample data. With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder.
+
 ## Run the checks
 
-You need Node 22 or later. There are no dependencies to install.
+You need Node 22 or later, and `npm install` once (discord.js and playwright-core, both pinned to one exact version).
 
 ```sh
 npm run check
 ```
 
-The check runs `node --check` on every source file, then the tests in `test/`. A test runs the example above and checks that this README holds it. The tests use sample ids only.
+The check runs `node --check` on every source file, then the tests in `test/`. A test runs the example above and checks that this README holds it. The tests use sample ids only. One test runs npm itself from another folder with `HOME` set to a scratch folder, to prove the `.npmrc`: npm writes and deletes no log file anywhere (`logs-dir=/dev/null`, `logs-max=0`). For a debug log of one command: `npm --logs-dir=/tmp/npm-logs --logs-max=5 <command>`.
