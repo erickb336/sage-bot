@@ -3,13 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const PROJECT = new URL('..', import.meta.url).pathname;
 
-test('F-T27-2: planted npm logs in the other folder and in the scratch home survive an npm run from there', () => {
+test('F-T27-2, F-T27-15: planted npm logs survive an npm run from another folder, and npm writes no log in its cache either', () => {
   const scratch = mkdtempSync(join(tmpdir(), 'sage-bot-npmrc-'));
   const home = join(scratch, 'home');
   const elsewhere = join(scratch, 'elsewhere');
@@ -26,4 +26,6 @@ test('F-T27-2: planted npm logs in the other folder and in the scratch home surv
   assert.deepEqual(readdirSync(join(elsewhere, '.npm-logs')).sort(), planted);
   assert.deepEqual(readdirSync(join(home, '.npm', '_logs')).sort(), planted);
   assert.deepEqual(readdirSync(elsewhere), ['.npm-logs']); // npm made no folder there
+  // Without the .npmrc, npm writes its debug log to <cache>/_logs: its absence proves that the settings are in effect (F-T27-15).
+  assert.equal(existsSync(join(scratch, 'npm-cache', '_logs')), false);
 });
