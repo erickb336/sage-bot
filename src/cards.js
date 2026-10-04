@@ -25,9 +25,9 @@ const REASON_ON_CARD = 200;
  * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42, F-T27-46, F-T27-48). The cards are for people; no model reads them.
  * 1. A whole RGI emoji sequence (`\p{RGI_Emoji}`: a family, a skin tone, a keycap, a flag, FE0F where an emoji needs it) stays as it is.
  * 2. Any other character stays only when it is a letter (not one of the four Hangul fillers that look blank), a number, punctuation or a
- *    symbol (also a bare pictograph such as ™ or ✔; not a backtick or the blank Braille cell), a space (every white space folds to one
- *    space), a mark on a letter (at most 3 non-spacing marks, `\p{Mn}`, on one letter; a spacing or enclosing mark takes its own room and
- *    does not count), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
+ *    symbol (also a bare pictograph such as ™ or ✔; not a backtick, the blank Braille cell or the null notehead U+1D159, F-T27-49), a space (every white space folds to one
+ *    space), a mark on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
+ *    and `\p{Me}`, so that Burmese ကျော် stays whole: F-T27-46, F-T27-50), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
  *    or Khmer) when the next character is also of one (a Persian word, a Hindi or Bengali conjunct) or the joiner follows a mark (a final
  *    virama, as in a Malayalam legacy chillu); never two joiners in a row.
  * 3. Everything else goes: every format character, variation selector, control, private-use and unassigned code point, a lone surrogate, a
@@ -38,7 +38,8 @@ const EMOJI = /^\p{RGI_Emoji}$/v;
 const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
 const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
 const STACKING = /^\p{Mn}$/u; // a non-spacing mark piles on the letter: 3 at most, so no "zalgo" stack grows past the line
-const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800]]$/v;
+const MARKS_MAX = { stacking: 3, spacing: 4 }; // a spacing or enclosing mark draws a bar, ring or vowel sign: 4 at most (F-T27-50)
+const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;
 const SPACE = /^\p{White_Space}$/u;
 const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}\p{scx=Bengali}\p{scx=Gurmukhi}\p{scx=Gujarati}\p{scx=Oriya}\p{scx=Tamil}\p{scx=Telugu}\p{scx=Kannada}\p{scx=Malayalam}\p{scx=Sinhala}\p{scx=Myanmar}\p{scx=Khmer}]]$/v;
 /**
@@ -52,18 +53,19 @@ export function safe(text) {
   let out = '';
   let last = ' '; // the last kept character, so that the joiner rule never reads the growing `out` (F-T27-45)
   let onLetter = false; // whether a mark may follow: the last kept is a letter, or a mark or joiner on one
-  let stacked = 0; // the non-spacing marks on that letter so far
+  const on = { stacking: 0, spacing: 0 }; // the marks of each kind on that letter so far
   for (let index = 0, t; index < s.length; index += t.length) {
     TOKEN.lastIndex = index;
     t = TOKEN.exec(s)[0];
     const letter = LETTER.test(t);
     const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(last)
       && (MARK.test(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
-    const mark = onLetter && MARK.test(t) && (stacked < 3 || !STACKING.test(t));
+    const kind = STACKING.test(t) ? 'stacking' : 'spacing';
+    const mark = onLetter && MARK.test(t) && on[kind] < MARKS_MAX[kind];
     const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark ? t : SPACE.test(t) ? ' ' : '';
     if (!keep) continue;
-    if (letter) [onLetter, stacked] = [true, 0];
-    else if (mark) stacked += STACKING.test(t) ? 1 : 0;
+    if (letter) [onLetter, on.stacking, on.spacing] = [true, 0, 0];
+    else if (mark) on[kind]++;
     else if (!joiner) onLetter = false;
     last = keep;
     out += keep;
