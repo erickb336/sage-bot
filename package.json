@@ -6,7 +6,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "check": "node scripts/syntax.mjs && node --test test/"
+    "check": "node scripts/syntax.mjs && node --test \"test/*.test.js\""
   },
   "license": "UNLICENSED"
 }
