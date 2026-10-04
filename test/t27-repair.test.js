@@ -38,9 +38,9 @@ test('F-T27-8: every masked link is escaped, also the second and the third', () 
   assert.equal(safe('plain ] and [ alone'), 'plain \\] and \\[ alone');
 });
 
-test('F-T27-11: format characters (zero-width, bidi controls, BOM) are removed from reasons and names', () => {
-  assert.equal(safe('Er​ick‮kcire‍﻿'), 'Erickkcire');
-  assert.equal(safe('⁦A⁩ ‌B­C'), 'A BC'); // isolates, zero-width non-joiner, soft hyphen
+test('F-T27-11: hiding characters (zero-width space, bidi controls and marks, BOM, soft hyphen) are removed from reasons and names', () => {
+  assert.equal(safe('Er\u200bick\u202ekcire\u200e\ufeff'), 'Erickkcire'); // zero-width space, right-to-left override, left-to-right mark, BOM
+  assert.equal(safe('\u2066A\u2069 \u00adB\u061cC'), 'A BC'); // isolates, soft hyphen, Arabic letter mark; the joiners stay (see t27-repair2)
   const gate = step(openAsk('B7', T0), ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes​‮ please'), PEOPLE.holders, PEOPLE.leads).gate;
   const names = new Map([[MAYA, 'Ma​ya']]);
   const c = card(gate, ASKS.B7, { ...PEOPLE, names });
@@ -163,8 +163,7 @@ test('F-T27-16: with every part tied the card does not call the other parts prov
 });
 
 test('F-T27-18: the form title shows the option within 45 characters; Cancel comes first; an early end says so on the card', () => {
-  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'Your vote counts: C. Visible columns, plus a…');
-  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title.length, 45);
+  assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'Your vote counts: C. Visible columns, plus…'); // at a word (F-T27-23)
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 1).title, 'Your vote counts: B. No');
   assert.deepEqual(confirmEnd(openAsk('B9', T0), PEOPLE).components[0].components.map((c) => c.label), ['Cancel', 'End vote now']);
   const early = step(openAsk('B9', T0), { type: 'end', by: JON, at: clock(14, 50), via: 'discord' }, PEOPLE.holders, PEOPLE.leads).gate;
@@ -173,8 +172,8 @@ test('F-T27-18: the form title shows the option within 45 characters; Cancel com
   assert.match(card(onTime, ASKS.B9, PEOPLE).embeds[0].description, /^Voting ended at <t:1791126060:t>\. /);
 });
 
-test('F-T27-7: the README documents the fake layer: fakeInteraction({ user, customId, fields, ephemeral }) and the reason input id', () => {
+test('F-T27-7: the README documents the fake layer: fakeInteraction({ user, customId, fields, ephemeral, refuse }) and the reason input id', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.ok(readme.includes('fakeInteraction({ user, customId, fields, ephemeral })'));
+  assert.ok(readme.includes('fakeInteraction({ user, customId, fields, ephemeral, refuse })'));
   assert.ok(readme.includes("`getTextInputValue('reason')`"));
 });

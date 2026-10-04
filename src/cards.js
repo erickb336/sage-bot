@@ -23,16 +23,29 @@ const FIELDS_MAX = 25;
 const REASON_ON_CARD = 200;
 
 /**
- * Untrusted text as one inert line: format characters (zero-width, bidi controls) removed (F-T27-11), markdown and
- * every `[` and `]` escaped (no masked link), `<` escaped (no mention, timestamp or emoji code), whitespace folded.
+ * The characters that hide or reorder text (F-T27-11): bidi controls and marks, the zero-width space, the BOM and the soft hyphen.
+ * Not the joiners U+200C and U+200D or the tag characters U+E0020 to U+E007F: a family emoji, a Persian word and a subdivision flag need them.
  */
-export const safe = (text) => escapeMarkdown(String(text).replace(/\p{Cf}/gu, ''), ESCAPE_ALL)
+const HIDING = /[\u00ad\u061c\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+/**
+ * Untrusted text as one inert line: hiding characters removed, markdown and every `[` and `]` escaped (no masked link),
+ * `<` escaped (no mention, timestamp or emoji code), whitespace folded. The result can be '' (only spaces or hiding characters):
+ * a caller never puts '' in a field, because Discord refuses an empty field value (F-T27-19).
+ */
+export const safe = (text) => escapeMarkdown(String(text).replace(HIDING, ''), ESCAPE_ALL)
   .replace(/[<[\]]/g, '\\$&').replace(/\s+/g, ' ').trim();
 /** `text` cut to `max` characters, the last one "…"; a cut never leaves half of a surrogate pair. */
 const cut = (text, max) => text.length <= max ? text : `${text.slice(0, max - 1).replace(/[\ud800-\udbff]$/, '')}…`;
+/** `text` cut at the last space before `max` characters, then "…", so no word is cut in half; one long word is cut like `cut` (F-T27-23). */
+const cutAtWord = (text, max) => {
+  if (text.length <= max) return text;
+  const space = text.lastIndexOf(' ', max - 2);
+  return space > max / 2 ? `${text.slice(0, space)}…` : cut(text, max);
+};
 /** A Discord timestamp: `t` shows hh:mm in the viewer's zone; `R` shows a live countdown ("in 18 minutes"). */
 export const stamp = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
-const who = (id, names) => safe(names.get(id) ?? id);
+/** A person's name made safe; the id when the name is missing or safe makes it empty, and 'unknown' when the id is empty too. */
+const who = (id, names) => safe(names.get(id) ?? '') || safe(id) || 'unknown';
 const label = (p, key) => p.options[key] ?? key;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -110,7 +123,11 @@ function batch(gate, ask, holders, names) {
     const { top, tied } = leaders(counts);
     const ballots = ballotsOf(part);
     const voted = [...ballots].filter(([id]) => holders.has(id));
-    for (const [id, b] of voted) if (b.reason) reasons.push({ name: `${who(id, names)}, part ${n}`, value: safe(b.reason), at: b.at });
+    for (const [id, b] of voted) {
+      // A reason that is only spaces or hiding characters gives no field: Discord refuses an empty field value (F-T27-19).
+      const value = b.reason && safe(b.reason);
+      if (value) reasons.push({ name: `${who(id, names)}, part ${n}`, value, at: b.at });
+    }
     const named = (ids) => ids.map((id) => who(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')).join(', ');
     const notYet = [...holders].filter((id) => !ballots.has(id));
     const o = part.outcome;
@@ -162,7 +179,7 @@ export function reasonModal(gate, ask, part, index) {
   const input = new TextInputBuilder().setCustomId('reason').setLabel(`Reason for part ${part + 1} (optional)`)
     .setStyle(TextInputStyle.Paragraph).setMaxLength(REASON_MAX).setRequired(false)
     .setPlaceholder('Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.');
-  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(cut(`Your vote counts: ${key}. ${label(ask.parts[part], key)}`, 45))
+  return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(cutAtWord(`Your vote counts: ${key}. ${label(ask.parts[part], key)}`, 45))
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 
