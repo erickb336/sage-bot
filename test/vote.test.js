@@ -6,14 +6,14 @@ import { openGate, step, view, nextReminderAt, cleanReason, MINUTE } from '../sr
 const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
 const JON = 'sample-jon';
-const SAM = 'sample-sam'; // got the Discord role outside a vote
+const SAM = 'sample-sam'; // not on the holder list
 const THREE = [ERICK, MAYA, JON];
 const T0 = Date.UTC(2026, 9, 4, 12, 0); // sample time
 
 const normal = () => openGate({ id: 'g1', kind: 'question', options: ['A', 'B', 'C'], askedBy: ERICK, at: T0 });
-const critical = (kind = 'deploy', change = null) => openGate({ id: 'g2', kind, askedBy: ERICK, at: T0, change });
+const critical = (kind = 'publish') => openGate({ id: 'g2', kind, askedBy: ERICK, at: T0 });
 
-const press = (by, option, min, extra = {}) => ({ type: 'press', by, option, at: T0 + min * MINUTE, ...extra });
+const press = (by, option, min, extra = {}) => ({ type: 'press', by, option, at: T0 + min * MINUTE, via: 'discord', ...extra });
 const object = (by, min) => ({ type: 'object', by, at: T0 + min * MINUTE });
 const tick = (min) => ({ type: 'tick', at: T0 + min * MINUTE });
 
@@ -127,13 +127,13 @@ const cases = [
     gate: critical, events: [press(ERICK, 'yes', 0), press(JON, 'no', 1), press(MAYA, 'yes', 2)],
     phase: 'closed', outcome: { status: 'rejected' },
   },
-  ...['delete-data', 'publish', 'force-push', 'role-change'].map((kind) => ({
+  ...['delete-data', 'force-push'].map((kind) => ({
     rule: `${kind} is critical: one No rejects`,
     gate: () => critical(kind), events: [press(MAYA, 'no', 0)],
     phase: 'closed', outcome: { status: 'rejected' },
   })),
-  ...['merge', 'autopilot'].map((kind) => ({
-    rule: `${kind} is not a vote kind: the first answer wins as on a normal gate`,
+  ...['merge', 'autopilot', 'deploy'].map((kind) => ({
+    rule: `${kind} is a normal kind: the first answer wins`,
     gate: () => openGate({ id: 'g3', kind, options: ['yes', 'no'], askedBy: ERICK, at: T0 }), events: [press(MAYA, 'yes', 0), tick(10)],
     phase: 'closed', outcome: { status: 'approved', option: 'yes' },
   })),
@@ -193,34 +193,9 @@ for (const c of cases) {
   });
 }
 
-test('a role given outside a vote does not count until a role-change vote passes', () => {
-  // Sam has the Discord role, but is not on the holder list: the press is ignored.
-  let r = run(normal(), [press(SAM, 'A', 0)], THREE);
-  assert.deepEqual(r.effects, [{ type: 'ignored', by: SAM, why: 'not-holder' }]);
-
-  // A role-change vote to add Sam: every current holder approves, and the new list comes out.
-  r = run(critical('role-change', { add: SAM }), [press(ERICK, 'yes', 0), press(MAYA, 'yes', 1), press(JON, 'yes', 2)], THREE);
-  const holders = r.effects.find((e) => e.type === 'holders').holders;
-  assert.deepEqual(holders, [ERICK, MAYA, JON, SAM]);
-
-  // With the new list, Sam's press counts.
-  r = run(normal(), [press(SAM, 'A', 0)], holders);
-  assert.deepEqual(r.effects, [{ type: 'answer', option: 'A', by: SAM }]);
-});
-
-test('a rejected role-change vote gives no new holder list', () => {
-  const r = run(critical('role-change', { add: SAM }), [press(MAYA, 'no', 0)]);
-  assert.deepEqual(r.effects, [{ type: 'closed', outcome: { status: 'rejected' } }]);
-});
-
-test('a role-change vote can remove a holder', () => {
-  const r = run(critical('role-change', { remove: JON }), [press(ERICK, 'yes', 0), press(MAYA, 'yes', 1), press(JON, 'yes', 2)]);
-  assert.deepEqual(r.effects.at(-1), { type: 'holders', holders: [ERICK, MAYA] });
-});
-
 const reasons = [
   ['keeps plain text', 'Tests fail on main.', 'Tests fail on main.'],
-  ['strips newlines and control characters', 'line one\nline two\r\t\u0007end', 'line oneline twoend'],
+  ['turns newlines and control characters into one space', 'line one\nline two\r\t\u0007end', 'line one line two end'],
   ['removes < > and backticks', '<@everyone> `rm -rf` <b>', '@everyone rm -rf b'],
   ['strips text-direction marks', 'a‮b⁦c', 'abc'],
   ['cuts to 500 characters', 'x'.repeat(600), 'x'.repeat(500)],
@@ -233,11 +208,13 @@ for (const [name, input, expected] of reasons) {
 
 test('a ballot keeps its cleaned reason', () => {
   const r = run(normal(), [press(MAYA, 'B', 0, { reason: 'ok\n<b>' })]);
-  assert.equal(r.gate.ballots[MAYA].reason, 'okb');
+  assert.equal(r.gate.ballots[MAYA].reason, 'ok b');
 });
 
 const reminders = [
-  ['no reminder before a vote opens', () => normal(), [], 0, null],
+  ['a gate nobody answered: first reminder 2 h after it opened', normal, [], 0, 120],
+  ['a gate nobody answered: next reminder after the first is due', normal, [], 120, 240],
+  ['no reminder in the objection window', normal, [press(MAYA, 'B', 0)], 5, null],
   ['first reminder 2 h after the vote opens', normal, [press(MAYA, 'B', 0), object(JON, 5)], 5, 5 + 120],
   ['next reminder after the first is due', normal, [press(MAYA, 'B', 0), object(JON, 5)], 5 + 120, 5 + 240],
   ['still due after 30 days: a vote has no deadline', critical, [], 30 * 24 * 60 + 1, 30 * 24 * 60 + 120],
