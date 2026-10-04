@@ -10,7 +10,8 @@
 // (an Array, a Set, or a Map's keys()); anything else counts as empty. Anyone else counts for nothing.
 // See the README for the full API.
 // The bridge sends a tick at `gate.endsAt` so that a batch vote ends on time.
-// A gate is plain JSON of a fixed depth: save it as it is, and check it with parseGate when you load it.
+// A gate is deep-frozen plain JSON of a fixed depth: save it as it is, and check it with parseGate when you load it.
+// Ballot reasons are stored as typed (cut to 500 code points): they are untrusted text for the bridge to clean.
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -21,8 +22,18 @@ export const REASON_MAX = 500;
 const KINDS = new Set(['single', 'batch']);
 const EVENT_TYPES = new Set(['press', 'end', 'tiebreak', 'withdraw', 'tick']);
 const VIAS = new Set(['discord', 'terminal']);
-const OPEN = Object.freeze({ status: 'open' });
+const OPEN = { status: 'open' };
 const isId = (x) => typeof x === 'string' && x !== '';
+/** Freeze a value and everything in it; a frozen part is skipped, as it is frozen all through. */
+const freeze = (x) => {
+  if (typeof x === 'object' && x !== null && !Object.isFrozen(x)) {
+    Object.values(x).forEach(freeze);
+    Object.freeze(x);
+  }
+  return x;
+};
+/** A ballot reason as B1 stores it: lone surrogates become U+FFFD, then a cut to REASON_MAX code points. */
+const reasonOf = (text) => Array.from(text.toWellFormed()).slice(0, REASON_MAX).join('');
 const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && new Set(x).size === x.length;
 
 /**
@@ -63,15 +74,15 @@ export function openGate({ id, kind, options, parts, askedBy, at }) {
   const base = { id, kind, askedBy, openedAt: at, lastAt: at, outcome: OPEN };
   if (kind === 'single') {
     if (!isOptions(options)) throw new TypeError('openGate: a single gate needs a non-empty list of unique options');
-    return { ...base, phase: 'open', options: [...options] };
+    return freeze({ ...base, phase: 'open', options: [...options] });
   }
   if (!(Array.isArray(parts) && parts.length > 0 && parts.every(isOptions))) {
     throw new TypeError('openGate: a batch needs a non-empty list of parts, each with a non-empty list of unique options');
   }
-  return {
+  return freeze({
     ...base, phase: 'voting', endsAt: at + BATCH_LIMIT, votingEndedAt: null,
     parts: parts.map((opts) => ({ options: [...opts], ballots: [], outcome: OPEN })),
-  };
+  });
 }
 
 /**
@@ -97,7 +108,12 @@ export function step(gate, event, holders, leads) {
     : apply(settled.gate, event, people);
   // The gate's time moves on only with an event that applies; a refused event leaves it as it was.
   const applied = !next.effects.some((e) => e.type === 'ignored');
-  return { gate: applied ? { ...next.gate, lastAt: event.at } : next.gate, effects: [...settled.effects, ...next.effects] };
+  // A step that ends withdrawn reports only its close: nothing that the time limit settled on the way counts.
+  const withdrawn = next.gate.outcome.status === 'withdrawn';
+  return {
+    gate: freeze(applied ? { ...next.gate, lastAt: event.at } : next.gate),
+    effects: withdrawn ? next.effects : [...settled.effects, ...next.effects],
+  };
 }
 
 /** Why an event is refused before it touches the gate, or null. Time never goes back. */
@@ -150,10 +166,10 @@ function vote(gate, event, holders) {
   const part = Number.isInteger(event.part) ? gate.parts[event.part] : undefined;
   if (!part) return ignore(gate, event, 'unknown-part');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
-  const reason = event.reason === undefined ? '' : cleanReason(event.reason);
-  const ballot = Object.freeze({ option: event.option, at: event.at, via: event.via, ...(reason && { reason }) });
+  const reason = event.reason === undefined ? '' : reasonOf(event.reason);
+  const ballot = { option: event.option, at: event.at, via: event.via, ...(reason && { reason }) };
   // One ballot per person: the new one replaces the person's earlier one.
-  const ballots = [...part.ballots.filter(([by]) => by !== event.by), Object.freeze([event.by, ballot])];
+  const ballots = [...part.ballots.filter(([by]) => by !== event.by), [event.by, ballot]];
   const parts = gate.parts.with(event.part, { ...part, ballots });
   return { gate: { ...gate, parts }, effects: [] };
 }
@@ -225,13 +241,13 @@ function ignored(event, why) {
 }
 
 /**
- * Check a loaded gate (for example from JSON after a restart) and return it.
+ * Check a loaded gate (for example from JSON after a restart), deep-freeze it and return it.
  * Throws a TypeError, with the reason, for anything that openGate and step could not have made.
  * @param {unknown} value
  * @returns {Gate}
  */
 export function parseGate(value) {
-  return checkGate(value, 'parseGate');
+  return freeze(checkGate(value, 'parseGate'));
 }
 
 function checkGate(gate, fn) {
@@ -290,7 +306,7 @@ function partProblem(part, inTime) {
   const seen = new Set();
   for (const entry of part.ballots) {
     const [by, b] = Array.isArray(entry) && entry.length === 2 ? entry : [];
-    const reasonOk = b?.reason === undefined || (typeof b.reason === 'string' && b.reason !== '' && cleanReason(b.reason) === b.reason);
+    const reasonOk = b?.reason === undefined || (typeof b.reason === 'string' && b.reason !== '' && reasonOf(b.reason) === b.reason);
     if (!isId(by) || seen.has(by) || !keysAre(b, ['option', 'at', 'via'], ['reason']) || !among(b.option) || !inTime(b.at)
       || !VIAS.has(b.via) || !reasonOk) return 'a ballot is not one valid ballot per person';
     seen.add(by);
@@ -314,30 +330,4 @@ export function nextReminderAt(gate, now) {
   else return null;
   const done = Math.max(0, Math.floor((now - from) / REMINDER_EVERY));
   return { at: from + (done + 1) * REMINDER_EVERY, to };
-}
-
-/** Characters that look like < > or a backtick and that NFKC does not map to them. « » stay: they are quotes. */
-const LOOKALIKES = '‹›〈〉⟨⟩⟪⟫《》❬❭❮❯❰❱⧼⧽⦅⦆≮≯≪≫⩽⩾◁▷◅▻ˋ‵'
-  + '\u02C2-\u02C5\u02F1\u02F2\u1405\u140A\u1431\u1433\u1438\u143A\u1440\u{1F890}-\u{1F8FF}';
-/** Combining overlays that draw a stroke through < or > (NFKC makes < with U+0338 into ≮). */
-const OVERLAYS = /[\u0338\u20D2\u20D3\u20E5]/gu;
-
-/**
- * Clean a ballot reason, in this order:
- * remove combining overlays; NFKC; remove format characters (zero-width, bidi, U+FEFF, tags), variation selectors,
- * lone surrogates and invisible fillers;
- * map control characters, line and paragraph separators and newlines (CRLF as one) to a space;
- * remove < > ` and their lookalikes; collapse spaces; trim; cut to 500 characters (code points).
- * @param {string} text
- */
-export function cleanReason(text) {
-  const clean = text.replace(OVERLAYS, '').normalize('NFKC')
-    // Format characters, tags, variation selectors, lone surrogates, and invisible fillers that are not format characters
-    // (Hangul fillers U+115F U+1160 U+3164 U+FFA0, the grapheme joiner U+034F, the blank Braille cell U+2800).
-    .replace(/[\p{Cf}\u{E0000}-\u{E007F}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\p{Cs}\u115F\u1160\u3164\uFFA0\u034F\u2800]/gu, '')
-    .replace(/\r\n|[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ')
-    .replace(new RegExp(`[<>\`${LOOKALIKES}]`, 'gu'), '')
-    .replace(/ {2,}/g, ' ')
-    .trim();
-  return Array.from(clean).slice(0, REASON_MAX).join('');
 }

@@ -2,7 +2,7 @@
 // (single gates and 30-minute batch votes). SAMPLE DATA: every id here is a made-up sample, not a real Discord id.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openGate, step, ballotsOf, cleanReason, nextReminderAt, MINUTE } from '../src/vote.js';
+import { openGate, step, ballotsOf, nextReminderAt, MINUTE } from '../src/vote.js';
 
 const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
@@ -124,30 +124,17 @@ test('F-T1-24: a lead cannot break a tie while the holder list is empty', () => 
   assert.deepEqual(r.effects.at(-1), { type: 'ignored', by: LEA, why: 'not-holder' });
 });
 
-// F-T1-17: reason cleaning.
+// F-T1-17, rewritten by F-T1-56: B1 stores a reason as typed, cut to 500 code points; the bridge cleans it.
 
-const tags = String.fromCodePoint(0xE0001, 0xE0069, 0xE0067, 0xE007F);
-const reasons = [
-  ['NFKC maps fullwidth < > to ASCII, which is then removed', '＜channel＞ ｀x｀ ﹤y﹥', 'channel x y'],
-  ['removes angle lookalikes that NFKC keeps', '‹a› 〈b〉 ⟨c⟩ ⟪d⟫ 《e》 ❮f❯', 'a b c d e f'],
-  ['removes zero-width characters and U+FEFF', 'a​b‌c‍d﻿e⁠f', 'abcdef'],
-  ['removes bidi marks and embeddings', 'a‎b‏c؜d‪e⁧f', 'abcdef'],
-  ['removes tag characters', 'ok' + tags, 'ok'],
-  ['removes variation selectors', 'a️b\u{E0100}c', 'abc'],
-  ['removes lone surrogates', 'a\uD83Db\uDE00c', 'abc'],
-  ['maps CRLF, CR, LF and NEL to one space each', 'a\r\nb\rc\nd\u0085e', 'a b c d e'],
-  ['maps line and paragraph separators to a space', 'a b c', 'a b c'],
-  ['collapses runs of spaces and trims', '  a \n\n  b\t\t c  ', 'a b c'],
-  ['cuts to 500 characters without a lone surrogate at the end', 'a'.repeat(499) + '\uD83D' + 'b', 'a'.repeat(499) + 'b'],
-  ['keeps an emoji whole at the cut', 'a'.repeat(499) + '\u{1F600}x', 'a'.repeat(499) + '\u{1F600}'],
-];
-for (const [name, input, expected] of reasons) {
-  test(`F-T1-17: reason ${name}`, () => assert.equal(cleanReason(input), expected));
-}
+const reasonStored = (reason) => ballotsOf(run(batch(), [[ballot(MAYA, 'B', 0, { reason }), THREE]]).gate.parts[0]).get(MAYA).reason;
 
-test('F-T1-17: a ballot keeps the reason with the newline as a space', () => {
-  const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: 'line one\nline two' }), THREE]]);
-  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).reason, 'line one line two');
+test('F-T1-17: a ballot keeps the reason as typed, with its newline', () => {
+  assert.equal(reasonStored('line one\nline two'), 'line one\nline two');
+});
+
+test('F-T1-17: a reason is cut to 500 code points; a lone surrogate becomes U+FFFD', () => {
+  assert.equal(reasonStored('a'.repeat(499) + '\uD83D' + 'b'), 'a'.repeat(499) + '\uFFFD');
+  assert.equal(reasonStored('a'.repeat(499) + '\u{1F600}x'), 'a'.repeat(499) + '\u{1F600}');
 });
 
 // F-T1-19 and F-T1-26: caller time.
@@ -197,11 +184,12 @@ test('F-T1-22: a withdraw without by is ignored as a bad event', () => {
   assert.deepEqual(r.effects, [{ type: 'ignored', by: null, why: 'bad-event' }]);
 });
 
-// F-T1-25: an empty cleaned reason.
+// F-T1-25, rewritten by F-T1-56: only an empty reason means no reason; spaces and < > ` stay as typed.
 
-test('F-T1-25: a reason that cleans to nothing leaves no reason on the ballot', () => {
-  const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: ' <>` \n' }), THREE]]);
+test('F-T1-25: an empty reason leaves no reason on the ballot; any other text stays as typed', () => {
+  const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: '' }), THREE], [ballot(JON, 'A', 1, { reason: ' <>` \n' }), THREE]]);
   assert.deepEqual(ballotsOf(r.gate.parts[0]).get(MAYA), { option: 'B', at: T0, via: 'discord' });
+  assert.equal(ballotsOf(r.gate.parts[0]).get(JON).reason, ' <>` \n');
 });
 
 // F-T1-27: counts kept on a plain object read inherited keys such as "constructor".
@@ -243,39 +231,6 @@ test('F-T1-32: the same lead, as a holder, ends the vote and breaks the tie', ()
   const r = run(batch(), [[end(LEA, 1), holders], [tiebreak(LEA, 'B', 2), holders]]);
   assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak' });
   assert.equal(r.gate.phase, 'closed');
-});
-
-// F-T1-30: lookalikes of < and > that the first list missed.
-
-const lookalikes = [
-  ['< plus a combining long solidus, which NFKC makes into ≮', '≮/channel>', '/channel'],
-  ['> plus a combining overlay, which NFKC keeps', 'a>⃒b⃓c⃥', 'abc'],
-  ['precomposed not-less and not-greater', '≮x≯', 'x'],
-  ['much-less, much-greater and slanted less-or-equal', '≪a≫ ⩽b⩾', 'a b'],
-  ['modifier arrowheads', '˂a˃ ˄b˅ ˱c˲', 'a b c'],
-  ['Canadian syllabics that look like arrowheads', 'ᐸaᐳ ᐊbᐅ ᑀcᐺ ᐱd', 'a b c d'],
-  ['white triangles', '◁a▷ ◅b▻', 'a b'],
-  ['white parentheses, also from their fullwidth forms', '⦅a⦆ ｟b｠', 'a b'],
-  ['the arrowhead block U+1F890 to U+1F8FF', '\u{1F890}a\u{1F8FF}', 'a'],
-  ['single angle quotes', '‹a›', 'a'],
-];
-for (const [name, input, expected] of lookalikes) {
-  test(`F-T1-30: reason removes ${name}`, () => assert.equal(cleanReason(input), expected));
-}
-
-test('F-T1-30: reason keeps the French quotes « »', () => {
-  assert.equal(cleanReason('il a dit «oui»'), 'il a dit «oui»');
-});
-
-// F-T1-31: invisible characters that are not format characters.
-
-test('F-T1-31: reason removes Hangul fillers, the grapheme joiner and the blank Braille cell', () => {
-  assert.equal(cleanReason('aㅤbᅟcᅠdﾠe͏f⠀g'), 'abcdefg');
-});
-
-test('F-T1-31: a reason made only of invisible characters is dropped', () => {
-  const r = run(batch(), [[ballot(MAYA, 'B', 0, { reason: 'ㅤᅟᅠﾠ͏⠀' }), THREE]]);
-  assert.deepEqual(ballotsOf(r.gate.parts[0]).get(MAYA), { option: 'B', at: T0, via: 'discord' });
 });
 
 // F-T1-33: a refused event does not move the gate's time.
@@ -329,7 +284,7 @@ test('F-T1-35: nextReminderAt gives null for a time that is not a safe integer',
 // Changed by F-T1-52: the time limit settles first, so this withdraw cancels only because the part is tied.
 test('F-T1-36: a withdraw at the time limit, with no tick before it and a tied part, cancels the whole gate', () => {
   const r = run(batch(), [[{ type: 'withdraw', by: ERICK, at: T0 + 30 * MINUTE }, THREE]]);
-  assert.deepEqual(r.effects, [{ type: 'vote-ended', by: null }, { type: 'closed', outcome: { status: 'withdrawn' } }]);
+  assert.deepEqual(r.effects, [{ type: 'closed', outcome: { status: 'withdrawn' } }]); // F-T1-58: no vote-ended
   assert.deepEqual(r.gate.parts.map((p) => p.outcome), [{ status: 'open' }]);
 });
 

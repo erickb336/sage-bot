@@ -1,7 +1,7 @@
 // Table-driven tests of the vote rules. SAMPLE DATA: every id here is a made-up sample, not a real Discord id.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openGate, step, ballotsOf, nextReminderAt, cleanReason, MINUTE, BATCH_LIMIT } from '../src/vote.js';
+import { openGate, step, ballotsOf, nextReminderAt, MINUTE, BATCH_LIMIT } from '../src/vote.js';
 
 const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
@@ -216,23 +216,18 @@ for (const c of cases) {
   });
 }
 
+// Since F-T1-56, B1 stores a reason as typed and only cuts it to 500 code points.
 const reasons = [
-  ['keeps plain text', 'Tests fail on main.', 'Tests fail on main.'],
-  ['turns newlines and control characters into one space', 'line one\nline two\r\t\u0007end', 'line one line two end'],
-  ['removes < > and backticks', '<@everyone> `rm -rf` <b>', '@everyone rm -rf b'],
-  ['strips text-direction marks', 'a‮b⁦c', 'abc'],
+  ['keeps the text as typed, also < > backticks and newlines', '<@everyone> `rm -rf`\n<b>', '<@everyone> `rm -rf`\n<b>'],
   ['cuts to 500 characters', 'x'.repeat(600), 'x'.repeat(500)],
-  ['cuts after cleaning, so cleaning does not waste the limit', '<'.repeat(100) + 'y'.repeat(500), 'y'.repeat(500)],
   ['cuts by character, not by UTF-16 unit', '\u{1F600}'.repeat(501), '\u{1F600}'.repeat(500)],
 ];
-for (const [name, input, expected] of reasons) {
-  test(`reason: ${name}`, () => assert.equal(cleanReason(input), expected));
+for (const [name, reason, stored] of reasons) {
+  test(`reason: ${name}`, () => {
+    const r = run(batch(), [ballot(MAYA, 0, 'B', 0, { reason })]);
+    assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).reason, stored);
+  });
 }
-
-test('a ballot keeps its cleaned reason', () => {
-  const r = run(batch(), [ballot(MAYA, 0, 'B', 0, { reason: 'ok\n<b>' })]);
-  assert.equal(ballotsOf(r.gate.parts[0]).get(MAYA).reason, 'ok b');
-});
 
 const reminders = [
   ['single with no answer: first reminder to the holders 2 h after it opened', single, [], 0, { at: at(120), to: 'holders' }],

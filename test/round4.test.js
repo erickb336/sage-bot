@@ -74,9 +74,7 @@ test('F-T1-52: a withdraw at or after the time limit, with no tick, has no effec
 
 test('F-T1-52: a withdraw after the time limit, with no tick and a tied part, cancels the whole gate', () => {
   const r = play(batch(), [ballot(MAYA, 'A', T0), withdraw(END + 1)]);
-  assert.deepEqual(r.effects, [
-    { type: 'vote-ended', by: null },
-    { type: 'decided', part: 0, option: 'A', how: 'votes' },
+  assert.deepEqual(r.effects, [ // F-T1-58: no vote-ended or decided in a step that ends withdrawn
     { type: 'closed', outcome: { status: 'withdrawn' } },
   ]);
   assert.deepEqual(r.gate.parts.map((p) => p.outcome), [{ status: 'open' }, { status: 'open' }]);
@@ -130,7 +128,9 @@ test('F-T1-55: parseGate and step refuse a forged gate with a TypeError', () => 
     'two ballots by one person': forge(tied, (g) => { g.parts[1].ballots[1][0] = MAYA; }),
     'ballot after lastAt': forge(tied, (g) => { g.parts[0].ballots[0][1].at = END + 1; }),
     'ballot time not whole ms': forge(tied, (g) => { g.parts[0].ballots[0][1].at = T0 + 0.5; }),
-    'ballot reason not cleaned': forge(tied, (g) => { g.parts[0].ballots[0][1].reason = '<script>'; }),
+    'ballot reason over 500 code points': forge(tied, (g) => { g.parts[0].ballots[0][1].reason = 'x'.repeat(501); }),
+    'ballot reason with a lone surrogate': forge(tied, (g) => { g.parts[0].ballots[0][1].reason = 'a\uD83D'; }),
+    'ballot reason that is empty': forge(tied, (g) => { g.parts[0].ballots[0][1].reason = ''; }),
     'ballots in the old linked-list format': forge(tied, (g) => { g.parts[0].ballots = { by: MAYA, ballot: { option: 'A', at: T0, via: 'discord' }, prev: null }; }),
     'unknown field': forge(tied, (g) => { g.extra = 1; }),
     'part with no outcome': forge(tied, (g) => { delete g.parts[0].outcome; }),
