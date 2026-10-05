@@ -107,7 +107,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   assert.deepEqual([vote.status, vote.stdout.trim()], [0, 'team votes: project/G1 project/G2']);
 });
 
-test('F-T132-2: a card of a project that left the config refuses each press with a private note, logs once, and changes nothing', async () => {
+test('F-T132-2: a card of a project that left the config refuses each press with a private note, logs once, and gets no answer', async () => {
   const b = two();
   writeFileSync(`${b.statePath}.votes`, '["beta/G1","project/G1"]', { mode: 0o600 });
   b.bridge = b.with([['beta', b.betaSage], ['project', b.sage]], 'project');
@@ -119,9 +119,11 @@ test('F-T132-2: a card of a project that left the config refuses each press with
   for (let n = 0; n < 2; n++) assert.deepEqual((await b.press(MAYA, 'press:beta/G1:0:1')).map((r) => r.content), [GONE]);
   await b.bridge.loop();
   assert.equal(await b.answerOfBeta('G1'), '');
-  assert.equal(b.discord.messages.get(card).length, before); // the card shows no answer
+  // The one edit is the close of F-T132-8: no buttons, the note, and no answer on the card.
+  assert.equal(b.discord.messages.get(card).length, before + 1);
+  assert.deepEqual([buttons(b.discord.latest(card)), b.discord.latest(card).content], [[], GONE]);
   assert.equal(saved(b).entries.find((e) => e.gate.id === 'beta/G1').gate.outcome.status, 'open');
-  assert.equal(b.lines.filter((l) => l.startsWith('beta/G1: its project is no longer in the config')).length, 1, b.lines.join('\n'));
+  assert.equal(b.lines.filter((l) => l.startsWith('beta/G1: its project is no longer in the config, so its card takes no press')).length, 1, b.lines.join('\n'));
 });
 
 test('F-T132-5: a stop and a failed edit before the redraw keep the mark; the old buttons work until an edit gives the keys', async () => {
@@ -191,4 +193,62 @@ test('F-T132-6: a settled card of a project that left the config sends no answer
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['A. CSV', '']);
   assert.deepEqual(b.lines.slice(lines).filter((l) => /beta\/G1/.test(l)), []);
+});
+
+test('F-T132-8: a card of a project that left the config gets no reminder, is closed once with the note, and its thread can lock', async () => {
+  const b = two();
+  writeFileSync(`${b.statePath}.votes`, '["beta/G1","project/G1"]', { mode: 0o600 });
+  const dir = `${b.statePath}.sessions`;
+  const at = (event) => record({ session_id: S1, cwd: b.beta, hook_event_name: event }, { projects: b.projects, dir, pid: process.pid, now: b.now, home: b.root });
+  at('SessionStart');
+  b.bridge = b.with([['beta', b.betaSage], ['project', b.sage]], 'project');
+  await b.post();
+  const card = [...b.discord.messages.keys()].find((id) => b.discord.latest(id).embeds?.[0].title === 'Question beta/G1 · T1 Beta colours');
+  const [thread] = [...b.discord.threads.keys()];
+  assert.equal(b.discord.where.get(card), thread);
+  b.bridge = b.with([['project', b.sage]], 'project'); // beta left the config
+  b.shBeta('gate', 'answer', 'G1', 'B. Blue'); // Erick answers at the terminal; the bridge reads no beta logbook now
+  const posts = b.discord.posts.length;
+  for (let n = 0; n < 12; n++) { b.now += 30 * 60_000; await b.bridge.loop(); } // 6 hours, a loop every 30 minutes
+  assert.deepEqual(b.discord.posts.slice(posts).filter((p) => /beta\/G1/.test(p.content ?? '')), []); // no reminder ping
+  assert.equal(b.discord.messages.get(card).filter((p) => p.content === GONE).length, 1); // closed once
+  assert.deepEqual(buttons(b.discord.latest(card)), []);
+  assert.equal(b.discord.threads.get(thread).locked, false); // the session still runs
+  at('SessionEnd');
+  b.now += 30 * 60_000;
+  await b.bridge.loop();
+  assert.equal(b.discord.threads.get(thread).locked, true); // its question no longer counts as open (G15)
+  assert.equal(b.lines.filter((l) => l === 'beta/G1: its project is no longer in the config, so the bridge closed its card; Erick answers it at the terminal').length, 1, b.lines.join('\n'));
+});
+
+test('F-T132-9: a renamed own project logs its cards and marks at the start, no misleading line, and a re-mark posts no second card', async () => {
+  const b = setup({ markAll: false });
+  for (const [n, q] of [[1, 'Which file type?'], [2, 'Which port?']]) {
+    b.sh('task', 'add', '--title', `Task ${n}`, '--size', 'small');
+    b.sh('gate', 'add', `T${n}`, '--question', q, '--options', 'A|B', '--recommend', 'A');
+  }
+  b.mark('G1', 'G2');
+  await b.post();
+  b.sh('task', 'add', '--title', 'Task 3', '--size', 'small');
+  b.sh('gate', 'add', 'T3', '--question', 'Which name?', '--options', 'A|B', '--recommend', 'A');
+  b.mark('G3'); // marked, but the bridge stops before its card
+  const cards = () => [...b.discord.messages.keys()].map((id) => b.discord.messages.get(id)[0].embeds?.[0].title).filter(Boolean);
+  assert.deepEqual(cards(), ['Question project/G1 · T1 Task 1', 'Question project/G2 · T2 Task 2']);
+  // Erick renames the own project from `project` to `alpha` in projects.
+  const lines = b.lines.length;
+  b.bridge = createBridge({ sages: new Map([['alpha', b.sage]]), own: 'alpha', discord: b.discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => b.lines.push(l) });
+  assert.deepEqual(b.lines.slice(lines), ["the gate file holds cards of project 'project', which is not in projects: G1, G2; the marks name gates of project 'project', which is not in projects: G1, G2, G3; keep a project's name as it was at its first start"]);
+  await b.post();
+  // sage marks the gates again, now under alpha.
+  writeFileSync(`${b.statePath}.votes`, JSON.stringify(['alpha/G1', 'alpha/G2', 'alpha/G3', 'project/G1', 'project/G2', 'project/G3']), { mode: 0o600 });
+  b.now += 60_000;
+  await b.post();
+  assert.deepEqual(cards(), ['Question project/G1 · T1 Task 1', 'Question project/G2 · T2 Task 2', 'Question alpha/G3 · T3 Task 3']); // G3 had no card
+  const after = b.lines.slice(lines + 1);
+  assert.deepEqual(after.filter((l) => /did not mark it/.test(l)), []);
+  assert.deepEqual(after.filter((l) => /stays at the terminal/.test(l)), [
+    "alpha/G1 stays at the terminal: its card is project/G1, of project 'project', which is not in projects; keep a project's name as it was at its first start",
+    "alpha/G2 stays at the terminal: its card is project/G2, of project 'project', which is not in projects; keep a project's name as it was at its first start",
+    "alpha/G3 stays at the terminal: it has no mark of alpha; the mark is project/G3, of project 'project', which is not in projects; keep a project's name as it was at its first start",
+  ]);
 });
