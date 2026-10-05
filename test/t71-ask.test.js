@@ -61,7 +61,7 @@ function world(t) {
 
 const G1 = '  A. Name · B. Date\n  Recommended: Name · Default: Date';
 const G2 = '  A. Yes · B. No\n  Recommended: Yes';
-const BOARD = `**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project's records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n${G1}\n- G2 (T2): Ship the wake note?\n${G2}`;
+const BOARD = "**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project's records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n  A. Name · B. Date\n- G2 (T2): Ship the wake note?\n  A. Yes · B. No";
 const GATES = `**Open questions · project** (2)\n- G1 (T1), team vote: Which sort is the default?\n${G1}\n- G2 (T2), answered at the terminal: Ship the wake note?\n${G2}`;
 
 test('each command answers an apprentice and a lead in public (G20), from the safe columns only', async (t) => {
@@ -93,7 +93,56 @@ test('no answer holds text from decisions.tsv, findings, briefs, reports, a why 
   // The recommendation and the default of each open question, escaped as all logbook text: no ping, no link, no markdown.
   const g3 = 'G3 (T2), answered at the terminal: Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\*\n  Recommended: @everyone \\[x\\](https:// evil.example) · Default: No';
   assert.deepEqual(all[1], { content: `${GATES.replace('(2)', '(3)')}\n- ${g3}`, ...PUBLIC });
-  assert.ok(all[0].content.endsWith(`\n- ${g3.replace(', answered at the terminal', '')}`), all[0].content);
+  assert.ok(all[0].content.endsWith('\n- G3 (T2): Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\*'), all[0].content); // no advice on the board
+});
+
+/** Six more open questions of T2 (G3 to G8), each of about the longest normal size: 130 characters, 3 options, a 100-character recommendation. */
+function sixLong(b) {
+  for (let n = 3; n <= 8; n++) {
+    b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', 'First option|Second option|Third option', '--recommend', `R${n} ${'r'.repeat(96)}`, '--default', 'First option');
+  }
+}
+const isWhole = (content) => { // every heading in the reply shows its question to the end
+  const heads = [...content.matchAll(/^- G(\d+) \(T\d\)[^:]*: (.*)$/gm)].filter((m) => Number(m[1]) > 2);
+  assert.ok(heads.length >= 4, content);
+  for (const [, n, text] of heads) assert.equal(text, `Q${n} ${'q'.repeat(126)}?`);
+};
+
+test('F-T95-1: /sage gates shows the open questions that fit in full, then "N more open question(s)" with the ids of the rest', async (t) => {
+  const b = world(t);
+  sixLong(b);
+  const [{ content }] = await b.cmd(MAYA, 'gates');
+  assert.ok(content.length <= 2000, String(content.length));
+  assert.deepEqual(content.match(/^- G\d/gm), ['- G1', '- G2', '- G3', '- G4', '- G5', '- G6']);
+  assert.ok(content.endsWith(`  Recommended: R6 ${'r'.repeat(96)} · Default: First option\n2 more open question(s): G7, G8.`), content);
+  assert.ok(!content.includes('…'), content);
+  isWhole(content);
+});
+
+test('F-T95-1: when even the ids of the rest do not fit, the reply ends with their count', async (t) => {
+  const b = world(t);
+  sixLong(b);
+  // 400 more open questions, written as rows of gates.tsv in the scratch logbook (one `sage gate add` each would take minutes).
+  const rows = Array.from({ length: 400 }, (_, i) => `G${i + 9}\tT2\tShort ${i + 9}?\tYes|No\tYes\tNo\t\t\n`).join('');
+  appendFileSync(join(b.sh('logbook'), 'gates.tsv'), rows);
+  const [{ content }] = await b.cmd(MAYA, 'gates');
+  assert.ok(content.length <= 2000, String(content.length));
+  assert.match(content, /^\*\*Open questions · project\*\* \(408\)\n/);
+  assert.equal(content.match(/^- G\d/gm).length, 6);
+  assert.ok(content.endsWith(`· Default: First option\n402 more open question(s).`), content);
+});
+
+test('F-T95-1: the board shows no advice line, and the same "N more open question(s)" line when its list does not fit', async (t) => {
+  const b = world(t);
+  sixLong(b);
+  for (let n = 9; n <= 14; n++) b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', 'First option|Second option|Third option', '--recommend', 'x');
+  const [{ content }] = await b.cmd(MAYA, 'board');
+  assert.ok(content.length <= 2000, String(content.length));
+  assert.ok(!/Recommended|Default/.test(content), content);
+  assert.match(content, /\n14 open question\(s\):\n- G1 \(T1\): Which sort is the default\?\n  A\. Name · B\. Date\n- G2 /);
+  assert.equal(content.match(/^- G\d+/gm).length, 10);
+  assert.ok(content.endsWith('\n  A. First option · B. Second option · C. Third option\n4 more open question(s): G11, G12, G13, G14.'), content);
+  isWhole(content);
 });
 
 test('G20: a member with neither sage role gets nothing for a command or a mention, and nothing counts; a bot gets nothing', async (t) => {
@@ -474,7 +523,7 @@ test('F-T71-10 and F-T71-12: an answered question is not open; merged, concluded
   b.sh('task', 'add', '--title', 'Dropped', '--size', 'tiny');
   setStates(b, { T1: 'merged', T3: 'concluded', T4: 'abandoned' });
   assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: ['**Board · project**', '4 task(s) · merged 1 · framed 1 · concluded 1 · abandoned 1',
-    "1 task(s) left. Time left is not estimated yet: the project's records have no estimate.", '1 open question(s):', '- G1 (T1): Which sort is the default?', G1].join('\n'), ...PUBLIC }]);
+    "1 task(s) left. Time left is not estimated yet: the project's records have no estimate.", '1 open question(s):', '- G1 (T1): Which sort is the default?', '  A. Name · B. Date'].join('\n'), ...PUBLIC }]);
   assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: `**Open questions · project** (1)\n- G1 (T1), team vote: Which sort is the default?\n${G1}`, ...PUBLIC }]);
 });
 
@@ -488,13 +537,13 @@ test('F-T71-11: a folder symlink to a sibling folder whose name starts with the 
 });
 
 test('F-T71-13: a reply over 2000 characters is cut to 2000 with an ellipsis, as Discord allows no more', async (t) => {
+  // The open questions never reach this cut (F-T95-1); a list of long file names does.
   const b = world(t);
-  const questions = Array.from({ length: 12 }, (_, n) => `Question ${n + 3} ${'x'.repeat(180)}?`);
-  for (const q of questions) b.sh('gate', 'add', 'T2', '--question', q, '--options', 'Yes|No', '--recommend', 'Yes');
-  const full = [...BOARD.split('\n').slice(0, 3), '14 open question(s):', '- G1 (T1): Which sort is the default?', G1, '- G2 (T2): Ship the wake note?', G2,
-    ...questions.map((q, n) => `- G${n + 3} (T2): ${q}\n${G2}`)].join('\n');
+  const names = Array.from({ length: 10 }, (_, n) => `${String(n).padStart(2, '0')}${'f'.repeat(188)}.svg`); // "shots/" and these: 200 characters
+  const s = site(t, b, Object.fromEntries(names.map((n) => [n, '<svg/>'])), ['shots/*.svg']);
+  const full = ['10 shared file(s) of site:', ...names.map((n) => `- shots/${n}`)].join('\n');
   assert.ok(full.length > 2000, String(full.length));
-  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `${full.slice(0, 1999)}…`, ...PUBLIC }]);
+  assert.equal((await files(s.ask))[0].content, `${full.slice(0, 1999)}…`);
 });
 
 test('F-T71-13: the team vote label comes only from the bridge\'s own project, not from a gate of another project with the same id', async (t) => {

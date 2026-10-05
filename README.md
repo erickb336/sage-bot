@@ -110,7 +110,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
 | `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
 | sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
-| An answer shows only the id, title, size, state and pull request of a task, and each open question in full: its text, its options, sage's recommendation and the default. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
+| An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
 | Each sage-apprentice and sage-lead can ask 10 times in a rolling hour; every ask counts. The limit note is public too. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
 
 ## Set up a live trial
@@ -270,7 +270,7 @@ In #ask-sage, a sage-apprentice or a sage-lead types one of these. The answer is
 
 | You want to | Type this in #ask-sage |
 | --- | --- |
-| See the tasks by state, the tasks left and the open questions | `/sage board [project]` |
+| See the tasks by state, the tasks left and the open questions with their options | `/sage board [project]` |
 | See one task: its title, size, state and pull request | `/sage task <id> [project]`, for example `/sage task T7` |
 | See the open questions with their options, sage's recommendation, the default, and which ones are team votes | `/sage gates [project]` |
 | Get the shared images and PDFs of a project | `/sage files [project]` |

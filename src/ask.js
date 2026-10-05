@@ -30,6 +30,8 @@ const REPO = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 const TASK_ID = /^T\d{1,9}$/;
 const DONE = new Set(['merged', 'concluded', 'abandoned']);
 const SNOWFLAKE = /^\d{17,20}$/;
+/** Discord's limit for the text of one message. */
+const REPLY = 2000;
 
 export const POINTER = "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead.";
 export const BUILDS = 'Builds are for sage-leads: ask a lead.';
@@ -223,22 +225,38 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
     const count = new Map();
     for (const t of tasks) count.set(t.state, (count.get(t.state) ?? 0) + 1);
     const left = tasks.filter((t) => !DONE.has(t.state)).length;
-    return [`**Board · ${p.name}**`,
+    return fitted([`**Board · ${p.name}**`,
       `${tasks.length} task(s)${[...count].map(([s, n]) => ` · ${shown(s, 20)} ${n}`).join('')}`,
       `${left} task(s) left. Time left is not estimated yet: the project's records have no estimate.`,
-      `${open.length} open question(s)${open.length ? ':' : '.'}`,
-      ...open.flatMap((g) => question(g))].join('\n');
+      `${open.length} open question(s)${open.length ? ':' : '.'}`], open, (g) => question(g));
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
     const votes = teamVotes(p);
-    return [`**Open questions · ${p.name}** (${open.length})`, ...open.flatMap((g) => question(g, votes.has(g.id) ? 'team vote' : 'answered at the terminal'))].join('\n');
+    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(g.id) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
   }
-  /** One open question in full (G20): its text, its options, sage's recommendation and the default. */
-  function question(g, how) {
-    const advice = [['Recommended', g.recommendation], ['Default', g.byDefault]].map(([name, text]) => [name, shown(text, 200)]).filter(([, text]) => text);
-    return [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`,
-      ...(advice.length ? [`  ${advice.map(([name, text]) => `${name}: ${text}`).join(' · ')}`] : [])];
+  /** One open question in full (G20): its text and its options. */
+  const question = (g, how) => [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`];
+  /** sage's recommendation and the default of an open question, as one line; none when the logbook has neither (only /sage gates shows it). */
+  function advice(g) {
+    const parts = [['Recommended', g.recommendation], ['Default', g.byDefault]].map(([name, text]) => [name, shown(text, 200)]).filter(([, text]) => text);
+    return parts.length ? [`  ${parts.map(([name, text]) => `${name}: ${text}`).join(' · ')}`] : [];
+  }
+  /**
+   * `head`, then as many whole open questions as fit in one reply of REPLY characters, then "N more open question(s): G7, G8." with
+   * the ids of the rest, or only the count when the ids do not fit either (F-T95-1). So no question is cut, and none is left out unsaid.
+   */
+  function fitted(head, open, block) {
+    const blocks = open.map((g) => block(g).join('\n'));
+    const ids = open.map((g) => shown(g.id, 12));
+    for (let k = open.length; ; k--) {
+      const text = [...head, ...blocks.slice(0, k)].join('\n');
+      if (k === open.length) { if (text.length <= REPLY) return text; continue; }
+      const more = `${open.length - k} more open question(s)`;
+      for (const line of [`${more}: ${ids.slice(k).join(', ')}.`, `${more}.`]) {
+        if (text.length + 1 + line.length <= REPLY) return `${text}\n${line}`;
+      }
+    }
   }
   function task(p, { tasks }, id) {
     const t = TASK_ID.test(id) && tasks.find((x) => x.id === id);
@@ -265,7 +283,7 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
       }
-      try { await i.edit({ ...payload, content: cut(payload.content, 2000), allowedMentions: NO_MENTIONS }); } catch (e) {
+      try { await i.edit({ ...payload, content: cut(payload.content, REPLY), allowedMentions: NO_MENTIONS }); } catch (e) {
         say(`Discord refused a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`);
       }
     },
