@@ -141,39 +141,34 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const post = async (target, payload) => {
     try { return await discord.post(target, payload); } catch (e) {
       const x = goneThread(target, e);
-      if (x) await lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
+      if (x) lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
       return null;
     }
   };
   /**
    * A session thread that Discord says is gone (deleted, or the bot lost access): the session forgets it, and its next card makes a new
-   * one (F-T29-9). Each card of the thread that still waits is posted again in the parent channel as it is now, and every later post
-   * about it goes there (G17). The votes stay in the gate, so the new card shows them. A settled card is not posted again.
+   * one (F-T29-9). Each card of the thread that still waits loses its message and gets the parent channel as its place, in the same save:
+   * sync posts it there as it is now, also after a failure or a restart in between, and every later post about it goes there (G17,
+   * F-T55-3). The votes stay in the gate, so the new card shows them. A settled card is not posted again.
    */
-  const lost = async (x, e) => {
+  const lost = (x, e) => {
     const thread = x.thread;
     sayOnce(`the thread ${thread} of ${x.title} is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: ${apiError(e)}`);
     Object.assign(x, { thread: null, closed: false });
+    const moving = [...meta].filter(([id, m]) => m.message && m.channel === thread && waits(id));
+    for (const [, m] of moving) Object.assign(m, { message: null, channel: config.channelId });
     persist();
-    const moving = [...meta].filter(([id, m]) => m.message && m.channel === thread && waits(id)).map(([id]) => id);
-    const ppl = moving.length ? await people() : null;
-    for (const id of moving) {
-      // A post that Discord refuses leaves the card without a message, so the next loop posts it in the parent channel (sync).
-      const message = await postCard(id, ppl, config.channelId);
-      if (!message) Object.assign(meta.get(id), { message: null, channel: config.channelId });
-      persist();
-      say(`${id}: ${message ? 'its card is posted again' : 'its card waits for a new post'} in the parent channel, because the thread of ${x.title} is gone (G17)`);
-    }
+    for (const [id] of moving) say(`${id}: its card moves to the parent channel, because the thread of ${x.title} is gone (G17)`);
   };
   const edit = async (target, message, payload, what) => {
     try { await discord.edit(target, message, payload); } catch (e) {
       const x = goneThread(target, e);
-      if (x) await lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
+      if (x) lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
     }
   };
   const setLocked = async (x, locked) => {
     try { await discord.setLocked(x.thread, locked); x.closed = locked; persist(); return true; } catch (e) {
-      if (GONE.has(e?.code)) await lost(x, e); else sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`);
+      if (GONE.has(e?.code)) lost(x, e); else sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`);
       return false;
     }
   };
@@ -234,14 +229,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   }
 
   /**
-   * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is posted. When this post finds the
-   * thread gone, the card moved to the parent channel (G17), and the message goes there too.
+   * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is first posted. A card that moved to
+   * the parent channel (G17) and waits for its new post has its place there, so the message goes there. When this post finds the thread
+   * gone, the card moves, and the message goes to the parent channel too.
    */
   const postAbout = async (id, payload) => {
     const m = meta.get(id);
+    if (!m.channel && !m.message) return null;
     const at = m.channel ?? config.channelId;
-    if (!m.message) return null;
-    return (await post(at, payload)) ?? (m.message && m.channel !== at ? post(m.channel, payload) : null);
+    return (await post(at, payload)) ?? (m.channel !== at ? post(m.channel, payload) : null);
   };
 
   /**
@@ -514,8 +510,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       meta.set(gate.id, { sage, texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
-    // Post every entry that has no card yet, with the role alert.
-    for (const [id, m] of meta) if (!m.message) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
+    // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17). An
+    // error on one card never stops the posts of the others (F-T55-3).
+    for (const [id, m] of meta) {
+      if (m.message) continue;
+      try { await postCard(id, ppl, m.channel ?? await placeOf(m.session)); } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
+    }
   }
 
   /** The timers: the tick at gate.endsAt (also after a sleep) and the reminders every 2 hours. */

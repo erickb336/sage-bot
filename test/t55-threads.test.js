@@ -42,22 +42,22 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   assert.match(batchBefore[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/);
   b.discord.deleteThread(thread);
 
-  // The vote ends: the edit of the batch card finds the thread gone, the open cards move, and the tie post goes with them.
+  // The vote ends: the edit of the batch card finds the thread gone, the open cards move, and the tie post goes with them: the tie post
+  // at once, then the cards, in the same loop (F-T55-3).
   b.now += 30 * MINUTE;
   await b.bridge.loop();
   const [line, ...rest] = shown(b, CHANNEL);
   assert.match(line, /^\*\*Session 1 · Sun 4 Oct\*\*/);
-  assert.deepEqual(rest.slice(0, 2), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
-  assert.match(rest[2], new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
-  assert.equal(rest.length, 3);
+  assert.match(rest[0], new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
+  assert.deepEqual(rest.slice(1), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
   const moved = cardIn(b, CHANNEL, 'Batch vote G2+G3 · T2 ');
   assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/); // the vote cast in the thread
   assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: no votes\.\*\*/);
-  assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[1])[0].content,
+  assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[2])[0].content,
     `<@&${DRIVER}> T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
   assert.deepEqual(b.lines.filter((l) => /\(G17\)$/.test(l)), [
-    'G1: its card is posted again in the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)',
-    'G2+G3: its card is posted again in the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)']);
+    'G1: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)',
+    'G2+G3: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)']);
 
   // A lead breaks the tie on the moved card: the press counts, the card in the parent channel changes, and the lead's post goes there.
   await b.press(JON, 'tiebreak:G2+G3:1:1');
@@ -117,4 +117,87 @@ test('F-T55-1: a --project word of quoted and bare pieces is read as /bin/sh rea
   assert.deepEqual(words.map((w) => projectOf(w, home)), words.map(shell));
   assert.deepEqual([`"$(pwd)"`, '`pwd`', '"$HOME"/$(pwd)', '$PROJECT', '"$HOMEx"', '~root/x', `"x`, '$HOME/x'].map((w) => projectOf(w, home)), Array(8).fill(undefined));
   assert.equal(shell('$HOME/x'), `${join(b.root, 'home')}dir/x`); // the shell splits a bare $HOME with a space into two words
+});
+
+// F-T55-3: a failure or a stop in the middle of a move never leaves an open card in the deleted thread.
+/** A session with an open single G1 and a batch G2+G3 with Maya's vote on part 1, in a thread that is then deleted. */
+async function movedSetup() {
+  const b = setup();
+  hook(b, 'SessionStart');
+  gateAdd(b, 'T1');
+  gateAdd(b, 'T2', 'A?');
+  gateAdd(b, 'T2', 'B?');
+  await b.post();
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G2+G3:0:0');
+  b.discord.deleteThread(b.bridge.threadOf(S1));
+  return b;
+}
+const cards = (b) => shown(b, CHANNEL).filter((t) => /^(Question|Batch vote) /.test(t));
+
+test('F-T55-3: members() throws in the move of a deleted thread: the next loop posts every open card in the parent channel, each once', async () => {
+  const b = await movedSetup();
+  const real = b.discord.members;
+  let thrown = false; // members() fails once, at its first call after the bridge forgot the thread
+  b.discord.members = () => {
+    if (!thrown && b.bridge.threadOf(S1) === undefined) { thrown = true; throw Object.assign(new Error('Service Unavailable'), { status: 503 }); }
+    return real();
+  };
+  await b.press(MAYA, 'press:G2+G3:1:0'); // the edit of the batch card finds the thread gone
+  assert.equal(b.bridge.threadOf(S1), undefined);
+  await b.bridge.loop().catch(() => {});
+  await b.bridge.loop().catch(() => {});
+  assert.equal(thrown, true);
+  assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  await b.bridge.loop();
+  assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']); // no duplicate
+});
+
+for (const hangAt of [1, 2]) {
+  test(`F-T55-3: the bridge stops at the parent-channel card post #${hangAt} of a move: a restarted bridge posts the rest, each card once, and its reminders go to the parent channel`, async () => {
+    const b = await movedSetup();
+    const real = b.discord.post;
+    let n = 0;
+    let stopped;
+    const stop = new Promise((r) => { stopped = r; });
+    b.discord.post = (target, payload) => {
+      if (target === CHANNEL && payload.embeds && ++n === hangAt) { stopped(); return new Promise(() => {}); } // a post that never returns
+      return real(target, payload);
+    };
+    b.now += 30 * MINUTE;
+    b.bridge.loop(); // the vote of G2+G3 ends, its edit finds the thread gone, and the move starts; this bridge never ends
+    await stop;
+    b.discord.post = real;
+    b.bridge = b.make(); // the restart: a new bridge on the same state file
+    b.now += MINUTE;
+    await b.bridge.loop();
+    await b.bridge.loop();
+    assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+    assert.match(cardIn(b, CHANNEL, 'Batch vote G2+G3 · T2 ').embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/);
+    b.now += 2 * HOUR;
+    await b.bridge.loop();
+    const after = shown(b, CHANNEL);
+    assert.equal(after.filter((t) => t.startsWith(`<@&${DRIVER}> reminder: G1 waits`)).length, 1);
+    assert.equal(after.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of G2+G3 still tied`)).length, 1);
+    assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  });
+}
+
+test('F-T55-3: a card that waits for its new post: its tie post goes to the parent channel at once, and its reminders after the card is posted', async () => {
+  const b = await movedSetup();
+  const real = b.discord.post;
+  b.discord.post = (target, payload) => (target === CHANNEL && payload.embeds
+    ? Promise.reject(Object.assign(new Error('Internal Server Error'), { status: 500 })) : real(target, payload));
+  b.now += 30 * MINUTE;
+  await b.bridge.loop(); // the vote of G2+G3 ends tied on part 2; the edit finds the thread gone; Discord refuses the card posts
+  assert.deepEqual(cards(b), []);
+  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
+  b.discord.post = real;
+  b.now += 2 * HOUR;
+  await b.bridge.loop(); // the cards first; the reminders wait for them
+  assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  await b.bridge.loop();
+  const all = shown(b, CHANNEL);
+  assert.equal(all.filter((t) => t.startsWith(`<@&${DRIVER}> reminder: G1 waits`)).length, 1);
+  assert.equal(all.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of G2+G3 still tied`)).length, 1);
 });
