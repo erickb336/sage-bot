@@ -616,9 +616,11 @@ test('F-T29-9: a session thread deleted in Discord: the next card goes to the pa
   gateAdd(b, S1, 'T2');
   await b.post();
   for (let i = 0; i < 4; i++) { b.now += LOOP_GAP; await b.bridge.loop(); }
-  assert.deepEqual([cardsIn(b, CHANNEL), b.bridge.threadOf(S1)], [['Question G2 · T2 '], undefined]);
+  // G17: the open card G1 of the deleted thread is posted again in the parent channel, after G2, whose post found the thread gone.
+  assert.deepEqual([cardsIn(b, CHANNEL), b.bridge.threadOf(S1)], [['Question G2 · T2 ', 'Question G1 · T1 '], undefined]);
   assert.deepEqual(b.lines.filter((l) => /gone|refused/.test(l)), [
-    `the thread ${first} of Session 1 · Sun 4 Oct is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: code 10003, status 404: Unknown Channel`]);
+    `the thread ${first} of Session 1 · Sun 4 Oct is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: code 10003, status 404: Unknown Channel`,
+    'G1: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)']);
   // The next card makes a new thread from the same line.
   gateAdd(b, S1, 'T3');
   await b.post();
@@ -634,7 +636,7 @@ test('F-T29-9: a session thread deleted in Discord: the next card goes to the pa
   await b.post();
   const third = b.bridge.threadOf(S1);
   const lines = b.discord.in(CHANNEL).filter((id) => b.discord.latest(id).content?.startsWith('**Session'));
-  assert.deepEqual([cardsIn(b, CHANNEL), cardsIn(b, third), lines.length, b.discord.threads.get(third).from], [['Question G2 · T2 ', 'Question G4 · T4 '], ['Question G5 · T5 '], 1, lines[0]]);
+  assert.deepEqual([cardsIn(b, CHANNEL), cardsIn(b, third), lines.length, b.discord.threads.get(third).from], [['Question G2 · T2 ', 'Question G1 · T1 ', 'Question G4 · T4 ', 'Question G3 · T3 '], ['Question G5 · T5 '], 1, lines[0]]);
   assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nrunning · 5 tasks · 5 open questions$/);
   // A lock of a deleted thread forgets it too: the session ends, the lock is refused once, and no loop tries again.
   b.discord.deleteThread(third);

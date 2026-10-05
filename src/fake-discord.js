@@ -36,7 +36,8 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
  * locked thread is refused, and so is an edit of a message in another place. `deleteThread` and `deleteMessage` do what a member's delete
  * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
- * message with code 10008 (Unknown Message). `members` is the list that `members()` gives, as
+ * message with code 10008 (Unknown Message). With `{ keepOnLine: true }`, `deleteThread` does what Discord can do: the message keeps
+ * the deleted thread, so a new thread from it is refused with code 160004, and a fetch of the thread with code 10003. `members` is the list that `members()` gives, as
  * src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
  * @param {{ id: string, name: string, roles: string[], bot?: boolean }[]} members
  */
@@ -46,6 +47,7 @@ export function fakeDiscord(members) {
   const where = new Map();
   const threads = new Map();
   const deleted = new Set();
+  const kept = new Map(); // message id → the deleted thread that Discord keeps on it
   const gone = (target) => {
     if (deleted.has(target)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
   };
@@ -63,7 +65,11 @@ export function fakeDiscord(members) {
     latest: (id) => messages.get(id).at(-1),
     /** The ids of the messages posted in one channel or thread, in order. */
     in: (target) => [...where].filter(([, t]) => t === target).map(([id]) => id),
-    deleteThread: (id) => { threads.delete(id); deleted.add(id); },
+    deleteThread: (id, { keepOnLine = false } = {}) => {
+      if (keepOnLine) kept.set(threads.get(id).from, id);
+      threads.delete(id);
+      deleted.add(id);
+    },
     deleteMessage: (id) => { messages.delete(id); where.delete(id); },
     async post(target, payload) {
       gone(target);
@@ -82,7 +88,7 @@ export function fakeDiscord(members) {
     },
     async startThread(from, name) {
       if (!messages.has(from)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
-      if ([...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
+      if (kept.has(from) || [...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
       const id = String(next++);
       threads.set(id, { from, name, archived: false, locked: false });
       return id;
