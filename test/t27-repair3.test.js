@@ -188,7 +188,7 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
 });
 
 test('F-T27-26: the README states the field limits, when handle throws, what replyError means and what B3 logs of it', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ['B3 also keeps the texts of an ask reasonable', '`card` never throws for a team of 2 to 5 with at most 4 parts',
     'name of at most 256 and a value of at most 1024', '`handle` rejects only for a programming error', "beside the `'ignored'` effect",
     'only its `code`, `status` and `message`', 'member …6789', 'meanwhile. Nothing to cancel.']) {

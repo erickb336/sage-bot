@@ -176,7 +176,7 @@ test('F-T27-18: the form title shows the option within 45 characters; Cancel com
 });
 
 test('F-T27-7: the README documents the fake layer: fakeInteraction({ user, customId, fields, ephemeral, refuse }) and the reason input id', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   assert.ok(readme.includes('fakeInteraction({ user, customId, fields, ephemeral, refuse })'));
   assert.ok(readme.includes("`getTextInputValue('reason')`"));
 });

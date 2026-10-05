@@ -105,7 +105,7 @@ test('F-T27-45: the joiner check is linear: 1 MB of conjuncts in well under a se
 });
 
 test('F-T27-47, F-T27-38: the README states the `<` and `>` escape, the kept symbols, the mark rule and no fixed count of shown reasons; the premise stays', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ['a person reads on the card, and nothing else reads it', 'every `[`, `]`, `<` and `>` (no masked link, mention, timestamp, emoji code or quote',
     'a bare pictograph such as ™, ©, ✔ or ⚠', 'they do not count toward the 3, so Burmese ကျော် stays whole', 'a leading `-#` (no subtext)',
     'how many depends on the names and on the ask\'s texts', 'or when the joiner follows a mark such as a final virama']) {

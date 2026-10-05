@@ -43,7 +43,7 @@ test('F-T27-49: the null notehead U+1D159 looks blank, so it goes; a name of onl
 });
 
 test('F-T27-49, F-T27-50: the README states both mark caps and the six characters that look blank', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ['at most 3 combining marks on a letter that pile on it (the non-spacing marks, Unicode `Mn`) and at most 4 spacing or enclosing marks (Unicode `Mc` and `Me`',
     'the six characters that look blank (the four Hangul fillers, the blank Braille cell U+2800 and the musical null notehead U+1D159)']) {
     assert.ok(readme.includes(line), line);

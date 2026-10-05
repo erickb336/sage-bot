@@ -260,7 +260,7 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
 });
 
 test('F-T27-30 to F-T27-33: the README states the premise of safe, the budget order and the fallback name', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ["cleaned by B3's own allow-list", 'at most 3 combining marks on a letter', 'drops the oldest reason fields', 'cuts the voter lists', 'then the why, then the option labels, then the question',
     'The keys, the counts and "The chief recommends A" never shrink', 'The single card shrinks the same way', '"member …6789" (the last 4 digits of an id of 4 or more digits) or "member"']) {
     assert.ok(readme.includes(line), line);
