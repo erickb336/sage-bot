@@ -23,7 +23,7 @@ The demo plays one chief session from start to end, with sample people and a scr
 - the private notes that each person sees, for example "Your press did not count";
 - the answers in sage, and the reasons that the chief can read.
 
-In the demo, Maya answers a single question first, so her answer is final. Sam has no role, so his press does not count. A batch vote ends in a tie, and Jon, a sage-lead, breaks it. Erick, the owner, answers one question at the terminal, and that answer is final. When the session ends, its thread locks.
+In the demo, Maya answers a single question first, so her answer is final. Sam has no role, so sage-bot ignores his press: he gets no reply, and the press does not count. A batch vote ends in a tie, and Jon, a sage-lead, breaks it. Erick, the owner, answers one question at the terminal, and that answer is final. When the session ends, its thread locks.
 
 All files go into a new scratch folder, so the demo never touches your home folder or a real logbook. To write the page to a path of your own, run `npm run demo -- --out <page.html>`. More options are in the [reference](docs/reference.md#the-demo).
 
@@ -78,7 +78,7 @@ Some questions are for the sage-leads alone, and only as advice. The first one i
 
 1. The chief asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
 2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
-3. Only a sage-lead can press. Anyone else gets the private note "Only a sage-lead can answer this. Erick decides."
+3. Only a sage-lead can press. A sage-apprentice gets the private note "Only a sage-lead can answer this. Erick decides." A member with neither role gets no reply.
 4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
 5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to the chief is final, also after the leads' recommendation (G10).
 
@@ -108,9 +108,10 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | A session thread holds the votes and the chief's posts only. Chat with the chief is in a separate channel. (G16) | Votes stay readable, and no chat text goes near the chief's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
 | No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
-| `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a private reply. (G18) | The team can read the state of the work, and nobody else can. | `src/ask.js` |
-| An answer shows only the id, title, size, state and pull request of a task, and the text and options of an open question. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
-| Each person can ask 10 times in a rolling hour; every ask counts. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
+| `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
+| sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
+| An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
+| Each sage-apprentice and sage-lead can ask 10 times in a rolling hour; every ask counts. The limit note is public too. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
 
 ## Set up a live trial
 
@@ -152,7 +153,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
-  *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage` and reads the answers; people without a role can read it, and `/sage` refuses them. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+  *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage`, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3. Use the absolute path of your sage-bot folder.
@@ -265,16 +266,18 @@ Run each command in the sage-bot folder.
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 
-In #ask-sage, a sage-apprentice or a sage-lead types one of these. Only the person who asks sees the answer. Leave out `project` for the first project of the config.
+In #ask-sage, a sage-apprentice or a sage-lead types one of these. The answer is public: everyone in #ask-sage sees it, and it pings nobody. Leave out `project` for the first project of the config.
 
 | You want to | Type this in #ask-sage |
 | --- | --- |
-| See the tasks by state, the tasks left and the open questions | `/sage board [project]` |
+| See the tasks by state, the tasks left and the open questions with their options | `/sage board [project]` |
 | See one task: its title, size, state and pull request | `/sage task <id> [project]`, for example `/sage task T7` |
-| See the open questions with their options, and which ones are team votes | `/sage gates [project]` |
+| See the open questions with their options, sage's recommendation, the default, and which ones are team votes | `/sage gates [project]` |
 | Get the shared images and PDFs of a project | `/sage files [project]` |
 
 Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in #ask-sage, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention in another channel gets one pointer to #ask-sage per person per day. `/sage` also works in a thread of #ask-sage.
+
+sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
 
 ## FAQ
 

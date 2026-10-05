@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
-import { BOT, CONFIG, APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, setup, T0 } from './bridge-setup.js';
+import { BOT, CONFIG, APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, SAM, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { card as cardOf } from '../src/cards.js';
 import { peopleOf } from '../src/handle.js';
@@ -180,11 +180,12 @@ test('F-T28-7: holders and leads come fresh from the members as Sets: a role tak
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   members[1].roles = [];
-  const replies = await b.press(MAYA, 'press:G1:0:0');
-  assert.match(replies[0].content, /Only people with the sage-apprentice or sage-lead role can answer or vote/);
+  assert.deepEqual(await b.press(MAYA, 'press:G1:0:0'), []); // no sage role: no reply (G20), and the press does not count
+  assert.equal(b.bridge.entry('G1').gate.phase, 'open');
   members[1].roles = [APPRENTICE];
   await b.press(MAYA, 'press:G1:0:0');
   assert.equal(b.bridge.entry('G1').gate.outcome.by, MAYA);
+  assert.deepEqual(await b.press(SAM, 'press:G1:0:1'), []); // also no "Already answered" note for a member with no role (G20)
 });
 
 test('F-T28-9: a withdraw comes only from the chief side; an answer at the terminal is one press on a normal gate', async () => {

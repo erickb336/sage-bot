@@ -1,16 +1,17 @@
 // The read commands of #ask-sage (T71, G18 option A): /sage board, task, gates and files, and one pointer for an @sage-bot mention.
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
-// columns). It never reads decisions.tsv, findings, briefs or reports. Every reply goes through `safe` (the readers are people on
-// Discord) and pings nobody. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
+// columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
+// and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. A member with neither sage role gets
+// nothing. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
-import { MessageFlags, SlashCommandBuilder, InteractionContextType } from 'discord.js';
+import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadVotes, votesPathOf } from './state.js';
 
-/** Asks per person in a rolling hour (G18 D5); every ask counts, also a refused one. */
+/** Asks per person in a rolling hour (G18 D5); every ask of a role holder counts, also a refused one. */
 export const ASK_LIMIT = 10;
 export const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -29,8 +30,9 @@ const REPO = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 const TASK_ID = /^T\d{1,9}$/;
 const DONE = new Set(['merged', 'concluded', 'abandoned']);
 const SNOWFLAKE = /^\d{17,20}$/;
+/** Discord's limit for the text of one message. */
+const REPLY = 2000;
 
-export const NO_ROLE = 'Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.';
 export const POINTER = "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead.";
 export const BUILDS = 'Builds are for sage-leads: ask a lead.';
 export const LEAD_BUILDS = 'Builds from Discord are not ready yet.';
@@ -100,12 +102,12 @@ export function askCommand(projects) {
     .toJSON();
 }
 
-/** Only the safe columns of the logbook: no recommendation, no default, no answer text, no branch, no findings, never decisions. */
+/** Only the safe columns of the logbook: an open question in full (G20), but no answer text, no branch, no why, no findings, never decisions. */
 async function pick(tool) {
   const [tasks, gates] = await Promise.all([tool.tasks(), tool.gates()]);
   return {
     tasks: tasks.map(({ id, title, size, state, pr }) => ({ id, title, size, state, pr })),
-    open: gates.filter((g) => !g.answer).map(({ id, task, question, options }) => ({ id, task, question, options })),
+    open: gates.filter((g) => !g.answer).map(({ id, task, question, options, recommendation, default: byDefault }) => ({ id, task, question, options, recommendation, byDefault })),
   };
 }
 
@@ -195,9 +197,8 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
   };
 
   /** The content (and files) of the answer to one /sage command. */
-  async function answer({ user, roles, channelId, parentId, sub, options: o }) {
+  async function answer({ user, channelId, parentId, sub, options: o }) {
     const next = spend(user.id);
-    if (!isHolder(roles)) return { content: NO_ROLE }; // also over the limit: a member with no role can never use /sage (F-T71Q-3)
     if (next) return { content: limited(next) };
     if (!await inAsk(channelId, parentId)) return { content: `I answer /sage in ${here}, so please ask there.` };
     const p = o.project ? byName.get(o.project) : byName.get(projects[0].name);
@@ -224,18 +225,38 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
     const count = new Map();
     for (const t of tasks) count.set(t.state, (count.get(t.state) ?? 0) + 1);
     const left = tasks.filter((t) => !DONE.has(t.state)).length;
-    return [`**Board · ${p.name}**`,
+    return fitted([`**Board · ${p.name}**`,
       `${tasks.length} task(s)${[...count].map(([s, n]) => ` · ${shown(s, 20)} ${n}`).join('')}`,
       `${left} task(s) left. Time left is not estimated yet: the project's records have no estimate.`,
-      `${open.length} open question(s)${open.length ? ':' : '.'}`,
-      ...open.map((g) => `- ${shown(g.id, 12)} (${shown(g.task, 12)}): ${shown(g.question, 200)}`)].join('\n');
+      `${open.length} open question(s)${open.length ? ':' : '.'}`], open, (g) => question(g));
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
     const votes = teamVotes(p);
-    return [`**Open questions · ${p.name}** (${open.length})`, ...open.flatMap((g) => [
-      `- ${shown(g.id, 12)} (${shown(g.task, 12)}), ${votes.has(g.id) ? 'team vote' : 'answered at the terminal'}: ${shown(g.question, 300)}`,
-      `  ${options(g.options)}`])].join('\n');
+    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(g.id) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
+  }
+  /** One open question in full (G20): its text and its options. */
+  const question = (g, how) => [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`];
+  /** sage's recommendation and the default of an open question, as one line; none when the logbook has neither (only /sage gates shows it). */
+  function advice(g) {
+    const parts = [['Recommended', g.recommendation], ['Default', g.byDefault]].map(([name, text]) => [name, shown(text, 200)]).filter(([, text]) => text);
+    return parts.length ? [`  ${parts.map(([name, text]) => `${name}: ${text}`).join(' · ')}`] : [];
+  }
+  /**
+   * `head`, then as many whole open questions as fit in one reply of REPLY characters, then "N more open question(s): G7, G8." with
+   * the ids of the rest, or only the count when the ids do not fit either (F-T95-1). So no question is cut, and none is left out unsaid.
+   */
+  function fitted(head, open, block) {
+    const blocks = open.map((g) => block(g).join('\n'));
+    const ids = open.map((g) => shown(g.id, 12));
+    for (let k = open.length; ; k--) {
+      const text = [...head, ...blocks.slice(0, k)].join('\n');
+      if (k === open.length) { if (text.length <= REPLY) return text; continue; }
+      const more = `${open.length - k} more open question(s)`;
+      for (const line of [`${more}: ${ids.slice(k).join(', ')}.`, `${more}.`]) {
+        if (text.length + 1 + line.length <= REPLY) return `${text}\n${line}`;
+      }
+    }
   }
   function task(p, { tasks }, id) {
     const t = TASK_ID.test(id) && tasks.find((x) => x.id === id);
@@ -247,13 +268,13 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
   return {
     projects,
     /**
-     * One /sage command: `{ user: { id, bot }, roles, channelId, parentId, sub, options: { project, id }, defer, edit }`. A bot gets
-     * nothing. Every other ask is first deferred in private, before any file or logbook work (F-T71-2), then gets its answer as an
-     * edit of that reply, which pings nobody. Never rejects.
+     * One /sage command: `{ user: { id, bot }, roles, channelId, parentId, sub, options: { project, id }, defer, edit }`. A bot and a
+     * member with neither sage role get nothing, and nothing counts (G20). Every other ask is first deferred in public, before any file
+     * or logbook work (F-T71-2), then gets its answer as an edit of that reply, which pings nobody. Never rejects.
      */
     async command(i) {
-      if (i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '')) return;
-      try { await i.defer({ flags: MessageFlags.Ephemeral }); } catch (e) {
+      if (i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '') || !isHolder(i.roles ?? [])) return;
+      try { await i.defer({}); } catch (e) {
         say(`Discord refused to defer a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`);
         return;
       }
@@ -262,20 +283,20 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
       }
-      try { await i.edit({ ...payload, content: cut(payload.content, 2000), allowedMentions: NO_MENTIONS }); } catch (e) {
+      try { await i.edit({ ...payload, content: cut(payload.content, REPLY), allowedMentions: NO_MENTIONS }); } catch (e) {
         say(`Discord refused a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`);
       }
     },
     /**
      * One message that mentions the bot: `{ user: { id, bot }, roles, channelId, parentId, content, reply }`. In #ask-sage or a thread
      * of it: one public reply in place with the pointer (and a build line for a build: for a lead, that builds are not ready), counted
-     * like a command; over the limit, one note until the hour frees up (the role note for a member with no role). Elsewhere: one
-     * pointer to #ask-sage per person per UTC day. A bot gets nothing. Never rejects.
+     * like a command; over the limit, one note until the hour frees up. Elsewhere: one pointer to #ask-sage per person per UTC day.
+     * A bot and a member with neither sage role get nothing, and nothing counts (G20). Never rejects.
      */
     async mention(m) {
-      if (m.user?.bot || !SNOWFLAKE.test(m.user?.id ?? '')) return;
-      const id = m.user.id;
       const roles = m.roles ?? [];
+      if (m.user?.bot || !SNOWFLAKE.test(m.user?.id ?? '') || !isHolder(roles)) return;
+      const id = m.user.id;
       let content = null;
       if (!await inAsk(m.channelId, m.parentId)) {
         const day = Math.floor(now() / DAY);
@@ -283,7 +304,7 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
       } else {
         const next = spend(id);
         if (!next) content = isBuild(m.content) ? `${POINTER} ${roles.includes(config.leadRole) ? LEAD_BUILDS : BUILDS}` : POINTER;
-        else if ((warned.get(id) ?? 0) <= now()) { warned.set(id, next); content = isHolder(roles) ? limited(next) : NO_ROLE; }
+        else if ((warned.get(id) ?? 0) <= now()) { warned.set(id, next); content = limited(next); }
       }
       if (!content) return;
       try { await m.reply({ content, allowedMentions: { ...NO_MENTIONS, repliedUser: false } }); } catch (e) {

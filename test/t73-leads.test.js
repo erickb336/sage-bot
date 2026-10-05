@@ -82,11 +82,11 @@ test('T73: the card of a leads-only question pings sage-lead only and is titled 
   assert.deepEqual(b.discord.posts.at(-1).allowedMentions.roles, [LEAD]);
 });
 
-test('T73: an apprentice press and a press with no role are refused with the leads-only note, and sage gets nothing', async () => {
+test('T73: an apprentice press gets the leads-only note, a press with no role gets no reply (G20), and sage gets nothing', async () => {
   const b = await asked();
   b.now += MINUTE;
   assert.deepEqual(await b.press(MAYA, 'press:G1:0:0'), [NOTE]);
-  assert.deepEqual(await b.press(SAM, 'press:G1:0:0'), [NOTE]);
+  assert.deepEqual(await b.press(SAM, 'press:G1:0:0'), []);
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), '');
   assert.doesNotMatch(text(b), /Recommended by/);
