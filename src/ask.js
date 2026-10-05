@@ -290,19 +290,33 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     return line;
   }
 
+  /** Saves the thread map after a change to the thread `thread`; a failure only loses the change at the next restart. */
+  function keep(thread) {
+    try { saveThreads(threadsPath, threads); } catch (e) { say(`the thread map could not be saved, so the last change to ${thread} lasts only until the next restart: ${e?.message}`); }
+  }
+
   /**
    * The reply to a mention in a thread of sage-bot: `t` is its entry in the thread map. A lead's talk, and every message in a lead
    * thread, would go to sage: it is logged (an apprentice's as quoted data) and gets the dry-run reply, or the fixed reply while the
-   * kill switch is set. No session starts here (T131 is a dry run). Any other mention is a read ask; a lead's is logged too.
+   * kill switch is set. A lead's talk in an answer thread first turns it into a lead thread and logs its held apprentice mentions,
+   * in order, as quoted data (G27). No session starts here (T131 is a dry run). Any other mention is a read ask; a lead's is logged
+   * too, and an apprentice's in an answer thread is held in the thread map.
    */
   async function inThread(m, t, thread) {
     const lead = isLead(m.roles);
     if (t.kind === 'lead' || (lead && isTalk(m.content))) {
       const off = linkOff(killPath); // checked before each would-be delivery; a flag that cannot be checked counts as set
+      if (t.kind === 'answer') { // a lead's talk turns an answer thread into a lead thread; its apprentices' text goes first, as quoted data (G27)
+        while (t.held.length) { const h = t.held[0]; record({ ...h, user: { id: h.user } }, { thread, project: t.project, outcome: 'earlier' }); t.held.shift(); }
+        delete t.held;
+        t.kind = 'lead';
+        keep(thread);
+      }
       record(m, { thread, project: t.project, outcome: off ? 'link-off' : 'dry-run' });
       return { content: off ? LINK_OFF : DRY_RUN };
     }
     if (lead) record(m, { thread, project: t.project, outcome: 'read-ask' });
+    else { t.held.push({ id: m.id, user: m.user.id, roles: m.roles, content: m.content ?? '' }); keep(thread); }
     const ask = readAsk(m.content);
     if (ask) return answer({ ...m, ...ask }, t.channel);
     return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : BUILDS}` : POINTER };
@@ -491,9 +505,9 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
             await where(null, { content: NO_RIGHT.has(e?.code) ? noRight('Create Public Threads') : 'I could not open a thread just now. Nothing changed. Please ask again in a minute.', allowedMentions: QUIET }, true);
             return;
           }
-          t = { kind: lead && isTalk(m.content) ? 'lead' : 'answer', channel: at, project, by: id, at: now() };
+          t = lead && isTalk(m.content) ? { kind: 'lead', channel: at, project, by: id, at: now() } : { kind: 'answer', channel: at, project, by: id, at: now(), held: [] };
           threads.set(thread, t);
-          try { saveThreads(threadsPath, threads); } catch (e) { say(`the thread map could not be saved, so ${thread} continues only until the next restart: ${e?.message}`); }
+          keep(thread);
         }
         let payload;
         try { payload = await inThread(m, t, thread); } catch (e) {

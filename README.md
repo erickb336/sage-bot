@@ -320,7 +320,7 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 | Thread | Who opens it | What sage-bot does there |
 | --- | --- | --- |
 | Answer thread | A sage-apprentice, or a sage-lead with a read ask | Answers a mention that names `board`, `gates` (or `questions`), `files` or a task id such as `T7`, like the `/sage` command. Any other mention gets a pointer to these words. No AI. |
-| Lead thread | A sage-lead whose mention holds the word "talk" | Records each message in the lead log and replies that sessions with sage are not on yet. No sage session starts: that comes in a later step. An apprentice may write there too; the log keeps their text only as quoted data. |
+| Lead thread | A sage-lead whose mention holds the word "talk" | Records each message in the lead log and replies that sessions with sage are not on yet. No sage session starts: that comes in a later step. An apprentice may write there too; the log keeps their text only as quoted data. When a sage-lead talks in an answer thread, it becomes a lead thread: the apprentice's earlier mentions there go into the lead log first, in order, as quoted data. A lead's read ask keeps it an answer thread. |
 
 - A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel.
 - When sage-bot lacks a right for its thread, it replies once in place and names the right: "Create Public Threads" or "Send Messages in Threads".

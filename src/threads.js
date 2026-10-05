@@ -15,7 +15,9 @@ const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.k
 export const threadsPathOf = ({ statePath }) => `${statePath}.threads`;
 
 /**
- * The thread map: thread id → { kind: 'answer' | 'lead', channel, project, by, at }; an empty Map when there is no file. Throws, and
+ * The thread map: thread id → { kind: 'answer' | 'lead', channel, project, by, at }, and for an answer thread `held`: the mentions of
+ * apprentices there, each { id, user, roles, content }, in order. When a lead talks in an answer thread, it becomes a lead thread and
+ * its held mentions go into the lead log as quoted data (G27). An empty Map when there is no file. Throws, and
  * the bridge stops, for a file that is not this user's 0600 file, a symlink, bad JSON or an entry that the bridge did not write.
  */
 export function loadThreads(path) {
@@ -25,9 +27,12 @@ export function loadThreads(path) {
   let data;
   try { data = JSON.parse(text); } catch { throw bad; }
   if (shape(data) !== 'threads,version' || data.version !== 1 || shape(data.threads) === null) throw bad;
+  const isHeld = (h) => shape(h) === 'content,id,roles,user' && SNOWFLAKE.test(h.id) && SNOWFLAKE.test(h.user) && typeof h.content === 'string'
+    && Array.isArray(h.roles) && h.roles.every((r) => SNOWFLAKE.test(r));
   for (const [id, t] of Object.entries(data.threads)) {
-    if (!SNOWFLAKE.test(id) || shape(t) !== 'at,by,channel,kind,project' || !['answer', 'lead'].includes(t.kind) || !SNOWFLAKE.test(t.channel)
-      || !SNOWFLAKE.test(t.by) || typeof t.project !== 'string' || !Number.isSafeInteger(t.at)) throw bad;
+    if (!SNOWFLAKE.test(id) || shape(t) !== { answer: 'at,by,channel,held,kind,project', lead: 'at,by,channel,kind,project' }[t?.kind]
+      || !SNOWFLAKE.test(t.channel) || !SNOWFLAKE.test(t.by) || typeof t.project !== 'string' || !Number.isSafeInteger(t.at)
+      || (t.kind === 'answer' && !(Array.isArray(t.held) && t.held.every(isHeld)))) throw bad;
   }
   return new Map(Object.entries(data.threads));
 }
