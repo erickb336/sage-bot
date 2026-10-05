@@ -37,7 +37,7 @@ function run(gate, events, holders = HOLDERS, leads = LEADS) {
 
 const OPEN = { status: 'open' };
 const votes = (option) => ({ status: 'decided', option, how: 'votes' });
-const lead = (option) => ({ status: 'decided', option, how: 'lead-tiebreak' });
+const lead = (option, min) => ({ status: 'decided', option, how: 'lead-tiebreak', by: LEA, at: at(min) });
 const answered = (option, by, via = 'discord') => ({ status: 'answered', option, by, via });
 
 const cases = [
@@ -145,14 +145,14 @@ const cases = [
   {
     rule: 'batch: a lead breaks a tie; when every part is decided the batch closes',
     gate: batch, events: [ballot(MAYA, 0, 'A', 0), ballot(JON, 0, 'B', 1), ballot(MAYA, 1, 'Z', 2), tick(30), tiebreak(LEA, 0, 'B', 45)],
-    phase: 'closed', outcome: { status: 'decided' }, parts: [lead('B'), votes('Z')],
+    phase: 'closed', outcome: { status: 'decided' }, parts: [lead('B', 45), votes('Z')],
     effects: [{ type: 'vote-ended', by: null }, { type: 'decided', part: 1, option: 'Z', how: 'votes' },
       { type: 'decided', part: 0, option: 'B', how: 'lead-tiebreak' }, { type: 'closed', outcome: { status: 'decided' } }],
   },
   {
     rule: 'batch: a lead may pick any option of a part with zero votes',
     gate: batch, events: [ballot(MAYA, 0, 'A', 0), tick(30), tiebreak(LEA, 1, 'Z', 31)],
-    phase: 'closed', outcome: { status: 'decided' }, parts: [votes('A'), lead('Z')],
+    phase: 'closed', outcome: { status: 'decided' }, parts: [votes('A'), lead('Z', 31)],
   },
   {
     rule: 'batch: a lead action from the terminal is refused',

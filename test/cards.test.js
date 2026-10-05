@@ -23,7 +23,7 @@ test('an open batch card: a live countdown, the tally per part with voters and n
   const c = card(gate, ASKS.B7, PEOPLE);
   const [embed] = c.embeds;
   assert.equal(embed.title, 'Batch vote B7 · T7 CSV export for reports');
-  assert.equal(embed.description, `3 product questions of T7. Vote on each part; change your vote until the vote ends. Closes at <t:${ts(END)}:t> (<t:${ts(END)}:R>).`);
+  assert.equal(embed.description, `3 product questions of T7. Vote on each part; change your vote until the vote ends. The work on the task goes on. Closes at <t:${ts(END)}:t> (<t:${ts(END)}:R>).`);
   assert.equal(embed.fields[0].name, 'Part 1 · Which columns go in the export?');
   assert.equal(embed.fields[0].value, [
     '**A.** Only the columns visible in the table · Recommended · 2 votes (Erick (terminal), Jon)',
@@ -71,7 +71,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
   assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 of 3 votes$/);
-  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\.$/);
+  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\. The chief reminds @sage-lead every 2 h\.$/);
   assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 of 3 votes$/);
   assert.deepEqual(buttons(c), [
     ['press:B7:0:0 Part 1, A: Only the columns visible in the table s3 off', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2 off',
@@ -82,8 +82,8 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   // A part with no votes offers every option to the lead, and the lead's early end says so (F-T27-18), not "closed".
   const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
-  assert.equal(e.embeds[0].description, `Ended early at <t:${ts(T0 + 2 * MINUTE)}:t> by a sage-lead, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
-  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\.$/);
+  assert.equal(e.embeds[0].description, `Ended early by Jon (sage-lead) at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
+  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\. The chief reminds @sage-lead every 2 h\.$/);
   assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (sage-lead only) s4']);
 });
 
