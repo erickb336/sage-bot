@@ -295,18 +295,44 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     for (const [id, m] of meta) {
       for (const [sageId, text] of answersOf(id)) {
         if (m.sent[sageId] === text) continue;
+        // The decisions before the gate rows: an answer that the read of the rows misses is after `mark` in the trail (F-T43-1).
+        const mark = (await sage.decisions()).length;
         // The row again, just before the answer: an answer that the owner typed meanwhile is final, and the bridge skips it (G10).
         await readOwner(await sage.gates());
         if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text) continue;
         try {
           await sage.answer(sageId, text);
-          m.sent[sageId] = text;
-          persist();
-          say(`sage gate ${sageId} answered: ${text}`);
         } catch (e) {
           say(`sage did not record the answer of ${sageId}; the bridge tries again: ${e.message}`);
+          continue;
         }
+        m.sent[sageId] = text;
+        persist();
+        say(`sage gate ${sageId} answered: ${text}`);
+        await keepOwner(sageId, text, mark);
       }
+    }
+  }
+
+  /**
+   * Writes back an answer that the owner typed between the bridge's last read and its own write, which sage replaced (F-T43-1).
+   * gates.tsv keeps only the last write, but decisions.tsv keeps each answer in the order of the writes. So an answer of the gate
+   * after `mark` and just before the bridge's own row is the owner's, and final (G10 a). An answer after the bridge's row is in
+   * gates.tsv already, and the bridge leaves it. The check runs again after each write back, for an answer in that window too.
+   * `m.sent` keeps the bridge's text, so the next read of the rows takes the owner's answer as final and the bridge never sends again.
+   */
+  async function keepOwner(sageId, text, mark) {
+    const row = (await sage.gates()).find((r) => r.id === sageId);
+    const head = `${row.question} → `;
+    for (let wrote = text, from = 0; ;) {
+      const said = (await sage.decisions()).slice(mark).filter((d) => d.task === row.task && d.decision.startsWith(head))
+        .map((d) => d.decision.slice(head.length));
+      const mine = said.lastIndexOf(wrote);
+      if (mine <= from || mine < said.length - 1) return; // nothing between the reads and the write, or a later answer stands
+      wrote = said[mine - 1];
+      await sage.answer(sageId, wrote);
+      say(`${sageId}: the owner answered at the terminal just before the bridge; the bridge wrote the owner's answer back: ${wrote}`);
+      from = mine + 1;
     }
   }
 
