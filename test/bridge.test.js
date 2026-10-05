@@ -7,50 +7,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
+import { BOT, CONFIG, DRIVER, JON, LEADR, MAYA, MEMBERS, OWNER, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { sageTool } from '../src/sage.js';
 import { load, save } from '../src/state.js';
 import { ballotsOf, HOUR, MINUTE, openGate, parseGate, MAX_BALLOTS } from '../src/vote.js';
 
-export const SAGE = process.env.SAGE_TOOL ?? '/Users/erickb336/.claude/plugins/cache/sage/sage/39e9bf767a1f/skills/sage/sage.mjs';
-const DRIVER = '300000000000000001';
-const LEADR = '300000000000000002';
-export const [OWNER, MAYA, JON, SAM, BOT] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004', '100000000000000005'];
-const MEMBERS = [
-  { id: OWNER, name: 'Erick', roles: [DRIVER, LEADR] },
-  { id: MAYA, name: 'Maya', roles: [DRIVER] },
-  { id: JON, name: 'Jon', roles: [DRIVER, LEADR] },
-  { id: SAM, name: 'Sam', roles: [] },
-  { id: BOT, name: 'sage bridge', roles: [DRIVER, LEADR], bot: true },
-];
-const CONFIG = { ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
-const T0 = Date.UTC(2026, 9, 4, 14, 0);
-
-/** A scratch project with a sage logbook, and a bridge on it with the fake Discord layer and a clock that the test moves. */
-export function setup({ members = MEMBERS } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-b3-'));
-  const project = join(root, 'project');
-  mkdirSync(project);
-  const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
-  const sh = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', project], { env, encoding: 'utf8' }).trim();
-  sh('init');
-  const discord = fakeDiscord(members);
-  const lines = [];
-  const b = { root, project, sh, discord, lines, now: T0, statePath: join(root, 'state', 'gates.json') };
-  b.sage = sageTool({ sagePath: SAGE, project, env });
-  b.make = () => createBridge({ sage: b.sage, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
-  b.bridge = b.make();
-  b.gates = () => readFileSync(join(sh('logbook'), 'gates.tsv'), 'utf8');
-  b.answerOf = (id) => b.gates().split('\n').find((l) => l.startsWith(`${id}\t`)).split('\t')[6];
-  b.press = async (user, customId, fields) => {
-    const i = fakeInteraction({ user, customId, fields });
-    await b.bridge.interaction(i);
-    return i.replies;
-  };
-  /** Two loops SETTLE apart: the first sees the new gates, the second posts them. */
-  b.post = async () => { await b.bridge.loop(); b.now += SETTLE; await b.bridge.loop(); };
-  return b;
-}
 const card = (b, id = [...b.discord.messages.keys()][0]) => b.discord.latest(id);
 const text = (payload) => JSON.stringify(payload);
 
@@ -100,7 +62,7 @@ test('F-T28-19: a task with 5 open gates is refused, once, and nothing is posted
   await b.post();
   await b.bridge.loop();
   assert.equal(b.discord.posts.length, 0);
-  assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')), ['not posted: T2 has 5 open gates, and a batch holds at most 4 parts. Answer them at the terminal.']);
+  assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')), ['not posted: T2 asked 5 questions together, and a batch holds at most 4 parts. Answer them at the terminal.']);
   b.sh('gate', 'add', 'T3', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   for (let i = 1; i <= 3; i++) b.sh('gate', 'add', 'T3', '--question', `R${i}?`, '--options', 'x|y', '--recommend', 'x');
   await b.post();
@@ -230,12 +192,12 @@ test('F-T28-9: a withdraw comes only from the chief side; an answer at the termi
   await b.post();
   // No button withdraws: a forged custom id is an unknown button.
   assert.equal((await b.press(OWNER, 'withdraw:G1'))[0].content, 'I do not know this button or its question. Nothing changed.');
-  // The owner answers G1 at the terminal with an option: it is the first answer, via the terminal; the bridge writes nothing back.
+  // The owner answers G1 at the terminal with an option: it is final on the card (G10); the bridge writes nothing back.
   b.sh('gate', 'answer', 'G1', 'y');
   // The chief answers G2 with no option: that withdraws it.
   b.sh('gate', 'answer', 'G2', 'dropped: the task changed');
   await b.bridge.loop();
-  assert.deepEqual(b.bridge.entry('G1').gate.outcome, { status: 'answered', option: 'B', by: OWNER, via: 'terminal' });
+  assert.deepEqual(b.bridge.entry('G1').ask.parts[0].final, { by: OWNER, at: b.now, option: 'B', text: 'B. y' });
   assert.equal(b.answerOf('G1'), 'y');
   assert.deepEqual(b.bridge.entry('G2').gate.outcome, { status: 'withdrawn' });
   assert.equal(b.answerOf('G2'), 'dropped: the task changed');

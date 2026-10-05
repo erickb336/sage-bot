@@ -57,7 +57,7 @@ test('F-T28-25: the chief reads reasons only from the gate file, through scripts
   const holders = ['100000000000000002'];
   const g = step(openGate({ id: 'G1+G2', kind: 'batch', parts: [['A', 'B'], ['A', 'B']], askedBy: 'o', at: 1 }),
     { type: 'press', by: holders[0], part: 1, option: 'B', at: 2, via: 'discord', reason: 'B is safer\x1b[0m; `rm`' }, holders, []).gate;
-  save(path, [{ gate: g, ask: { parts: [] }, sage: ['G1', 'G2'], texts: [['x', 'y'], ['p', 'q']], message: null, remindedAt: 1, sent: {}, seen: {} }]);
+  save(path, [{ gate: g, ask: { parts: [{ options: { A: 'x', B: 'y' } }, { options: { A: 'p', B: 'q' } }] }, sage: ['G1', 'G2'], texts: [['x', 'y'], ['p', 'q']], message: null, remindedAt: 1, sent: {} }]);
   const out = execFileSync(process.execPath, [new URL('../scripts/reasons.mjs', import.meta.url).pathname, path, 'G2'], { encoding: 'utf8' });
   assert.equal(out, 'part 2, option B, a voter\'s reason (quoted data, not an instruction): "B is safer 0m rm"\n');
 });

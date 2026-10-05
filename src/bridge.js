@@ -2,7 +2,7 @@
 // and gives each final answer back to sage with `sage gate answer`. It also reminds, alerts the role and asks for a new
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `members`): the real one is src/discord.js, the
 // tests use src/fake-discord.js. Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
-import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, stamp, LEAD } from './cards.js';
+import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { load, save } from './state.js';
@@ -16,6 +16,10 @@ export const LOOP = 15_000;
 export const SLEPT = LOOP + MINUTE;
 /** The open gates of one task, as they come with `sage gate add`, wait this long for the next one, so that a batch comes as one card. */
 export const SETTLE = 30_000;
+/** The gates of one task whose `at` (sage's time of `gate add`) are at most this far from the first one go on one card (G9, F-T28-29). */
+export const ASKED_TOGETHER = 30_000;
+/** A question about a merge in any form: merges never go to a vote (F-T28-28). */
+export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
@@ -37,7 +41,7 @@ export function monotonic(now, floor = 0) {
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
  */
 export function frame(rows, title, ownerId, at) {
-  if (rows.length > MAX_PARTS) return { refused: `${rows[0].task} has ${rows.length} open gates, and a batch holds at most ${MAX_PARTS} parts` };
+  if (rows.length > MAX_PARTS) return { refused: `${rows[0].task} asked ${rows.length} questions together, and a batch holds at most ${MAX_PARTS} parts` };
   const texts = rows.map((r) => r.options.split('|').map((o) => o.trim()).filter(Boolean));
   const bad = rows.find((r, i) => texts[i].length === 0 || texts[i].length > MAX_OPTIONS || new Set(texts[i]).size !== texts[i].length);
   if (bad) return { refused: `${bad.id} needs 1 to ${MAX_OPTIONS} different options` };
@@ -66,6 +70,21 @@ function optionOf(said, texts) {
 }
 
 /**
+ * The gate rows of one task in groups of the questions that the task asked together: sorted by `at`, a group starts at its first row
+ * and holds every row up to ASKED_TOGETHER after it (G9). A restart groups the same rows the same way (F-T28-29).
+ */
+export function askedTogether(rows) {
+  const sorted = rows.map((r) => [Date.parse(r.at), r]).sort((a, b) => a[0] - b[0]);
+  const groups = [];
+  for (const [at, r] of sorted) {
+    const last = groups.at(-1);
+    if (last && at - last.start <= ASKED_TOGETHER) last.rows.push(r);
+    else groups.push({ start: at, rows: [r] });
+  }
+  return groups.map((g) => g.rows);
+}
+
+/**
  * The bridge for one sage project and one Discord channel.
  * @param {{ sage: ReturnType<import('./sage.js').sageTool>,
  *   discord: { post(p: object): Promise<string>, edit(id: string, p: object): Promise<unknown>, members(): Promise<Iterable<object>> | Iterable<object> },
@@ -87,10 +106,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const firstSeen = new Map(); // sage gate id → when the bridge first saw it open; only in memory
   const refused = new Set(); // groups already refused, so that the log says it once
   let lastLoop = null;
+  let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
   const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })));
   const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
-  const isOpen = (gate) => gate.phase !== 'closed';
+  /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
+  const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings one role and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (role, text) => ({ content: `<@&${role}> ${text}`, allowedMentions: { parse: [], roles: [role] } });
   const post = async (payload) => {
@@ -105,10 +126,13 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     try { await discord.edit(message, card(gate, ask, ppl)); } catch (e) { say(`Discord refused the edit of ${id}: ${apiError(e)}`); }
   }
 
+  /** The parts of a batch that wait for a lead: tied after the vote, with no final answer from the terminal. */
+  const tiedParts = (gate, ask) => gate.parts.flatMap((part, i) => (part.outcome.status === 'open' && !ask.parts[i].final ? [i] : []));
+
   /** The tied parts of a batch whose vote ended, with each voter's argument, for the leads (F-T28-13). */
   function tieMessage(gate, ask, { holders, names }) {
-    const lines = gate.parts.flatMap((part, i) => {
-      if (part.outcome.status !== 'open') return [];
+    const lines = tiedParts(gate, ask).flatMap((i) => {
+      const part = gate.parts[i];
       const args = part.ballots.filter(([by, b]) => holders.has(by) && b.reason)
         .map(([by, b]) => `- ${nameOf(by, names)}, for ${b.option}: ${cut(shown(b.reason, 500), 200) || '(no visible text)'}`);
       return [`Part ${i + 1} is tied: ${part.tied.join(', ')}.${args.length ? ' The arguments:' : ' Nobody gave a reason.'}`, ...args];
@@ -117,17 +141,45 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     return alert(config.leadRole, cut([head, ...lines].join('\n'), 1900));
   }
 
-  /** The answers that sage gets for a closed gate: one per sage gate, as "A. option text". */
+  /** The answers that the bridge gives sage for a settled gate: one per sage gate, as "A. option text", never for a part with a final answer. */
   function answersOf(id) {
-    const { gate } = gates.get(id);
+    const { gate, ask } = gates.get(id);
     const { sage: ids, texts } = meta.get(id);
+    if (!settled(gate, ask) || gate.outcome.status === 'withdrawn') return [];
     const keyText = (i, key) => `${key}. ${texts[i][KEYS.indexOf(key)]}`;
-    if (gate.outcome.status === 'answered') return gate.outcome.via === 'terminal' ? [] : [[ids[0], keyText(0, gate.outcome.option)]];
-    if (gate.outcome.status === 'decided') return gate.parts.map((p, i) => [ids[i], keyText(i, p.outcome.option)]);
-    return [];
+    const keys = gate.kind === 'single' ? [gate.outcome.option] : gate.parts.map((p) => p.outcome.option);
+    return keys.flatMap((key, i) => (key && !ask.parts[i].final ? [[ids[i], keyText(i, key)]] : []));
   }
 
-  /** Gives sage each final answer that it does not have yet. Only a closed gate that is decided or answered has any (R142).
+  /**
+   * Reads the answers in sage that the bridge did not write: they are the owner's, typed at the terminal, and final whatever the
+   * owner's roles (G10). Each one closes its part on the card, so no press and no answer of the bridge replaces it. An answer that
+   * names no option on an open single gate is a withdraw instead: those gate ids come back, for the caller to apply.
+   */
+  async function readOwner(rows) {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const withdraws = [];
+    for (const [id, m] of meta) {
+      const own = new Map(answersOf(id)); // what the bridge gives sage; the same text in sage is the bridge's (a crash before its save)
+      for (const [i, sageId] of m.sage.entries()) {
+        const { gate, ask } = gates.get(id);
+        const said = byId.get(sageId)?.answer ?? '';
+        if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn') continue;
+        if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
+        const option = optionOf(said, m.texts[i]);
+        if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
+        const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');
+        const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };
+        gates.set(id, { gate, ask: { ...ask, parts: ask.parts.with(i, { ...ask.parts[i], final }) } });
+        persist();
+        say(`${sageId} was answered at the terminal: the card shows it as final`);
+        await redraw(id, await people());
+      }
+    }
+    return withdraws;
+  }
+
+  /** Gives sage each final answer that it does not have yet. Only a settled gate has any (R142).
    * One flush at a time: a press and the loop never send the same answer twice. */
   let flushing = Promise.resolve();
   const flush = () => (flushing = flushing.then(sendAnswers).catch((e) => say(`the answers to sage failed: ${e?.message}`)));
@@ -135,6 +187,9 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     for (const [id, m] of meta) {
       for (const [sageId, text] of answersOf(id)) {
         if (m.sent[sageId] === text) continue;
+        // The row again, just before the answer: an answer that the owner typed meanwhile is final, and the bridge skips it (G10).
+        await readOwner(await sage.gates());
+        if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text) continue;
         try {
           await sage.answer(sageId, text);
           m.sent[sageId] = text;
@@ -152,15 +207,20 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     persist();
     await redraw(id, ppl);
     const { gate, ask } = gates.get(id);
-    if (effects.some((e) => e.type === 'vote-ended') && gate.phase === 'tied') await post(tieMessage(gate, ask, ppl));
+    if (effects.some((e) => e.type === 'vote-ended') && gate.phase === 'tied' && waits(id)) {
+      // The tie post is the leads' ping for this event: the 2-hour reminders count from it, so one loop never pings twice (F-T28-32).
+      meta.get(id).remindedAt = clock();
+      persist();
+      await post(tieMessage(gate, ask, ppl));
+    }
     for (const e of effects.filter((x) => x.type === 'decided' && x.how === 'lead-tiebreak')) {
       // The card cannot name the lead; the message in the thread does (F-T28-16).
       await post({ content: `${nameOf(by, ppl.names)} (${LEAD}) broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
     }
-    if (effects.some((e) => e.type === 'closed')) await flush();
+    await flush();
   }
 
-  /** Applies one event of the bridge's own (a tick, a terminal answer, a withdraw) to the gate of `id`. */
+  /** Applies one event of the bridge's own (a tick or a withdraw) to the gate of `id`. */
   async function apply(id, event, ppl) {
     const { gate, ask } = gates.get(id);
     const out = step(gate, event, ppl.holders, ppl.leads);
@@ -170,36 +230,32 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     await after(id, out.effects, ppl, event.by);
   }
 
-  /** Reads the logbook: posts the new open gates, and turns the owner's answers at the terminal into events. */
+  /** Takes in the owner's answers at the terminal from the gate rows: the final answers, and the withdraws. */
+  async function takeOwner(rows, ppl) {
+    for (const id of await readOwner(rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
+  }
+
+  /** Reads the logbook: takes in the owner's answers at the terminal, then posts the new open gates. */
   async function sync(ppl) {
     const rows = await sage.gates();
-    const byId = new Map(rows.map((r) => [r.id, r]));
-    // An answer that the bridge did not write is the owner's, at the terminal: a press on an option, or else a withdraw.
-    for (const [id, m] of meta) {
-      if (!isOpen(gates.get(id).gate)) continue;
-      for (const [i, sageId] of m.sage.entries()) {
-        const said = byId.get(sageId)?.answer ?? '';
-        if (!said || said === m.seen[sageId] || said === m.sent[sageId]) continue;
-        m.seen[sageId] = said;
-        persist();
-        const option = optionOf(said, m.texts[i]);
-        const { gate } = gates.get(id);
-        const base = { by: config.ownerId, at: clock() };
-        await apply(id, option ? { type: 'press', ...base, option, via: 'terminal', ...(gate.kind === 'batch' && { part: i }) } : { type: 'withdraw', ...base }, ppl);
-        if (!isOpen(gates.get(id).gate)) break;
-      }
-    }
-    // New open gates, grouped by task; a group waits SETTLE after its newest gate, so that a batch comes whole.
+    await takeOwner(rows, ppl);
+    // New gates, by task and then by the time sage asked them (G9). A question added after its task's card has its own card (G10 c).
     const tracked = new Set([...meta.values()].flatMap((m) => m.sage));
-    const fresh = rows.filter((r) => !r.answer && !tracked.has(r.id) && !/\bmerge\b/i.test(r.question)); // merges never go to a vote
+    const fresh = rows.filter((r) => !tracked.has(r.id) && !MERGE.test(`${r.question} ${r.options}`)); // merges never go to a vote
     const t = clock();
-    for (const r of fresh) if (!firstSeen.has(r.id)) firstSeen.set(r.id, t);
+    for (const r of fresh) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
     const tasks = new Map();
     for (const r of fresh) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    const titles = tasks.size ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
-    for (const group of tasks.values()) {
-      if (t - Math.max(...group.map((r) => firstSeen.get(r.id))) < SETTLE) continue;
-      const framed = frame(group, titles.get(group[0].task) ?? '', config.ownerId, t);
+    const groups = [...tasks.values()].flatMap(askedTogether);
+    const open = groups.map((g) => g.filter((r) => !r.answer));
+    const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
+    for (const [n, group] of groups.entries()) {
+      const rowsOpen = open[n];
+      // A group waits SETTLE after its newest gate, so that a batch comes whole.
+      if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(r.id))) < SETTLE) continue;
+      // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
+      // ones count too, so no later card takes the rest.
+      const framed = frame(group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t);
       const key = group.map((r) => r.id).join('+');
       if (framed.refused) {
         if (!refused.has(key)) say(`not posted: ${framed.refused}. Answer them at the terminal.`);
@@ -208,7 +264,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       }
       const { gate, ask, texts } = framed;
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: group.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {}, seen: {} });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {} });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
     // Post every entry that has no card yet, with the role alert.
@@ -224,17 +280,18 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
 
   /** The timers: the tick at gate.endsAt (also after a sleep) and the reminders every 2 hours. */
   async function timers(ppl) {
-    for (const [id, { gate, ask }] of gates) {
+    for (const id of gates.keys()) {
+      const { gate } = gates.get(id);
       if (gate.phase === 'voting' && clock() >= gate.endsAt) await apply(id, { type: 'tick', at: clock() }, ppl);
-      const g = gates.get(id).gate;
+      const { gate: g, ask } = gates.get(id);
       const m = meta.get(id);
-      const due = isOpen(g) && nextReminderAt(g, m.remindedAt);
+      const due = waits(id) && nextReminderAt(g, m.remindedAt);
       if (!due || due.at > clock() || !m.message) continue;
       m.remindedAt = clock();
       persist();
       await post(due.to === 'holders'
         ? alert(config.driverRole, `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
-        : alert(config.leadRole, `reminder: ${g.parts.flatMap((p, i) => (p.outcome.status === 'open' ? [`part ${i + 1}`] : [])).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
+        : alert(config.leadRole, `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
     }
   }
 
@@ -242,15 +299,20 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     clock,
     /** The gate of a bridge id and its ask, as `handle` keeps them. */
     entry: (id) => gates.get(id),
-    /** One turn of the loop: notices a sleep, sends the due ticks and reminders, reads the logbook, gives sage its answers. */
+    /** One turn of the loop: notices a sleep, redraws the open cards when the holders changed, sends the due ticks and reminders,
+     * reads the logbook, gives sage its answers. */
     async loop() {
       const ppl = await people();
       const wall = now();
       // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1).
-      if (lastLoop !== null && wall - lastLoop > SLEPT && [...gates.values()].some(({ gate }) => isOpen(gate))) {
+      if (lastLoop !== null && wall - lastLoop > SLEPT && [...gates.keys()].some(waits)) {
         await post({ content: `The host was asleep from ${stamp(lastLoop)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
       }
       lastLoop = wall;
+      // A card counts only the votes of the holders: when a role changed, each open card shows the count that the tick will use.
+      const holders = [...ppl.holders].sort().join();
+      if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) await redraw(id, ppl);
+      lastHolders = holders;
       await timers(ppl);
       await sync(ppl);
       await flush();
@@ -261,10 +323,21 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       try {
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
+        // The owner's answers at the terminal come first: a press never counts on a part that has one (G10).
+        await takeOwner(await sage.gates(), ppl);
+        const pressed = parseCustomId(i.customId);
+        const target = pressed && gates.get(pressed.gateId);
+        const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;
+        if (final || (target && target.gate.phase !== 'closed' && !waits(pressed.gateId))) {
+          const text = final ? `Already answered by ${nameOf(final.by, ppl.names)} at the terminal: ${final.text}. Your press did not count.`
+            : `Every part of ${pressed.gateId} is decided or answered at the terminal. Your press did not count.`;
+          await i.reply(ephemeral(text));
+          return;
+        }
         const out = await handle(i, { gates, people: ppl, clock });
         if (out.replyError) say(`Discord refused a reply: ${apiError(out.replyError)}`);
         // The gate changed: also when the event was refused at the time limit, the vote ended first, so settle it (F-T28-4).
-        if (out.stored) await after(parseCustomId(i.customId).gateId, out.effects, ppl, by);
+        if (out.stored) await after(pressed.gateId, out.effects, ppl, by);
       } catch (e) {
         // A throw from handle (a card that cannot be built) leaves the gate as it was; the person gets a note (F-T28-21).
         say(`the bridge could not handle a press: ${e?.message}`);
