@@ -79,7 +79,7 @@ const GRAPHEMES = new Intl.Segmenter();
  * dropped whole (F-T27-28). When the first cluster alone is too long (a chain of conjuncts), the cut is by code point, never through a
  * surrogate pair, so that the reader still sees the start of the text (F-T27-45).
  */
-function cut(text, max) {
+export function cut(text, max) {
   if (text.length <= max) return text;
   let end = 0;
   for (const { index, segment } of GRAPHEMES.segment(text)) {
@@ -170,14 +170,26 @@ const leaders = (counts) => {
 };
 
 /**
+ * Whether a gate needs nothing more: the vote rules closed it, or every part is decided or has the owner's final answer from the
+ * terminal (`ask.parts[i].final`, G10). A part with a final answer takes no press, and the bridge never gives sage an answer for it.
+ * @param {import('./vote.js').Gate} gate
+ * @param {{ parts: { final?: object }[] }} ask
+ */
+export const settled = (gate, ask) => gate.phase === 'closed'
+  || (gate.parts ?? [gate]).every((p, i) => ask.parts[i].final || p.outcome.status === 'decided');
+/** The line of a part that the owner answered at the terminal. */
+const finalLine = (f, names) => `**Answered by ${who(f.by, names)} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
+
+/**
  * The card of a gate: `{ embeds, components, allowedMentions }`. The embed is plain data, not an EmbedBuilder: the builder's setters
  * throw at the first text over a limit, and `budget` has to measure the whole embed first and shrink it until it fits (F-T27-30, F-T27-33).
  * @param {import('./vote.js').Gate} gate
- * @param {{ task: string, title: string, parts: { question: string, why: string, recommended: string, default?: string, options: Record<string, string> }[] }} ask
+ * @param {{ task: string, title: string, parts: { question: string, why: string, recommended: string, default?: string, options: Record<string, string>,
+ *   final?: { by: string, at: number, option?: string, text: string } }[] }} ask  `final`: the owner's answer at the terminal, made safe
  * @param {{ holders: Set<string>, names: Map<string, string> }} people
  */
 export function card(gate, ask, { holders, names }) {
-  const closed = gate.phase === 'closed';
+  const closed = settled(gate, ask);
   const withdrawn = gate.outcome.status === 'withdrawn';
   const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names) : batch(gate, ask, holders, names);
   const color = withdrawn ? COLOR.withdrawn : closed ? COLOR.decided : gate.phase === 'tied' ? COLOR.tied : COLOR.open;
@@ -191,7 +203,7 @@ const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key
 
 function single(gate, ask, names) {
   const [p] = ask.parts;
-  const o = gate.outcome;
+  const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
   const build = ({ why, label: cap, question }) => ({
     title: cut(`Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     description: [
@@ -201,19 +213,21 @@ function single(gate, ask, names) {
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
       '**Rule:** the first answer is final · reminder every 2 h until answered',
       `**Who can answer:** every ${DRIVER}`,
-      ...(o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
+      ...(p.final ? ['', finalLine(p.final, names)]
+        : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
   });
   const row = new ActionRowBuilder().addComponents(gate.options.map((k, i) => button(customId('press', gate.id, 0, i), `${k}. ${label(p, k)}`,
-    k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary, { chosen: o.option === k, disabled: gate.phase === 'closed' })));
+    k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary, { chosen: o.option === k, disabled: settled(gate, ask) })));
   return { embed: budget(build, caps(ask), { why: 1, label: gate.options.length, question: 1 }), rows: [row] };
 }
 
 function batch(gate, ask, holders, names) {
-  const voting = gate.phase === 'voting';
+  const done = settled(gate, ask);
+  const voting = gate.phase === 'voting' && !done;
   const withdrawn = gate.outcome.status === 'withdrawn';
-  const tiedParts = gate.phase === 'tied' ? gate.parts.filter((part) => part.outcome.status === 'open').length : 0;
+  const tiedParts = gate.phase === 'tied' && !done ? gate.parts.filter((part, i) => part.outcome.status === 'open' && !ask.parts[i].final).length : 0;
   const rows = [];
   const reasons = [];
   const parts = gate.parts.map((part, i) => {
@@ -232,14 +246,15 @@ function batch(gate, ask, holders, names) {
     const notYet = [...holders].filter((id) => !ballots.has(id));
     const o = part.outcome;
     const state = withdrawn ? ''
+      : p.final ? finalLine(p.final, names)
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by a ${LEAD}`}`
       : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
-    const breakable = !voting && !withdrawn && o.status === 'open';
+    const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
       ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${LEAD} only)`, ButtonStyle.Danger) : null)
       : button(customId('press', gate.id, i, j), `Part ${n}, ${k}: ${label(p, k)}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
-        { chosen: o.status === 'decided' && o.option === k, disabled: !voting })).filter(Boolean)));
+        { chosen: p.final ? p.final.option === k : o.status === 'decided' && o.option === k, disabled: !voting || Boolean(p.final) })).filter(Boolean)));
     /** The field of the part under the caps of a plan: the voter lists, the why, the labels and the question shrink; the keys and the counts never. */
     return ({ voters, why, label: cap, question }) => {
       const named = (ids) => list(ids.map((id) => who(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')), voters);
@@ -263,7 +278,7 @@ function batch(gate, ask, holders, names) {
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
     : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for a ${LEAD}. ` +
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
-    : `${ended}Closed: every part is decided. ${ask.task} goes on.`;
+    : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
   const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for a ${LEAD} · ` +
     `Who votes: every ${DRIVER}, one vote per part · Reason: optional, after a press` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
@@ -330,6 +345,7 @@ const NOTES = {
   'wrong-kind': () => 'This is a single question, not a vote: there is nothing to end and no tie to break.',
   'not-tied': () => 'This part is not tied, so there is no tie to break.',
   'not-tied-option': () => 'Only one of the tied options can break the tie.',
+  full: () => 'This part already has the most voters it can count. Your press did not count.',
   closed: (g, names) => g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
     : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${who(g.askedBy, names)}. Nothing to answer.`
     : `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your press did not count.`,
