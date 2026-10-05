@@ -64,7 +64,6 @@ The bridge only reads the logbook and calls the sage state tool. It never writes
 
 ```mermaid
 stateDiagram-v2
-    direction LR
     [*] --> Open: single question
     [*] --> Voting: batch of 2 to 4
     Open --> Decided: first press of a sage-driver
