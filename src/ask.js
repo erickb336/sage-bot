@@ -175,8 +175,11 @@ export function readShared(files) {
   return { attached, over };
 }
 
-/** The custom_id of the confirm button of /sage unregister: this prefix and the channel id. */
+/** The custom_id of the confirm button of /sage unregister: this prefix and the channel id. Its Cancel button is CANCEL. */
 export const UNREGISTER = 'channel-unregister:';
+export const CANCEL = `${UNREGISTER}cancel`;
+/** How long the confirm of /sage unregister works after Discord made it. */
+export const CONFIRM_FOR = 10 * 60_000;
 /** The custom_id of the confirm button of /sage stop (the kill switch). */
 export const STOP = 'leads-stop';
 /** Discord's codes for a right that sage-bot lacks: Missing Access and Missing Permissions. */
@@ -265,7 +268,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     if (!roles.includes(config.leadRole)) return { content: 'Only a sage-lead can unregister a channel. Ask a lead.' };
     if (channels.get(at).home) return { content: `<#${at}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.` };
     return { content: `Unregister <#${at}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`,
-      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${at}` }] }] };
+      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${at}` },
+        { type: 2, style: 2, label: 'Cancel', custom_id: CANCEL }] }] };
   }
 
   /** The answer to /sage stop: a confirm button for a sage-lead or Erick, a refusal for anyone else. */
@@ -418,33 +422,39 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
       }
     },
     /**
-     * A press of the confirm button of /sage unregister or /sage stop: `{ user: { id, bot }, roles, customId, update, reply }`. A sage-lead's press
-     * removes the channel from the registry, saves it, logs it at the terminal and replaces the confirm with the result. An apprentice's
-     * press changes nothing and gets a reply of its own, so the lead's confirm stays. A member with neither sage role gets nothing. Never rejects.
+     * A press of a button of the /sage unregister confirm or the /sage stop confirm: `{ user: { id, name, bot }, roles, customId, sentAt,
+     * update, reply }`, where `sentAt` is when Discord made the confirm. STOP goes to the kill switch (stopPress). A sage-lead's press of
+     * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the lead's name and id, and
+     * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. An
+     * apprentice's press changes nothing and gets a reply of its own, so the lead's confirm stays. A member with neither sage role, and a
+     * custom_id that is not STOP, CANCEL or a channel id, get nothing. Never rejects.
      */
     async press(b) {
       const roles = b.roles ?? [];
       if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '') || !(isHolder(roles) || b.user.id === config.ownerId)) return;
       if (b.customId === STOP) return stopPress(b, roles);
       const id = String(b.customId).slice(UNREGISTER.length);
+      if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
       let content;
       if (!roles.includes(config.leadRole)) {
         await b.reply({ content: 'Only a sage-lead can unregister a channel. Nothing changed.', allowedMentions: NO_MENTIONS })
           .catch((e) => say(`Discord refused the unregister reply: code ${e?.code ?? '-'}: ${e?.message}`));
         return;
       }
-      if (!channels.has(id)) content = `<#${id}> is not registered. Nothing changed.`;
+      if (b.customId === CANCEL) content = 'Cancelled. Nothing changed.';
+      else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.';
+      else if (!channels.has(id)) content = `<#${id}> is not registered. Nothing changed.`;
       else if (channels.get(id).home) content = `<#${id}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`;
       else {
         const { project } = channels.get(id);
-        channels.delete(id);
-        try { saveChannels(channelsPathOf(config), channels); } catch (e) {
-          channels.set(id, { project });
+        const next = new Map(channels);
+        next.delete(id);
+        try { saveChannels(channelsPathOf(config), next); channels.delete(id); } catch (e) { // the registry in memory changes only after the save
           say(`the channel registry could not be saved, so ${id} stays registered: ${e?.message}`);
           content = 'I could not unregister this channel just now. Nothing changed. Please try again in a minute.';
         }
         if (!content) {
-          say(`the sage-lead ${b.user.id} unregistered the channel ${id} (it was for the project ${project})`);
+          say(`the sage-lead ${b.user.name} (${b.user.id}) unregistered the channel ${id} (it was for the project ${project})`);
           content = `<#${id}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`;
         }
       }

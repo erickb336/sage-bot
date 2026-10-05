@@ -79,8 +79,8 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch)) : undefined;
     if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP)) {
-      return ask.press({ user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), customId: i.customId,
-        update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
+      return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member),
+        customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
     }
     return accepts(i, config.channelId, fetch).then((ok) => ok && bridge.interaction(i));
   },
@@ -95,24 +95,45 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 });
 
 /**
- * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), opens the channel registry (T130: made from
- * channelId and askChannelId when there is none), reads the token, logs in, logs each permission that sage-bot lacks in a registered
- * channel, and runs the loop every LOOP ms. The votes and cards go to the registry's home channel.
+ * The start before Discord: refuses an old config, checks the projects, takes the lock on the gate file (one bridge at a time,
+ * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
+ * or a bad registry, stops here, before the Keychain. Then it opens the lead log and reads the kill switch (createAsk, T131).
+ * `fetchChannel(id)` gives a Discord channel after the login: the #sage-audit copy of each lead log line goes through it. The returned
+ * config has the registry's home channel as its channelId: the votes and cards go there.
+ */
+export function prepare(file, log, fetchChannel) {
+  refuseOldRoles(file);
+  const projects = projectsOf(file);
+  lock(file.statePath);
+  const channels = openChannels(file, projects, log);
+  const config = withHome(file, channels);
+  // #sage-audit (T131): a copy of each lead log line. Without auditChannelId, the lead log only, and the start says so.
+  let auditChannel = null;
+  const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
+  if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
+  return { config, channels, ask: createAsk({ config, channels, log, audit }) };
+}
+
+/**
+ * The start after the login: fetches the guild and its members, sets /sage for this guild only, and logs each permission that sage-bot
+ * lacks in a registered channel. Returns the guild.
+ */
+export async function enter(client, { config, channels, ask, log }) {
+  const guild = await client.guilds.fetch(config.guildId);
+  await guild.members.fetch();
+  await guild.commands.set([askCommand(ask.projects)]);
+  for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
+  return guild;
+}
+
+/**
+ * Starts the bridge: `prepare`, then reads the token, logs in, `enter`, and runs the loop every LOOP ms.
  * @param {{ guildId: string, channelId?: string, askChannelId?: string, ownerId: string, apprenticeRole: string, leadRole: string,
  *   project: string, sagePath: string, statePath: string }} file
  */
 export async function start(file) {
-  refuseOldRoles(file); // before the lock and the Keychain: an old config never reaches Discord
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const projects = projectsOf(file); // the same: a config that is not safe stops here (T71)
-  lock(file.statePath);
-  const channels = openChannels(file, projects, log); // a bad registry stops here, before Discord
-  const config = withHome(file, channels);
-  // #sage-audit (T131): a copy of each lead log line. Without auditChannelId, the lead log only, and the start says so.
-  let auditChannel = null;
-  const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await client.channels.fetch(config.auditChannelId); await auditChannel.send(payload); } : undefined;
-  if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
-  const ask = createAsk({ config, channels, log, audit });
+  const { config, channels, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any lead log line
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
@@ -120,10 +141,7 @@ export async function start(file) {
   const ready = new Promise((done) => client.once(Events.ClientReady, done));
   await client.login(token);
   await ready;
-  const guild = await client.guilds.fetch(config.guildId);
-  await guild.members.fetch();
-  await guild.commands.set([askCommand(ask.projects)]); // /sage, for this guild only
-  for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
+  const guild = await enter(client, { config, channels, ask, log });
   const channel = await client.channels.fetch(config.channelId);
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({

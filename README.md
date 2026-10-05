@@ -128,7 +128,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
 - [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
   *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
-- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. You can also leave both ids out and register the home channel with the script (see [Channels](#channels)). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
   Then set `projects`, the projects that `/sage` may read. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, `/sage` reads only `project`, with no files. Remove the example's sample entry, or fill it in.
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
@@ -293,9 +293,25 @@ Time left is not estimated yet: the board shows the count of tasks left. In a ch
 
 sage-bot works only in the channels that Erick registers. Each registered channel is for one project: `/sage` there reads that project when you leave out `project`. One channel is the home channel: the votes and cards post there. The list is the channel registry, the file `<statePath>.channels`.
 
-**Your first start makes the registry.** If you used sage-bot before, you need to do nothing: the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. `/sage` now also works in the home channel.
+**Make the registry once.** The commands below read the bridge's config at `~/.config/sage-bot/config.json`; add `--config <config.json>` for another file.
 
-**Register or unregister a channel at the terminal.** Stop the bridge first: the script refuses while the bridge runs, because only one of them may change the registry. To copy a channel id, right-click the channel with Developer Mode on.
+- If you used sage-bot before, you need to do nothing: at its first start the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. `/sage` now also works in the home channel.
+- On a new install, you can leave `channelId` and `askChannelId` out of the config. Then register the home channel first, while the bridge is stopped (see the next step). Until you do, the bridge does not start, and its message gives this command.
+
+<!-- check: run, prints "registered the channel 400000000000000001 for the project your-project (home channel of the votes and cards)" -->
+```sh
+node scripts/channels.mjs register 400000000000000001 your-project --home   # the home channel: the votes and cards post there
+```
+
+**Register or unregister a channel at the terminal.** Stop the bridge first: `register` and `unregister` refuse while the bridge runs, because only one of them may change the registry. `list` only reads, so it works at any time. To copy a channel id, right-click the channel with Developer Mode on.
+
+The launchd agent starts the bridge again when it stops, so stop it with launchctl, and start it again after your changes. If you run the bridge by hand, stop it with Ctrl+C instead.
+
+<!-- check: skip, changes the Mac's login items; the test never runs launchctl -->
+```sh
+launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist   # stop the bridge before register or unregister
+launchctl load ~/Library/LaunchAgents/com.sage.bot.plist     # start it again after them
+```
 
 <!-- check: run, prints "registered the channel 400000000000000003 for the project your-project" -->
 ```sh
@@ -305,11 +321,14 @@ node scripts/channels.mjs list                                       # print the
 ```
 
 - A project that is not in the config's `projects` is refused.
-- `register <id> <project> --home` makes that channel the home channel.
+- `register <id> <project> --home` makes that channel the home channel. The old home stays registered as a normal channel.
+- The home channel cannot move while a card waits for votes in the old home or its threads: their buttons would stop working. Wait until they are settled, or answer them at the terminal.
 - The home channel cannot be unregistered: make another channel the home first.
+- When you remove a project from the config, the bridge does not start while a channel still has it. `list` marks each such channel "not in the config". Register it again for a listed project, or unregister it.
+- When the registry file is broken (for example bad JSON, a wrong mode or a symlink), the bridge and the script stop, and the message gives the command that repairs it. For a wrong mode, it is `chmod 600 <file>`. For everything else, move the file aside with `mv <file> <file>.bad`, then register the home channel again with `register <channel id> <project> --home`, and then each other channel.
 - Then start the bridge again. At start it checks its permissions in each registered channel and logs each missing one, by name, in `~/Library/Logs/sage-bot.log`.
 
-**A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a button; a lead's press removes the channel, and the terminal log names the lead. A sage-apprentice cannot. Nobody can register a channel from Discord.
+**A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". A lead's press of the first removes the channel, and the terminal log gives the lead's name and id. The confirm works for 10 minutes. A sage-apprentice cannot unregister a channel. Nobody can register a channel from Discord.
 
 sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
 
