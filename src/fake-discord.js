@@ -108,7 +108,7 @@ export function fakeDiscord(members) {
 /**
  * A fake /sage command, as src/discord.js maps a real one for src/ask.js: `{ user: { id, bot }, roles, channelId, parentId, sub, options,
  * defer, edit }`. `parentId` is the parent channel of a thread, else null. `replies` records each call in order as `{ kind, ...payload }`,
- * kind 'defer' or 'edit' (files as their names and sizes). `onDefer` runs inside the defer, before it resolves: a test changes the
+ * kind 'defer', 'edit' (files as their names and sizes) or 'remove'. `onDefer` runs inside the defer, before it resolves: a test changes the
  * project there to see that no work came before it. SAMPLE DATA ONLY.
  * @param {{ user: string, roles?: string[], bot?: boolean, channelId: string, parentId?: string | null, sub: string,
  *   options?: { project?: string, id?: string }, onDefer?: () => void }} o
@@ -119,11 +119,23 @@ export function fakeCommand({ user, roles = [], bot = false, channelId, parentId
     replies.push({ kind, ...structuredClone(payload), ...(files && { files: files.map((f) => ({ name: f.name, size: f.attachment.length })) }) });
     if (kind === 'defer') await onDefer?.();
   };
-  return { user: { id: user, bot }, roles, channelId, parentId, sub, options, replies, defer: record('defer'), edit: record('edit') };
+  return { user: { id: user, bot }, roles, channelId, parentId, sub, options, replies, defer: record('defer'), edit: record('edit'), remove: async () => { replies.push({ kind: 'remove' }); } };
 }
 
-/** A fake message that mentions the bot, as src/discord.js maps a real one: `{ user: { id, bot }, roles, channelId, parentId, content, reply }`. SAMPLE DATA ONLY. */
-export function fakeMention({ user, roles = [], bot = false, channelId, parentId = null, content = '' }) {
+/**
+ * A fake message that mentions the bot, as src/discord.js maps a real one: `{ id, user: { id, bot }, roles, channelId, parentId, forum,
+ * content, reply, startThread, post }`. `replies` records the replies in place. The threads and their posts go to `place`, a
+ * fakeDiscord (a new one when none is given): the message is posted in its channel there first, so `startThread` opens a thread from it.
+ * `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }` (Missing Permissions). SAMPLE DATA ONLY.
+ */
+export function fakeMention({ user, roles = [], bot = false, channelId, parentId = null, forum = false, content = '', place = fakeDiscord([]), refuse = {} }) {
   const replies = [];
-  return { user: { id: user, bot }, roles, channelId, parentId, content, replies, reply: async (payload) => { replies.push(structuredClone(payload)); } };
+  const no = (call) => { if (refuse[call]) throw Object.assign(new Error('Missing Permissions'), { code: refuse[call], status: 403 }); };
+  const id = String(800000000000000000n + BigInt(place.messages.size));
+  place.messages.set(id, [{ content }]);
+  place.where.set(id, channelId);
+  return { id, user: { id: user, bot }, roles, channelId, parentId, forum, content, replies, place,
+    reply: async (payload) => { no('reply'); replies.push(structuredClone(payload)); },
+    startThread: async (name) => { no('startThread'); return place.startThread(id, name); },
+    post: async (thread, payload) => { no('post'); return place.post(thread, payload); } };
 }

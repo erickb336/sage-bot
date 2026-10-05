@@ -42,7 +42,7 @@ try {
 }
 const missing = CONFIG_FIELDS.filter((k) => typeof fields?.[k] !== 'string' || !fields[k]);
 if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. ${nothing}`);
-const notIds = DISCORD_IDS.filter((k) => !SNOWFLAKE.test(fields[k]));
+const notIds = DISCORD_IDS.filter((k) => (CONFIG_FIELDS.includes(k) || fields[k] !== undefined) && !SNOWFLAKE.test(fields[k]));
 if (notIds.length) stop(`in the config file ${config}, ${notIds.join(', ')} must each be a Discord id (17 to 20 digits). ${nothing}`);
 try {
   projectsOf(fields); // the projects of /sage, checked as the bridge checks them at start (T71)
