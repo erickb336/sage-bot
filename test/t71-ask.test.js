@@ -284,7 +284,7 @@ const files = async (ask, o = {}) => {
   return answers(i);
 };
 
-test('F-T71-2: every /sage command defers in private before any file or logbook work, then edits that reply', async (t) => {
+test('F-T71-2: every /sage command defers in public before any file or logbook work, then edits that reply', async (t) => {
   const b = world(t);
   // The defer adds a task and a file: an answer that shows them did its work after the defer.
   const [board] = await b.cmd(MAYA, 'board', {}, { onDefer: () => b.sh('task', 'add', '--title', 'Added during the defer', '--size', 'tiny') });
