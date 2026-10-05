@@ -108,6 +108,9 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | A session thread holds the votes and the chief's posts only. Chat with the chief is in a separate channel. (G16) | Votes stay readable, and no chat text goes near the chief's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
 | No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
+| `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a private reply. (G18) | The team can read the state of the work, and nobody else can. | `src/ask.js` |
+| An answer shows only the id, title, size, state and pull request of a task, and the text and options of an open question. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
+| Each person can ask 10 times in a rolling hour; every ask counts. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
 
 ## Set up a live trial
 
@@ -115,11 +118,12 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
-- [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Invite it to your server with the `bot` scope. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
-  *Why:* the bridge reads the members' roles to know who may vote. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach the chief's chat.
+- [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Leave the **Message Content** intent off. Invite it to your server with the `bot` and `applications.commands` scopes. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
+  *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach the chief's chat.
 - [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
   *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
-- [ ] **3. Fill in the config.** Copy the example, then put in the 5 Discord ids: the server (`guildId`), the parent channel (`channelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+  Then set `projects`, the projects that `/sage` may read. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, `/sage` reads only `project`, with no files. Remove the example's sample entry, or fill it in.
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
 
@@ -138,9 +142,17 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | sage-lead | Deny the same four permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
+  In #ask-sage:
+
+  | Who | Permissions in #ask-sage |
+  | --- | --- |
+  | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
+  | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
+  | The sage-bot app | Allow View Channel, Send Messages, Attach Files and Read Message History. |
+
   **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
-  *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+  *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage` and reads the answers; people without a role can read it, and `/sage` refuses them. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3. Use the absolute path of your sage-bot folder.
@@ -253,6 +265,17 @@ Run each command in the sage-bot folder.
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 
+In #ask-sage, a sage-apprentice or a sage-lead types one of these. Only the person who asks sees the answer. Leave out `project` for the first project of the config.
+
+| You want to | Type this in #ask-sage |
+| --- | --- |
+| See the tasks by state, the tasks left and the open questions | `/sage board [project]` |
+| See one task: its title, size, state and pull request | `/sage task <id> [project]`, for example `/sage task T7` |
+| See the open questions with their options, and which ones are team votes | `/sage gates [project]` |
+| Get the shared images and PDFs of a project | `/sage files [project]` |
+
+Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in #ask-sage, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention in another channel gets one pointer to #ask-sage per person per day. `/sage` also works in a thread of #ask-sage.
+
 ## FAQ
 
 **Does a Discord message ever reach the chief?** No. The bridge gives sage only the final answer: the option's letter and sage's own option text. The chief reads the reasons only through `scripts/reasons.mjs`, which keeps only letters, digits, spaces and `. , : -`, and frames each reason as quoted data. Two settings of the owner keep Discord text away from the chief too: the Discord plugin does not watch the parent channel ([step 4](#set-up-a-live-trial)), and its `fetch_messages` tool is denied ([step 7](#set-up-a-live-trial)). Those two are settings, not code.
@@ -276,6 +299,7 @@ Run each command in the sage-bot folder.
 | `src/vote.js` | The vote rules: pure functions, no clock and no Discord. |
 | `src/cards.js`, `src/handle.js` | The cards, the reason form, the private notes, and the handler of a press. |
 | `src/bridge.js`, `src/discord.js` | The bridge's loop, and the only code that connects to Discord. |
+| `src/ask.js` | The `/sage` read commands of #ask-sage, the answer to an @sage-bot mention, and the rate limit. |
 | `src/state.js`, `src/sessions.js`, `src/sage.js` | The gate file and its lock, the session threads, and the calls to the sage state tool. |
 | `src/clean.js` | The allow-lists for the terminal and for the chief. |
 | `src/fake-discord.js` | The fake Discord for the tests and the demo. |

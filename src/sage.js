@@ -23,8 +23,11 @@ function rows(text) {
  */
 export function sageTool({ sagePath, project, env = process.env }) {
   const sage = async (...args) => (await run(process.execPath, [sagePath, ...args, '--project', project], { env, encoding: 'utf8' })).stdout.trim();
+  // One lookup of the logbook folder, kept as one promise, so that tables read at the same time share it (F-T71-2). A lookup that
+  // fails is not kept: the next read tries again.
   let dir;
-  const table = async (name) => rows(await readFile(join(dir ??= await sage('logbook'), `${name}.tsv`), 'utf8'));
+  const logbook = () => (dir ??= sage('logbook').catch((e) => { dir = undefined; throw e; }));
+  const table = async (name) => rows(await readFile(join(await logbook(), `${name}.tsv`), 'utf8'));
   return {
     /** Every gate row: { id, task, question, options, recommendation, default, answer, at }. */
     gates: () => table('gates'),
