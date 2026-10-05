@@ -1,4 +1,4 @@
-// The bridge's gate file: the only copy of the votes (F-T28-10, F-T28-12, F-T28-15). Only the bridge writes it: its folder
+// The bridge's gate file and the team votes file. The gate file is the only copy of the votes (F-T28-10, F-T28-12, F-T28-15). Only the bridge writes it: its folder
 // is 0700 and the file 0600, it is replaced whole by a rename (never half written), and a load refuses a file that another
 // user owns or that others may write. Every gate in it goes through parseGate on fresh JSON.parse output. The bridge loads
 // it only from this path, never from Discord or a shared place.
@@ -29,24 +29,61 @@ function entryOf(e) {
  *   sent: Record<string, string> }[]}  the owner's final answers from the terminal are in `ask.parts[i].final`
  */
 export function load(path) {
-  const st = lstatSync(path, { throwIfNoEntry: false });
-  if (!st) return [];
-  if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
-    throw new Error(`the gate file ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`);
-  }
-  const data = JSON.parse(readFileSync(path, 'utf8'));
+  const text = readOwn(path, 'gate file');
+  if (text === undefined) return [];
+  const data = JSON.parse(text);
   if (data?.version !== 1 || !Array.isArray(data.entries)) throw new TypeError(`the gate file ${path} is not version 1`);
   return data.entries.map(entryOf);
 }
 
-/** Replaces the gate file whole: a new 0600 file beside it, synced, then renamed over it. */
-export function save(path, entries) {
+/** The text of a file that only this user may read and write, or undefined when there is none. Throws for any other file. */
+function readOwn(path, what) {
+  const st = lstatSync(path, { throwIfNoEntry: false });
+  if (!st) return undefined;
+  if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
+    throw new Error(`the ${what} ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`);
+  }
+  return readFileSync(path, 'utf8');
+}
+
+/** Replaces the gate file whole. */
+export const save = (path, entries) => writeWhole(path, JSON.stringify({ version: 1, entries }));
+
+/** A sage gate id, as sage writes it: G and digits. Only these go in the team votes file. */
+export const GATE_ID = /^G\d{1,9}$/;
+
+/**
+ * The team votes file (G13): the sage gate ids that the chief marked as team votes. The bridge posts only these.
+ * It is `votesPath` in the config, or `<statePath>.votes`; scripts/vote.mjs writes it.
+ */
+export function votesPathOf({ votesPath, statePath }) {
+  const path = votesPath ?? (typeof statePath === 'string' ? `${statePath}.votes` : undefined);
+  if (typeof path !== 'string' || !path) throw new TypeError('the config needs statePath (or votesPath) to find the team votes file');
+  return path;
+}
+
+/** The marked gate ids, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list of gate ids. */
+export function loadVotes(path) {
+  const text = readOwn(path, 'team votes file');
+  if (text === undefined) return new Set();
+  const ids = JSON.parse(text);
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && GATE_ID.test(id))) {
+    throw new TypeError(`the team votes file ${path} must be a JSON list of sage gate ids (G and digits). Nothing was loaded.`);
+  }
+  return new Set(ids);
+}
+
+/** Replaces the team votes file whole, sorted by number. */
+export const saveVotes = (path, ids) => writeWhole(path, JSON.stringify([...ids].sort((a, b) => a.slice(1) - b.slice(1))));
+
+/** Replaces a file whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700. */
+function writeWhole(path, text) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.tmp`;
   rmSync(tmp, { force: true }); // a temp file left by a crash; 'wx' then makes a new one with mode 0600
   const fd = openSync(tmp, 'wx', 0o600);
   try {
-    writeSync(fd, JSON.stringify({ version: 1, entries }));
+    writeSync(fd, text);
     fsyncSync(fd);
   } finally {
     closeSync(fd);

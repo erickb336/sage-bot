@@ -1,11 +1,11 @@
 // The sage bridge (B3): it reads the open gates of a sage logbook, posts them as cards, turns presses into vote events,
 // and gives each final answer back to sage with `sage gate answer`. It also reminds, alerts the role and asks for a new
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `members`): the real one is src/discord.js, the
-// tests use src/fake-discord.js. Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
+// tests use src/fake-discord.js. It posts only the gates that the chief marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
-import { load, save } from './state.js';
+import { load, loadVotes, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
@@ -18,7 +18,7 @@ export const SLEPT = LOOP + MINUTE;
 export const SETTLE = 30_000;
 /** The gates of one task whose `at` (sage's time of `gate add`) are at most this far from the first one go on one card (G9, F-T28-29). */
 export const ASKED_TOGETHER = 30_000;
-/** A question about a merge in any form: merges never go to a vote (F-T28-28). */
+/** A question about a merge in any form: merges never go to a vote, also when the chief marked one (F-T28-28, a second guard to G13). */
 export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
@@ -88,7 +88,7 @@ export function askedTogether(rows) {
  * The bridge for one sage project and one Discord channel.
  * @param {{ sage: ReturnType<import('./sage.js').sageTool>,
  *   discord: { post(p: object): Promise<string>, edit(id: string, p: object): Promise<unknown>, members(): Promise<Iterable<object>> | Iterable<object> },
- *   config: { ownerId: string, driverRole: string, leadRole: string }, statePath: string, now?: () => number, log?: (line: string) => void }} o
+ *   config: { ownerId: string, driverRole: string, leadRole: string, votesPath?: string }, statePath: string, now?: () => number, log?: (line: string) => void }} o
  */
 export function createBridge({ sage, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
   for (const key of ['ownerId', 'driverRole', 'leadRole']) {
@@ -105,6 +105,9 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const clock = monotonic(now, Math.max(0, ...[...gates.values()].map((e) => e.gate.lastAt)));
   const firstSeen = new Map(); // sage gate id → when the bridge first saw it open; only in memory
   const refused = new Set(); // groups already refused, so that the log says it once
+  const kept = new Set(); // sage gate ids already logged as kept at the terminal (not marked, or about a merge), so that the log says it once
+  const votesPath = votesPathOf({ statePath, votesPath: config.votesPath });
+  let votesError = null; // the last refusal of the team votes file, so that the log says it once
   let lastLoop = null;
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
@@ -235,15 +238,37 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     for (const id of await readOwner(rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
   }
 
+  /** The gate ids in the team votes file. A refused file counts as empty, so nothing is posted; the log says why once. */
+  function teamVotes() {
+    try {
+      const votes = loadVotes(votesPath);
+      votesError = null;
+      return votes;
+    } catch (e) {
+      if (e.message !== votesError) say(`no gate is posted: ${e.message}`);
+      votesError = e.message;
+      return new Set();
+    }
+  }
+
   /** Reads the logbook: takes in the owner's answers at the terminal, then posts the new open gates. */
   async function sync(ppl) {
     const rows = await sage.gates();
     await takeOwner(rows, ppl);
     // New gates, by task and then by the time sage asked them (G9). A question added after its task's card has its own card (G10 c).
     const tracked = new Set([...meta.values()].flatMap((m) => m.sage));
-    const fresh = rows.filter((r) => !tracked.has(r.id) && !MERGE.test(`${r.question} ${r.options}`)); // merges never go to a vote
+    const untracked = rows.filter((r) => !tracked.has(r.id));
     const t = clock();
-    for (const r of fresh) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
+    // The time a gate was first seen counts also before the chief marks it: a gate marked later posts at the next loop.
+    for (const r of untracked) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
+    // Only the gates that the chief marked as team votes go to Discord (G13); every rule below sees only these.
+    const votes = teamVotes();
+    const fresh = untracked.filter((r) => {
+      const why = !votes.has(r.id) ? 'the chief did not mark it as a team vote'
+        : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
+      if (why && !r.answer && !kept.has(r.id)) { kept.add(r.id); say(`${r.id} stays at the terminal: ${why}`); }
+      return !why;
+    });
     const tasks = new Map();
     for (const r of fresh) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
     const groups = [...tasks.values()].flatMap(askedTogether);

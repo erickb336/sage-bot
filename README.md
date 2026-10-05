@@ -265,10 +265,29 @@ Discord shows every button of a message to everyone, so a non-lead sees "End vot
 1. It notices a sleep of the Mac (two turns more than 75 seconds apart). When a gate is open, it posts: "The host was asleep from 22:10 to 08:05. Presses in that time did not count. Please press again on any open question." A press while the Mac slept never reached the bridge: Discord showed "This interaction failed".
 2. It sends the tick at `gate.endsAt` to each batch vote at or after its limit, also after a sleep.
 3. It sends each reminder that is due, once, also after a sleep: to the sage-driver role for a single gate with no answer, and to the sage-lead role for a batch with tied parts.
-4. It reads the logbook (see below) and posts the new gates.
+4. It reads the logbook (see below) and posts the new gates that the chief marked as team votes.
 5. It gives sage each final answer that sage does not have yet.
 
 Each event gets its time from the bridge's own clock: the wall clock (it runs on while the Mac sleeps), never earlier than its last value. No time comes from Discord data.
+
+### Which questions go to Discord
+
+Only the questions that the chief marks as team votes go to Discord. Every other gate stays at the terminal: it gets no card, and the bridge logs one line for it, "G5 stays at the terminal: the chief did not mark it as a team vote". This is the owner's decision G13: most gates are questions for the owner alone, and the team votes only on the questions that the chief chooses for it.
+
+The chief marks gates with `scripts/vote.mjs`:
+
+```sh
+node scripts/vote.mjs G4 G5          # mark G4 and G5 as team votes
+node scripts/vote.mjs --unmark G5    # unmark G5
+node scripts/vote.mjs --list         # print the list: "team votes: G4"
+```
+
+Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`. The list is the team votes file: `votesPath` in the config, or `<statePath>.votes`. It is a JSON list of gate ids, mode 0600, written whole with a new file and a rename. The script refuses an id that is not a sage gate id (G and digits) and then changes nothing. The bridge reads the file at each turn of the loop, and refuses a file that another user owns, that others can read or write, or that is not a list of gate ids: then it posts nothing and logs why once.
+
+- Mark the gates of one batch with one command. Each rule below works on the marked gates only: two marked gates of one task, asked within 30 seconds, share a card; 5 marked gates asked together stay at the terminal.
+- A gate marked after it was added is posted at the next turn of the loop. When its task's card is already out, it gets its own card.
+- A marked question about a merge is still not posted, and the bridge logs "G5 stays at the terminal: it is about a merge, and a merge never goes to a vote".
+- Unmarking a gate that has a card does not take the card back.
 
 ### How a sage gate becomes a card
 
@@ -281,7 +300,7 @@ The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` f
 | 5 or more gates that one task asked together | Refused: no card. The terminal shows "not posted: T2 asked 5 questions together, and a batch holds at most 4 parts. Answer them at the terminal." once. They stay at the terminal until each one has an answer: the answered ones still count, so no later card takes the rest. |
 | A gate that a task adds after its card was posted | Its own card, also within 30 seconds of the first. |
 | A gate with no option or more than 5 | Refused the same way: one row of Discord buttons holds 5. |
-| A gate whose question or options name a merge ("merge", "merges", "merged", "merging") | Not posted. Merges never go to a vote; they stay at the terminal. |
+| A marked gate whose question or options name a merge ("merge", "merges", "merged", "merging") | Not posted. Merges never go to a vote; they stay at the terminal. |
 | A new card | The post mentions the sage-driver role, and only that role: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." |
 | The owner answers a posted gate at the terminal (`sage gate answer`) | Final, whatever the owner's roles. The card shows "Answered by Erick (terminal) at 14:05: B. text. Final." on that question, or on that part of a batch, and its buttons go grey. A press on it gets "Already answered by Erick at the terminal: … Your press did not count." The other parts of a batch keep voting, and the leads never get a tie for an answered part. The answer is no ballot. |
 | An answer in sage that the bridge did not write | The owner's. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
@@ -305,7 +324,7 @@ You need Node 22 or later, `npm ci` once, and:
 
 1. A Discord application with a bot user in your server, with the Server Members intent on. Make the roles sage-driver and sage-lead.
 2. **The Keychain item.** Put the bot token in the macOS Keychain as a generic password with the service name `sage-bot`, with Keychain Access (File, New Password Item: name `sage-bot`). Do not type it in a command, because the shell history keeps it. At start the bridge reads it with `/usr/bin/security find-generic-password -s sage-bot -w`. It never writes the token to a file, a log or an error. When the item is missing, the bridge stops with: "no bot token: the macOS Keychain has no generic password with the service "sage-bot". Add it with Keychain Access, then start the bridge again."
-3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the owner and the two roles; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file.
+3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the owner and the two roles; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
 4. Start it: `node scripts/bridge.mjs ~/.config/sage-bot/config.json`. It logs to the terminal; every log line goes through an allow-list, so no control character reaches the terminal. Of a Discord error it logs only the code, the status and the message, never its url or body (they can hold an interaction token).
 
 **The launchd plist.** To start the bridge at each login and again after it stops, print its launchd agent and save it yourself:

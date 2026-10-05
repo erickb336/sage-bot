@@ -145,7 +145,7 @@ test('F-T28-10, F-T28-12, F-T28-15: the gate file is 0600, written whole, and lo
   await b.post();
   assert.equal(statSync(b.statePath).mode & 0o777, 0o600);
   assert.equal(statSync(join(b.root, 'state')).mode & 0o777, 0o700);
-  assert.deepEqual(readdirSync(join(b.root, 'state')), ['gates.json']);
+  assert.deepEqual(readdirSync(join(b.root, 'state')), ['gates.json', 'gates.json.votes']);
   // A restart loads the same gate and goes on with it.
   await b.press(MAYA, 'press:G1:0:0');
   const again = b.make();
