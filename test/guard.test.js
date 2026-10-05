@@ -110,6 +110,25 @@ test('T133 (G44 A): a wildcard in a part that runs or writes that may match the 
   for (const c of ["git commit -m '[T133] x'", 'node --test {WT}/test/*.test.js', 'cp {SCRATCH}/*.txt {SCRATCH}/out', 'cp {SCRATCH}/a?.json {SCRATCH}/out']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
+test('T133 (G46 A, F-T133-46): git and node --test expand a quoted pattern in an operand themselves, so it is a wildcard too', () => {
+  const wild = (w) => `sage-bot guard: the wildcard ${w} (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`;
+  assert.equal(guard(bash('node --test "{SCRATCH}/s*"')).reason, wild('/sample/scratch/s*'));
+  assert.equal(guard(bash("git rm --cached '{SCRATCH}/sag?.mjs'")).reason, wild('/sample/scratch/sag?.mjs'));
+  assert.equal(guard(bash('git add -- "./[s]age.mjs"')).reason, `sage-bot guard: the wildcard [ in ./[s]age.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  // Any other pattern character (node's braces and extglobs, git's backslash) is refused like the [.
+  assert.equal(guard(bash('node --test "./sa{g,x}e.mjs"')).reason, `sage-bot guard: the wildcard { in ./sa{g,x}e.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(guard(bash("git add 'sag\\e.mjs'")).reason, `sage-bot guard: the wildcard \\ in sag\\e.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  // A pattern that cannot match the name, and a quoted text that is no operand (a commit message), pass.
+  for (const c of ['node --test "test/*.test.js"', "git commit -m '[T133] {x} sage*'", 'git log --oneline -- "src/guard.js"', 'node {SCRATCH}/x.mjs "s*"']) assert.equal(guard(bash(c)).reason, undefined, c);
+});
+
+test('T133 (G46 A, F-T133-47): when one part of a pipeline runs or writes, every part of it is checked', () => {
+  assert.equal(guard(bash('cat ./sag?.mjs | head -n 99999 > ./x.mjs && node ./x.mjs')).reason, `sage-bot guard: the wildcard ./sag?.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(guard(bash('cat "./café.txt" | head > ./x.txt')).reason, `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${STOP}`);
+  // A pipeline that only reads, and a read before a && that writes, run nothing.
+  for (const c of ['ls ./s* | head -5', 'cat ./sag?.mjs && npm test', 'npm run check 2>&1 | tail -20']) assert.equal(guard(bash(c)).reason, undefined, c);
+});
+
 test('T133 (G44 A): in a part that runs or writes, and in a file tool path, a character that is not printable ASCII is refused with the stop ending', () => {
   const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${STOP}`;
   for (const c of ['cp "{SCRATCH}/caf\u00e9.txt" {SCRATCH}/x.txt', 'node "{SCRATCH}/x\u200b.mjs"', 'echo x > "{SCRATCH}/\u00e9.txt"', 'ls | tee "{SCRATCH}/\u00e9.txt"', 'git commit -m "x\ty"', 'git commit -m "a\nb"']) {
@@ -138,11 +157,16 @@ test('T133 (G44 A): every code point that folds to a letter of the name (NFKC, t
   assert.deepEqual(found.filter(([, name]) => guard(tool('Write', { file_path: '{WT}/x.mjs', content: `import './${name}';` })).reason !== STATE), []);
 });
 
-test('T133 (G44 A): node never reads its script from stdin, and a broken input refuses with the stop ending', () => {
+test('T133 (G44 A): node never reads its script from stdin or a device, and a broken input refuses with the stop ending', () => {
   const stdin = `sage-bot guard: node with no script file (code from stdin) is refused in a lead session. ${STOP}`;
   assert.equal(guard(bash('node - status < {SCRATCH}/x.mjs')).reason, stdin);
   assert.equal(guard(bash('node --test -')).reason, stdin);
   assert.equal(guard(bash('node {SCRATCH}/x.mjs -')).decision, 'allow');
+  // F-T133-48 (G46 A): nor from a device, a script path under /dev/ in any spelling; node --test checks each of its files.
+  const dev = (p) => `sage-bot guard: node with the script ${p} (a device under /dev/, such as stdin) is refused in a lead session. ${STOP}`;
+  for (const p of ['/dev/stdin', '/dev/fd/0', '//dev/./stdin', '../../../dev/stdin', '/x/../dev/fd/3']) assert.equal(guard(bash(`node ${p} < {SCRATCH}/x.mjs`)).reason, dev(p));
+  assert.equal(guard(bash('node --test test/a.test.js /dev/stdin')).reason, dev('/dev/stdin'));
+  for (const c of ['node {SCRATCH}/x.mjs /dev/null', 'node test/dev/x.mjs', 'node --test test/dev/x.test.js']) assert.equal(guard(bash(c)).decision, 'allow', c);
   for (const input of [{}, { command: 42 }, { command: null }]) assert.equal(guard(tool('Bash', input)).reason, `sage-bot guard: a Bash call with no command text is refused in a lead session. ${STOP}`);
   for (const name of ['Agent', 'Write', 'Bash']) assert.equal(guard(tool(name, [])).reason, `sage-bot guard: a hook input that is not a tool call is refused in a lead session. ${STOP}`);
 });

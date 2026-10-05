@@ -13,16 +13,17 @@
 // - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds.
 // - The sage state tool is refused by its name (G30 A): a lead session reaches the logbook only through sage-bot (T134).
 //   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A); this check is a
-//   second layer. Its class rules: in a part that runs or writes, every word is printable ASCII and has no [ wildcard; a
-//   redirect target is a word like any other; node never reads its script from stdin; a file tool's strings are checked one
-//   by one, and its paths are printable ASCII.
+//   second layer. Its class rules: in a pipeline that runs or writes, every word is printable ASCII and has no [ wildcard; a
+//   redirect target is a word like any other; node runs no script from stdin (-) or from a path under /dev/ (a device); an
+//   operand that git or node --test expands as a pattern is a wildcard also inside quotes; a file tool's strings are
+//   checked one by one, and its paths are printable ASCII.
 // - The Grep tool, and an Agent or Task call with an isolation field, are refused. Any tool that is not in TOOLS is refused.
 // - WebFetch reaches only a host name or a global unicast address.
 //
 // The environment (set by sage-bot, never by the session's model): SAGE_ORIGIN, and optionally SAGE_TOOL (the sage state
 // tool, sage.mjs; a file named sage.mjs is the state tool too).
 import { BlockList, isIPv4, isIPv6 } from 'node:net';
-import { basename } from 'node:path';
+import { basename, posix } from 'node:path';
 
 /** The largest hook input that the guard reads, in bytes. */
 export const MAX_INPUT = 64 * 1024;
@@ -151,17 +152,17 @@ function options(name, args, table, { posix = false, safe } = {}) {
   return ops;
 }
 
-/** A command's rule: its option table, then `rule(ops, env)` for its operands. */
+/** A command's rule: its option table, then `rule(ops, env)` for its operands. It gives a refusal, or the operands. */
 const cmd = (table, rule = () => null) => (args, env, name) => {
   const ops = options(name, args, table);
-  return typeof ops === 'string' ? ops : rule(ops, env);
+  return typeof ops === 'string' ? ops : rule(ops, env) ?? ops;
 };
 
 const TEST = { '-f': FLAG, '-d': FLAG, '-e': FLAG, '-s': FLAG, '-r': FLAG, '-w': FLAG, '-x': FLAG, '-n': FLAG, '-z': FLAG, '-L': FLAG };
 const none = cmd({});
 const NPM_RUN = new Set(['ci', 'test', 't', 'run', 'run-script', 'ls', 'outdated']);
 
-// The allow-list of commands, each with its option table. A rule gives the reason of a refusal, or null.
+// The allow-list of commands, each with its option table. A rule gives the reason of a refusal, or null or its operands.
 const COMMANDS = {
   ls: cmd({ '-l': FLAG, '-a': FLAG, '-la': FLAG, '-al': FLAG, '-A': FLAG, '-1': FLAG, '-h': FLAG, '-lh': FLAG, '-lah': FLAG, '-d': FLAG, '-t': FLAG, '-F': FLAG }),
   cat: cmd({ '-n': FLAG }),
@@ -241,13 +242,19 @@ const GIT = {
 
 const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
 
-/** node: a script, never code from an option or from stdin (no script, or the script -). node --test finds its own files. */
+// A path under /dev/ as text (/dev/stdin, //dev/fd/0, ../../dev/stdin): a device, never a script file.
+const DEV = /^(\/|(\.\.\/)+)dev(\/|$)/;
+/**
+ * node: a script file, never code from an option, from stdin (no script, or the script -) or from a device (a path under
+ * /dev/: stdin, a file descriptor). node --test finds its own files, or takes files and patterns, each checked like a script.
+ */
 function node(args) {
   if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;
   const ops = options('node', args, NODE, { posix: true });
   if (typeof ops === 'string') return ops;
   if (ops[0] === '-' || (!ops[0] && !args.includes('--test'))) return 'node with no script file (code from stdin)';
-  return null;
+  const dev = (args.includes('--test') ? ops : ops.slice(0, 1)).find((p) => DEV.test(posix.normalize(p)));
+  return dev ? `node with the script ${dev} (a device under /dev/, such as stdin)` : ops;
 }
 
 // ---- The sage state tool ------------------------------------------------------------------------------------------------
@@ -275,6 +282,16 @@ const STATE_TOOL = 'a call that may name the sage state tool (a lead session rea
 const ASCII = /^[\x20-\x7e]*$/;
 const WILDCARD = 'name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>)';
 
+/**
+ * Why a wildcard is refused, or null: a [ (or, in a `pattern` operand, any pattern character but * and ?), or a * or ? that
+ * can match the state tool. `chars`: the word's wildcard characters.
+ */
+function wildcard(text, chars, env, pattern = false) {
+  const odd = pattern ? text.match(/[^A-Za-z0-9 _\-./,:=%~^*?]/) : chars.includes('[') && ['['];
+  if (odd) return how(`the wildcard ${odd[0]} in ${text} (in a part that runs or writes)`, WILDCARD);
+  return /[*?]/.test(chars) && mayMatchStateTool(text, env) ? how(`the wildcard ${text} (it can match the sage state tool)`, WILDCARD) : null;
+}
+
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
 
 // Environment variables that a simple command may set in front of it; never in front of git, which reads its config
@@ -301,7 +318,16 @@ function simple({ words }, env) {
   const glob = words.slice(i + 1).find((w) => w.glob && /^[*?[]/.test(w.text));
   if (glob) return how(`the word ${glob.text} (a wildcard at its start can expand to an option)`, `start the word with a folder, for example ./${glob.text}`);
   if (!Object.hasOwn(COMMANDS, name)) return `the command ${name}`;
-  return COMMANDS[name](args, env, name);
+  const ops = COMMANDS[name](args, env, name);
+  if (typeof ops === 'string') return ops;
+  // git (a pathspec) and node --test (a test file) expand a pattern in an operand themselves, also a quoted one; the only
+  // pattern characters they may get are * and ?, which must not match the state tool.
+  if (name !== 'git' && !(name === 'node' && args.includes('--test'))) return null;
+  for (const op of ops ?? []) {
+    const why = wildcard(op, op, env, true);
+    if (why) return why;
+  }
+  return null;
 }
 
 const REPHRASE = 'one command per call, or commands joined only by && (a | only into head, tail, wc, sort or grep), with no ;, ||, $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file>';
@@ -313,15 +339,18 @@ export function bashRefusal(command, env) {
   const parsed = parse(command);
   if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, REPHRASE);
   if (namesStateTool(parsed.flatMap((seg) => [...seg.words, ...seg.redirects]).map((w) => w.text), env)) return STATE_TOOL;
-  // The words of the parts that run a script or write a file (a renamed copy), with their redirect targets. A read
+  // A pipeline is the parts joined by |. It runs or writes as a whole when one of its parts runs a script or writes a file (a
+  // renamed copy): cat x | head > y writes what cat reads. Its words are then checked with their redirect targets. A read
   // (ls dir/*, cat é.txt) runs nothing.
-  const rw = parsed.filter((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length)
-    .flatMap((seg) => [...seg.words, ...seg.redirects]);
+  const pipelines = [];
+  for (const seg of parsed) (seg.pipe ? pipelines.at(-1) : pipelines[pipelines.push([]) - 1]).push(seg);
+  const rw = pipelines.filter((p) => p.some((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length))
+    .flat().flatMap((seg) => [...seg.words, ...seg.redirects]);
   if (rw.some((w) => !ASCII.test(w.text))) return 'a character that is not printable ASCII in a part that runs or writes';
-  const bracket = rw.find((w) => w.glob.includes('['));
-  if (bracket) return how(`the wildcard [ in ${bracket.text} (in a part that runs or writes)`, WILDCARD);
-  const glob = rw.find((w) => w.glob && mayMatchStateTool(w.text, env));
-  if (glob) return how(`the wildcard ${glob.text} (it can match the sage state tool)`, WILDCARD);
+  for (const w of rw) {
+    const why = wildcard(w.text, w.glob, env);
+    if (why) return why;
+  }
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
     if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${commandOf(texts)[0] ?? 'nothing'}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');

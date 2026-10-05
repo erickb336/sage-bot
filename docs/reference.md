@@ -666,7 +666,7 @@ It reads these variables from the environment of the `claude` process. The hook 
 | `cd <folder>` alone, or a `cd` after the first part | `cd <folder> && <command>`, or the full path in the command |
 | `HOME=… git …` | The same command with no variable in front of it |
 | A word that starts with a wildcard (`rm -rf *`): it can expand to a file named like an option | Start the word with a folder: `./*` |
-| A wildcard that can match the state tool's name in a part that runs or writes (`git add scripts/*.mjs`, `node --test test/*.mjs`), or any `[` wildcard there | Name each file in full; for the tests, `npm test` or `node --test <file>` |
+| A wildcard that can match the state tool's name in a part that runs or writes (`git add scripts/*.mjs`, `node --test test/*.mjs`, also in quotes for git and `node --test`), or any `[` wildcard there | Name each file in full; for the tests, `npm test` or `node --test <file>` |
 | An unknown option | The options that the message lists, each spelled in full |
 | An input over 64 KB | The text in a file in the scratch folder, written in parts of less than 64 KB |
 
@@ -680,7 +680,7 @@ It reads these variables from the environment of the `claude` process. The hook 
 | Command | Allowed | Refused |
 | --- | --- | --- |
 | `git` | `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`, `add`, `rm`, `mv`, `restore`, `commit` (`-m`, `-F`), `switch`, `checkout -b`, `branch` (list or create), `stash` (`list`, `push`, `pop`, `apply`, `show`), `remote -v`, `worktree add` and `list`; the global option `-C <folder>` | `push`, `fetch` (the broker), `merge`, `pull`, `rebase`, `reset`, `clean`, `tag`, `cherry-pick`, `config`, `credential`, `cat-file`, `branch -D` and `-d`, `stash clear` and `drop`, `remote add` and `set-url`, `worktree remove`; every global option but `-C` (`-c`, `--git-dir`, `--exec-path`); `--output`, `--ext-diff`, `--textconv`, `--no-index`, `commit --no-verify`; `--pretty` and `--format` with a value in the next word (git takes a value only as `--pretty=<value>`) |
-| `node` | `node --version`; a script; `--test`, `--check` | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script or the script `-` (code from stdin) |
+| `node` | `node --version`; a script; `--test`, `--check` | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script or the script `-` (code from stdin); a script under `/dev/` |
 | `npm` | `ci`, `test`, `run <script>`, `ls`, `outdated` | `publish`, `exec`, `install`, a script whose name has `deploy`, `release` or `publish`; `--prefix`, `--userconfig`, `--script-shell`, `--node-options`, `-g` |
 | `rg` | `-n`, `-i`, `-l`, `-c`, `-w`, `-F`, `-e`, `-g`, `-t`, `-A`, `-B`, `-C`, `--files` | `--pre`, `-L`, every other option |
 | `find` | names and tests | `-exec`, `-execdir`, `-ok`, `-delete`, `-fprint` |
@@ -688,12 +688,12 @@ It reads these variables from the environment of the `claude` process. The hook 
 
 **The sage state tool.** A lead session gets no direct state tool, with any command (G30 A). In T134 it reaches the logbook only through a few fixed broker verbs, with the project fixed.
 
-The guarantee is the sandbox of T134: it denies the sage plugin folder and every logbook, so no form of a call can run or change the state tool (G44 A). Test F-T134-6 proves that each known bypass fails there. The hook is a second layer. It refuses the plain forms early with a clear message, by these class rules. A "part that runs or writes" is a part whose command is `node`, `npm`, `cp`, `mv`, `git` or `tee`, or a part with a redirect; a read (`ls dir/*`, `cat`) runs nothing.
+The guarantee is the sandbox of T134: it denies the sage plugin folder and every logbook, so no form of a call can run or change the state tool (G44 A). Test F-T134-6 proves that each known bypass fails there. The hook is a second layer. It refuses the plain forms early with a clear message, by these class rules. A "part that runs or writes" is a part whose command is `node`, `npm`, `cp`, `mv`, `git` or `tee`, or a part with a redirect, and every other part of its pipeline (the parts joined by `|`): in `cat ./sag?.mjs | head > ./x.mjs`, the `cat` part writes too. A read (`ls dir/*`, `cat`, `ls dir/* | head`) runs nothing.
 
 1. In a part that runs or writes, every word, also inside quotes, is printable ASCII. Anything else (the long s `ſ`, a full-width letter, a zero-width space, `é`, a tab) is refused with the stop ending.
-2. `node` never reads its script from stdin: no script, or the script `-`, is refused with the stop ending. `node --test` with no file finds its own test files.
+2. `node` runs no script from stdin or from a device: no script, the script `-`, and a script path under `/dev/` (`/dev/stdin`, `/dev/fd/0`, also as `//dev/./stdin` or `../../dev/stdin`) are refused with the stop ending. `node --test` with no file finds its own test files; each file it is given is checked the same way. The rule reads the path as text: a relative path after a `cd` into `/dev` is not seen (the sandbox holds it).
 3. A redirect target is a word like any other: the checks of rules 1, 4 and 5 and of the name see it (`node - < ./sa""ge.mjs`).
-4. In a part that runs or writes, a `[` wildcard is refused, with the hint to name the files. `*` and `?` go to rule 5.
+4. In a part that runs or writes, a `[` wildcard is refused, with the hint to name the files. `*` and `?` go to rule 5. git (a pathspec) and `node --test` (a test file) expand a pattern in an operand themselves, also a quoted one: there, a quoted `*`, `?` or `[` is a wildcard too, and any other character than letters, digits, a space and `_ - . / , : = % ~ ^ * ?` (node's `{a,b}` and `@(…)`, git's `\` and `:(…)`) is refused like the `[`. A quoted text that is not an operand (a `git commit -m` message, an argument of a script) is no pattern.
 5. A word whose text, with its quotes joined, holds the file name `sage.mjs` or the file name of `SAGE_TOOL` is refused with the stop ending. The name is folded first (NFKC, then lower case), so `SAGE.MJS`, `sa'ge'.mjs` and `ſage.mjs` match; a name that only ends like it (`message.mjs`) is another name. A `*` or `?` wildcard that can match one of these names, in a part that runs or writes, is refused with the hint to name the files (`git add scripts/*.mjs`).
 6. A Write, Edit, MultiEdit or NotebookEdit call: each string of its input is checked on its own by rule 5 (a tab before the name does not hide it), and each path is printable ASCII.
 7. git takes the value of `--pretty` and `--format` only in the form `--pretty=<value>`; the next word is never their value.
