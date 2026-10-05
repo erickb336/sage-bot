@@ -5,7 +5,7 @@ process.env.TZ = 'UTC'; // the title of a thread has the host's date: 2026-10-04
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectOf, record } from '../src/sessions.js';
 import { HOUR, MINUTE } from '../src/vote.js';
@@ -251,4 +251,79 @@ test('T65: the bridge stops before the new post of a moved card whose vote ended
   await b.bridge.loop();
   assert.deepEqual(shown(b, CHANNEL).slice(1).map((t) => t.split('.')[0]), [
     'Question G1 · T1 ', 'Batch vote G2+G3 · T2 ', `<@&${LEADR}> G2+G3 is tied after its vote`]);
+});
+
+// F-T65-4: messages held for a moved card keep their order, and a settled card drops them: no stale tie alert after the answer.
+/** Discord refuses the tie alert of G2+G3 while `refuse.on` is true; every other post goes through. */
+function refuseTieAlert(b) {
+  const real = b.discord.post;
+  const refuse = { on: true };
+  b.discord.post = (target, payload) => (refuse.on && payload.content?.includes('G2+G3 is tied after its vote')
+    ? Promise.reject(Object.assign(new Error('Internal Server Error'), { status: 500 })) : real(target, payload));
+  return refuse;
+}
+const heldOf = (b, id) => JSON.parse(readFileSync(b.statePath, 'utf8')).entries.find((e) => e.gate.id === id).held;
+const tieAlerts = (b) => shown(b, CHANNEL).filter((t) => t.startsWith(`<@&${LEADR}> G2+G3 is tied after its vote`));
+
+test('F-T65-4: the moved card posts, Discord refuses its tie alert, then a lead breaks the tie: the tie-break note posts, the stale alert never does, the held list goes', async () => {
+  const b = await movedSetup();
+  const refuse = refuseTieAlert(b);
+  b.now += 30 * MINUTE;
+  await b.bridge.loop(); // the vote ends tied on part 2; the cards move and post; the tie alert is refused and held
+  assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  assert.equal(heldOf(b, 'G2+G3').length, 1);
+  refuse.on = false;
+  await b.press(JON, 'tiebreak:G2+G3:1:0');
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.deepEqual(tieAlerts(b), []);
+  assert.deepEqual(shown(b, CHANNEL).filter((t) => /broke the tie/.test(t)), ['Jon (sage-lead) broke the tie on part 2 of G2+G3: A.']);
+  assert.equal(heldOf(b, 'G2+G3'), undefined);
+  assert.deepEqual(b.lines.filter((l) => /drops/.test(l)), ['G2+G3: it is settled, so the bridge drops the 1 message(s) that waited for its card']);
+});
+
+test('F-T65-4: the owner answers at the terminal while the tie alert is held: the stale alert never posts, the held list goes', async () => {
+  const b = await movedSetup();
+  const refuse = refuseTieAlert(b);
+  b.now += 30 * MINUTE;
+  await b.bridge.loop();
+  assert.equal(heldOf(b, 'G2+G3').length, 1);
+  refuse.on = false;
+  b.sh('gate', 'answer', 'G3', 'y');
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.deepEqual(tieAlerts(b), []);
+  assert.equal(heldOf(b, 'G2+G3'), undefined);
+});
+
+test('F-T65-4: a reminder about a card whose tie alert is held goes after the alert, never before it', async () => {
+  const b = await movedSetup();
+  const refuse = refuseTieAlert(b);
+  b.now += 30 * MINUTE;
+  await b.bridge.loop();
+  b.now += 2 * HOUR + MINUTE; // past the leads' 2-hour reminder of G2+G3
+  await b.bridge.loop();
+  assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')), []);
+  refuse.on = false;
+  await b.bridge.loop();
+  assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')).map((t) => t.split(' of ')[0].split(' is ')[0]), [
+    `<@&${LEADR}> G2+G3`, `<@&${LEADR}> reminder: part 2`]);
+  assert.deepEqual(heldOf(b, 'G2+G3'), []);
+});
+
+// F-T65-3: the gate file is the bridge's own, so a held list that the bridge did not write is refused at load.
+test('F-T65-3: a gate file with a held list that the bridge did not write is refused at load; one that it did write loads', async () => {
+  const b = setup();
+  gateAdd(b, 'T1');
+  await b.post();
+  const file = JSON.parse(readFileSync(b.statePath, 'utf8'));
+  const withHeld = (held) => writeFileSync(b.statePath, JSON.stringify({ ...file, entries: [{ ...file.entries[0], held }] }), { mode: 0o600 });
+  for (const held of ['abc', [{ content: 'hi', allowedMentions: { parse: [] } }, 7], [{ content: '@everyone hi' }],
+    [{ content: '@everyone hi', allowedMentions: { parse: ['everyone'] } }], [{ content: 'hi', allowedMentions: { parse: [], roles: [LEADR] }, tts: true }],
+    [{ content: 'x'.repeat(2001), allowedMentions: { parse: [] } }]]) {
+    withHeld(held);
+    assert.throws(() => b.make(), { message: 'the gate file has an entry with held messages that the bridge did not write' }, JSON.stringify(held).slice(0, 80));
+  }
+  withHeld([{ content: 'hi', allowedMentions: { parse: [] } }, { content: `<@&${LEADR}> hi`, allowedMentions: { parse: [], roles: [LEADR] } }]);
+  assert.equal(typeof b.make().loop, 'function');
 });

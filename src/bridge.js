@@ -139,7 +139,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
   const post = async (target, payload) => {
-    try { return await discord.post(target, payload); } catch (e) {
+    // A payload with no allowedMentions would ping every mention in its text: the bridge's default pings nobody (F-T65-3).
+    try { return await discord.post(target, { allowedMentions: NO_MENTIONS, ...payload }); } catch (e) {
       const x = goneThread(target, e);
       if (x) lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
       return null;
@@ -233,12 +234,29 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   /**
    * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is first posted. A card that moved (G17)
    * holds the message in its entry, also when this post finds the thread gone: sync posts it after the new card, also after a restart (T65).
+   * While messages wait in `held`, a new one goes after them, so they keep their order (F-T65-4).
    */
   const postAbout = async (id, payload) => {
     const m = meta.get(id);
-    if (m.message && (await post(m.channel ?? config.channelId, payload))) return;
-    if (moved(m)) { m.held = [...(m.held ?? []), payload]; persist(); }
+    await postHeld(id);
+    if (!m.held?.length && m.message && (await post(m.channel ?? config.channelId, payload))) return;
+    if ((moved(m) || m.held?.length) && waits(id)) { m.held = [...(m.held ?? []), payload]; persist(); }
   };
+  /**
+   * Posts the messages held for the card of `id` below it, in order, while the card waits for them. A settled card drops them: a tie
+   * alert or a reminder after the answer would call the team for nothing (F-T65-4).
+   */
+  async function postHeld(id) {
+    const m = meta.get(id);
+    if (!m.held?.length) return;
+    if (!waits(id)) {
+      say(`${id}: it is settled, so the bridge drops the ${m.held.length} message(s) that waited for its card`);
+      delete m.held;
+      persist();
+      return;
+    }
+    while (m.message && m.held.length && (await post(m.channel, m.held[0]))) { m.held.shift(); persist(); }
+  }
 
   /**
    * Posts the card of `id` with the role alert at `at`, and keeps its place. A card with a place and no message lost its thread (G17),
@@ -512,13 +530,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
     // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17) and still
-    // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it (T65). An error on one card
-    // never stops the posts of the others (F-T55-3).
+    // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it, or dropped when it is
+    // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
-      if (moved(m) && !waits(id)) continue;
       try {
-        if (!m.message) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
-        while (m.message && m.held?.length && (await post(m.channel, m.held[0]))) { m.held.shift(); persist(); }
+        if (!m.message && (waits(id) || !moved(m))) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
+        await postHeld(id);
       } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
     }
   }

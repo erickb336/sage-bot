@@ -13,6 +13,17 @@ const isTime = (x) => Number.isSafeInteger(x);
 const isFinal = (f, part) => f === undefined || (f && isText(f.by) && isTime(f.at) && isText(f.text)
   && (f.option === undefined || Object.hasOwn(part.options ?? {}, f.option)));
 
+/** The keys of an object, sorted and joined, to compare its shape with the one the bridge writes. */
+const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().join() : null);
+/**
+ * A message held for a moved card (T65), exactly as the bridge makes it: a text in Discord's 2,000 characters that pings nobody, or one
+ * role (F-T65-3). Discord would ping @everyone for a payload with no allowedMentions.
+ */
+const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content) && p.content.length <= 2000
+  && Array.isArray(p.allowedMentions.parse) && p.allowedMentions.parse.length === 0
+  && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && Array.isArray(p.allowedMentions.roles)
+    && p.allowedMentions.roles.length === 1 && /^\d{17,20}$/.test(p.allowedMentions.roles[0])));
+
 /** One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make. */
 function entryOf(e) {
   const ok = e && Array.isArray(e.sage) && e.sage.every(isText) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
@@ -23,6 +34,9 @@ function entryOf(e) {
     // Version 2 (T29): the chief session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel));
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
+  if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
+    throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
+  }
   return { ...e, session: e.session ?? null, gate: parseGate(e.gate) };
 }
 
