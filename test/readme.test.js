@@ -71,6 +71,7 @@ function scratchHome() {
   mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
   mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
   mkdirSync(join(home, 'tmp'));
+  mkdirSync(config.project); // the owner's project folder exists (F-T132-14)
   writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify(config));
   return home;
 }

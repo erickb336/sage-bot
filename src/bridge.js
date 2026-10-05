@@ -52,6 +52,8 @@ const KEYS = ['A', 'B', 'C', 'D', 'E'];
 const GONE = new Set([10003, 50001]);
 /** Discord's code for a message that is gone: Unknown Message. */
 const UNKNOWN_MESSAGE = 10008;
+/** The codes of a close edit that can never work: the channel or the message is gone, or the thread is locked (F-T132-16). */
+const NO_EDIT = new Set([10003, UNKNOWN_MESSAGE, 50083]);
 /** Only the code, status and message of a Discord error: its url and body can hold the interaction token (F-T28-23). */
 export const apiError = (e) => `code ${e?.code ?? '-'}, status ${e?.status ?? '-'}: ${e?.message ?? String(e)}`;
 /** Untrusted text for a card: cut first, so that `safe` never works on a long input (F-T28-24), then made safe; '' falls back. */
@@ -189,7 +191,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     if (parts.length) say(`${parts.join('; ')}; keep a project's name as it was at its first start`);
   }
   const gone = new Set(); // the cards of a project that left the config whose press is already logged once (F-T132-2)
-  const shut = new Set(); // the cards of a project that left the config that this run closed (F-T132-8)
   /** The sage tool of the project of the entry `id`. */
   const sageOf = (id) => sages.get(projectOfKey(id));
   /** The entries of `project`, as [id, meta]. */
@@ -366,13 +367,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
 
   /**
    * Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). The first edit that works gives a card of the time
-   * before T132 the buttons with the keys, so it loses its mark `oldButtons` (F-T132-5).
+   * before T132 the buttons with the keys, so it loses its mark `oldButtons` (F-T132-5), and gives a card that `closeGone` closed its
+   * buttons back without the note, so it loses its mark `shut` (F-T132-15).
    */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
     const m = meta.get(id);
-    if (m.message && (await edit(m.channel ?? config.channelId, m.message, card(gate, ask, ppl), id)) && m.oldButtons) {
+    const payload = { ...card(gate, ask, ppl), ...(m.shut && { content: '' }) };
+    if (m.message && (await edit(m.channel ?? config.channelId, m.message, payload, id)) && (m.oldButtons || m.shut)) {
       delete m.oldButtons;
+      delete m.shut;
       persist();
     }
   }
@@ -682,7 +686,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       const { gate: g, ask } = gates.get(id);
       const m = meta.get(id);
       const due = waits(id) && nextReminderAt(g, m.remindedAt);
-      if (!due || due.at > clock() || !m.message) continue;
+      if (!due || due.at > clock() || !m.message || m.shut) continue; // a closed card first gets its buttons back (F-T132-15)
       m.remindedAt = clock();
       persist();
       await postAbout(id, due.to === 'holders'
@@ -692,18 +696,26 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * Closes each open card of a project that left the config, once: its buttons go, and a note says that ${OWNER} answers it at the
-   * terminal (F-T132-8). A refused edit is tried again at the next loop.
+   * Closes each open card of a project that left the config, once in total: its buttons go, and a note says that ${OWNER} answers it at
+   * the terminal (F-T132-8). The mark `shut` in the gate file keeps it closed across restarts (F-T132-16). A card that Discord can never
+   * edit (a locked thread, a message or channel that is gone) counts as closed, and the log says so once. Any other refused edit is tried
+   * again at the next loop. When the project is in the config again, `redraw` gives the card its buttons back (F-T132-15).
    */
   async function closeGone(ppl) {
     for (const [id, m] of meta) {
-      if (served(id) || shut.has(id) || !m.message || !waits(id)) continue;
+      if (served(id) || m.shut || !m.message || !waits(id)) continue;
       const { gate, ask } = gates.get(id);
       const payload = { ...card(gate, ask, ppl), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
-      if (!(await edit(m.channel ?? config.channelId, m.message, payload, id))) continue;
-      shut.add(id);
-      if (m.oldButtons) { delete m.oldButtons; persist(); }
-      say(`${id}: its project is no longer in the config, so the bridge closed its card; ${OWNER} answers it at the terminal`);
+      let why = null;
+      try { await discord.edit(m.channel ?? config.channelId, m.message, payload); } catch (e) {
+        if (!NO_EDIT.has(e?.code)) { say(`Discord refused the edit of ${id}: ${apiError(e)}`); continue; }
+        why = e;
+      }
+      m.shut = true;
+      if (!why) delete m.oldButtons;
+      persist();
+      say(why ? `${id}: its project is no longer in the config, and Discord cannot edit its card (${apiError(why)}), so the bridge leaves it; ${OWNER} answers it at the terminal`
+        : `${id}: its project is no longer in the config, so the bridge closed its card; ${OWNER} answers it at the terminal`);
     }
   }
 
@@ -748,9 +760,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       const ppl = await people();
       const wall = now();
       readSessions();
-      for (const [id, m] of meta) if (m.oldButtons && served(id)) await redraw(id, ppl); // the cards with old buttons, open or settled (F-T132-5)
       await closeGone(ppl);
       await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
+      // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
+      // after reconcile: their thread is open again now.
+      for (const [id, m] of meta) if ((m.oldButtons || m.shut) && served(id)) await redraw(id, ppl);
       // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
       // place that has an open question.
       if (lastLoop !== null && wall - lastLoop > SLEPT) {

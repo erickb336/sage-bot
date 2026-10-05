@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forModel, forTerminal, reasonLines } from '../src/clean.js';
@@ -56,6 +56,7 @@ test('F-T28-22: text for the terminal keeps printable characters only; every con
 function reasonsSetup() {
   const dir = mkdtempSync(join(tmpdir(), 'sage-bot-reasons-'));
   const config = join(dir, 'config.json');
+  for (const p of ['project', 'other']) mkdirSync(join(dir, p)); // a listed folder that does not exist is refused (F-T132-14)
   writeFileSync(config, JSON.stringify({ project: join(dir, 'project'), sagePath: '/sample/sage.mjs', statePath: join(dir, 'gates.json'),
     projects: [{ name: 'project', project: join(dir, 'project') }, { name: 'other', project: join(dir, 'other') }] }));
   return { path: join(dir, 'gates.json'), config };

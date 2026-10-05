@@ -1,6 +1,7 @@
 // The bridge's only way to sage: the state tool, run with execFile (no shell). It reads the gates and tasks of the
 // logbook as sage wrote them, and records an answer with `sage gate answer`. It never writes a logbook file itself.
 import { execFile } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -58,4 +59,14 @@ export function pickProject(config, projects, name) {
   const p = projects.find((x) => x.name === name);
   if (!p) throw new Error(`the project "${name}" is not in the config's projects (${projects.map((x) => x.name).join(', ')}). Nothing changed.`);
   return p;
+}
+
+/**
+ * Throws for a listed project whose folder does not exist (F-T132-14). The bridge, vote.mjs and reasons.mjs call it first, so they stop
+ * before the lock, the Keychain or a mark, with one line that names the project and its path.
+ * @param {{ name: string, project: string }[]} projects  src/ask.js projectsOf
+ */
+export function refuseMissing(projects) {
+  const p = projects.find((x) => !statSync(x.project, { throwIfNoEntry: false })?.isDirectory());
+  if (p) throw new Error(`the folder of project ${p.name} (${p.project}) does not exist. Fix its path in projects, or take the project out. Nothing changed.`);
 }

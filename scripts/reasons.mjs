@@ -1,5 +1,6 @@
 // The ballot reasons of one bridge gate for sage: node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>.
-// The gate is of the project `--project` names, one of the config's projects; without it, of the bridge's own project (T132). The gate
+// The gate is of the project `--project` names, one of the config's projects; without it, of the listed project whose folder holds the cwd,
+// or of the bridge's own project when no listed folder holds it (T132, F-T132-13). The gate
 // file is the config's `statePath`; the config is the bridge's (default ~/.config/sage-bot/config.json).
 // sage reads reasons only here, never from Discord. Each line is quoted data, cleaned for a model reader (src/clean.js).
 import { readFileSync } from 'node:fs';
@@ -7,7 +8,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectsOf } from '../src/ask.js';
 import { forTerminal, reasonLines } from '../src/clean.js';
-import { pickProject } from '../src/sage.js';
+import { projectAt } from '../src/sessions.js';
+import { pickProject, refuseMissing } from '../src/sage.js';
 import { keyOf, load, projectOfKey } from '../src/state.js';
 
 const USAGE = 'usage: node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>';
@@ -22,7 +24,9 @@ try {
   if (!configPath || !id || more.length) throw new Error(USAGE);
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const projects = projectsOf(config);
-  const project = pickProject(config, projects, name).name; // a project that the config does not list is refused
+  refuseMissing(projects); // a listed folder that does not exist is refused (F-T132-14)
+  // Without --project: the listed project whose folder holds the cwd, as the hook finds it; the own project outside them all (F-T132-13).
+  const project = pickProject(config, projects, name ?? projectAt(process.cwd(), projects)?.name).name; // a name that the config does not list is refused
   const { entries } = load(config.statePath, pickProject(config, projects).name);
   // A bridge gate id (G1+G2) or one sage gate id of it, always of this project: G1 of another project is another gate.
   const entry = entries.find((e) => e.gate.id === keyOf(project, id) || (projectOfKey(e.gate.id) === project && e.sage.includes(id)));

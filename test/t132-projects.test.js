@@ -175,6 +175,7 @@ test('T132: vote.mjs marks the gates of the project that --project names, the ow
   const b = setup({ markAll: false });
   const home = join(b.root, 'home');
   const config = join(b.root, 'vote-config.json');
+  mkdirSync(join(b.root, 'beta')); // a listed folder that does not exist is refused (F-T132-14)
   writeFileSync(config, JSON.stringify({ project: b.project, sagePath: SAGE, statePath: b.statePath,
     projects: [{ name: 'project', project: b.project }, { name: 'beta', project: join(b.root, 'beta') }] }));
   const vote = (...args) => {

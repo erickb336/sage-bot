@@ -6,7 +6,7 @@ import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'di
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
 import { askCommand, createAsk, projectsOf, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
-import { pickProject, sageTool } from './sage.js';
+import { pickProject, refuseMissing, sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
 
@@ -86,7 +86,7 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 });
 
 /**
- * The start before Discord: refuses an old config, checks the projects, takes the lock on the gate file (one bridge at a time,
+ * The start before Discord: refuses an old config, checks the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
  * or a bad registry, stops here, before the Keychain. The returned config has the registry's home channel as its channelId: the votes
  * and cards go there.
@@ -94,6 +94,7 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 export function prepare(file, log) {
   refuseOldRoles(file);
   const projects = projectsOf(file);
+  refuseMissing(projects); // a listed folder that does not exist stops here, before the lock (F-T132-14)
   const own = pickProject(file, projects).name; // a config whose project is not listed stops here (F-T132-1)
   lock(file.statePath);
   const channels = openChannels(file, projects, log);

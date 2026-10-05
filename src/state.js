@@ -39,7 +39,9 @@ function entryOf(e) {
     // T73: a leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
     && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'))
     // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).
-    && (e.oldButtons === undefined || e.oldButtons === true);
+    && (e.oldButtons === undefined || e.oldButtons === true)
+    // T132: a card that the bridge closed while its project was out of the config, until an edit gives it its buttons back (F-T132-16).
+    && (e.shut === undefined || e.shut === true);
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
   if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
     throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
