@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
+import { askCommand, createAsk } from './ask.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
@@ -30,6 +31,16 @@ export async function readToken(security = '/usr/bin/security') {
  */
 export const memberOf = (m) => ({ id: m.id, name: m.displayName, roles: [...m.roles.cache.keys()], bot: m.user.bot === true });
 
+/** The role ids of an interaction's member: a GuildMember (roles.cache) or the raw API member (a list of ids). Roles come from Discord, never from text. */
+export const rolesOf = (member) => (Array.isArray(member?.roles) ? [...member.roles] : [...(member?.roles?.cache?.keys() ?? [])]);
+
+/** A /sage chat command as src/ask.js reads it. */
+export const commandOf = (i) => ({
+  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), channelId: i.channelId,
+  sub: i.options.getSubcommand(false), options: { project: i.options.getString('project'), id: i.options.getString('id') },
+  reply: (payload) => i.reply(payload),
+});
+
 /**
  * Whether an interaction is the bridge's: a button or a form in the configured channel or in a thread of it (T29). A press in any
  * other channel is not, also on a message with the bridge's custom ids. A thread that is not in the cache (i.channel is null) comes
@@ -50,16 +61,19 @@ export async function accepts(i, channelId, fetch) {
  */
 export async function start(config) {
   refuseOldRoles(config); // before the lock and the Keychain: an old config never reaches Discord
+  const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
+  const ask = createAsk({ config, log }); // the same: a config that is not safe stops here (T71)
   lock(config.statePath);
   const token = await readToken();
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
-  const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
+  // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
+  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
   client.on(Events.Error, (e) => log(`Discord error: ${apiError(e)}`));
   const ready = new Promise((done) => client.once(Events.ClientReady, done));
   await client.login(token);
   await ready;
   const guild = await client.guilds.fetch(config.guildId);
   await guild.members.fetch();
+  await guild.commands.set([askCommand(ask.projects)]); // /sage, for this guild only
   const channel = await client.channels.fetch(config.channelId);
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({
@@ -79,7 +93,13 @@ export async function start(config) {
     },
   });
   client.on(Events.InteractionCreate, (i) => {
+    if (i.guildId !== config.guildId) return;
+    if (i.isChatInputCommand()) { if (i.commandName === 'sage') ask.command(commandOf(i)); return; }
     accepts(i, config.channelId, place).then((ok) => ok && bridge.interaction(i));
+  });
+  client.on(Events.MessageCreate, (m) => {
+    if (m.guildId !== config.guildId || m.author.bot || !m.mentions.users.has(client.user.id)) return;
+    ask.mention({ user: { id: m.author.id, bot: false }, channelId: m.channelId, content: m.content, reply: (payload) => m.reply(payload) });
   });
   let busy = false;
   const turn = async () => {

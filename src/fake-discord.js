@@ -104,3 +104,22 @@ export function fakeDiscord(members) {
     },
   };
 }
+
+/**
+ * A fake /sage command, as src/discord.js maps a real one for src/ask.js: `{ user: { id, bot }, roles, channelId, sub, options, reply }`.
+ * `replies` records each reply payload (files as their names and sizes). SAMPLE DATA ONLY.
+ * @param {{ user: string, roles?: string[], bot?: boolean, channelId: string, sub: string, options?: { project?: string, id?: string } }} o
+ */
+export function fakeCommand({ user, roles = [], bot = false, channelId, sub, options = {} }) {
+  const replies = [];
+  const reply = async ({ files, ...payload }) => {
+    replies.push({ ...structuredClone(payload), ...(files && { files: files.map((f) => ({ name: f.name, size: f.attachment.length })) }) });
+  };
+  return { user: { id: user, bot }, roles, channelId, sub, options, replies, reply };
+}
+
+/** A fake message that mentions the bot, as src/discord.js maps a real one: `{ user: { id, bot }, channelId, content, reply }`. SAMPLE DATA ONLY. */
+export function fakeMention({ user, bot = false, channelId, content = '' }) {
+  const replies = [];
+  return { user: { id: user, bot }, channelId, content, replies, reply: async (payload) => { replies.push(structuredClone(payload)); } };
+}
