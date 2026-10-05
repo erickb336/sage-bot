@@ -136,25 +136,44 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings one role and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (role, text) => ({ content: `<@&${role}> ${text}`, allowedMentions: { parse: [], roles: [role] } });
+  /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
+  const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
   const post = async (target, payload) => {
     try { return await discord.post(target, payload); } catch (e) {
-      const x = GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
-      if (x) lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
+      const x = goneThread(target, e);
+      if (x) await lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
       return null;
     }
   };
-  /** A session thread that Discord says is gone (deleted, or the bot lost access): the session forgets it, and its next card makes a new one (F-T29-9). */
-  const lost = (x, e) => {
-    sayOnce(`the thread ${x.thread} of ${x.title} is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: ${apiError(e)}`);
+  /**
+   * A session thread that Discord says is gone (deleted, or the bot lost access): the session forgets it, and its next card makes a new
+   * one (F-T29-9). Each card of the thread that still waits is posted again in the parent channel as it is now, and every later post
+   * about it goes there (G17). The votes stay in the gate, so the new card shows them. A settled card is not posted again.
+   */
+  const lost = async (x, e) => {
+    const thread = x.thread;
+    sayOnce(`the thread ${thread} of ${x.title} is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: ${apiError(e)}`);
     Object.assign(x, { thread: null, closed: false });
     persist();
+    const moving = [...meta].filter(([id, m]) => m.message && m.channel === thread && waits(id)).map(([id]) => id);
+    const ppl = moving.length ? await people() : null;
+    for (const id of moving) {
+      // A post that Discord refuses leaves the card without a message, so the next loop posts it in the parent channel (sync).
+      const message = await postCard(id, ppl, config.channelId);
+      if (!message) Object.assign(meta.get(id), { message: null, channel: config.channelId });
+      persist();
+      say(`${id}: ${message ? 'its card is posted again' : 'its card waits for a new post'} in the parent channel, because the thread of ${x.title} is gone (G17)`);
+    }
   };
   const edit = async (target, message, payload, what) => {
-    try { await discord.edit(target, message, payload); } catch (e) { say(`Discord refused the edit of ${what}: ${apiError(e)}`); }
+    try { await discord.edit(target, message, payload); } catch (e) {
+      const x = goneThread(target, e);
+      if (x) await lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
+    }
   };
   const setLocked = async (x, locked) => {
     try { await discord.setLocked(x.thread, locked); x.closed = locked; persist(); return true; } catch (e) {
-      if (GONE.has(e?.code)) lost(x, e); else sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`);
+      if (GONE.has(e?.code)) await lost(x, e); else sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`);
       return false;
     }
   };
@@ -191,7 +210,11 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         return config.channelId;
       }
       if (!thread && tries > 0) return config.channelId;
-      if (!thread) sayOnce(`the line ${x.line} of ${x.title} is gone or keeps a deleted thread, so the session gets a new line`);
+      if (!thread) {
+        sayOnce(`the line ${x.line} of ${x.title} is gone or keeps a deleted thread, so the session gets a new line`);
+        // The old line stays in the parent channel with its history, so it says where the session went (F-T55-1).
+        await edit(config.channelId, x.line, { content: `**${x.title}**\nmoved to a new line below`, allowedMentions: NO_MENTIONS }, `the old line of ${x.title}`);
+      }
       Object.assign(x, thread ? { thread } : { line: null });
       persist();
     }
@@ -210,8 +233,33 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     try { return await discord.threadFrom(x.line); } catch (e) { if (GONE.has(e?.code)) return null; throw e; }
   }
 
-  /** Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is posted. */
-  const postAbout = (id, payload) => { const m = meta.get(id); return m.message ? post(m.channel ?? config.channelId, payload) : null; };
+  /**
+   * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is posted. When this post finds the
+   * thread gone, the card moved to the parent channel (G17), and the message goes there too.
+   */
+  const postAbout = async (id, payload) => {
+    const m = meta.get(id);
+    const at = m.channel ?? config.channelId;
+    if (!m.message) return null;
+    return (await post(at, payload)) ?? (m.message && m.channel !== at ? post(m.channel, payload) : null);
+  };
+
+  /**
+   * Posts the card of `id` with the role alert at `at`, and keeps its place. A card with a place and no message lost its thread (G17),
+   * and its alert says so. When the session's thread is gone, the card goes to the parent channel in this loop (F-T29-9). Returns the message id or null.
+   */
+  async function postCard(id, ppl, at) {
+    const m = meta.get(id);
+    const { gate, ask } = gates.get(id);
+    const text = (gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
+      : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
+      + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
+    const payload = { ...card(gate, ask, ppl), ...alert(config.driverRole, text) };
+    let message = await post(at, payload);
+    if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
+    if (message) { Object.assign(m, { message, channel: at }); persist(); }
+    return message;
+  }
 
   /** The questions of the gate of `id` that still wait for an answer: none on a closed gate, one per open single gate or open part. */
   const openQuestions = (id) => {
@@ -467,18 +515,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
     // Post every entry that has no card yet, with the role alert.
-    for (const [id, m] of meta) {
-      if (m.message) continue;
-      const { gate, ask } = gates.get(id);
-      const text = gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
-        : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`;
-      const payload = { ...card(gate, ask, ppl), ...alert(config.driverRole, text) };
-      let at = await placeOf(m.session);
-      let message = await post(at, payload);
-      // The session's thread was gone (`post` forgot it): the card goes to the parent channel in this loop (F-T29-9).
-      if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
-      if (message) { Object.assign(m, { message, channel: at }); persist(); }
-    }
+    for (const [id, m] of meta) if (!m.message) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
   }
 
   /** The timers: the tick at gate.endsAt (also after a sleep) and the reminders every 2 hours. */

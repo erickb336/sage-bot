@@ -66,13 +66,15 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 - The thread is titled "Session N · weekday day month", for example "Session 14 · Tue 4 Oct".
 - The bridge edits the line when a count changes, and when the session ends.
 - When the session ended and all its questions are settled, the bridge archives and locks the thread. A resume opens it again.
+- When someone deletes a session thread, the bridge posts each open card of it again in the parent channel, with the votes so far. The team votes there, and the reminders and tie posts go there. A settled card is not posted again. (G17)
+- When the session then needs a new line, the old line says "moved to a new line below".
 - A session thread holds the votes and the chief's posts only. To chat with the chief, use a separate channel.
 
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
 
 ## Rules held in code
 
-These are the owner's decisions. Each one is in code and has tests. The ids in brackets (G9 to G16) are the owner's decisions in the sage logbook.
+These are the owner's decisions. Each one is in code and has tests. The ids in brackets (G9 to G17) are the owner's decisions in the sage logbook.
 
 | Rule | Why | Where |
 | --- | --- | --- |
@@ -89,6 +91,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | The owner's answer at the terminal is final. A press never replaces it. (G10) | The owner has the last word. | `src/bridge.js` |
 | Only the owner withdraws a question, and the owner withdraws it at the terminal. | Nobody in Discord can cancel the chief's question. | `src/vote.js`, `src/bridge.js` |
 | One thread per chief session, only for a session that acts as chief and has a team vote, titled "Session N · weekday day month". It locks when the session ended and its questions are settled. (G14, G15) | Each session's questions stay together, and an old thread takes no more presses. | `src/sessions.js`, `src/bridge.js` |
+| When a session thread is deleted while a vote in it is open, each open card is posted again in the parent channel, with its votes. Its reminders and tie posts go there too. (G17) | The team can still vote. | `src/bridge.js` |
 | A session thread holds the votes and the chief's posts only. Chat with the chief is in a separate channel. (G16) | Votes stay readable, and no chat text goes near the chief's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
 | No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
