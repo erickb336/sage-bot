@@ -65,16 +65,16 @@ const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>).';
 const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
 
-test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}) and of wildcards (${CORPUS.wildcard.length}), each once`, () => {
-  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
-  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox, ...CORPUS.state, ...CORPUS.wildcard];
+test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}), of wildcards (${CORPUS.wildcard.length}) and of pattern characters (${CORPUS.pattern.length}), each once`, () => {
+  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.pattern.length >= 15 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox, ...CORPUS.state, ...CORPUS.wildcard, ...CORPUS.pattern];
   assert.equal(new Set(all).size, all.length);
 });
 
 test('T133: with SAGE_ORIGIN unset or not "lead", the guard allows every corpus case (it is inert)', () => {
   const env = { ...LEAD };
   delete env.SAGE_ORIGIN;
-  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.state, ...CORPUS.wildcard].map((c) => bash(c)).concat([...CORPUS.tools.refuse, ...CORPUS.tools.state].map(([n, i]) => tool(n, i)));
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.state, ...CORPUS.wildcard, ...CORPUS.pattern].map((c) => bash(c)).concat([...CORPUS.tools.refuse, ...CORPUS.tools.state].map(([n, i]) => tool(n, i)));
   assert.deepEqual(all.filter((x) => guard(x, env).decision !== 'allow'), []);
   for (const origin of ['owner', 'LEAD', '', 'lead ']) assert.equal(hook(bash(CORPUS.refuse[0]), { ...LEAD, SAGE_ORIGIN: origin }).decision, 'allow');
   assert.equal(hook('not json', {}).decision, 'allow');
@@ -115,11 +115,54 @@ test('T133 (G46 A, F-T133-46): git and node --test expand a quoted pattern in an
   assert.equal(guard(bash('node --test "{SCRATCH}/s*"')).reason, wild('/sample/scratch/s*'));
   assert.equal(guard(bash("git rm --cached '{SCRATCH}/sag?.mjs'")).reason, wild('/sample/scratch/sag?.mjs'));
   assert.equal(guard(bash('git add -- "./[s]age.mjs"')).reason, `sage-bot guard: the wildcard [ in ./[s]age.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
-  // Any other pattern character (node's braces and extglobs, git's backslash) is refused like the [.
-  assert.equal(guard(bash('node --test "./sa{g,x}e.mjs"')).reason, `sage-bot guard: the wildcard { in ./sa{g,x}e.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(guard(bash("git add 'sag\\e.mjs'")).reason, `sage-bot guard: the wildcard \\ in sag\\e.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  // Any other pattern character (node's braces and extglobs, git's backslash) is refused too, with the stop ending (F-T133-51).
+  assert.equal(guard(bash('node --test "./sa{g,x}e.mjs"')).reason, `sage-bot guard: the character { in the operand ./sa{g,x}e.mjs (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash("git add 'sag\\e.mjs'")).reason, `sage-bot guard: the character \\ in the operand sag\\e.mjs (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
   // A pattern that cannot match the name, and a quoted text that is no operand (a commit message), pass.
   for (const c of ['node --test "test/*.test.js"', "git commit -m '[T133] {x} sage*'", 'git log --oneline -- "src/guard.js"', 'node {SCRATCH}/x.mjs "s*"']) assert.equal(guard(bash(c)).reason, undefined, c);
+});
+
+test('T133 (G47 A, F-T133-51): any other pattern character than [ in a git or node --test operand has no safe form, so it gets the stop ending', () => {
+  const PATTERN = /^sage-bot guard: the character .+ in the operand .+ \(git and node --test can read it as a pattern\) is refused in a lead session\. This needs Erick; tell the sage-lead and stop this action\.$/;
+  assert.deepEqual(CORPUS.pattern.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !PATTERN.test(why)), []);
+  assert.equal(guard(bash('git add src/c++.js')).reason, `sage-bot guard: the character + in the operand src/c++.js (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash("git stash pop 'stash@{0}'")).reason, `sage-bot guard: the character @ in the operand stash@{0} (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  // The same characters in a word that is no pattern operand pass.
+  for (const c of ["git commit -m 'c++ and @types'", 'cat src/@types/x.d.ts', 'git stash pop']) assert.equal(guard(bash(c)).reason, undefined, c);
+});
+
+test('T133 (F-T133-52): git checkout -- <file> is refused with the hint to git restore, which the guard allows', () => {
+  assert.equal(guard(bash('git checkout -- src/a.js')).reason, 'sage-bot guard: git checkout with the option -- is refused in a lead session. sage can do this instead: git restore <file> to undo the changes of a file, or git checkout -b <branch>.');
+  assert.equal(guard(bash('git restore src/a.js')).decision, 'allow');
+});
+
+test('T133 (F-T133-50): a file tool input nested 30,000 deep, or 64 KB of any shape, is decided by the real hook (exit code 0), with no stack error', () => {
+  // [[[ … ]]] 30,000 deep is 60 KB; the name at the bottom must still be found.
+  const deep = (leaf, d = 30_000) => `${'['.repeat(d)}${JSON.stringify(leaf)}${']'.repeat(d)}`;
+  const write = (content) => `{"tool_name":"Write","tool_input":{"file_path":"/sample/scratch/x.txt","content":${content}}}`;
+  const named = hook(write(deep('sage.mjs')));
+  assert.deepEqual([named.status, named.reason], [0, STATE]);
+  const plain = hook(write(deep('x')));
+  assert.deepEqual([plain.status, plain.decision], [0, 'allow']);
+  // Just under 64 KB: objects nested as deep as fit, a wide array, and a mix, in each file tool.
+  const fit = (make) => {
+    let d = 1;
+    while (Buffer.byteLength(make(d * 2)) <= 64 * 1024) d *= 2;
+    for (let s = d / 2; s >= 1; s /= 2) if (Buffer.byteLength(make(d + s)) <= 64 * 1024) d += s;
+    return make(d);
+  };
+  const shapes = [
+    (d) => write(`${'{"a":'.repeat(d)}"x"${'}'.repeat(d)}`),
+    (d) => write(`[${Array(d).fill('"x"').join(',')}]`),
+    (d) => write(`${'[{"a":'.repeat(d)}"x"${'}]'.repeat(d)}`),
+  ];
+  for (const name of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+    for (const make of shapes) {
+      const input = fit((d) => make(d).replace('"Write"', `"${name}"`));
+      assert.ok(Buffer.byteLength(input) > 60 * 1024 && Buffer.byteLength(input) <= 64 * 1024, `${Buffer.byteLength(input)}`);
+      assert.equal(guard(input).decision, 'allow', `${name} ${input.slice(0, 80)}`);
+    }
+  }
 });
 
 test('T133 (G46 A, F-T133-47): when one part of a pipeline runs or writes, every part of it is checked', () => {

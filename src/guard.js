@@ -152,9 +152,9 @@ function options(name, args, table, { posix = false, safe } = {}) {
   return ops;
 }
 
-/** A command's rule: its option table, then `rule(ops, env)` for its operands. It gives a refusal, or the operands. */
-const cmd = (table, rule = () => null) => (args, env, name) => {
-  const ops = options(name, args, table);
+/** A command's rule: its option table, then `rule(ops, env)` for its operands. It gives a refusal, or the operands. `safe`: see options(). */
+const cmd = (table, rule = () => null, safe = undefined) => (args, env, name) => {
+  const ops = options(name, args, table, { safe });
   return typeof ops === 'string' ? ops : rule(ops, env) ?? ops;
 };
 
@@ -233,7 +233,7 @@ const GIT = {
   restore: gitCmd({ '--staged': FLAG, '-S': FLAG, '--worktree': FLAG, '-W': FLAG }),
   commit: cmd({ '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG }),
   switch: cmd({ '-c': TEXT, '--create': TEXT }),
-  checkout: cmd({ '-b': TEXT }),
+  checkout: cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>'),
   branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '-u': TEXT, '--set-upstream-to': TEXT, '--contains': TEXT }),
   stash: (args, env, name) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${args[0]}`),
   remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'git remote: a change of a remote'),
@@ -288,6 +288,8 @@ const WILDCARD = 'name each file in full instead of a wildcard (for the tests: n
  */
 function wildcard(text, chars, env, pattern = false) {
   const odd = pattern ? text.match(/[^A-Za-z0-9 _\-./,:=%~^*?]/) : chars.includes('[') && ['['];
+  // Any other character than [ in a pattern operand (@, +, (, {, \) has no safe form: a file or revision may hold it (F-T133-51).
+  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${text} (git and node --test can read it as a pattern)`;
   if (odd) return how(`the wildcard ${odd[0]} in ${text} (in a part that runs or writes)`, WILDCARD);
   return /[*?]/.test(chars) && mayMatchStateTool(text, env) ? how(`the wildcard ${text} (it can match the sage state tool)`, WILDCARD) : null;
 }
@@ -373,7 +375,17 @@ const allow = () => null;
 // Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules and the sandbox of step 6 hold their paths. A file
 // tool may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
 // input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
-const strings = (v, key = '') => (typeof v === 'string' ? [[key, v]] : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => strings(x, k)) : []);
+/** Each string of a tool input with its key. An explicit stack: a recursive walk overflowed at a nesting of about 3000 (F-T133-50). */
+function strings(input) {
+  const all = [];
+  const stack = [['', input]];
+  while (stack.length) {
+    const [key, v] = stack.pop();
+    if (typeof v === 'string') all.push([key, v]);
+    else if (v && typeof v === 'object') for (const e of Object.entries(v)) stack.push(e);
+  }
+  return all;
+}
 function file(i, env) {
   const all = strings(i);
   if (all.some(([k, v]) => k.endsWith('path') && !ASCII.test(v))) return 'a file path with a character that is not printable ASCII';

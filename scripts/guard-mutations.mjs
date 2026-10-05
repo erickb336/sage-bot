@@ -97,6 +97,9 @@ const MUTATIONS = [
   ['node: its operands are given back (F-T133-46)', "such as stdin)` : ops;", "such as stdin)` : null;"],
   ['a quoted * or ? in a pattern operand can match the state tool (F-T133-46)', 'const why = wildcard(op, op, env, true);', "const why = wildcard(op, '', env, true);"],
   ['a pattern operand: no pattern character but * and ? (F-T133-46)', 'pattern ? text.match(/[^A-Za-z0-9 _\\-./,:=%~^*?]/) :', "pattern ? text.match(/\\[/) :"],
+  // G47 A: a pattern character other than [ in such an operand has no safe form, so it gets the stop ending (F-T133-51).
+  ['a pattern operand: a character with no safe form gets the stop ending (F-T133-51)', "  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${text} (git and node --test can read it as a pattern)`;\n", ''],
+  ['git checkout --: the hint to git restore (F-T133-52)', "cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>')", "cmd({ '-b': TEXT })"],
   // F-T133-47 (G46 A): a pipeline runs or writes as a whole.
   ['a pipeline is checked as a whole (F-T133-47)', '(seg.pipe ? pipelines.at(-1) : pipelines[pipelines.push([]) - 1]).push(seg);', 'pipelines[pipelines.push([]) - 1].push(seg);'],
   // F-T133-48 (G46 A): node runs no script from a path under /dev/.
@@ -142,6 +145,9 @@ const MUTATIONS = [
   ['ExitPlanMode is allowed', 'ExitPlanMode: allow, ', ''],
   ['a file tool without the name is allowed', 'return namesStateTool(all.map(([, v]) => v), env) ? STATE_TOOL : null;', 'return STATE_TOOL;'],
   ['a file tool: each string on its own (F-T133-42)', 'const all = strings(i);', "const all = [['', JSON.stringify(i)]];"],
+  ['a file tool: the strings of nested objects are walked', 'for (const e of Object.entries(v)) stack.push(e);', 'if (v === input) for (const e of Object.entries(v)) stack.push(e);'],
+  // The walk before F-T133-50: a recursion, which overflowed the stack at a nesting of about 3000.
+  ['a file tool: the walk needs no stack depth (F-T133-50)', 'function strings(input) {\n', "function strings(input) {\n  if (input) return (function walk(v, key = '') { return typeof v === 'string' ? [[key, v]] : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => walk(x, k)) : []; })(input);\n"],
   ['a file tool: a path is printable ASCII', "if (all.some(([k, v]) => k.endsWith('path') && !ASCII.test(v))) return", 'if (false) return'],
   ['SendMessage is allowed', ' SendMessage: allow,', ''],
   ['EnterWorktree is allowed', ' EnterWorktree: allow,', ''],
