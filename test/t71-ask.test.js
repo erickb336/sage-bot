@@ -2,20 +2,28 @@
 // with the fake Discord. SAMPLE DATA ONLY: every id, name and file is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
-import { askCommand, BUILDS, createAsk, HOUR, MAX_FILE, NO_ROLE, POINTER, projectsOf } from '../src/ask.js';
-import { rolesOf } from '../src/discord.js';
+import { askCommand, attachmentName, BUILDS, createAsk, HOUR, MAX_BYTES, NO_ROLE, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
+import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000001';
 const SECRET = 'ZZSECRET';
-const PRIVATE = { flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
+const PRIVATE = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is private (checked in `answers`)
+const ROLES = { [MAYA]: [APPRENTICE], [JON]: [LEADR] };
+
+/** The edits of a fake command's reply, after a check that its first call is one private defer. */
+function answers(i) {
+  assert.deepEqual(i.replies[0], { kind: 'defer', flags: MessageFlags.Ephemeral });
+  assert.ok(i.replies.slice(1).every((r) => r.kind === 'edit'), JSON.stringify(i.replies));
+  return i.replies.slice(1).map(({ kind, ...payload }) => payload);
+}
 
 /** A scratch logbook with two tasks, a team vote, a terminal question, and the secret marker in every place that /sage must never read. */
 function world(t) {
@@ -39,19 +47,19 @@ function world(t) {
   b.ask = b.makeAsk();
   /** One /sage command; returns its replies. */
   b.cmd = async (user, sub, options = {}, o = {}) => {
-    const i = fakeCommand({ user, roles: o.roles ?? { [MAYA]: [APPRENTICE], [JON]: [LEADR] }[user] ?? [], bot: o.bot, channelId: o.channelId ?? ASK, sub, options });
+    const i = fakeCommand({ user, roles: o.roles ?? ROLES[user] ?? [], bot: o.bot, channelId: o.channelId ?? ASK, parentId: o.parentId, sub, options, onDefer: o.onDefer });
     await b.ask.command(i);
-    return i.replies;
+    return o.bot ? i.replies : answers(i);
   };
-  b.mention = async (user, content, channelId = ASK, bot = false) => {
-    const m = fakeMention({ user, bot, channelId, content });
+  b.mention = async (user, content, channelId = ASK, bot = false, parentId = null) => {
+    const m = fakeMention({ user, roles: ROLES[user] ?? [], bot, channelId, parentId, content });
     await b.ask.mention(m);
     return m.replies;
   };
   return b;
 }
 
-const BOARD = '**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the logbook has no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n- G2 (T2): Ship the wake note?';
+const BOARD = '**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project\'s records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n- G2 (T2): Ship the wake note?';
 const GATES = '**Open questions · project** (2)\n- G1 (T1), team vote: Which sort is the default?\n  A. Name · B. Date\n- G2 (T2), answered at the terminal: Ship the wake note?\n  A. Yes · B. No';
 
 test('each command answers an apprentice and a lead in private, from the safe columns only', async (t) => {
@@ -148,7 +156,7 @@ function filesProject(t) {
   writeFileSync(join(project, 'docs', 'flow.svg'), '<svg/>');
   writeFileSync(join(project, 'docs', 'notes.md'), `notes ${SECRET}`);
   writeFileSync(join(project, 'docs', '.hidden.svg'), '<svg/>');
-  writeFileSync(join(project, 'design', 'shots', 'big.png'), Buffer.alloc(MAX_FILE + 1));
+  writeFileSync(join(project, 'design', 'shots', 'big.png'), Buffer.alloc(MAX_BYTES + 1));
   for (let n = 1; n <= 11; n++) writeFileSync(join(project, 'design', 'shots', `${String(n).padStart(2, '0')}.png`), Buffer.alloc(n));
   symlinkSync(join(root, 'outside.png'), join(project, 'design', 'shots', 'link.png'));
   symlinkSync(root, join(project, 'docs', 'up'));
@@ -161,16 +169,16 @@ test('/sage files attaches only allow-listed files: regular, inside the project,
   const ask = createAsk({ config: { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath,
     projects: [{ name: 'site', project, files: ['docs/*.svg', 'docs/up/*.png', 'design/shots/*.png'] }] }, now: () => b.now, log: () => {} });
   const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files', options: {} });
-  await ask.command(i);
+  const got = (await ask.command(i), answers(i));
   const names = ['design/shots/01.png', 'design/shots/02.png', 'design/shots/03.png', 'design/shots/04.png', 'design/shots/05.png',
     'design/shots/06.png', 'design/shots/07.png', 'design/shots/08.png', 'design/shots/09.png', 'design/shots/10.png'];
-  assert.deepEqual(i.replies, [{
+  assert.deepEqual(got, [{
     content: `10 shared file(s) of site:\n${names.map((n) => `- ${n}`).join('\n')}`,
     files: names.map((n, k) => ({ name: n.split('/').at(-1), size: k + 1 })), ...PRIVATE }]);
   const one = createAsk({ config: { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath, projects: [{ name: 'site', project, files: ['docs/*.svg', 'docs/up/*.png', 'design/shots/big.png', 'design/shots/link.png'] }] }, log: () => {} });
   const j = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files' });
   await one.command(j);
-  assert.deepEqual(j.replies[0].files, [{ name: 'flow.svg', size: 6 }]); // not .hidden.svg, notes.md, outside.png through docs/up, the 8 MB + 1 big.png or the symlink link.png
+  assert.deepEqual(answers(j)[0].files, [{ name: 'flow.svg', size: 6 }]); // not .hidden.svg, notes.md, outside.png through docs/up, the 8 MB + 1 big.png or the symlink link.png
 });
 
 test('the config is checked at load: a traversal, a type or an absolute file entry, an unsafe name, a relative path, no askChannelId', () => {
@@ -225,4 +233,201 @@ test('launchd.mjs refuses a config whose projects the bridge would refuse, with 
   assert.equal(r.status, 1);
   assert.equal(r.stdout, '');
   assert.equal(r.stderr, `sage-bot launchd: in the config file ${path}, projects[0].files: "../secrets/*.png" must be a path in the project, such as "docs/*.svg", with no "..", and end in .png, .jpg, .svg, .pdf. No plist printed.\n`);
+});
+
+// ---- Repair round 1 (R333): the findings of R329, R330 and R332. ----
+
+const POINTER_TEXT = "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead.";
+const THREAD = '400000000000000077';
+
+/** A project folder `site` with the given files (name → content), and an ask whose only project is it, with `files` as its allow-list. */
+function site(t, b, contents, files) {
+  const root = mkdtempSync(join(tmpdir(), 'sage-bot-r333-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const project = join(root, 'site');
+  mkdirSync(join(project, 'shots'), { recursive: true });
+  for (const [name, content] of Object.entries(contents)) writeFileSync(join(project, 'shots', name), content);
+  const config = { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath, projects: [{ name: 'site', project, files }] };
+  return { root, project, config, ask: createAsk({ config, now: () => b.now, log: (l) => b.lines.push(l) }) };
+}
+const files = async (ask, o = {}) => {
+  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files', ...o });
+  await ask.command(i);
+  return answers(i);
+};
+
+test('F-T71-2: every /sage command defers in private before any file or logbook work, then edits that reply', async (t) => {
+  const b = world(t);
+  // The defer adds a task and a file: an answer that shows them did its work after the defer.
+  const [board] = await b.cmd(MAYA, 'board', {}, { onDefer: () => b.sh('task', 'add', '--title', 'Added during the defer', '--size', 'tiny') });
+  assert.equal(board.content.split('\n')[1], '3 task(s) · building 1 · framed 2');
+  const s = site(t, b, { 'a.svg': '<svg/>' }, ['shots/*.svg']);
+  assert.deepEqual(await files(s.ask, { onDefer: () => writeFileSync(join(s.project, 'shots', 'b.svg'), '<svg>b</svg>') }),
+    [{ content: '2 shared file(s) of site:\n- shots/a.svg\n- shots/b.svg', files: [{ name: 'a.svg', size: 6 }, { name: 'b.svg', size: 12 }], ...PRIVATE }]);
+  // A defer that Discord refuses (the interaction is gone) ends the command: no edit, one log line.
+  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'board' });
+  i.defer = async () => { throw Object.assign(new Error('Unknown interaction'), { code: 10062 }); };
+  await b.ask.command(i);
+  assert.deepEqual(i.replies, []);
+  assert.equal(b.lines.at(-1), 'Discord refused to defer a /sage reply: code 10062: Unknown interaction');
+});
+
+test('F-T71-2: the first ask runs the logbook lookup once; a lookup that fails is tried again on the next ask', async (t) => {
+  const b = world(t);
+  const calls = join(b.root, 'calls.txt');
+  const fail = join(b.root, 'fail');
+  const wrapper = join(b.root, 'counting-sage.mjs'); // the real sage state tool, with a record of each call
+  writeFileSync(wrapper, `import { appendFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+appendFileSync(${JSON.stringify(calls)}, process.argv[2] + '\\n');
+if (existsSync(${JSON.stringify(fail)})) process.exit(3);
+process.exit(spawnSync(process.execPath, [${JSON.stringify(SAGE)}, ...process.argv.slice(2)], { stdio: 'inherit' }).status ?? 1);
+`);
+  const lookups = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((l) => l === 'logbook').length : 0);
+  b.ask = b.makeAsk({ sagePath: wrapper });
+  writeFileSync(fail, '');
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: 'I could not read the records of project just now. Nothing is lost. Please ask again in a minute.', ...PRIVATE }]);
+  assert.equal(lookups(), 1);
+  rmSync(fail);
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: BOARD, ...PRIVATE }]);
+  assert.equal(lookups(), 2);
+  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: GATES, ...PRIVATE }]);
+  assert.equal(lookups(), 2);
+});
+
+test('F-T71-1: /sage files sends at most 8 MB in one reply; the files that do not fit are listed as not attached', async (t) => {
+  const b = world(t);
+  const big = Buffer.alloc(MAX_BYTES);
+  const names = Array.from({ length: 10 }, (_, n) => `a${String(n + 1).padStart(2, '0')}.png`);
+  const s = site(t, b, Object.fromEntries(names.map((n) => [n, big])), ['shots/*.png']);
+  const [got] = await files(s.ask);
+  assert.deepEqual(got.files, [{ name: 'a01.png', size: 8 * 1024 * 1024 }]);
+  assert.equal(got.content, ['1 shared file(s) of site:', '- shots/a01.png', '9 more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.',
+    ...names.slice(1).map((n) => `- shots/${n}`)].join('\n'));
+  // A smaller file after one that does not fit still comes: 5 + 3 MB fit, 4 MB does not.
+  const mb = (n) => Buffer.alloc(n * 1024 * 1024);
+  const mix = site(t, b, { 'b1.png': mb(5), 'b2.png': mb(4), 'b3.png': mb(3) }, ['shots/*.png']);
+  assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.\n- shots/b2.png',
+    files: [{ name: 'b1.png', size: 5 * 1024 * 1024 }, { name: 'b3.png', size: 3 * 1024 * 1024 }], ...PRIVATE }]);
+});
+
+test('F-T71S-1: a file swapped between the check and the read is never sent: not for a symlink, not for another file', async (t) => {
+  const b = world(t);
+  const s = site(t, b, { 'real.svg': '<svg/>' }, ['shots/*.svg']);
+  const outside = join(s.root, 'outside.svg');
+  const real = join(s.project, 'shots', 'real.svg');
+  writeFileSync(outside, SECRET);
+  const p = s.ask.projects[0];
+  const text = (r) => ({ attached: r.attached.map((f) => [f.name, f.data.toString()]), over: r.over });
+  assert.deepEqual(text(readShared(sharedFiles(p))), { attached: [['shots/real.svg', '<svg/>']], over: [] });
+  let checked = sharedFiles(p);
+  rmSync(real);
+  symlinkSync(outside, real); // after the check, before the read
+  assert.deepEqual(text(readShared(checked)), { attached: [], over: [] });
+  rmSync(real);
+  writeFileSync(real, '<svg/>');
+  checked = sharedFiles(p);
+  renameSync(outside, real); // another regular file in its place: another inode
+  assert.deepEqual(text(readShared(checked)), { attached: [], over: [] });
+});
+
+test('F-T71S-2 and F-T71-3: a dangling symlink is skipped and the other files still come; an in-project symlink is left out', async (t) => {
+  const b = world(t);
+  const s = site(t, b, { 'ok.svg': '<svg/>', 'real.svg': '<svg>r</svg>' }, ['shots/*.svg']);
+  symlinkSync(join(s.root, 'missing.svg'), join(s.project, 'shots', 'gone.svg'));
+  assert.deepEqual(await files(s.ask), [{ content: '2 shared file(s) of site:\n- shots/ok.svg\n- shots/real.svg', files: [{ name: 'ok.svg', size: 6 }, { name: 'real.svg', size: 12 }], ...PRIVATE }]);
+  symlinkSync(join(s.project, 'shots', 'real.svg'), join(s.project, 'shots', 'inlink.svg'));
+  const only = createAsk({ config: { ...s.config, projects: [{ name: 'site', project: s.project, files: ['shots/inlink.svg'] }] }, log: () => {} });
+  assert.deepEqual(await files(only), [{ content: 'site shares no files.', ...PRIVATE }]);
+});
+
+test('F-T71Q-2: an attachment name keeps only A-Z, a-z, 0-9, dot, dash and underscore: a sweep over every code point', async (t) => {
+  const keep = /^[A-Za-z0-9._-]$/u;
+  const wrong = [];
+  for (let cp = 0; cp <= 0x10FFFF; cp++) {
+    const ch = String.fromCodePoint(cp);
+    const out = attachmentName(`a${ch}.png`);
+    if (out !== (keep.test(ch) ? `a${ch}.png` : 'a_.png')) wrong.push(cp.toString(16));
+  }
+  assert.deepEqual(wrong, []);
+  const b = world(t);
+  const s = site(t, b, { 'evil‮gpj.\nx.svg': '<svg/>' }, ['shots/*.svg']);
+  const [got] = await files(s.ask);
+  assert.deepEqual(got.files, [{ name: 'evil_gpj._x.svg', size: 6 }]);
+  assert.equal(got.content, '1 shared file(s) of site:\n- shots/evilgpj. x.svg'); // the list goes through `safe`
+});
+
+test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #ask-sage; a thread of another channel does not', async (t) => {
+  const b = world(t);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ASK }), [{ content: BOARD, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: Promise.resolve(ASK) }), [{ content: BOARD, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PRIVATE }]);
+  const quiet = { parse: [], repliedUser: false };
+  assert.deepEqual(await b.mention(MAYA, '<@1> hi', THREAD, false, ASK), [{ content: POINTER_TEXT, allowedMentions: quiet }]);
+  assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
+});
+
+test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, a build verb that starts a sentence, a member with no role', async (t) => {
+  const b = world(t);
+  const say = async (who, text) => (await b.mention(who, text))[0]?.content;
+  assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
+  assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
+  for (const text of ['<@1> any update on T7?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(SAM, text), POINTER_TEXT, text);
+  for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
+    assert.equal(await say(SAM, text), `${POINTER_TEXT} Builds are for sage-leads: ask a lead.`, text);
+  }
+  b.now += HOUR; // a new hour: Sam asks 10 times, then once more
+  for (let n = 1; n <= 10; n++) await say(SAM, 'hi');
+  assert.equal(await say(SAM, 'hi'), 'Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.');
+  assert.deepEqual(await b.cmd(SAM, 'board'), [{ content: 'Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.', ...PRIVATE }]);
+});
+
+test('F-T71Q-5: with no projects, a folder name that makes no valid name gets a message with the cause and the fix', () => {
+  const base = { ...CONFIG, askChannelId: ASK, sagePath: '/s/sage.mjs', statePath: '/st/gates.json' };
+  const fix = 'makes no valid project name: add a projects entry with a name of lower-case letters, digits and dashes (at most 32)';
+  assert.throws(() => projectsOf({ ...base, project: '/Users/x/_scratch' }), { message: `the config has no projects, and the folder name of project ("_scratch") ${fix}` });
+  assert.throws(() => projectsOf({ ...base, project: `/Users/x/${'a'.repeat(33)}` }), { message: `the config has no projects, and the folder name of project ("${'a'.repeat(33)}") ${fix}` });
+  assert.throws(() => projectsOf({ ...base, project: 'x' }), { message: 'the config: project must be an absolute path' });
+  assert.throws(() => projectsOf({ ...base, project: '/Users/x/site', sagePath: undefined }), { message: 'the config: sagePath must be an absolute path' });
+  assert.deepEqual(projectsOf({ ...base, project: '/Users/x/My Site' }), [{ name: 'my-site', project: '/Users/x/My Site', sagePath: '/s/sage.mjs', files: [] }]);
+});
+
+/** A chat command as discord.js gives it, for `routes`: roles only on `member`; every string option answers `strings[name]`. SAMPLE DATA ONLY. */
+function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [APPRENTICE], channelId = ASK, channel = null, sub = 'board', strings = {} } = {}) {
+  const calls = [];
+  return { calls, guildId, commandName: 'sage', user: { id: user, bot: false }, member: { roles }, channelId, channel,
+    isChatInputCommand: () => true, isButton: () => false, isModalSubmit: () => false,
+    options: { getSubcommand: () => sub, getString: (name) => strings[name] ?? null },
+    deferReply: async (p) => { calls.push(['defer', p]); }, editReply: async (p) => { calls.push(['edit', p.content]); } };
+}
+/** A message as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
+function message({ guildId = CONFIG_GUILD, author = MAYA, bot = false, roles = [APPRENTICE], mentions = [BOT_USER], channelId = ASK, channel = null, content = '<@1> hi' } = {}) {
+  const calls = [];
+  return { calls, guildId, author: { id: author, bot }, member: { roles }, mentions: { users: new Map(mentions.map((id) => [id, {}])) }, channelId, channel, content,
+    reply: async (p) => { calls.push(p.content); } };
+}
+const CONFIG_GUILD = '200000000000000001';
+const BOT_USER = '100000000000000099';
+
+test('F-T71-4: routes take roles from the member, never from options, and answer only their own guild and mentions of the bot', async (t) => {
+  const b = world(t);
+  const pressed = [];
+  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : { isThread: () => false });
+  const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER });
+  const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
+  const defer = ['defer', { flags: MessageFlags.Ephemeral }];
+  // Roles come from the member: an option that names the lead role changes nothing.
+  assert.deepEqual(await run(chat({ roles: [], strings: { role: LEADR, roles: LEADR } })), [defer, ['edit', NO_ROLE]]);
+  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR] })), [defer, ['edit', BOARD]]);
+  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], guildId: '200000000000000002' })), []);
+  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], channelId: THREAD })), [defer, ['edit', BOARD]]); // a thread of #ask-sage, not in the cache
+  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], channelId: THREAD, channel: { isThread: () => true, parentId: ELSEWHERE } })),
+    [defer, ['edit', `I answer /sage in <#${ASK}>, so please ask there.`]]);
+  // Messages: only this guild, only people, only a mention of the bot.
+  assert.deepEqual(await run(message({ guildId: '200000000000000002' }), 'message'), []);
+  assert.deepEqual(await run(message({ bot: true }), 'message'), []);
+  assert.deepEqual(await run(message({ mentions: [JON] }), 'message'), []);
+  assert.deepEqual(await run(message({ author: JON, roles: [LEADR], content: '<@1> fix the login' }), 'message'), [`${POINTER_TEXT} Builds from Discord are not ready yet.`]);
+  assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [POINTER_TEXT]);
+  assert.deepEqual(pressed, []);
 });

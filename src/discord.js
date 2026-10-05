@@ -34,25 +34,50 @@ export const memberOf = (m) => ({ id: m.id, name: m.displayName, roles: [...m.ro
 /** The role ids of an interaction's member: a GuildMember (roles.cache) or the raw API member (a list of ids). Roles come from Discord, never from text. */
 export const rolesOf = (member) => (Array.isArray(member?.roles) ? [...member.roles] : [...(member?.roles?.cache?.keys() ?? [])]);
 
-/** A /sage chat command as src/ask.js reads it. */
-export const commandOf = (i) => ({
-  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), channelId: i.channelId,
+/**
+ * The parent channel id when an interaction or a message is in a thread, else null. A thread that is not in the cache (`channel` is
+ * null) comes from `fetch(x.channelId)`; a fetch that fails gives null, so it counts as another channel (F-T29-10).
+ * @param {(id: string) => Promise<{ isThread(): boolean, parentId?: string }>} fetch
+ */
+export async function parentOf(x, fetch) {
+  const channel = x.channel ?? await fetch(x.channelId).catch(() => null);
+  return channel?.isThread() === true ? channel.parentId : null;
+}
+
+/** A /sage chat command as src/ask.js reads it. `parentId` is a promise: src/ask.js defers the reply before it waits for anything. */
+export const commandOf = (i, fetch) => ({
+  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), channelId: i.channelId, parentId: parentOf(i, fetch),
   sub: i.options.getSubcommand(false), options: { project: i.options.getString('project'), id: i.options.getString('id') },
-  reply: (payload) => i.reply(payload),
+  defer: (payload) => i.deferReply(payload),
+  edit: (payload) => i.editReply(payload),
 });
 
 /**
  * Whether an interaction is the bridge's: a button or a form in the configured channel or in a thread of it (T29). A press in any
- * other channel is not, also on a message with the bridge's custom ids. A thread that is not in the cache (i.channel is null) comes
- * from `fetch(i.channelId)`; a fetch that fails counts as another channel (F-T29-10).
- * @param {(id: string) => Promise<{ isThread(): boolean, parentId?: string }>} fetch
+ * other channel is not, also on a message with the bridge's custom ids.
  */
 export async function accepts(i, channelId, fetch) {
   if (!(i.isButton() || i.isModalSubmit())) return false;
-  if (i.channelId === channelId) return true;
-  const channel = i.channel ?? await fetch(i.channelId).catch(() => null);
-  return channel?.isThread() === true && channel.parentId === channelId;
+  return i.channelId === channelId || await parentOf(i, fetch) === channelId;
 }
+
+/**
+ * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js and the bridge's buttons and forms to
+ * the bridge; `message` takes a message that mentions the bot (`botId`) and is not from a bot to src/ask.js. Anything from another
+ * guild gets nothing. Each returns the promise of its work, or nothing.
+ */
+export const routes = ({ config, ask, bridge, fetch, botId }) => ({
+  interaction(i) {
+    if (i.guildId !== config.guildId) return undefined;
+    if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch)) : undefined;
+    return accepts(i, config.channelId, fetch).then((ok) => ok && bridge.interaction(i));
+  },
+  message(m) {
+    if (m.guildId !== config.guildId || m.author.bot || !m.mentions.users.has(botId)) return undefined;
+    return ask.mention({ user: { id: m.author.id, bot: false }, roles: rolesOf(m.member), channelId: m.channelId, parentId: parentOf(m, fetch),
+      content: m.content, reply: (payload) => m.reply(payload) });
+  },
+});
 
 /**
  * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
@@ -92,15 +117,9 @@ export async function start(config) {
       setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
     },
   });
-  client.on(Events.InteractionCreate, (i) => {
-    if (i.guildId !== config.guildId) return;
-    if (i.isChatInputCommand()) { if (i.commandName === 'sage') ask.command(commandOf(i)); return; }
-    accepts(i, config.channelId, place).then((ok) => ok && bridge.interaction(i));
-  });
-  client.on(Events.MessageCreate, (m) => {
-    if (m.guildId !== config.guildId || m.author.bot || !m.mentions.users.has(client.user.id)) return;
-    ask.mention({ user: { id: m.author.id, bot: false }, channelId: m.channelId, content: m.content, reply: (payload) => m.reply(payload) });
-  });
+  const on = routes({ config, ask, bridge, fetch: place, botId: client.user.id });
+  client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
+  client.on(Events.MessageCreate, (m) => { on.message(m); });
   let busy = false;
   const turn = async () => {
     if (busy) return;
