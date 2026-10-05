@@ -33,9 +33,14 @@ test('F-T1-56: the three probe reasons are stored as typed and survive step, JSO
 });
 
 test('F-T1-56: 1,000 random reasons survive step, JSON, parseGate and step', () => {
-  // A seeded generator, so that a failure repeats. The pieces are the hard cases for a cut or a cleaner.
+  // A seeded generator (mulberry32), so that a failure repeats. The pieces are the hard cases for a cut or a cleaner.
   let seed = 56;
-  const rand = (n) => { seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31; return seed % n; };
+  const rand = (n) => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (((t ^ (t >>> 14)) >>> 0) / 4294967296 * n) | 0;
+  };
   const pieces = ['a', ' ', '<', '>', '`', '́', '̸', '\u{1F600}', '\u{1F468}‍\u{1F469}', '\uD83D', '\uDE00', '\n', 'é', '＜'];
   for (let i = 0; i < 1000; i++) {
     const length = i % 10 === 0 ? 480 + rand(60) : rand(40); // every tenth reason reaches the cut
@@ -48,6 +53,11 @@ test('F-T1-56: 1,000 random reasons survive step, JSON, parseGate and step', () 
 });
 
 test('F-T1-57: a gate from openGate, step or parseGate is frozen all through, so a change to one gate cannot reach another', () => {
+  const fresh = batch(); // straight from openGate, before any step
+  assert.throws(() => { fresh.parts[0].ballots.push([JON, { option: 'A', at: T0, via: 'discord' }]); }, TypeError);
+  assert.throws(() => { fresh.parts[0].options[0] = 'Z'; }, TypeError);
+  assert.throws(() => { fresh.outcome.status = 'decided'; }, TypeError);
+  assert.throws(() => { fresh.phase = 'closed'; }, TypeError);
   const first = step(batch(), ballot(MAYA, 'A', T0), HOLDERS, [LEA]).gate;
   const second = step(first, ballot(JON, 'B', T0 + 1), HOLDERS, [LEA]).gate;
   assert.equal(first.parts[1], second.parts[1]); // the unchanged part is shared ...
