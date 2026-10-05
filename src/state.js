@@ -18,26 +18,39 @@ function entryOf(e) {
     && e.ask.parts.every((p) => p && isFinal(p.final, p))
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
-    && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText);
+    && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
+    // Version 2 (T29): the chief session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
+    && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel));
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
-  return { ...e, gate: parseGate(e.gate) };
+  return { ...e, session: e.session ?? null, gate: parseGate(e.gate) };
+}
+
+/** One chief session as the bridge keeps it (T29): its number, the title of its thread, its line in the parent channel and its thread. */
+function sessionOf(s) {
+  const ok = s && SESSION_ID.test(s.id) && Number.isSafeInteger(s.n) && s.n > 0 && isText(s.title)
+    && (s.line === null || isText(s.line)) && (s.thread === null || isText(s.thread)) && typeof s.closed === 'boolean'
+    && (s.endedAt === undefined || isTime(s.endedAt));
+  if (!ok) throw new TypeError('the gate file has a session that the bridge did not write');
+  return s;
 }
 
 /**
- * The entries of the gate file, or [] when there is none yet. Throws for a file that is not the bridge's own.
+ * The entries and the chief sessions of the gate file, both [] when there is none yet. Throws for a file that is not the bridge's own.
+ * A version 1 file (before T29) has no sessions, and its entries have no session.
  * @returns {{ gate: import('./vote.js').Gate, ask: object, sage: string[], texts: string[][], message: string | null, remindedAt: number,
  *   sent: Record<string, string> }[]}  the owner's final answers from the terminal are in `ask.parts[i].final`
  */
 export function load(path) {
   const text = readOwn(path, 'gate file');
-  if (text === undefined) return [];
+  if (text === undefined) return { entries: [], sessions: [] };
   const data = JSON.parse(text);
-  if (data?.version !== 1 || !Array.isArray(data.entries)) throw new TypeError(`the gate file ${path} is not version 1`);
-  return data.entries.map(entryOf);
+  const sessions = data?.version === 1 ? [] : data?.sessions;
+  if (![1, 2].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1 or 2`);
+  return { entries: data.entries.map(entryOf), sessions: sessions.map(sessionOf) };
 }
 
 /** The text of a file that only this user may read and write, or undefined when there is none. Throws for any other file. */
-function readOwn(path, what) {
+export function readOwn(path, what) {
   const st = lstatSync(path, { throwIfNoEntry: false });
   if (!st) return undefined;
   if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
@@ -47,10 +60,12 @@ function readOwn(path, what) {
 }
 
 /** Replaces the gate file whole. */
-export const save = (path, entries) => writeWhole(path, JSON.stringify({ version: 1, entries }));
+export const save = (path, entries, sessions = []) => writeWhole(path, JSON.stringify({ version: 2, entries, sessions }));
 
 /** A sage gate id, as sage writes it: G and digits. Only these go in the team votes file. */
 export const GATE_ID = /^G\d{1,9}$/;
+/** A Claude Code session id: a UUID, in lower case as Claude Code writes it. */
+export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * The team votes file (G13): the sage gate ids that the chief marked as team votes. The bridge posts only these.
@@ -77,7 +92,7 @@ export function loadVotes(path) {
 export const saveVotes = (path, ids) => writeWhole(path, JSON.stringify([...ids].sort((a, b) => a.slice(1) - b.slice(1))));
 
 /** Replaces a file whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700. */
-function writeWhole(path, text) {
+export function writeWhole(path, text) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.${process.pid}.tmp`;
   rmSync(tmp, { force: true }); // a temp file left by a crash; 'wx' then makes a new one with mode 0600
@@ -92,7 +107,7 @@ function writeWhole(path, text) {
 }
 
 /** Whether a process with this pid runs (EPERM: it runs as another user). */
-function alive(pid) {
+export function alive(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }

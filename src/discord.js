@@ -2,7 +2,7 @@
 // src/bridge.js uses. The tests never run `start`: it is the only code that connects to Discord.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Client, Events, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
@@ -31,6 +31,13 @@ export async function readToken(security = '/usr/bin/security') {
 export const memberOf = (m) => ({ id: m.id, name: m.displayName, roles: [...m.roles.cache.keys()], bot: m.user.bot === true });
 
 /**
+ * Whether an interaction is the bridge's: a button or a form in the configured channel or in a thread of it (T29). A press in any
+ * other channel is not, also on a message with the bridge's custom ids.
+ */
+export const accepts = (i, channelId) => (i.isButton() || i.isModalSubmit())
+  && (i.channelId === channelId || (i.channel?.isThread() === true && i.channel.parentId === channelId));
+
+/**
  * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
  * @param {{ guildId: string, channelId: string, ownerId: string, driverRole: string, leadRole: string,
  *   project: string, sagePath: string, statePath: string }} config
@@ -47,6 +54,7 @@ export async function start(config) {
   const guild = await client.guilds.fetch(config.guildId);
   await guild.members.fetch();
   const channel = await client.channels.fetch(config.channelId);
+  const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({
     sage: sageTool(config),
     config,
@@ -54,12 +62,15 @@ export async function start(config) {
     log,
     discord: {
       members: () => guild.members.cache.map(memberOf),
-      post: async (payload) => (await channel.send(payload)).id,
-      edit: async (id, payload) => (await channel.messages.fetch(id)).edit(payload),
+      post: async (target, payload) => (await (await place(target)).send(payload)).id,
+      edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
+      // A thread from the session's line in the parent channel. Discord archives a quiet thread after a week; a post opens it again.
+      startThread: async (lineId, name) => (await (await channel.messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
+      setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
     },
   });
   client.on(Events.InteractionCreate, (i) => {
-    if ((i.isButton() || i.isModalSubmit()) && i.channelId === config.channelId) bridge.interaction(i);
+    if (accepts(i, config.channelId)) bridge.interaction(i);
   });
   let busy = false;
   const turn = async () => {

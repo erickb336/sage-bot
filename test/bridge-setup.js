@@ -12,6 +12,7 @@ import { loadVotes, saveVotes } from '../src/state.js';
 export const SAGE = process.env.SAGE_TOOL ?? '/Users/erickb336/.claude/plugins/cache/sage/sage/39e9bf767a1f/skills/sage/sage.mjs';
 export const DRIVER = '300000000000000001';
 export const LEADR = '300000000000000002';
+export const CHANNEL = '400000000000000001';
 export const [OWNER, MAYA, JON, SAM, BOT] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004', '100000000000000005'];
 export const MEMBERS = [
   { id: OWNER, name: 'Erick', roles: [DRIVER, LEADR] },
@@ -20,7 +21,7 @@ export const MEMBERS = [
   { id: SAM, name: 'Sam', roles: [] },
   { id: BOT, name: 'sage bridge', roles: [DRIVER, LEADR], bot: true },
 ];
-export const CONFIG = { ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
+export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
 /**

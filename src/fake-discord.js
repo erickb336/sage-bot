@@ -30,30 +30,55 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
 }
 
 /**
- * A fake channel and guild for the bridge (src/bridge.js): the port `{ post, edit, members }` with a record of every message.
- * `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts` lists the posted payloads
- * in order. `members` is the list that `members()` gives, as src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
+ * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, setLocked, members }`
+ * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
+ * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
+ * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
+ * locked thread is refused, and so is an edit of a message in another place. `members` is the list that `members()` gives, as
+ * src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
  * @param {{ id: string, name: string, roles: string[], bot?: boolean }[]} members
  */
 export function fakeDiscord(members) {
   const messages = new Map();
   const posts = [];
+  const where = new Map();
+  const threads = new Map();
   let next = 900000000000000000n;
+  const archived = (target) => {
+    if (threads.get(target)?.locked) throw Object.assign(new Error('Thread is locked'), { code: 50083, status: 400 });
+  };
   return {
     members: () => members,
     messages,
     posts,
+    where,
+    threads,
     /** The latest payload of a message. */
     latest: (id) => messages.get(id).at(-1),
-    async post(payload) {
+    /** The ids of the messages posted in one channel or thread, in order. */
+    in: (target) => [...where].filter(([, t]) => t === target).map(([id]) => id),
+    async post(target, payload) {
+      archived(target);
       const id = String(next++);
       messages.set(id, [structuredClone(payload)]);
       posts.push(structuredClone(payload));
+      where.set(id, target);
       return id;
     },
-    async edit(id, payload) {
-      if (!messages.has(id)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
+    async edit(target, id, payload) {
+      if (where.get(id) !== target) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
+      archived(target);
       messages.get(id).push(structuredClone(payload));
+    },
+    async startThread(from, name) {
+      if (!messages.has(from) || [...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
+      const id = String(next++);
+      threads.set(id, { from, name, archived: false, locked: false });
+      return id;
+    },
+    async setLocked(id, locked) {
+      if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
+      Object.assign(threads.get(id), { archived: locked, locked });
     },
   };
 }

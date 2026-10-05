@@ -150,7 +150,7 @@ test('F-T28-10, F-T28-12, F-T28-15: the gate file is 0600, written whole, and lo
   await b.press(MAYA, 'press:G1:0:0');
   const again = b.make();
   assert.equal(again.entry('G1').gate.outcome.by, MAYA);
-  assert.ok(Object.isFrozen(load(b.statePath)[0].gate.outcome));
+  assert.ok(Object.isFrozen(load(b.statePath).entries[0].gate.outcome));
   // Another user's write bits refuse the file; so does a gate that the vote rules could not have made.
   chmodSync(b.statePath, 0o644);
   assert.throws(() => b.make(), /must be a regular file of this user with mode 0600/);

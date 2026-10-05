@@ -116,7 +116,7 @@ test('the bridge\'s own answer in sage, without its save (a crash in between), s
   await b.post();
   await b.press(MAYA, 'press:G1:0:1');
   assert.equal(b.answerOf('G1'), 'B. y');
-  const data = load(b.statePath).map(({ sent, ...e }) => ({ ...e, sent: {} }));
+  const data = load(b.statePath).entries.map(({ sent, ...e }) => ({ ...e, sent: {} }));
   save(b.statePath, data);
   b.bridge = b.make();
   await b.bridge.loop();
