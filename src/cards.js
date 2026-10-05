@@ -9,7 +9,8 @@ import {
 } from 'discord.js';
 import { ballotsOf, REASON_MAX } from './vote.js';
 
-export const DRIVER = 'sage-driver';
+/** The people who may answer and vote: a member with either role (T70). */
+const HOLDERS = 'sage-apprentice or sage-lead';
 export const LEAD = 'sage-lead';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
@@ -214,7 +215,7 @@ function single(gate, ask, names) {
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
       '**Rule:** the first answer is final · reminder every 2 h until answered',
-      `**Who can answer:** every ${DRIVER}`,
+      `**Who can answer:** every ${HOLDERS}`,
       ...(p.final ? ['', finalLine(p.final, names)]
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
@@ -282,7 +283,7 @@ function batch(gate, ask, holders, names) {
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
   const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for a ${LEAD} · ` +
-    `Who votes: every ${DRIVER}, one vote per part · Reason: optional, after a press` };
+    `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
     title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
@@ -338,7 +339,7 @@ const NOTES = {
   'bad-event': () => 'This press is not one I understand. Nothing changed.',
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
-  'not-holder': () => `Your press did not count. Only people with the ${DRIVER} role can answer or vote. You can still read this thread.`,
+  'not-holder': () => `Your press did not count. Only people with the ${HOLDERS} role can answer or vote. You can still read this thread.`,
   'not-lead': () => `Only a ${LEAD} can do this. Your votes on the parts count like everyone's.`,
   'lead-needs-discord': () => `A ${LEAD} action works only here in Discord, not at the terminal.`,
   'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,

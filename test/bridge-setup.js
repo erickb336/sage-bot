@@ -11,18 +11,18 @@ import { loadVotes, saveVotes } from '../src/state.js';
 import { sagePath } from '../scripts/sage-path.mjs';
 
 export const SAGE = sagePath();
-export const DRIVER = '300000000000000001';
+export const APPRENTICE = '300000000000000001';
 export const LEADR = '300000000000000002';
 export const CHANNEL = '400000000000000001';
 export const [OWNER, MAYA, JON, SAM, BOT] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004', '100000000000000005'];
 export const MEMBERS = [
-  { id: OWNER, name: 'Erick', roles: [DRIVER, LEADR] },
-  { id: MAYA, name: 'Maya', roles: [DRIVER] },
-  { id: JON, name: 'Jon', roles: [DRIVER, LEADR] },
+  { id: OWNER, name: 'Erick', roles: [LEADR] },
+  { id: MAYA, name: 'Maya', roles: [APPRENTICE] },
+  { id: JON, name: 'Jon', roles: [LEADR] },
   { id: SAM, name: 'Sam', roles: [] },
-  { id: BOT, name: 'sage bridge', roles: [DRIVER, LEADR], bot: true },
+  { id: BOT, name: 'sage bridge', roles: [APPRENTICE, LEADR], bot: true },
 ];
-export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
+export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
 /**

@@ -10,7 +10,7 @@ import { accepts } from '../src/discord.js';
 import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
-import { CHANNEL, DRIVER, JON, LEADR, MAYA, OWNER, setAt, setup, T0 } from './bridge-setup.js';
+import { CHANNEL, APPRENTICE, JON, LEADR, MAYA, OWNER, setAt, setup, T0 } from './bridge-setup.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;
@@ -115,7 +115,7 @@ test('a session whose gates the chief did not mark gets no line and no thread; i
   assert.equal(b.discord.threads.get(thread).from, line);
   assert.deepEqual(b.discord.messages.get(line)[0], { content: '**Session 1 · Sun 4 Oct**\nrunning · 2 tasks · 1 open question', allowedMentions: { parse: [] } });
   assert.deepEqual(cardsIn(b, thread), ['Question G2 · T2 ']);
-  assert.equal(b.discord.latest(b.discord.in(thread)[0]).content, `<@&${DRIVER}> T2 needs one product answer. The first answer is final.`);
+  assert.equal(b.discord.latest(b.discord.in(thread)[0]).content, `<@&${APPRENTICE}> <@&${LEADR}> T2 needs one product answer. The first answer is final.`);
   assert.equal(b.bridge.threadOf(S1), thread);
 });
 
@@ -303,7 +303,7 @@ test('a version 1 gate file loads: its card stays in the parent channel with its
   b.now += 2 * HOUR;
   await b.bridge.loop();
   assert.equal(b.bridge.threadOf(S1), undefined);
-  assert.deepEqual(b.discord.in(CHANNEL).map((id) => b.discord.latest(id).content).slice(1), [`<@&${DRIVER}> reminder: G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
+  assert.deepEqual(b.discord.in(CHANNEL).map((id) => b.discord.latest(id).content).slice(1), [`<@&${APPRENTICE}> <@&${LEADR}> reminder: G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
   await b.press(MAYA, 'press:G1:0:1');
   assert.match(b.discord.latest(card).embeds[0].description, /Answered by Maya/);
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
@@ -460,7 +460,7 @@ test('F-T29-4: a card in the parent channel keeps its tie post, tie-break note a
   await b.press(JON, 'tiebreak:G1+G2:0:1');
   // The first text of each message, without the wake notes (the test's clock jumps): the card, S1's line, the tie, the reminder, the note.
   const contents = (at) => b.discord.in(at).map((id) => b.discord.messages.get(id)[0].content).filter((c) => !c.startsWith('The host'));
-  assert.deepEqual(contents(CHANNEL).map((c) => c.split(' ').slice(1, 3).join(' ')), ['T7 has', '1 ·', 'G1+G2 is', 'reminder: part', '(sage-lead) broke']);
+  assert.deepEqual(contents(CHANNEL).map((c) => c.replace(/^(<@&\d+> )+/, '').split(' ').slice(0, 2).join(' ')), ['T7 has', '**Session 1', 'G1+G2 is', 'reminder: part', 'Jon (sage-lead)']);
   assert.equal(contents(thread).filter((c) => c.includes('G1+G2')).length, 0);
   assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), / · 1 task · 1 open question$/);
 });

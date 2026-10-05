@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
-import { BOT, CONFIG, DRIVER, JON, LEADR, MAYA, MEMBERS, OWNER, setup, T0 } from './bridge-setup.js';
+import { BOT, CONFIG, APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { card as cardOf } from '../src/cards.js';
 import { peopleOf } from '../src/handle.js';
@@ -25,8 +25,8 @@ test('end to end: a scratch logbook gets a gate, the bridge posts its card, two 
   await b.post();
   assert.equal(b.discord.posts.length, 1);
   const posted = b.discord.posts[0];
-  assert.equal(posted.content, `<@&${DRIVER}> T1 needs one product answer. The first answer is final.`);
-  assert.deepEqual(posted.allowedMentions, { parse: [], roles: [DRIVER] });
+  assert.equal(posted.content, `<@&${APPRENTICE}> <@&${LEADR}> T1 needs one product answer. The first answer is final.`);
+  assert.deepEqual(posted.allowedMentions, { parse: [], roles: [APPRENTICE, LEADR] });
   assert.equal(posted.embeds[0].title, 'Question G1 · T1 Fix login timeout');
   b.now += MINUTE;
   await b.press(MAYA, 'press:G1:0:1');
@@ -44,7 +44,7 @@ test('end to end: a task with two open gates is one batch vote; two holders vote
   b.sh('gate', 'add', 'T7', '--question', 'Which date format?', '--options', 'ISO|Locale|Both', '--recommend', 'ISO');
   await b.post();
   const [id] = b.discord.messages.keys();
-  assert.equal(b.discord.posts[0].content, `<@&${DRIVER}> T7 has 2 product questions. Vote on each part within 30 minutes.`);
+  assert.equal(b.discord.posts[0].content, `<@&${APPRENTICE}> <@&${LEADR}> T7 has 2 product questions. Vote on each part within 30 minutes.`);
   assert.equal(b.discord.posts[0].embeds[0].title, 'Batch vote G1+G2 · T7 ');
   b.now += MINUTE;
   assert.equal((await b.press(MAYA, 'press:G1+G2:0:0'))[0].kind, 'modal');
@@ -164,7 +164,7 @@ test('F-T28-10, F-T28-12, F-T28-15: the gate file is 0600, written whole, and lo
 });
 
 test('F-T28-6: only a Discord id goes into an event: another user id gets a note and changes nothing, and the config needs ids', async () => {
-  const b = setup({ members: [...MEMBERS, { id: 'sample-maya', name: 'Fake', roles: [DRIVER] }] });
+  const b = setup({ members: [...MEMBERS, { id: 'sample-maya', name: 'Fake', roles: [APPRENTICE] }] });
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   const replies = await b.press('sample-maya', 'press:G1:0:0');
@@ -181,8 +181,8 @@ test('F-T28-7: holders and leads come fresh from the members as Sets: a role tak
   await b.post();
   members[1].roles = [];
   const replies = await b.press(MAYA, 'press:G1:0:0');
-  assert.match(replies[0].content, /Only people with the sage-driver role can answer or vote/);
-  members[1].roles = [DRIVER];
+  assert.match(replies[0].content, /Only people with the sage-apprentice or sage-lead role can answer or vote/);
+  members[1].roles = [APPRENTICE];
   await b.press(MAYA, 'press:G1:0:0');
   assert.equal(b.bridge.entry('G1').gate.outcome.by, MAYA);
 });
@@ -282,10 +282,10 @@ test('reminders: an open single gate pings the holders every 2 hours from its op
     b.now = opened + at;
     await b.bridge.loop();
   }
-  const single = `<@&${DRIVER}> reminder: G1 waits for an answer since <t:${opened / 1000}:t>. T1 waits.`;
+  const single = `<@&${APPRENTICE}> <@&${LEADR}> reminder: G1 waits for an answer since <t:${opened / 1000}:t>. T1 waits.`;
   assert.deepEqual(reminders(), [
-    [single, [DRIVER]],
+    [single, [APPRENTICE, LEADR]],
     [`<@&${LEADR}> reminder: part 1, part 2 of G2+G3 still tied since <t:${(opened + 30 * MINUTE) / 1000}:t>. T2 waits.`, [LEADR]],
-    [single, [DRIVER]],
+    [single, [APPRENTICE, LEADR]],
   ]);
 });

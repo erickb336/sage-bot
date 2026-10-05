@@ -40,7 +40,7 @@ ${body}
 
 /** The flow of one question: five lanes, nine numbered messages from top to bottom. */
 function flow() {
-  const lanes = [['The chief', 'at the terminal'], ['The sage', 'logbook'], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'sage-driver role']];
+  const lanes = [['The chief', 'at the terminal'], ['The sage', 'logbook'], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'both roles']];
   const x = (i) => 100 + i * 200;
   const top = 30, head = 90, first = 190, step = 78;
   const n = 9, bottom = first + (n - 1) * step + 40;
@@ -50,7 +50,7 @@ function flow() {
     [0, 1, 'asks a question'],
     [0, 2, 'marks it as a team vote (vote.mjs)'],
     [2, 1, 'reads it, every 15 s'],
-    [2, 3, 'posts a card, pings sage-driver'],
+    [2, 3, 'posts a card, pings both roles'],
     [4, 3, 'presses an option'],
     [3, 2, 'sends the press'],
     [2, 2, ['checks the role and the', 'vote rules, edits the card']],
@@ -85,7 +85,7 @@ function states() {
   body += arrow('M230 200 V118') + text(244, 152, ['the owner withdraws it', 'at the terminal'], { size: 19 });
   body += arrow('M230 440 V512') + text(244, 470, ['30 min end:', 'a tie or no votes'], { size: 19 });
   body += box(720, 200, 260, 400, 'Decided', ['the bridge gives', 'sage the answer'], { fill: C.end, stroke: C.endEdge });
-  body += arrow('M360 240 H712') + text(396, 228, 'first press of a sage-driver', { size: 19 });
+  body += arrow('M360 240 H712') + text(396, 228, 'first press of a holder', { size: 19 });
   body += arrow('M360 400 H712') + text(396, 366, ['30 min end with a clear leader,', 'or a sage-lead ends the vote'], { size: 19 });
   body += arrow('M360 560 H712') + text(396, 548, 'a sage-lead breaks the tie', { size: 19 });
   body += arrow('M230 670 V742') + text(244, 712, 'the owner answers the chief', { size: 19 });

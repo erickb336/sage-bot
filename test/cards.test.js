@@ -113,7 +113,7 @@ test('a single question card: options with Recommended and Default, the rule, an
     '**Why recommended:** A keeps the user in flow; the token refresh exists.',
     '**Default:** Sign in again silently and keep the page, but no time-out applies it',
     '**Rule:** the first answer is final · reminder every 2 h until answered',
-    '**Who can answer:** every sage-driver',
+    '**Who can answer:** every sage-apprentice or sage-lead',
   ].join('\n'));
   assert.deepEqual(buttons(c), [['press:G5:0:0 A. Sign in again silently and keep the page s1',
     'press:G5:0:1 B. Show a "Session ended" screen with a Sign-in button s2', 'press:G5:0:2 C. Ask first if the page has unsaved work s2']]);

@@ -10,7 +10,7 @@ import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, BRIDGE, clock, openAsk } 
 
 const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const PRIVATE = { flags: 64, allowedMentions: { parse: [] } };
-const NO_ROLE = 'Your press did not count. Only people with the sage-driver role can answer or vote. You can still read this thread.';
+const NO_ROLE = 'Your press did not count. Only people with the sage-apprentice or sage-lead role can answer or vote. You can still read this thread.';
 
 /** A bridge with these open gates and a clock that the test moves. */
 function bridge(ids, at) {

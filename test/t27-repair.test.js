@@ -50,7 +50,7 @@ test('F-T27-11: hiding characters (zero-width space, bidi controls and marks, BO
 /** A batch of `nParts` parts with 3 options, and `nHolders` holders with 15-character names. */
 function team(nHolders, nParts) {
   const members = Array.from({ length: nHolders }, (_, i) => ({ id: `h${i}`, name: `Holder Number ${i}`, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, { driverRole: 'drv', leadRole: 'ld' });
+  const people = peopleOf(members, { apprenticeRole: 'drv', leadRole: 'ld' });
   const parts = Array.from({ length: nParts }, () => ['A', 'B', 'C']);
   const ask = { kind: 'batch', task: 'T7', title: 'date formats', parts: parts.map((_, i) => ({ question: `Question ${i + 1}`, why: 'because', recommended: 'A', options: { A: 'alpha', B: 'beta', C: 'gamma' } })) };
   const gates = new Map([['B7', { gate: openGate({ id: 'B7', kind: 'batch', parts, askedBy: 'h0', at: T0 }), ask }]]);

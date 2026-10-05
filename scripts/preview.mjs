@@ -36,7 +36,7 @@ const moment = (file, title, about, id, extra = {}) => moments.push({ file, titl
 
 // 1 to 2: a single question, answered first by Maya; Jon presses one second later.
 open('G5', clock(14, 20)); ctx.now = clock(14, 21);
-moment('01-single-open', 'A single question', 'The first answer of a sage-driver is final.', 'G5');
+moment('01-single-open', 'A single question', 'The first answer of a sage-apprentice or sage-lead is final.', 'G5');
 await press(MAYA, 'press:G5:0:0', clock(14, 22));
 const late = await press(JON, 'press:G5:0:1', clock(14, 22, 1));
 moment('02-already-answered', 'Maya answered first; Jon presses one second later', 'Only Jon sees the private note.', 'G5', { note: late });
@@ -76,7 +76,7 @@ moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button i
 // at Discord's 32-character limit, so that the budget drops the oldest reasons and the description counts them (F-T27-35).
 {
   const names = ['Erick Alexander Benitez-Castillo', 'Maya Lindqvist-Oyelaran Nkemelu', 'Jon Kristoffer Vandenbroucke Jr', 'Ana Lucía Fernández de la Vega', 'Lea Marguerite Schönberg-Dubois'];
-  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: names[i], roles: [CONFIG.driverRole] }));
+  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: names[i], roles: [CONFIG.apprenticeRole] }));
   const parts = Array.from({ length: 4 }, () => ['A', 'B', 'C']);
   const ask = { kind: 'batch', task: 'T12', title: 'Four questions, every reason at 500 characters', parts: parts.map((_, i) => ({
     question: `Question ${i + 1} of the batch?`, why: 'A is the smallest change.', recommended: 'A', options: { A: 'Option A', B: 'Option B', C: 'Option C' } })) };

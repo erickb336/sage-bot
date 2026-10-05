@@ -37,7 +37,7 @@ function bridge(ids, at, refuse, people = PEOPLE) {
 /** A team of `n` holders with 32-character names (Discord's longest display name) and one lead, on an ask with these labels and why. */
 function team(n, labelLength, whyLength, options = ['A', 'B', 'C']) {
   const members = Array.from({ length: n }, (_, i) => ({ id: `${i}`.padStart(18, '7'), name: `Member number ${i}`.padEnd(32, '!'), roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, { driverRole: 'drv', leadRole: 'ld' });
+  const people = peopleOf(members, { apprenticeRole: 'drv', leadRole: 'ld' });
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: [{ question: 'q'.repeat(300), why: 'why '.repeat(whyLength / 4), recommended: 'A',
     options: Object.fromEntries(options.map((o) => [o, `${o.toLowerCase()} `.repeat(labelLength / 2).trim()])) }] };
   let gate = openGate({ id: 'H', kind: 'batch', parts: [options], askedBy: members[0].id, at: T0 });
@@ -165,7 +165,7 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
   assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'C. Visible columns, plus an "Include hidden…');
   // A member with a visibly empty name shows as "member …6789" everywhere; the raw id shows nowhere.
   const id = '123456789012346789';
-  const members = [{ id, name: '\u200d', roles: [CONFIG.driverRole, CONFIG.leadRole] }, ...MEMBERS.filter((m) => m.id !== ERICK)];
+  const members = [{ id, name: '\u200d', roles: [CONFIG.apprenticeRole, CONFIG.leadRole] }, ...MEMBERS.filter((m) => m.id !== ERICK)];
   const people = peopleOf(members, CONFIG);
   const b9 = apply(openGate({ id: 'B9', kind: 'batch', parts: [['A', 'B'], ['A', 'B']], askedBy: id, at: T0 }), people,
     ballot(id, 0, 'A', T0 + MINUTE, 'yes'), ballot(MAYA, 0, 'A', T0 + MINUTE));
