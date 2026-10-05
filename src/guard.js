@@ -11,7 +11,11 @@
 //   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
 //   each of its options must be an entry of that command's option table by its full spelling; the rest is refused.
 // - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds.
-// - The sage state tool is refused in every form (G30 A): a lead session reaches the logbook only through sage-bot (T134).
+// - The sage state tool is refused by its name (G30 A): a lead session reaches the logbook only through sage-bot (T134).
+//   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A); this check is a
+//   second layer. Its class rules: in a part that runs or writes, every word is printable ASCII and has no [ wildcard; a
+//   redirect target is a word like any other; node never reads its script from stdin; a file tool's strings are checked one
+//   by one, and its paths are printable ASCII.
 // - The Grep tool, and an Agent or Task call with an isolation field, are refused. Any tool that is not in TOOLS is refused.
 // - WebFetch reaches only a host name or a global unicast address.
 //
@@ -38,9 +42,10 @@ const BROKER = "sage-bot-github, the GitHub broker of step 6, for a fetch, an up
 // ---- Bash: the parser ---------------------------------------------------------------------------------------------------
 
 /**
- * The command as parts: [{ pipe, words: [{ text, glob }], redirects: [op] }], or a string: why it is refused.
+ * The command as parts: [{ pipe, words: [{ text, glob }], redirects: [{ text, glob }] }], or a string: why it is refused.
  * Only && and | join parts (`pipe`: the part reads the output of the part before it); ;, ||, |& and & are refused.
- * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` says that it has an unquoted *, ? or [.
+ * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` holds its unquoted *, ? and [ characters.
+ * A redirect's target is kept as a word, so that every check of a word sees it.
  */
 export function parse(command) {
   if (typeof command !== 'string' || !command.trim()) return 'an empty command';
@@ -50,7 +55,8 @@ export function parse(command) {
   let pendingRedirect = null;
   const endWord = () => {
     if (word === null) return;
-    if (pendingRedirect) { seg.redirects.push(pendingRedirect); pendingRedirect = null; } else seg.words.push(word);
+    (pendingRedirect ? seg.redirects : seg.words).push(word);
+    pendingRedirect = null;
     word = null;
   };
   const endSegment = (pipe) => {
@@ -59,7 +65,7 @@ export function parse(command) {
     segments.push(seg);
     seg = { pipe, words: [], redirects: [] };
   };
-  const add = (ch, glob = false) => { word ??= { text: '', glob: false }; word.text += ch; word.glob ||= glob; };
+  const add = (ch, glob = false) => { word ??= { text: '', glob: '' }; word.text += ch; if (glob) word.glob += ch; };
   try {
     let i = 0;
     while (i < command.length) {
@@ -71,12 +77,12 @@ export function parse(command) {
         if (end < 0) throw 'an open quote';
         const body = command.slice(i + 1, end);
         if (/[\0-\x08\x0b-\x1f\x7f]/.test(body)) throw 'a control character';
-        word ??= { text: '', glob: false };
+        word ??= { text: '', glob: '' };
         word.text += body;
         i = end + 1;
       } else if (c === '"') {
         let j = i + 1;
-        word ??= { text: '', glob: false };
+        word ??= { text: '', glob: '' };
         for (; j < command.length && command[j] !== '"'; j++) {
           if (/[$`\\!]/.test(command[j])) throw `a ${command[j]} inside double quotes`;
           if (/[\0-\x08\x0b-\x1f\x7f]/.test(command[j])) throw 'a control character';
@@ -94,7 +100,7 @@ export function parse(command) {
         word = null;
         const m = rest.match(/^(>>|>&[12](?![^\s&|])|>|<)/);
         if (!m || /^(<<|<>|<&|>\||<\()/.test(rest)) throw `the redirect ${rest.slice(0, 2)}`;
-        if (!m[1].startsWith('>&')) pendingRedirect = m[1];
+        if (!m[1].startsWith('>&')) pendingRedirect = true;
         i += m[1].length;
       } else if (/[a-zA-Z0-9_\-./=:,+@%^~\]]/.test(c)) { add(c); i++; }
       else if (c === '*' || c === '?' || c === '[') { add(c, true); i++; }
@@ -110,8 +116,9 @@ export function parse(command) {
 
 // ---- Bash: options ------------------------------------------------------------------------------------------------------
 
-// The kinds of an entry in an option table: a flag, an option with a value, or an array: the values allowed.
-const FLAG = 0, TEXT = 1;
+// The kinds of an entry in an option table: a flag, an option with a value, a flag that takes a value only as --opt=value
+// (git --pretty), or an array: the values allowed.
+const FLAG = 0, TEXT = 1, EQ = 2;
 // The entry for a number option (head -20, git log -5).
 const NUM = '-<number>';
 
@@ -136,7 +143,7 @@ function options(name, args, table, { posix = false, safe } = {}) {
       const list = Object.keys(table).join(' ');
       return how(`${name} with the option ${a}`, safe ?? (list ? `give ${name} only the options ${list}, each one spelled in full and alone` : `give ${name} no option`));
     }
-    if (kind === FLAG) continue;
+    if (kind === FLAG || (kind === EQ && eq < 0)) continue;
     const value = eq < 0 ? args[++i] : a.slice(eq + 1);
     if (value === undefined) return `${name} ${opt} with no value`;
     if (Array.isArray(kind) && !kind.includes(value)) return `${name} ${opt} ${value} (only ${kind.join(', ')})`;
@@ -214,8 +221,8 @@ const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, 
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
   diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG }),
-  log: gitCmd({ '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': TEXT, '--pretty': TEXT, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
-  show: gitCmd({ '--stat': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--oneline': FLAG, '-s': FLAG, '--format': TEXT, '--pretty': TEXT }),
+  log: gitCmd({ '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': EQ, '--pretty': EQ, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
+  show: gitCmd({ '--stat': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--oneline': FLAG, '-s': FLAG, '--format': EQ, '--pretty': EQ }),
   'rev-parse': gitCmd({ '--show-toplevel': FLAG, '--abbrev-ref': FLAG, '--short': FLAG, '--verify': FLAG, '--is-inside-work-tree': FLAG }),
   'ls-files': gitCmd({ '-o': FLAG, '--others': FLAG, '--exclude-standard': FLAG, '-m': FLAG, '--modified': FLAG }),
   blame: gitCmd({ '-L': TEXT }),
@@ -234,32 +241,39 @@ const GIT = {
 
 const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
 
-/** node: a script, never code from an option or from stdin. */
+/** node: a script, never code from an option or from stdin (no script, or the script -). node --test finds its own files. */
 function node(args) {
   if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;
   const ops = options('node', args, NODE, { posix: true });
   if (typeof ops === 'string') return ops;
-  if (!ops[0]) return args.includes('--test') ? null : 'node with no script file (code from stdin)';
+  if (ops[0] === '-' || (!ops[0] && !args.includes('--test'))) return 'node with no script file (code from stdin)';
   return null;
 }
 
 // ---- The sage state tool ------------------------------------------------------------------------------------------------
 
 const escape = (text) => text.replace(/[.*+?^$()[\]{}|\\]/g, '\\$&');
+// A name as the Mac's disk compares it, and wider: NFKC (the long s and full-width letters become ASCII), then lower case.
+const fold = (text) => text.normalize('NFKC').toLowerCase();
+const stateNames = (env) => ['sage.mjs', basename(env.SAGE_TOOL ?? '')].filter(Boolean).map(fold);
 /**
- * Whether a tool call may name the sage state tool, by its text: a file name sage.mjs or the name of SAGE_TOOL in any text
- * or word (in any case: the Mac's disk ignores it; message.mjs is another name), and a wildcard whose last part can match one.
+ * Whether one of the texts holds the file name sage.mjs or the name of SAGE_TOOL, folded (message.mjs is another name).
  * The guard cannot see a copy under another name, or a script that builds the name: the sandbox holds those (docs/reference.md).
  */
-function namesStateTool(texts, globs, env) {
-  const names = ['sage.mjs', basename(env.SAGE_TOOL ?? '')].filter(Boolean);
-  const named = new RegExp(`(^|[^a-z0-9_.-])(${names.map(escape).join('|')})`, 'i');
-  // A wildcard as a pattern: each *, ? and [...] can stand for anything (refuse when in doubt).
-  const pattern = (g) => new RegExp(`^${basename(g).split(/(\[[^\]]*\]?|[*?])/).map((p) => (p === '*' ? '.*' : p === '?' || p.startsWith('[') ? '.' : escape(p))).join('')}$`, 'i');
-  return texts.some((t) => named.test(t)) || globs.some((g) => names.some((n) => pattern(g).test(n)));
+function namesStateTool(texts, env) {
+  const named = new RegExp(`(^|[^a-z0-9_.-])(${stateNames(env).map(escape).join('|')})`);
+  return texts.some((t) => named.test(fold(t)));
 }
-const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git']);
+/** Whether a wildcard word (only * and ?: a [ is refused before) can match the state tool's name in its last part. */
+function mayMatchStateTool(glob, env) {
+  const pattern = new RegExp(`^${basename(fold(glob)).split(/([*?])/).map((p) => (p === '*' ? '.*' : p === '?' ? '.' : escape(p))).join('')}$`);
+  return stateNames(env).some((n) => pattern.test(n));
+}
+// The commands that run a script or write a file. With the parts that have a redirect, they are the parts that run or write.
+const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee']);
 const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
+const ASCII = /^[\x20-\x7e]*$/;
+const WILDCARD = 'name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>)';
 
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
 
@@ -294,14 +308,20 @@ const REPHRASE = 'one command per call, or commands joined only by && (a | only 
 
 /** Why the Bash command is refused, or null. */
 export function bashRefusal(command, env) {
-  if (namesStateTool([String(command)], [], env)) return STATE_TOOL;
+  if (typeof command !== 'string') return 'a Bash call with no command text';
+  if (namesStateTool([command], env)) return STATE_TOOL;
   const parsed = parse(command);
   if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, REPHRASE);
-  // The wildcards of a part that runs a script or writes a file (a renamed copy): a read (ls dir/*) runs nothing. A word that
-  // starts with a wildcard is refused below anyway, with the hint ./* (which this check then sees).
-  const globs = parsed.filter((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length)
-    .flatMap((seg) => seg.words.filter((w) => w.glob && !/^[*?[]/.test(w.text)).map((w) => w.text));
-  if (namesStateTool(parsed.flatMap((seg) => seg.words.map((w) => w.text)), globs, env)) return STATE_TOOL;
+  if (namesStateTool(parsed.flatMap((seg) => [...seg.words, ...seg.redirects]).map((w) => w.text), env)) return STATE_TOOL;
+  // The words of the parts that run a script or write a file (a renamed copy), with their redirect targets. A read
+  // (ls dir/*, cat é.txt) runs nothing.
+  const rw = parsed.filter((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length)
+    .flatMap((seg) => [...seg.words, ...seg.redirects]);
+  if (rw.some((w) => !ASCII.test(w.text))) return 'a character that is not printable ASCII in a part that runs or writes';
+  const bracket = rw.find((w) => w.glob.includes('['));
+  if (bracket) return how(`the wildcard [ in ${bracket.text} (in a part that runs or writes)`, WILDCARD);
+  const glob = rw.find((w) => w.glob && mayMatchStateTool(w.text, env));
+  if (glob) return how(`the wildcard ${glob.text} (it can match the sage state tool)`, WILDCARD);
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
     if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${commandOf(texts)[0] ?? 'nothing'}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
@@ -322,8 +342,14 @@ export function bashRefusal(command, env) {
 
 const allow = () => null;
 // Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules and the sandbox of step 6 hold their paths. A file
-// tool may not name the state tool: a script that imports it, or a copy of it, is written through one.
-const file = (i, env) => (namesStateTool([JSON.stringify(i)], [], env) ? STATE_TOOL : null);
+// tool may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
+// input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
+const strings = (v, key = '') => (typeof v === 'string' ? [[key, v]] : v && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => strings(x, k)) : []);
+function file(i, env) {
+  const all = strings(i);
+  if (all.some(([k, v]) => k.endsWith('path') && !ASCII.test(v))) return 'a file path with a character that is not printable ASCII';
+  return namesStateTool(all.map(([, v]) => v), env) ? STATE_TOOL : null;
+}
 // An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox.
 const agent = (i) => (Object.hasOwn(i, 'isolation') ? `an agent with the isolation ${JSON.stringify(i.isolation)}` : null);
 const TOOLS = {
@@ -371,7 +397,7 @@ function webRefusal(url) {
  */
 export function decide(input, env) {
   if (env.SAGE_ORIGIN !== 'lead') return null;
-  if (!input || typeof input !== 'object' || typeof input.tool_name !== 'string' || !input.tool_input || typeof input.tool_input !== 'object') {
+  if (!input || typeof input !== 'object' || typeof input.tool_name !== 'string' || !input.tool_input || typeof input.tool_input !== 'object' || Array.isArray(input.tool_input)) {
     return refusal('a hook input that is not a tool call');
   }
   const rule = Object.hasOwn(TOOLS, input.tool_name) ? TOOLS[input.tool_name] : null;

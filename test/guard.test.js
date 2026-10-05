@@ -61,18 +61,20 @@ const tool = (tool_name, tool_input) => ({ session_id: 'aaaaaaaa-0000-4000-8000-
 const bash = (command) => tool('Bash', { command });
 const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
 const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
+const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
+const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>).';
 const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
 
-test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}) and of the state tool (${CORPUS.state.length}), each once`, () => {
-  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
-  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox, ...CORPUS.state];
+test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}) and of wildcards (${CORPUS.wildcard.length}), each once`, () => {
+  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox, ...CORPUS.state, ...CORPUS.wildcard];
   assert.equal(new Set(all).size, all.length);
 });
 
 test('T133: with SAGE_ORIGIN unset or not "lead", the guard allows every corpus case (it is inert)', () => {
   const env = { ...LEAD };
   delete env.SAGE_ORIGIN;
-  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.state].map((c) => bash(c)).concat([...CORPUS.tools.refuse, ...CORPUS.tools.state].map(([n, i]) => tool(n, i)));
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.state, ...CORPUS.wildcard].map((c) => bash(c)).concat([...CORPUS.tools.refuse, ...CORPUS.tools.state].map(([n, i]) => tool(n, i)));
   assert.deepEqual(all.filter((x) => guard(x, env).decision !== 'allow'), []);
   for (const origin of ['owner', 'LEAD', '', 'lead ']) assert.equal(hook(bash(CORPUS.refuse[0]), { ...LEAD, SAGE_ORIGIN: origin }).decision, 'allow');
   assert.equal(hook('not json', {}).decision, 'allow');
@@ -98,6 +100,51 @@ test('T133: the sage state tool is refused in every form, with the stop ending (
   // Another name that only ends like it, and a read with a wildcard, are not the state tool.
   assert.equal(guard(bash('node {SCRATCH}/message.mjs')).decision, 'allow');
   assert.equal(guard(bash('ls {SCRATCH}/copy/*')).decision, 'allow');
+});
+
+test('T133 (G44 A): a wildcard in a part that runs or writes that may match the state tool, and any [ there, are refused with the hint to name the files', () => {
+  assert.deepEqual(CORPUS.wildcard.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(WILDCARD)), []);
+  assert.equal(guard(bash('git add scripts/*.mjs')).reason, `sage-bot guard: the wildcard scripts/*.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(guard(bash('cp {SCRATCH}/[ab].txt {SCRATCH}/c.txt')).reason, `sage-bot guard: the wildcard [ in /sample/scratch/[ab].txt (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  // A quoted [ is no wildcard, and a wildcard that cannot match the name passes.
+  for (const c of ["git commit -m '[T133] x'", 'node --test {WT}/test/*.test.js', 'cp {SCRATCH}/*.txt {SCRATCH}/out', 'cp {SCRATCH}/a?.json {SCRATCH}/out']) assert.equal(guard(bash(c)).reason, undefined, c);
+});
+
+test('T133 (G44 A): in a part that runs or writes, and in a file tool path, a character that is not printable ASCII is refused with the stop ending', () => {
+  const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${STOP}`;
+  for (const c of ['cp "{SCRATCH}/caf\u00e9.txt" {SCRATCH}/x.txt', 'node "{SCRATCH}/x\u200b.mjs"', 'echo x > "{SCRATCH}/\u00e9.txt"', 'ls | tee "{SCRATCH}/\u00e9.txt"', 'git commit -m "x\ty"', 'git commit -m "a\nb"']) {
+    assert.equal(guard(bash(c)).reason, ascii, c);
+  }
+  const path = `sage-bot guard: a file path with a character that is not printable ASCII is refused in a lead session. ${STOP}`;
+  assert.equal(guard(tool('Write', { file_path: '{WT}/caf\u00e9.md', content: 'x' })).reason, path);
+  assert.equal(guard(tool('NotebookEdit', { notebook_path: '{WT}/\u00e9.ipynb', new_source: 'x' })).reason, path);
+  // A read runs nothing, and a file's text may hold any character.
+  assert.equal(guard(bash('cat "{SCRATCH}/caf\u00e9.txt"')).decision, 'allow');
+  assert.equal(guard(tool('Write', { file_path: '{WT}/notes.md', content: 'caf\u00e9 \u2014 x\n' })).decision, 'allow');
+});
+
+test('T133 (G44 A): every code point that folds to a letter of the name (NFKC, then lower case) still names the state tool in a file tool text', () => {
+  const letters = new Set('sagemj');
+  const found = [];
+  for (let cp = 0x80; cp <= 0x10ffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const ch = String.fromCodePoint(cp);
+    const forms = [ch.normalize('NFKC'), ch.toLowerCase(), ch.toUpperCase()].map((f) => f.toLowerCase());
+    const letter = forms.find((f) => letters.has(f));
+    if (letter) found.push([ch, 'sage.mjs'.replace(letter, ch)]);
+  }
+  // The long s (U+017F) and the full-width s are among them; each one is refused.
+  assert.ok(found.some(([ch]) => ch === '\u017f') && found.some(([ch]) => ch === '\uff53') && found.length > 20, `${found.length}`);
+  assert.deepEqual(found.filter(([, name]) => guard(tool('Write', { file_path: '{WT}/x.mjs', content: `import './${name}';` })).reason !== STATE), []);
+});
+
+test('T133 (G44 A): node never reads its script from stdin, and a broken input refuses with the stop ending', () => {
+  const stdin = `sage-bot guard: node with no script file (code from stdin) is refused in a lead session. ${STOP}`;
+  assert.equal(guard(bash('node - status < {SCRATCH}/x.mjs')).reason, stdin);
+  assert.equal(guard(bash('node --test -')).reason, stdin);
+  assert.equal(guard(bash('node {SCRATCH}/x.mjs -')).decision, 'allow');
+  for (const input of [{}, { command: 42 }, { command: null }]) assert.equal(guard(tool('Bash', input)).reason, `sage-bot guard: a Bash call with no command text is refused in a lead session. ${STOP}`);
+  for (const name of ['Agent', 'Write', 'Bash']) assert.equal(guard(tool(name, [])).reason, `sage-bot guard: a hook input that is not a tool call is refused in a lead session. ${STOP}`);
 });
 
 test('T133: an Agent or Task call with an isolation field is refused; one without it is allowed', () => {
@@ -161,9 +208,9 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
   assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
   assert.equal(why('rm -rf *'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
-  // A word that starts with a wildcard gets its own hint, also in a part that writes; the hint's ./* is then checked too.
-  assert.equal(why('cp * {SCRATCH}'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
-  assert.equal(why('cp ./* {SCRATCH}'), STATE);
+  // In a part that runs or writes, a wildcard that can match the state tool gets the hint to name the files first.
+  assert.equal(why('cp * {SCRATCH}'), `sage-bot guard: the wildcard * (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(why('cp ./* {SCRATCH}'), `sage-bot guard: the wildcard ./* (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
   assert.equal(guard(tool('Grep', { pattern: 'x' })).reason, 'sage-bot guard: the Grep tool (the sandbox does not cover it) is refused in a lead session. sage can do this instead: search with rg in Bash, for example rg -n <pattern> <folder>.');
   assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');

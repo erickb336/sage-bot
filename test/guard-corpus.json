@@ -1,5 +1,5 @@
 {
-  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'session' is a realistic sage session in order: every call must be allowed.",
+  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'wildcard' (a wildcard in a part that runs or writes that may match the state tool, or any [ there: refused with the hint to name the files), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'session' is a realistic sage session in order: every call must be allowed.",
   "refuse": [
     "/opt/homebrew/bin/gh pr merge 12",
     "git merge feature",
@@ -267,7 +267,16 @@
     "hasOwnProperty x",
     "git worktree list x",
     "NODE_ENV=test",
-    "HOME={SCRATCH}"
+    "HOME={SCRATCH}",
+    "node - status < {SCRATCH}/x.mjs",
+    "node - < {SCRATCH}/x.mjs",
+    "cp \"{SCRATCH}/café.txt\" {SCRATCH}/x.txt",
+    "node \"{SCRATCH}/x​.mjs\"",
+    "echo x > \"{SCRATCH}/é.txt\"",
+    "ls | tee \"{SCRATCH}/é.txt\"",
+    "git log --pretty --output=/sample/x",
+    "git show --pretty --ext-diff HEAD",
+    "git log --format --output=/sample/x"
   ],
   "broker": [
     "gh pr merge 12",
@@ -468,7 +477,14 @@
     "node {SCRATCH}/wt/scripts/usage.mjs status",
     "cat {SCRATCH}/proj/scripts/*",
     "node --test {WT}/test/*.test.js",
-    "node {WT}/scripts/build.mjs --out {SCRATCH}/x"
+    "node {WT}/scripts/build.mjs --out {SCRATCH}/x",
+    "git log --pretty=oneline -3",
+    "git show --format=%H -s HEAD",
+    "git log --pretty",
+    "node --test test/x.test.js",
+    "cat \"{SCRATCH}/café.txt\"",
+    "grep -n \"—\" README.md",
+    "git add README.md && git commit -m x"
   ],
   "sandbox": [
     "git -C {HOME} status",
@@ -1230,6 +1246,35 @@
           "prompt": "x",
           "isolation": ""
         }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/ſage.mjs",
+          "content": "x"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": "{SCRATCH}/sage.mjſ",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/café.md",
+          "content": "x"
+        }
+      ],
+      [
+        "NotebookEdit",
+        {
+          "notebook_path": "{WT}/é.ipynb",
+          "new_source": "x"
+        }
       ]
     ],
     "allow": [
@@ -1551,6 +1596,19 @@
           "prompt": "x",
           "subagent_type": "Explore"
         }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/notes.md",
+          "content": "café — sage-bot\n"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/café.md"
+        }
       ]
     ],
     "sandbox": [
@@ -1813,6 +1871,32 @@
           "notebook_path": "{WT}/x.ipynb",
           "new_source": "require('./sage.mjs')"
         }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/x.mjs",
+          "content": "import './ſage.mjs';\n"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.git/config",
+          "content": "[core]\n\tfsmonitor = node\tsage.mjs status\n"
+        }
+      ],
+      [
+        "MultiEdit",
+        {
+          "file_path": "{WT}/x.mjs",
+          "edits": [
+            {
+              "old_string": "a",
+              "new_string": "node\tstate.mjs"
+            }
+          ]
+        }
       ]
     ]
   },
@@ -1970,7 +2054,6 @@
     "node {TOOL} status --project {WT}",
     "node {TOOL} task show T1",
     "rg -n gate {TOOL} | head",
-    "cp {SCRATCH}/bare/* {WT}/sub",
     "node {TOOL} standing --project=x add y",
     "node {TOOL} --project /other/repo status",
     "node {TOOL} status --project /other/repo",
@@ -1992,23 +2075,10 @@
     "node {SCRATCH}/copy/sa'ge'.mjs status",
     "node \"{SCRATCH}/copy/sage\".mjs status",
     "node /sample/plugin/st\"ate\".mjs status",
-    "node {SCRATCH}/copy/sag?.mjs status",
-    "node {SCRATCH}/copy/s*.mjs status",
-    "node {SCRATCH}/copy/SA*.MJS status",
-    "node {SCRATCH}/copy/[s]age.mjs status",
-    "node {SCRATCH}/copy/sage.mj[s] status",
-    "node /sample/plugin/st*.mjs status",
-    "node /sample/plugin/*.mjs status",
-    "node --test /sample/plugin/*.mjs",
-    "npm test -- {SCRATCH}/copy/s*.mjs",
     "cp {TOOL} {SCRATCH}/x.mjs",
     "cp /sample/plugin/sage.mjs {SCRATCH}/x.mjs",
-    "cp -r {SCRATCH}/copy/s* {SCRATCH}/x.mjs",
     "mv {SCRATCH}/copy/sage.mjs {SCRATCH}/x.mjs",
-    "mv {SCRATCH}/copy/s?ge.mjs {SCRATCH}/x.mjs",
     "git mv {WT}/sage.mjs {WT}/x.mjs",
-    "git mv {WT}/s*.mjs {WT}/x.mjs",
-    "cat {SCRATCH}/copy/s*.mjs > {SCRATCH}/x.mjs",
     "ln -s {TOOL} {SCRATCH}/x.mjs",
     "{TOOL} status",
     "{SCRATCH}/copy/sage.mjs status",
@@ -2019,6 +2089,35 @@
     "node {TOOL} status || true",
     "cat {TOOL}",
     "echo sage.mjs",
-    "printf '%s' {SCRATCH}/copy/sage.mjs"
+    "printf '%s' {SCRATCH}/copy/sage.mjs",
+    "cd {SCRATCH} && node - status --project=x < ./sa\"\"ge.mjs",
+    "cat README.md > ./sa\"\"ge.mjs",
+    "node \"ſage.mjs\" status",
+    "node '{SCRATCH}/sage.mjſ' status",
+    "cat \"ｓage.mjs\""
+  ],
+  "wildcard": [
+    "cp {SCRATCH}/bare/* {WT}/sub",
+    "node {SCRATCH}/copy/sag?.mjs status",
+    "node {SCRATCH}/copy/s*.mjs status",
+    "node {SCRATCH}/copy/SA*.MJS status",
+    "node {SCRATCH}/copy/[s]age.mjs status",
+    "node {SCRATCH}/copy/sage.mj[s] status",
+    "node /sample/plugin/st*.mjs status",
+    "node /sample/plugin/*.mjs status",
+    "node --test /sample/plugin/*.mjs",
+    "npm test -- {SCRATCH}/copy/s*.mjs",
+    "cp -r {SCRATCH}/copy/s* {SCRATCH}/x.mjs",
+    "mv {SCRATCH}/copy/s?ge.mjs {SCRATCH}/x.mjs",
+    "git mv {WT}/s*.mjs {WT}/x.mjs",
+    "cat {SCRATCH}/copy/s*.mjs > {SCRATCH}/x.mjs",
+    "cd {SCRATCH} && node - status --project=x < ./sag?.mjs",
+    "cat README.md > ./sa?e.mjs",
+    "cp {SCRATCH}/s[]a]ge.mjs ./x.mjs && node ./x.mjs",
+    "cp {SCRATCH}/[ab].txt {SCRATCH}/c.txt",
+    "git add scripts/*.mjs",
+    "node --test test/*.mjs",
+    "cp * {SCRATCH}",
+    "cp ./* {SCRATCH}"
   ]
 }
