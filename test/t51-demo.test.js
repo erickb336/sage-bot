@@ -1,0 +1,50 @@
+// T51: npm run demo plays one chief session on the fake Discord layer and writes one HTML page. The test runs the demo twice, as the
+// owner does, each time into its own scratch folder with a scratch HOME, and reads the pages. SAMPLE DATA ONLY.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
+function demo() {
+  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t51-'));
+  const out = join(root, 'demo.html');
+  const env = { PATH: process.env.PATH, HOME: root, ...(process.env.SAGE_TOOL && { SAGE_TOOL: process.env.SAGE_TOOL }) };
+  const said = execFileSync(process.execPath, [DEMO, '--out', out], { env, encoding: 'utf8' });
+  return { root, said, page: readFileSync(out, 'utf8') };
+}
+
+test('the demo page shows the session line, the thread in order with the private notes, the answers in sage and the reasons; two runs give the same bytes', () => {
+  const a = demo();
+  const b = demo();
+  assert.equal(a.page, b.page);
+  const { page, said, root } = a;
+  assert.match(said, new RegExp(`Page: ${join(root, 'demo.html')}\n`));
+  assert.match(said, /G3 {2}T2 {2}B\. 04\/10\/2026 \(the user locale\)/);
+  assert.equal(page.includes(root), false); // the scratch path is not on the page
+  assert.equal(/<script|\b(?:src|href)=|url\(/.test(page), false); // no script and no external asset: the page opens with no network
+  assert.match(page, /Sample data\. Fake Discord\. No bot, no token\./);
+  // The line in the parent channel, with its final text, and the thread's state.
+  assert.match(page, /<b>Session 1 · Sun 4 Oct<\/b><br>ended <time>4 October 2026 14:43<\/time> · 4 tasks · no open questions/);
+  assert.match(page, /<span class="tag">locked<\/span><span class="tag">archived<\/span>/);
+  // The single question: Maya's first answer is final; Jon's late press gets a private note.
+  assert.match(page, /@sage-driver T1 needs one product answer\. The first answer is final\./);
+  assert.match(page, /Answered by Maya at <time>14:02<\/time>: A\. Sign in\. Final\./);
+  assert.match(page, /Only Jon can see this · Dismiss message<\/div><div>Already answered by Maya: A/);
+  // Sam has no role: only Sam sees the refusal.
+  assert.match(page, /Only Sam can see this · Dismiss message<\/div><div>Your press did not count\. Only people with the sage-driver role can answer or vote\./);
+  // The batch: the tie post in the thread, then Jon's tie-break.
+  assert.match(page, /@sage-lead G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
+  assert.match(page, /<b>Decided: B<\/b> · tie broken by Jon \(sage-lead\) at <time>14:36<\/time>/);
+  assert.match(page, /Jon \(sage-lead\) broke the tie on part 2 of G2\+G3: B\./);
+  // The owner's answer at the terminal is final on the card, and a later press on that part does not count.
+  assert.match(page, /Answered by Erick \(terminal\) at <time>14:39<\/time>: A\. An example report and a Create button\. Final\./);
+  assert.match(page, /Already answered by Erick at the terminal: A\. An example report and a Create button\. Your press did not count\./);
+  assert.match(page, /Ended early by Jon \(sage-lead\) at <time>14:42<\/time>/);
+  // The answers in sage's gates.tsv, and the reasons line for the chief.
+  const rows = [...page.matchAll(/<tr><td>(G\d)<\/td><td>T\d<\/td><td>[^<]*<\/td><td>([^<]*)<\/td><\/tr>/g)].map((m) => `${m[1]} ${m[2]}`);
+  assert.deepEqual(rows, ['G1 A. Sign in', 'G2 A. Only the visible columns', 'G3 B. 04/10/2026 (the user locale)', 'G4 A', 'G5 A', 'G6 A. Yes, under the button']);
+  assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
+});
