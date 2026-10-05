@@ -11,7 +11,7 @@ import { openGate, step, MINUTE } from '../src/vote.js';
 import { ASKS, MAYA, clock, openAsk } from '../examples/sample.js';
 
 const T0 = clock(14, 31);
-const ROLES = { driverRole: 'drv', leadRole: 'ld' };
+const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
 const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.leads).gate, gate);
 /** `text` as tag characters (U+E0000 + the ASCII code): invisible, and a model reads it as ASCII. */
 const tag = (s) => [...s].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
@@ -136,8 +136,10 @@ test('F-T27-30: the QA repro (a team of 5, 4 parts, 5 options, long questions, e
     const [e] = c.embeds;
     assert.ok(embedLength(e) <= 6000 && embedLength(e) > 5600, `question ${question}: ${embedLength(e)}`); // 6040 to 6256 on 56e5910
     const reasons = e.fields.slice(4);
-    // The 4 part fields take about 1020 characters each, so only the 2 newest reasons fit; the 18 oldest went; each shown one keeps its 200 characters.
-    assert.deepEqual(reasons.map((f) => f.name), ['Member number 4!!!!!!!!!!!!!!!!!, part 3', 'Member number 4!!!!!!!!!!!!!!!!!, part 4'], `question ${question}`);
+    // The 4 part fields take about 1020 characters each, so only the newest reasons fit: 2 up to a question of 240 characters, then 1
+    // (the T70 footer names two roles); the oldest went; each shown one keeps its 200 characters.
+    const newest = ['Member number 4!!!!!!!!!!!!!!!!!, part 3', 'Member number 4!!!!!!!!!!!!!!!!!, part 4'];
+    assert.deepEqual(reasons.map((f) => f.name), question <= 240 ? newest : newest.slice(1), `question ${question}`);
     assert.ok(reasons.every((f) => f.value.length === 200));
     // Each part field first went within 1024 on its own: the voter lists end in "and 4 more" and the why is cut at a word; the labels are whole.
     e.fields.slice(0, 4).forEach((f, idx) => {

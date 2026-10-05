@@ -6,21 +6,23 @@ import { step } from './vote.js';
 import { card, confirmEnd, ephemeral, note, parseCustomId, reasonModal, stamp } from './cards.js';
 
 /**
- * Who may answer and vote, from the guild members and the role ids of the config. A holder has the sage-driver role
- * and a lead the sage-lead role; nobody else, also not the owner (F-T27-12). A bot (discord.js `member.user.bot`) is neither.
+ * Who may answer and vote, from the guild members and the role ids of the config. A holder has the sage-apprentice or the
+ * sage-lead role, and a lead the sage-lead role, so a lead is always a holder (T70). Nobody else counts, also not the owner
+ * (F-T27-12). A bot (discord.js `member.user.bot`) is neither.
  * @param {Iterable<{ id: string, name: string, roles: string[], bot?: boolean }>} members
- * @param {{ driverRole: string, leadRole: string }} config
+ * @param {{ apprenticeRole: string, leadRole: string }} config
  * @returns {{ holders: Set<string>, leads: Set<string>, names: Map<string, string> }}
  */
-export function peopleOf(members, { driverRole, leadRole }) {
+export function peopleOf(members, { apprenticeRole, leadRole }) {
   const holders = new Set();
   const leads = new Set();
   const names = new Map();
   for (const m of members) {
     names.set(m.id, m.name);
     if (m.bot) continue;
-    if (m.roles.includes(driverRole)) holders.add(m.id);
-    if (m.roles.includes(leadRole)) leads.add(m.id);
+    const lead = m.roles.includes(leadRole);
+    if (lead) leads.add(m.id);
+    if (lead || m.roles.includes(apprenticeRole)) holders.add(m.id);
   }
   return { holders, leads, names };
 }

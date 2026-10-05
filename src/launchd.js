@@ -4,9 +4,9 @@
 export const LABEL = 'com.sage.bot';
 
 /** The fields of the config that the bridge needs, each a non-empty string (see examples/config.example.json). */
-export const CONFIG_FIELDS = ['guildId', 'channelId', 'ownerId', 'driverRole', 'leadRole', 'project', 'sagePath', 'statePath'];
+export const CONFIG_FIELDS = ['guildId', 'channelId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
 /** The fields of the config that are Discord ids: the bridge refuses each one that does not match its SNOWFLAKE. */
-export const DISCORD_IDS = ['guildId', 'channelId', 'ownerId', 'driverRole', 'leadRole'];
+export const DISCORD_IDS = ['guildId', 'channelId', 'ownerId', 'apprenticeRole', 'leadRole'];
 
 /** The Homebrew links that `brew upgrade node` keeps, in the order the plist prefers them. */
 const BREW_LINKS = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];

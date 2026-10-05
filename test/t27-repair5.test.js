@@ -10,7 +10,7 @@ import { openGate, step, MINUTE } from '../src/vote.js';
 import { ASKS, MAYA, clock, openAsk } from '../examples/sample.js';
 
 const T0 = clock(14, 31);
-const ROLES = { driverRole: 'drv', leadRole: 'ld' };
+const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
 const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.leads).gate, gate);
 const tag = (s) => [...s].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 const flag = (code) => `\u{1F3F4}${tag(code)}\u{E007F}`;

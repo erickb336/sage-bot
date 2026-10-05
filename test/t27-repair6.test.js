@@ -9,7 +9,7 @@ import { fakeInteraction } from '../src/fake-discord.js';
 import { ballotsOf, openGate, step } from '../src/vote.js';
 
 const T0 = Date.UTC(2026, 9, 4, 14, 31);
-const ROLES = { driverRole: 'drv', leadRole: 'ld' };
+const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
 /** One batch of one part with these members and a reason from each; returns the card's embed. */
 function build(names, reasons) {
   const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));

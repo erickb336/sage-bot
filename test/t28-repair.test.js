@@ -9,13 +9,14 @@ import { join } from 'node:path';
 import { askedTogether, MERGE } from '../src/bridge.js';
 import { lock, load, save } from '../src/state.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { DRIVER, JON, LEADR, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
+import { APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
 
 /** The members with the owner in no role: the owner's terminal answer must count all the same (G10). */
 const noRoles = () => MEMBERS.map((m) => (m.id === OWNER ? { ...m, roles: [] } : { ...m }));
 const lastCard = (b, n = 0) => b.discord.latest([...b.discord.messages.keys()][n]);
 const decisionsOf = (b, question) => table(b, 'decisions').filter((d) => d.decision.startsWith(`${question} →`)).map((d) => d.decision);
-const pings = (b, role) => b.discord.posts.filter((p) => p.allowedMentions?.roles?.includes(role)).map((p) => p.content);
+/** The posts that ping exactly these roles. */
+const pings = (b, ...roles) => b.discord.posts.filter((p) => JSON.stringify(p.allowedMentions?.roles) === JSON.stringify(roles)).map((p) => p.content);
 
 test('acceptance, F-T28-26, G10 a: the owner (no roles) answers G1 at the terminal, a holder presses after: sage keeps the owner\'s answer', async () => {
   const b = setup({ members: noRoles() });
@@ -225,7 +226,7 @@ test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the lea
   b.now = opened + 30 * MINUTE + 4 * HOUR;
   await b.bridge.loop();
   assert.deepEqual(pings(b, LEADR).slice(1).map((p) => p.replace(/<t:\d+:t>/, 'T')), [`<@&${LEADR}> reminder: part 1, part 2 of G1+G2 still tied since T. T6 waits.`]);
-  assert.equal(pings(b, DRIVER).length, 1); // only the card's own alert
+  assert.equal(pings(b, APPRENTICE, LEADR).length, 1); // only the card's own alert
 });
 
 test('F-T28-30: one bridge per gate file: a second lock stops with a clear message; a lock of a gone process is replaced; exit frees it', () => {

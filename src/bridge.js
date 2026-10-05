@@ -12,6 +12,15 @@ import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
 export const SNOWFLAKE = /^\d{17,20}$/;
+/**
+ * Stops a config of the time before T70 (two roles): it has the old role field and no apprenticeRole.
+ * The bridge and scripts/launchd.mjs both call it, so the owner reads the same message from each.
+ */
+export function refuseOldRoles(config) {
+  if (config?.driverRole !== undefined && config.apprenticeRole === undefined) {
+    throw new Error('the config has driverRole: sage-driver is gone. Rename driverRole to apprenticeRole and give that role id to the sage-apprentice role.');
+  }
+}
 /** The bridge looks at the clock, the logbook and the timers this often. */
 export const LOOP = 15_000;
 /** A gap between two loops longer than this means that the Mac slept. */
@@ -97,12 +106,13 @@ export function askedTogether(rows) {
  *     startThread(lineId: string, name: string): Promise<string>, threadFrom(lineId: string): Promise<string>,
  *     setLocked(thread: string, locked: boolean): Promise<unknown>,
  *     members(): Promise<Iterable<object>> | Iterable<object> },
- *   config: { channelId: string, ownerId: string, driverRole: string, leadRole: string, votesPath?: string, sessionsPath?: string },
+ *   config: { channelId: string, ownerId: string, apprenticeRole: string, leadRole: string, votesPath?: string, sessionsPath?: string },
  *   statePath: string, now?: () => number, log?: (line: string) => void }} o
  *   A `target` is the parent channel or a thread, by its Discord id.
  */
 export function createBridge({ sage, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
-  for (const key of ['channelId', 'ownerId', 'driverRole', 'leadRole']) {
+  refuseOldRoles(config);
+  for (const key of ['channelId', 'ownerId', 'apprenticeRole', 'leadRole']) {
     if (!SNOWFLAKE.test(config[key] ?? '')) throw new TypeError(`the config needs ${key} as a Discord id (17 to 20 digits)`);
   }
   const say = (line) => log(forTerminal(line)); // every line for the terminal goes through the allow-list (F-T28-22)
@@ -131,11 +141,18 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
   const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), [...sessions.values()]);
-  const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
+  const people = async () => { // Sets of ids (F-T28-7)
+    const members = [...await discord.members()];
+    const both = members.filter((m) => !m.bot && m.roles.includes(config.apprenticeRole) && m.roles.includes(config.leadRole));
+    if (both.length) sayOnce(`these members have both sage-apprentice and sage-lead, so each counts as a sage-lead: ${both.map((m) => `${m.name} (${m.id})`).join(', ')}. Give each person one of the two roles.`);
+    return peopleOf(members, config);
+  };
   /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
-  /** A message that pings one role and nobody else; the text is the bridge's own, with untrusted parts made safe. */
-  const alert = (role, text) => ({ content: `<@&${role}> ${text}`, allowedMentions: { parse: [], roles: [role] } });
+  /** A message that pings these roles and nobody else; the text is the bridge's own, with untrusted parts made safe. */
+  const alert = (roles, text) => ({ content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } });
+  /** The roles of the holders: a new card and a single gate's reminder ping both (T70). */
+  const holderRoles = [config.apprenticeRole, config.leadRole];
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
   const post = async (target, payload) => {
@@ -269,7 +286,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     const text = (gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
       : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
-    const payload = { ...card(gate, ask, ppl), ...alert(config.driverRole, text) };
+    const payload = { ...card(gate, ask, ppl), ...alert(holderRoles, text) };
     let message = await post(at, payload);
     if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
     if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
@@ -309,7 +326,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       return [`Part ${i + 1} is tied: ${part.tied.join(', ')}.${args.length ? ' The arguments:' : ' Nobody gave a reason.'}`, ...args];
     });
     const head = `${gate.id} is tied after its vote. ${ask.task} waits: please break the tie with the buttons on the card.`;
-    return alert(config.leadRole, cut([head, ...lines].join('\n'), 1900));
+    return alert([config.leadRole], cut([head, ...lines].join('\n'), 1900));
   }
 
   /** The answers that the bridge gives sage for a settled gate: one per sage gate, as "A. option text", never for a part with a final answer. */
@@ -552,8 +569,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       m.remindedAt = clock();
       persist();
       await postAbout(id, due.to === 'holders'
-        ? alert(config.driverRole, `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
-        : alert(config.leadRole, `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
+        ? alert(holderRoles, `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
+        : alert([config.leadRole], `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
     }
   }
 

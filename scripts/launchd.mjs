@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { SNOWFLAKE } from '../src/bridge.js';
+import { refuseOldRoles, SNOWFLAKE } from '../src/bridge.js';
 import { CONFIG_FIELDS, DISCORD_IDS, plist, stableNode } from '../src/launchd.js';
 import { forTerminal } from '../src/clean.js';
 
@@ -33,6 +33,11 @@ try {
   fields = JSON.parse(raw);
 } catch (e) {
   stop(`the config file ${config} is not JSON (${e.message}). ${nothing}`);
+}
+try {
+  refuseOldRoles(fields);
+} catch (e) {
+  stop(`${e.message} ${nothing}`);
 }
 const missing = CONFIG_FIELDS.filter((k) => typeof fields?.[k] !== 'string' || !fields[k]);
 if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. ${nothing}`);

@@ -43,11 +43,11 @@ test('the demo page shows the session line, the thread in order with the private
   ]);
   assert.match(page, /<span class="tag">locked<\/span><span class="tag">archived<\/span>/);
   // The single question: Maya's first answer is final; Jon's late press gets a private note.
-  assert.match(page, /@sage-driver T1 needs one product answer\. The first answer is final\./);
+  assert.match(page, /@sage-apprentice @sage-lead T1 needs one product answer\. The first answer is final\./);
   assert.match(page, /Answered by Maya at <time>14:02<\/time>: A\. Sign in\. Final\./);
   assert.match(page, /Only Jon can see this · Dismiss message<\/div><div>Already answered by Maya: A/);
   // Sam has no role: only Sam sees the refusal.
-  assert.match(page, /Only Sam can see this · Dismiss message<\/div><div>Your press did not count\. Only people with the sage-driver role can answer or vote\./);
+  assert.match(page, /Only Sam can see this · Dismiss message<\/div><div>Your press did not count\. Only people with the sage-apprentice or sage-lead role can answer or vote\./);
   // The batch: the tie post in the thread, then Jon's tie-break.
   assert.match(page, /@sage-lead G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
   assert.match(page, /<b>Decided: B<\/b> · tie broken by Jon \(sage-lead\) at <time>14:36<\/time>/);

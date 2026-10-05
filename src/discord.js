@@ -3,7 +3,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
-import { apiError, createBridge, LOOP } from './bridge.js';
+import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
@@ -45,10 +45,11 @@ export async function accepts(i, channelId, fetch) {
 
 /**
  * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
- * @param {{ guildId: string, channelId: string, ownerId: string, driverRole: string, leadRole: string,
+ * @param {{ guildId: string, channelId: string, ownerId: string, apprenticeRole: string, leadRole: string,
  *   project: string, sagePath: string, statePath: string }} config
  */
 export async function start(config) {
+  refuseOldRoles(config); // before the lock and the Keychain: an old config never reaches Discord
   lock(config.statePath);
   const token = await readToken();
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });

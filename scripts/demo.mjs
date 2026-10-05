@@ -17,17 +17,17 @@ import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
 import { sagePath } from './sage-path.mjs';
 
 // ---- Sample data -------------------------------------------------------------------------------------------------------------
-const [DRIVER, LEADR, CHANNEL] = ['300000000000000001', '300000000000000002', '400000000000000001'];
+const [APPRENTICE, LEADR, CHANNEL] = ['300000000000000001', '300000000000000002', '400000000000000001'];
 const [ERICK, MAYA, JON, SAM] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004'];
 const MEMBERS = [
-  { id: ERICK, name: 'Erick', roles: [DRIVER, LEADR] },
-  { id: MAYA, name: 'Maya', roles: [DRIVER] },
-  { id: JON, name: 'Jon', roles: [DRIVER, LEADR] },
+  { id: ERICK, name: 'Erick', roles: [LEADR] },
+  { id: MAYA, name: 'Maya', roles: [APPRENTICE] },
+  { id: JON, name: 'Jon', roles: [LEADR] },
   { id: SAM, name: 'Sam', roles: [] },
-  { id: '100000000000000005', name: 'sage bridge', roles: [DRIVER, LEADR], bot: true },
+  { id: '100000000000000005', name: 'sage bridge', roles: [APPRENTICE, LEADR], bot: true },
 ];
 const NAMES = new Map(MEMBERS.map((m) => [m.id, m.name]));
-const CONFIG = { channelId: CHANNEL, ownerId: ERICK, driverRole: DRIVER, leadRole: LEADR };
+const CONFIG = { channelId: CHANNEL, ownerId: ERICK, apprenticeRole: APPRENTICE, leadRole: LEADR };
 const SESSION = 'aaaaaaaa-0000-4000-8000-000000000051';
 const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
@@ -201,7 +201,7 @@ const gates = rowsTsv.map((l) => Object.fromEntries(l.split('\t').map((v, i) => 
 const reasons = [batch, second].map((id) => [id, node([script('reasons.mjs'), statePath, id])]);
 
 // ---- The page ------------------------------------------------------------------------------------------------------------------
-const roles = (text) => text.replaceAll(`<@&${DRIVER}>`, '@sage-driver').replaceAll(`<@&${LEADR}>`, '@sage-lead');
+const roles = (text) => text.replaceAll(`<@&${APPRENTICE}>`, '@sage-apprentice').replaceAll(`<@&${LEADR}>`, '@sage-lead');
 /** A message as Discord shows it: an edit replaces only the fields that it has, so a card keeps the text of its first post. */
 const show = (p) => (p.content ? { ...p, content: roles(p.content) } : p);
 const latest = (id) => show(Object.assign({}, ...fake.messages.get(id)));
@@ -230,8 +230,8 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
   @media (max-width: 600px) { section { padding: 12px 16px; } }
 </style></head><body><div class="banner">Sample data. Fake Discord. No bot, no token.</div>
 <section><h2>The sage-bot demo: one chief session</h2><p class="about">npm run demo played this session with the real sage state tool, the real hook,
-the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: owner, sage-driver and sage-lead;
-Maya: sage-driver; Jon: sage-driver and sage-lead; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
+the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: owner and sage-lead;
+Maya: sage-apprentice; Jon: sage-lead; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
 <section id="channel"><p class="chan"># <b>sage-chief</b> · the parent channel. The bridge edits the session's line as the session goes on: first as posted, then each edit.</p>
 ${states(lineId).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span><div>${md(s.p.content, s.at)}</div></div>` : message(s.p, s.at))).join('\n')}
 <p class="about">Thread: <b>${esc(thread.name)}</b><span class="tag">${thread.locked ? 'locked' : 'open'}</span><span class="tag">${thread.archived ? 'archived' : 'active'}</span>

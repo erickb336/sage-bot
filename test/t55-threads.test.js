@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectOf, record } from '../src/sessions.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { CHANNEL, DRIVER, JON, LEADR, MAYA, setAt, setup } from './bridge-setup.js';
+import { CHANNEL, APPRENTICE, JON, LEADR, MAYA, setAt, setup } from './bridge-setup.js';
 
 const S1 = 'aaaaaaaa-0000-4000-8000-000000000001';
 const spoolDir = (b) => `${b.statePath}.sessions`;
@@ -54,7 +54,7 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/); // the vote cast in the thread
   assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: no votes\.\*\*/);
   assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[1])[0].content,
-    `<@&${DRIVER}> T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
+    `<@&${APPRENTICE}> <@&${LEADR}> T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
   assert.deepEqual(b.lines.filter((l) => /\(G17\)$/.test(l)), [
     'G1: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)',
     'G2+G3: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)']);
@@ -66,7 +66,7 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   // The reminder of the open single goes to the parent channel; then a press on it counts there.
   b.now += 2 * HOUR;
   await b.bridge.loop();
-  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${DRIVER}> reminder: G1 waits for an answer`));
+  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${APPRENTICE}> <@&${LEADR}> reminder: G1 waits for an answer`));
   await b.press(MAYA, 'press:G1:0:1');
   assert.match(cardIn(b, CHANNEL, 'Question G1 · T1 ').embeds[0].description, /Answered by Maya/);
   await b.bridge.loop();
@@ -177,7 +177,7 @@ for (const hangAt of [1, 2]) {
     b.now += 2 * HOUR;
     await b.bridge.loop();
     const after = shown(b, CHANNEL);
-    assert.equal(after.filter((t) => t.startsWith(`<@&${DRIVER}> reminder: G1 waits`)).length, 1);
+    assert.equal(after.filter((t) => t.startsWith(`<@&${APPRENTICE}> <@&${LEADR}> reminder: G1 waits`)).length, 1);
     assert.equal(after.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of G2+G3 still tied`)).length, 1);
     assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
   });
@@ -185,7 +185,7 @@ for (const hangAt of [1, 2]) {
 
 
 // T65: a moved card that is settled before its new post stays quiet; a moved card's reminders and tie post come after its new post.
-const pings = (b) => shown(b, CHANNEL).filter((t) => t?.startsWith(`<@&${DRIVER}>`) || t?.startsWith(`<@&${LEADR}>`));
+const pings = (b) => shown(b, CHANNEL).filter((t) => t?.startsWith(`<@&${APPRENTICE}>`) || t?.startsWith(`<@&${LEADR}>`));
 
 test('F-T65-1: moved cards that are settled before their new post (one at the terminal, one by its vote) are not posted and ping nobody, also after a restart', async () => {
   const b = await movedSetup();
@@ -228,7 +228,7 @@ test('T65: Discord refuses the new posts of moved cards for 3 hours: the tie pos
   b.now += HOUR; // past the next 2-hour mark of each gate
   await b.bridge.loop();
   const all = shown(b, CHANNEL);
-  assert.equal(all.filter((t) => t.startsWith(`<@&${DRIVER}> reminder: G1 waits`)).length, 1);
+  assert.equal(all.filter((t) => t.startsWith(`<@&${APPRENTICE}> <@&${LEADR}> reminder: G1 waits`)).length, 1);
   assert.equal(all.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of G2+G3 still tied`)).length, 1);
 });
 

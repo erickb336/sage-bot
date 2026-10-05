@@ -2,7 +2,7 @@
   "guildId": "200000000000000001",
   "channelId": "400000000000000001",
   "ownerId": "100000000000000001",
-  "driverRole": "300000000000000001",
+  "apprenticeRole": "300000000000000001",
   "leadRole": "300000000000000002",
   "project": "/Users/you/workspace/your-project",
   "sagePath": "/Users/you/.claude/plugins/cache/sage/sage/<version>/skills/sage/sage.mjs",

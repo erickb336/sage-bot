@@ -16,21 +16,21 @@ import { save } from '../src/state.js';
 import { openGate, step } from '../src/vote.js';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'sage-bot-discord-'));
-const [OWNER, MAYA, DRIVER, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
-const CONFIG = { channelId: '400000000000000001', ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
+const [OWNER, MAYA, APPRENTICE, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
+const CONFIG = { channelId: '400000000000000001', ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 
 test('F-T28-20: memberOf maps a real discord.js GuildMember (no login) to { id, name, roles, bot }, which peopleOf reads', () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   try {
     const guild = client.guilds._add({ id: '200000000000000001', name: 'sample', members: [], roles: [
       { id: '200000000000000001', name: '@everyone', permissions: '0', position: 0 },
-      { id: DRIVER, name: 'sage-driver', permissions: '0', position: 1 }, { id: LEADR, name: 'sage-lead', permissions: '0', position: 2 }] });
+      { id: APPRENTICE, name: 'sage-apprentice', permissions: '0', position: 1 }, { id: LEADR, name: 'sage-lead', permissions: '0', position: 2 }] });
     const joined = new Date(0).toISOString();
-    const maya = guild.members._add({ user: { id: MAYA, username: 'maya', global_name: 'Maya G', bot: false }, nick: 'Maya', roles: [DRIVER], joined_at: joined });
-    const bot = guild.members._add({ user: { id: '100000000000000005', username: 'bridge', bot: true }, roles: [DRIVER, LEADR], joined_at: joined });
-    assert.deepEqual(memberOf(maya), { id: MAYA, name: 'Maya', roles: ['200000000000000001', DRIVER], bot: false });
-    assert.deepEqual(memberOf(bot), { id: '100000000000000005', name: 'bridge', roles: ['200000000000000001', DRIVER, LEADR], bot: true });
-    const people = peopleOf([maya, bot].map(memberOf), { driverRole: DRIVER, leadRole: LEADR });
+    const maya = guild.members._add({ user: { id: MAYA, username: 'maya', global_name: 'Maya G', bot: false }, nick: 'Maya', roles: [APPRENTICE], joined_at: joined });
+    const bot = guild.members._add({ user: { id: '100000000000000005', username: 'bridge', bot: true }, roles: [APPRENTICE, LEADR], joined_at: joined });
+    assert.deepEqual(memberOf(maya), { id: MAYA, name: 'Maya', roles: ['200000000000000001', APPRENTICE], bot: false });
+    assert.deepEqual(memberOf(bot), { id: '100000000000000005', name: 'bridge', roles: ['200000000000000001', APPRENTICE, LEADR], bot: true });
+    const people = peopleOf([maya, bot].map(memberOf), { apprenticeRole: APPRENTICE, leadRole: LEADR });
     assert.deepEqual([[...people.holders], [...people.leads]], [[MAYA], []]);
   } finally {
     client.destroy();
@@ -80,7 +80,7 @@ test('F-T28-23: a Discord error is logged as its code, status and message only, 
   const gate = openGate({ id: 'G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: 1 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
-  const bridge = createBridge({ sage: { gates: async () => [], answer: async () => '' }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [DRIVER] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  const bridge = createBridge({ sage: { gates: async () => [], answer: async () => '' }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   await bridge.interaction(fakeInteraction({ user: MAYA, customId: 'press:G1:0:0', refuse: error }));
   assert.ok(lines.includes('Discord refused a reply: code 10062, status 404: Unknown interaction'), lines.join('\n'));
   assert.equal(lines.join('\n').includes('sample-token'), false);
@@ -94,7 +94,7 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   const ask = { kind: 'batch', task: 'T1', title: '', parts: Array.from({ length: 5 }, () => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
   save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {} }]);
   const lines = [];
-  const bridge = createBridge({ sage: { gates: async () => [] }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [DRIVER] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  const bridge = createBridge({ sage: { gates: async () => [] }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   const i = fakeInteraction({ user: MAYA, customId: 'reason:B1:0:0', fields: { reason: 'r' } });
   await bridge.interaction(i);
   assert.deepEqual(i.replies, [{ kind: 'reply', content: 'The bridge could not handle this press. Nothing changed. Please tell the owner.', flags: 64, allowedMentions: { parse: [] } }]);
@@ -105,7 +105,7 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
 test('F-T28-21: a long display name is made safe, then cut to 32 characters, in the message that names the lead', async () => {
   const statePath = join(scratch(), 'gates.json');
   const long = `*${'Jonathan'.repeat(40)}`;
-  const people = [{ id: OWNER, name: long, roles: [DRIVER, LEADR] }];
+  const people = [{ id: OWNER, name: long, roles: [APPRENTICE, LEADR] }];
   const tied = step(openGate({ id: 'B1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], []).gate;
   const ask = { kind: 'batch', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
