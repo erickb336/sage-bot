@@ -115,8 +115,8 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
 | Each sage-apprentice and sage-lead can ask 10 times in a rolling hour, across all channels; every `/sage` command and every mention counts, and a mention that opens a thread counts once. The limit note is public too. (G27) | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
 | Every @sage-bot mention in a registered channel opens a public thread, named from the request, and the answer goes there. A mention in that thread continues it. A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel. The bridge answers read asks itself, with no AI. (G27) | Each request and its answer stay together, and the channel stays readable. | `src/ask.js`, `src/threads.js` |
-| Every message of a sage-lead to sage-bot, and every message of an apprentice in a lead thread, goes into the lead log first: one line each, with a hash chain, in a 0600 file outside every project. A copy goes to #sage-audit and pings nobody. An apprentice's text is kept only as quoted data. (G22) | Erick and the leads can see everything that a lead sent toward sage, and an edit of the log shows. | `src/audit.js` |
-| A sage-lead or Erick can turn off the link from Discord to sage with `/sage stop` and a confirm. Only Erick turns it on again, at the terminal. While it is off, read asks still work. A flag file that cannot be checked counts as off. No sage session starts from Discord yet: a lead's "talk" is recorded and gets the reply that sessions are not on yet. (G22, G27) | One press stops everything that a lead could send to sage. | `src/audit.js`, `src/ask.js`, `scripts/leads.mjs` |
+| Every message of a sage-lead to sage-bot, and every message of an apprentice in a lead thread, goes into the lead log first: one line each, with a hash chain, in a 0600 file outside every project. A copy goes to #sage-audit and pings nobody. An apprentice's text is kept only as quoted data. (G22) | Erick and the leads can see everything that a lead sent toward sage. `verify` shows an edit, a removal or a reorder of a line that has lines after it; the #sage-audit copy shows the rest (see [the lead log](#mention-threads-the-lead-log-and-the-kill-switch)). | `src/audit.js` |
+| A sage-lead or Erick can turn off the link from Discord to sage with `/sage stop` and a confirm, in any channel and also over the hourly limit. The confirm has a Cancel button and expires after 10 minutes. Erick can also turn it off at the terminal. Only Erick turns it on again, at the terminal. While it is off, read asks still work. A flag file that cannot be checked counts as off. No sage session starts from Discord yet: a lead's "talk" is recorded and gets the reply that sessions are not on yet. (G22, G27) | One press stops everything that a lead could send to sage. | `src/audit.js`, `src/ask.js`, `scripts/leads.mjs` |
 
 ## Set up a live trial
 
@@ -287,7 +287,7 @@ In a registered channel, or a thread of it, a sage-apprentice or a sage-lead typ
 | Turn off the link from Discord to sage (sage-leads and Erick; a button confirms it) | `/sage stop` |
 | Ask in a thread of its own | `@sage-bot board`, `@sage-bot gates`, `@sage-bot files` or `@sage-bot T7` |
 
-Time left is not estimated yet: the board shows the count of tasks left. In a channel that is not registered, sage-bot ignores `/sage` and mentions, except one pointer to a registered channel per person per day. See [Mention threads](#mention-threads-the-lead-log-and-the-kill-switch) for what a mention does.
+Time left is not estimated yet: the board shows the count of tasks left. In a channel that is not registered, sage-bot ignores `/sage` and mentions, except one pointer to a registered channel per person per day, and the `/sage stop` of a sage-lead or Erick. See [Mention threads](#mention-threads-the-lead-log-and-the-kill-switch) for what a mention does.
 
 ### Channels
 
@@ -345,18 +345,32 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 - When sage-bot lacks a right for its thread, it replies once in place and names the right: "Create Public Threads" or "Send Messages in Threads".
 - The threads are in `<statePath>.threads` (0600), so a thread continues after a restart.
 
-**The lead log.** Every message of a sage-lead to sage-bot, a `/sage stop`, and every message of an apprentice in a lead thread, goes into the lead log before anything else. Each line holds the time, the message id, the author id, their roles at that time, the sha256 of the raw text, the cleaned text, the thread, the project and the outcome. Each line also holds the hash of the line before it, so an edit, a removed line or a reorder shows as a break. The log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, so that a session in a project cannot change it. The file is 0600.
+**The lead log.** Every message of a sage-lead to sage-bot, a `/sage stop`, and every message of an apprentice in a lead thread, goes into the lead log before anything else. Each line holds the time, the message id, the author id, their roles at that time, the sha256 of the raw text, the cleaned text, the thread, the project and the outcome. Each line also holds the hash of the line before it. The log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600.
+
+What the hash chain shows, and what it does not:
+
+| A change to the log | `leads.mjs verify` | Only the #sage-audit copy shows it |
+| --- | --- | --- |
+| An edit, a removal or a reorder of a line that has lines after it | A break at that line | |
+| The last lines cut off | Intact | Yes: the copy has lines that the log has not |
+| An older copy of the log put back | Intact | Yes |
+| Every line written and hashed again | Intact | Yes: the hashes in the copy differ |
+
+The chain has no key, so anyone who can write the file can make a new chain that verifies. Anchoring the chain outside the Mac is follow-up task T135.
+
+The 0700 folder and the 0600 file keep other users out, but not a session: a sage session runs as Erick's user, so it could change the log or remove the kill switch flag. When sessions start from Discord (a later step), their sandbox must deny the state folder (T134). Until then, no session starts from Discord.
 
 **#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each log line there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
 
-**The kill switch.** A sage-lead or Erick types `/sage stop` and presses the button. sage-bot then posts a public notice, and nothing of a lead goes to sage until Erick turns the link on again at the terminal. Read asks keep working. The switch is the flag file `<statePath>.leads-off` (or `killPath` in the config); a flag that the bridge cannot check counts as set.
+**The kill switch.** A sage-lead or Erick types `/sage stop`, in any channel, and presses the button within 10 minutes. `/sage stop` does not count toward the hourly limit. Cancel, or a press after 10 minutes, changes nothing. sage-bot then posts a public notice, and nothing of a lead goes to sage until Erick turns the link on again at the terminal. Read asks keep working. The switch is the flag file `<statePath>.leads-off` (or `killPath` in the config); a flag that the bridge cannot check counts as set.
 
 <!-- check: run, prints "the link from Discord to sage is on" -->
 ```sh
 node scripts/leads.mjs status    # is the link on or off?
+node scripts/leads.mjs stop      # turn the link off at the terminal
 node scripts/leads.mjs restore   # turn the link on again (only Erick, at the terminal)
 node scripts/leads.mjs verify    # check the hash chain of the lead log; exits 1 at a break
-node scripts/leads.mjs read 20   # print the last 20 lines of the lead log
+node scripts/leads.mjs read 20   # print the last 20 lines of the lead log; a line from a break on starts with UNVERIFIED
 ```
 
 ## FAQ
