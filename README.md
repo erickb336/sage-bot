@@ -4,6 +4,26 @@ sage-bot is the sage bridge. It is a Discord app that runs on the owner's Mac. I
 
 This version has the vote rules (task B1), the Discord layer: the cards, the reason form and the private notes (task B2), and the bridge service (task B3): it reads sage's open gates, posts the cards, turns presses into vote events and gives each final answer back to sage. The tests run it against a fake Discord layer and a scratch logbook; no test connects to Discord. It also keeps one Discord thread per chief session and one line per session in the parent channel (task T29).
 
+## Try the demo
+
+See v1 work with no Discord account, no bot and no token. You need Node 22 or later, `npm install` once, and the sage plugin. The demo finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `~/.claude/plugins/cache/sage/sage/*/skills/sage/`; else it stops with a message that names `SAGE_TOOL`. The bridge tests use the same lookup.
+
+```sh
+npm run demo
+```
+
+The demo plays one chief session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in sage and the reasons for the chief.
+
+The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes command (`scripts/vote.mjs`) and bridge, on the fake Discord layer:
+
+1. The chief adds a single question (T1), a batch of 2 questions (T2) and one question that stays at the terminal (T3), and marks the team votes.
+2. Maya answers the single question first: her answer is final. Sam has no role: his press does not count.
+3. Maya and Jon vote on the batch with reasons. Part 2 is tied when the vote ends at 30 minutes; the tie post goes to the thread, and Jon (a sage-lead) breaks the tie.
+4. In a second batch (T4), Erick answers part 1 at the terminal, and Jon ends the vote early.
+5. The session ends: its line says "ended", and its thread locks because no question is open.
+
+Everything goes into a new scratch folder (printed at the end), with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. Options: `--out <page.html>` writes the page there instead (the demo checks this path before it starts, and stops with a message when it cannot make the folder or the path is a folder); `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
+
 ## The vote rules
 
 `src/vote.js` holds the rules as data and pure functions. A gate and an event go in; the new gate and its effects come out. Each event carries its time, so the rules never read the clock.
@@ -256,7 +276,7 @@ Discord shows every button of a message to everyone, so a non-lead sees "End vot
 
 ### The preview
 
-`node scripts/preview.mjs` renders the card JSON of the design's eleven moments, plus a card of a team of 5 with 4 parts and 500-character reasons, to `design/b2/index.html` with sample data. With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder. Chrome runs with `--disable-gpu`, so the shots are byte-identical from one cold run to the next (the GPU raster path draws the rounded border corner by one shade differently in some runs).
+`node scripts/preview.mjs` renders the card JSON of the design's eleven moments, plus a card of a team of 5 with 4 parts and 500-character reasons, to `design/b2/index.html` with sample data, through `scripts/render.mjs` (the demo uses it too). With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder. Chrome runs with `--disable-gpu`, so the shots are byte-identical from one cold run to the next (the GPU raster path draws the rounded border corner by one shade differently in some runs).
 
 ## The bridge service
 

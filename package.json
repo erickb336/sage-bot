@@ -9,7 +9,8 @@
   },
   "scripts": {
     "check": "node scripts/syntax.mjs && node --test \"test/*.test.js\"",
-    "check:npmrc-probe": "node -e \"console.log('probe')\""
+    "check:npmrc-probe": "node -e \"console.log('probe')\"",
+    "demo": "node scripts/demo.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {

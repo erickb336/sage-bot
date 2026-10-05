@@ -11,6 +11,7 @@ import { step } from '../src/vote.js';
 import { embedLength } from 'discord.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, clock, openAsk } from '../examples/sample.js';
 import { openGate } from '../src/vote.js';
+import { CSS, esc, message, modalHtml, noteHtml } from './render.mjs';
 
 const OUT = new URL('../design/b2/', import.meta.url);
 const people = peopleOf(MEMBERS, CONFIG);
@@ -88,53 +89,8 @@ moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button i
     now: ctx.now, card: c });
 }
 
-// Rendering: a Discord-like look, enough to judge the copy and the states.
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const hhmm = (sec) => new Date(sec * 1000).toISOString().slice(11, 16);
-const relative = (sec, now) => {
-  const min = Math.round((sec * 1000 - now) / 60_000);
-  const n = Math.abs(min);
-  const text = n < 60 ? `${n} minute${n === 1 ? '' : 's'}` : `${Math.round(n / 60)} hour${Math.round(n / 60) === 1 ? '' : 's'}`;
-  return min >= 0 ? `in ${text}` : `${text} ago`;
-};
-/** Discord markdown, as far as the cards use it: escapes, bold and timestamps. Mentions stay as text, as in an embed. */
-const md = (text, now) => esc(text)
-  .replace(/\\(&lt;|&gt;|&amp;|.)/g, (_, c) => `&#${c.startsWith('&') ? { '&lt;': 60, '&gt;': 62, '&amp;': 38 }[c] : c.codePointAt(0)};`)
-  .replace(/&lt;t:(\d+):t&gt;/g, (_, s) => `<time>${hhmm(s)}</time>`)
-  .replace(/&lt;t:(\d+):R&gt;/g, (_, s) => `<time>${relative(s, now)}</time>`)
-  .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-const STYLE = { 1: 'primary', 2: 'secondary', 3: 'success', 4: 'danger' };
-const rows = (components) => components.map((r) => `<div class="row">${r.components.map((b) =>
-  `<button class="${STYLE[b.style]}"${b.disabled ? ' disabled' : ''} title="${esc(b.custom_id)}">${esc(b.label)}</button>`).join('')}</div>`).join('');
-const embed = ({ embeds: [e], components }, now) => `<div class="msg"><span class="av">sb</span><div class="body"><div class="meta"><b>sage bridge</b> <span class="app">APP</span> · ${hhmm(now / 1000)}</div>
-  <div class="embed" style="border-color:#${e.color.toString(16).padStart(6, '0')}"><div class="title">${esc(e.title)}</div><div class="desc">${md(e.description, now)}</div>
-  ${(e.fields ?? []).map((f) => `<div class="field"><div class="fname">${esc(f.name)}</div><div class="fvalue">${md(f.value, now)}</div></div>`).join('')}
-  ${e.footer ? `<div class="footer">${esc(e.footer.text)}</div>` : ''}</div>${rows(components)}</div></div>`;
-const noteHtml = (n, now) => `<div class="msg eph"><span class="av">sb</span><div class="body"><div class="meta"><b>sage bridge</b> <span class="app">APP</span> · ${hhmm(now / 1000)}</div>
-  <div class="ephnote">Only you can see this · Dismiss message</div><div>${md(n.content, now)}</div>${rows(n.components ?? [])}</div></div>`;
-const modalHtml = (m) => `<div class="modal"><h3>${esc(m.title)}</h3>${m.components.map(({ components: [i] }) =>
-  `<label>${esc(i.label)}<textarea placeholder="${esc(i.placeholder)}" maxlength="${i.max_length}"></textarea></label>`).join('')}<div class="mbtns"><span>Cancel</span><button class="primary">Submit</button></div></div>`;
-const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>sage-bot B2: the cards (sample data)</title><style>
-  body { margin: 0; background: #313338; color: #dbdee1; font: 15px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-  .banner { background: #f0b232; color: #1e1f22; font-weight: 600; padding: 6px 16px; font-size: 13px; }
-  section { padding: 16px 24px 20px; border-bottom: 1px solid #1e1f22; max-width: 860px; }
-  h2 { font-size: 15px; margin: 0 0 2px; color: #f2f3f5; } .about { color: #949ba4; font-size: 13px; margin: 0 0 12px; }
-  .msg { display: flex; gap: 12px; margin-top: 10px; } .av { flex: none; width: 40px; height: 40px; border-radius: 50%; background: #5865f2; color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; }
-  .body { min-width: 0; flex: 1; } .meta { color: #949ba4; font-size: 12px; margin-bottom: 4px; } .meta b { color: #f2f3f5; font-size: 15px; }
-  .app { background: #5865f2; color: #fff; font-size: 10px; border-radius: 3px; padding: 0 4px; vertical-align: middle; }
-  .embed { background: #2b2d31; border-left: 4px solid; border-radius: 4px; padding: 10px 14px 10px 12px; max-width: 560px; }
-  .title { font-weight: 600; color: #f2f3f5; margin-bottom: 6px; } .desc { font-size: 14px; white-space: pre-wrap; }
-  .field { margin-top: 10px; } .fname { font-weight: 600; color: #f2f3f5; font-size: 14px; } .fvalue { font-size: 14px; white-space: pre-wrap; }
-  .footer { color: #949ba4; font-size: 12px; margin-top: 10px; } time { background: #404249; border-radius: 3px; padding: 0 2px; }
-  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; } button { border: 0; border-radius: 3px; padding: 6px 14px; font: inherit; font-size: 14px; color: #fff; }
-  button:disabled { opacity: .5; } .primary { background: #5865f2; } .secondary { background: #4e5058; } .success { background: #248046; } .danger { background: #da373c; }
-  .eph { background: rgba(88,101,242,.08); border-left: 2px solid #5865f2; padding: 6px 8px; } .ephnote { color: #949ba4; font-size: 12px; margin-bottom: 4px; }
-  .modal { background: #313338; border: 1px solid #1e1f22; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 16px; max-width: 440px; margin-top: 12px; }
-  .modal h3 { margin: 0 0 12px; color: #f2f3f5; font-size: 18px; } label { display: block; font-size: 12px; font-weight: 600; color: #b5bac1; text-transform: uppercase; }
-  textarea { display: block; width: 100%; box-sizing: border-box; min-height: 72px; margin-top: 6px; background: #1e1f22; color: #dbdee1; border: 0; border-radius: 3px; padding: 8px; font: inherit; font-size: 14px; text-transform: none; }
-  .mbtns { display: flex; justify-content: flex-end; gap: 16px; align-items: center; margin-top: 14px; color: #dbdee1; }
-</style></head><body><div class="banner">SAMPLE DATA · the card JSON of sage-bot B2 rendered to HTML: made-up people and questions, times in UTC, no Discord, no network.</div>
-${moments.map((m, i) => `<section id="m${i + 1}"><h2>${i + 1}. ${esc(m.title)}</h2><p class="about">${esc(m.about)}</p>${embed(m.card, m.now)}
+const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>sage-bot B2: the cards (sample data)</title><style>${CSS}</style></head><body><div class="banner">SAMPLE DATA · the card JSON of sage-bot B2 rendered to HTML: made-up people and questions, times in UTC, no Discord, no network.</div>
+${moments.map((m, i) => `<section id="m${i + 1}"><h2>${i + 1}. ${esc(m.title)}</h2><p class="about">${esc(m.about)}</p>${message(m.card, m.now)}
 ${m.note ? noteHtml(m.note, m.now) : ''}${m.confirm ? noteHtml(m.confirm, m.now) : ''}${m.modal ? modalHtml(m.modal) : ''}</section>`).join('\n')}
 </body></html>`;
 mkdirSync(new URL('shots/', OUT), { recursive: true });
