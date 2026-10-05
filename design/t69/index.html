@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask sage-bot by role</title>
+<style>
+/* T69 design. Colours and shapes follow the approved T1 page (design/t1/common.css). One file: no font, no image, no network. */
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --text: #1d1d1b; --muted: #5f5e58; --line: #e3e0d8;
+  --accent: #6b4fd8; --accent-soft: #efeafd; --ok: #1f7a4d; --ok-soft: #e6f4ec; --warn: #9a5b00; --warn-soft: #fdf1dc;
+  --stop: #b3261e; --stop-soft: #fbe9e7; --code-bg: #f3f1ec; --app-side: #ecebe6;
+  --appr: #0f766e; --appr-soft: #e2f3f1; --lead: #9a3412; --lead-soft: #fdeee5; --none: #6b6960; --none-soft: #eeede8;
+  --owner: #2f6fd6; --owner-soft: #eaf1fc; --bot: #3f3d56;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; overflow-x: hidden; }
+a { color: var(--accent); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+button { font: inherit; cursor: pointer; color: inherit; }
+.sample { background: repeating-linear-gradient(135deg, #fff4d6 0 12px, #ffecbf 12px 24px); color: #6b4200; text-align: center; font-weight: 700; font-size: .82rem; letter-spacing: .04em; padding: 5px 16px; border-bottom: 1px solid #f0d58a; }
+.sample span { font-weight: 500; letter-spacing: 0; }
+.doc { max-width: 1180px; margin: 0 auto; padding: 22px 16px 10px; }
+.doc.tail { padding-bottom: 80px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; line-height: 1.25; }
+.doc h2 { font-size: 1.15rem; margin: 30px 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.doc p, .doc li { max-width: 82ch; }
+.lead { background: var(--accent-soft); border-radius: 8px; padding: 12px 16px; }
+.lead p { margin: 4px 0; }
+.sub { color: var(--muted); margin-top: 0; font-size: .9rem; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+th { font-size: .74rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q { color: var(--warn); font-weight: 700; }
+
+/* Role badges */
+.rb { display: inline-block; font-size: .66rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; vertical-align: 1px; letter-spacing: .02em; white-space: nowrap; }
+.rb.appr { background: var(--appr-soft); color: var(--appr); } .rb.lead { background: var(--lead-soft); color: var(--lead); }
+.rb.none { background: var(--none-soft); color: var(--none); } .rb.owner { background: var(--owner-soft); color: var(--owner); }
+.rb.apptag { background: #4752c4; color: #fff; }
+.rb.drv { background: var(--accent-soft); color: var(--accent); }
+
+/* Moment control */
+.proto { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-top: 18px; background: var(--surface); }
+.moments { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); align-items: center; }
+.moments .grp { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 2px 0 8px; }
+.moments .grp:first-child { margin-left: 0; }
+.moments button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 3px 11px; font-size: .82rem; }
+.moments button[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--bg); font-size: .82rem; }
+.stepbar .lbl { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+.stepbar button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 2px 9px; font-size: .8rem; }
+.stepbar button[aria-current="true"] { border-color: var(--text); font-weight: 700; }
+.stepbar button.var { border-style: dashed; }
+.stepbar button.var[aria-current="true"] { border-style: solid; background: var(--warn-soft); border-color: var(--warn); color: #6b4200; }
+.stepbar .nav { margin-left: auto; display: flex; gap: 6px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; }
+.stage { padding: 16px; min-width: 0; }
+.notes { border-left: 1px solid var(--line); padding: 16px; font-size: .9rem; background: var(--surface); }
+.notes h3 { font-size: 1rem; margin: 0 0 6px; }
+.notes p { margin: 6px 0; color: var(--muted); }
+.notes .box { border-radius: 8px; padding: 8px 10px; margin: 10px 0; font-size: .86rem; }
+.notes .box b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.notes .box.dec { background: var(--warn-soft); border: 1px dashed var(--warn); color: #6b4200; }
+.notes .box.see { background: var(--bg); border: 1px solid var(--line); }
+.notes .box.chg { background: var(--stop-soft); border: 1px solid #f2c4bf; color: var(--stop); }
+.notes ul { margin: 4px 0; padding-left: 18px; }
+
+/* Discord-like shell: a generic look, not Discord's brand */
+.app { display: grid; grid-template-columns: 190px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); min-height: 520px; }
+.srv { background: var(--app-side); padding: 12px 10px; font-size: .84rem; }
+.srv .ws { font-weight: 700; margin-bottom: 8px; }
+.srv .h { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; }
+.srv .ch { padding: 3px 6px; border-radius: 5px; }
+.srv .ch.on { background: var(--accent); color: #fff; font-weight: 600; }
+.srv .ch.sub { padding-left: 18px; font-size: .8rem; }
+.srv .mem { display: flex; align-items: center; gap: 6px; padding: 2px 4px; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.dot.off { background: #bdbab1; }
+.chan { display: flex; flex-direction: column; min-width: 0; }
+.chan .hd { padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.chan .hd span { font-weight: 400; color: var(--muted); font-size: .82rem; }
+.stream { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.foot { padding: 10px 12px; border-top: 1px solid var(--line); }
+.composer { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 9px 12px; color: var(--muted); font-size: .9rem; }
+.composer b { color: var(--text); font-weight: 500; }
+.av { width: 34px; height: 34px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: .82rem; flex: none; }
+.av.sm { width: 18px; height: 18px; font-size: .6rem; }
+.av.maya { background: #c2410c; } .av.ana { background: #0f766e; } .av.jon { background: #7c3aed; } .av.sam { background: #8a877d; } .av.erick { background: var(--owner); } .av.bot { background: var(--bot); font-size: .66rem; }
+.msg { display: flex; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.msg .body { min-width: 0; flex: 1; }
+.msg .meta { font-size: .78rem; color: var(--muted); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.msg .meta b { font-size: .92rem; color: var(--text); }
+.msg p { margin: 2px 0; }
+.msg ul { margin: 2px 0; padding-left: 18px; }
+/* impeccable-disable-next-line side-tab -- designer: copies Discord's native mention styling (gold bar on a message that mentions you) */
+.msg.hl { background: #fff8e1; box-shadow: inset 3px 0 0 #e0a800; }
+.msg.eph { background: var(--accent-soft); }
+.ephnote { font-size: .74rem; color: var(--accent); font-weight: 600; margin-top: 3px; }
+.vis { display: inline-block; font-size: .66rem; font-weight: 700; border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
+.vis.pub { background: var(--none-soft); color: var(--none); } .vis.me { background: var(--accent-soft); color: var(--accent); }
+.mention { background: #e8eafd; color: #3c45a5; border-radius: 3px; padding: 0 3px; font-weight: 600; }
+.reply { font-size: .76rem; color: var(--muted); margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply::before { content: "\21B1 "; }
+.typing { color: var(--muted); font-size: .85rem; font-style: italic; padding: 4px 8px 4px 52px; }
+.dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); margin-right: 3px; animation: blink 1.2s infinite; }
+.dots span:nth-child(2) { animation-delay: .2s; } .dots span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dots span { animation: none; opacity: .6; } }
+.react { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0 7px; font-size: .78rem; margin-top: 3px; }
+.divider { text-align: center; font-size: .75rem; color: var(--muted); margin: 8px 0; display: flex; align-items: center; gap: 10px; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+/* impeccable-disable-next-line side-tab -- designer: copies Discord's embed (colour bar at the left of a rich card) */
+.embed { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; background: var(--bg); padding: 8px 12px 10px; margin-top: 5px; max-width: 560px; font-size: .88rem; }
+.embed.ok { border-left-color: var(--ok); } .embed.warn { border-left-color: var(--warn); } .embed.stop { border-left-color: var(--stop); } .embed.grey { border-left-color: #bdbab1; }
+.embed .et { font-weight: 700; margin-bottom: 4px; }
+.embed .ef { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 6px; }
+.embed .ef .k { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.embed .ef .v { margin-top: 1px; }
+.embed .full { grid-column: 1 / -1; }
+.embed ul { margin: 2px 0; padding-left: 16px; }
+.embed .efoot { font-size: .74rem; color: var(--muted); margin-top: 8px; }
+.embed dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 3px 10px; margin: 4px 0 0; }
+.embed dt { color: var(--muted); } .embed dd { margin: 0; overflow-wrap: anywhere; }
+.task { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; background: var(--code-bg); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.pill { display: inline-block; font-size: .7rem; font-weight: 700; padding: 0 6px; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.stop { background: var(--stop-soft); color: var(--stop); } .pill.grey { background: var(--none-soft); color: var(--none); }
+.cols { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.col { flex: 1 1 96px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font-size: .8rem; }
+.col .ch { font-size: .68rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.db { border: 0; border-radius: 4px; padding: 4px 12px; font-size: .84rem; font-weight: 600; background: #4e5058; color: #fff; }
+.db.pri { background: #4752c4; } .db.ok { background: #248046; } .db.stop { background: #b3261e; } .db.sec { background: #e3e5e8; color: #2e3035; }
+.db.link { background: #e3e5e8; color: #2e3035; }
+.db.link::after { content: " \2197"; }
+.db[disabled] { opacity: .5; cursor: default; }
+.db.pressed { outline: 2px solid #e0a800; outline-offset: 2px; }
+.att { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.att figure { margin: 0; width: 230px; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.att figcaption { font-size: .72rem; color: var(--muted); padding: 3px 8px; border-top: 1px solid var(--line); }
+.att svg { display: block; width: 100%; height: auto; }
+.linkcard { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); max-width: 440px; margin-top: 6px; font-size: .85rem; }
+.linkcard .lh { font-size: .72rem; color: var(--muted); }
+.modalwrap { position: relative; }
+.modalbg { position: absolute; inset: 0; background: rgba(29,29,27,.38); display: grid; place-items: center; padding: 16px; border-radius: 10px; }
+.modal { background: var(--surface); border-radius: 10px; padding: 14px 16px; width: min(440px, 100%); box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: .9rem; }
+.modal h4 { margin: 0 0 4px; font-size: 1rem; }
+.modal label { display: block; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 8px 0 2px; }
+.modal textarea { width: 100%; font: inherit; font-size: .86rem; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: none; }
+.modal .mb { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.term { background: #1d1d1b; color: #e8e6df; border-radius: 8px; overflow: hidden; margin-top: 12px; max-width: 620px; }
+.term .tt { font-size: .72rem; color: #a9a69c; padding: 4px 10px; background: #2b2a27; }
+.term pre { margin: 0; padding: 8px 10px; font-size: .78rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term .g { color: #8fd19e; } .term .y { color: #f2c46d; }
+.varhead { display: inline-block; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b4200; background: var(--warn-soft); border: 1px dashed var(--warn); border-radius: 6px; padding: 2px 8px; margin-bottom: 8px; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.opt { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px; font-size: .86rem; }
+.opt.rec { border: 2px solid var(--accent); }
+.opt h4 { margin: 0 0 6px; font-size: .95rem; }
+.rec-tag { font-size: .66rem; font-weight: 700; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
+.mini { border: 1px solid var(--line); border-radius: 8px; background: var(--app-side); padding: 6px 8px; font-size: .78rem; margin-bottom: 8px; }
+.mini div { padding: 1px 4px; border-radius: 4px; }
+.mini .on { background: var(--accent); color: #fff; }
+.mini .in { padding-left: 16px; }
+.opt ul { margin: 4px 0; padding-left: 18px; }
+
+/* Decisions */
+.dec { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 14px; margin: 10px 0; }
+.dec h3 { margin: 0 0 4px; font-size: 1rem; }
+.dec .why { color: var(--muted); font-size: .86rem; margin: 0 0 6px; }
+.dec ol { margin: 4px 0; padding-left: 22px; font-size: .9rem; }
+.dec li { margin: 3px 0; }
+.dec li.r { font-weight: 600; }
+.dec .see { font-size: .8rem; color: var(--muted); }
+.dec .see button { border: 0; background: none; color: var(--accent); text-decoration: underline; padding: 0; font-size: .8rem; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .notes { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 700px) {
+  .app { grid-template-columns: 1fr; min-height: 0; }
+  .srv { display: none; }
+  .stage { padding: 10px 8px; }
+  .msg { padding: 6px 4px; gap: 8px; }
+  .av { width: 28px; height: 28px; font-size: .72rem; }
+  .typing { padding-left: 40px; }
+  .embed dl { grid-template-columns: 1fr; }
+  .embed dt { margin-top: 4px; }
+  .stepbar .nav { margin-left: 0; width: 100%; }
+  h1 { font-size: 1.3rem; }
+}
+</style>
+</head>
+<body>
+<div class="sample">SAMPLE DATA <span>· a design only: no bot, no Discord, no network. All people, tasks, numbers and times are invented. Times in UTC.</span></div>
+
+<div class="doc">
+<h1>Ask @sage-bot in Discord, by role</h1>
+<p class="sub">Task T69 · run R313 · design branch <code>design/t69-roles</code> · nothing is built</p>
+<div class="lead">
+<p><b>What this is.</b> A clickable design of what the team can ask <span class="mention">@sage-bot</span> in Discord, by role. A <span class="rb appr">sage-apprentice</span> reads and asks questions. A <span class="rb lead">sage-lead</span> also starts sessions and does other write operations, each after a confirm. People with no role get a short refusal.</p>
+<p><b>Where it fits.</b> Today the bridge only posts vote cards in session threads, and only the owner chats with the chief (decision G16). The owner's new request opens the bot to the team. This page comes before any build. Next: you answer the 13 open decisions at the end, then a PE checks the plan.</p>
+<p><b>What changes from earlier decisions.</b> G16 (only the owner chats), "only the owner starts work", "only the owner withdraws a question" and "switches only at the host" each change in some moments. Each moment says so in a red box.</p>
+<p><b>Two forms of asking.</b> The owner asked for <span class="mention">@sage-bot</span> mentions. The PE prefers fixed slash commands (<code>/sage board</code>, <code>/sage task</code>, <code>/sage gates</code>, <code>/sage files</code>, and <code>/sage request</code> for leads) that the bridge answers in private. Moments 1 and 7 show both forms; decision D13 picks.</p>
+<p><b>What I need from you.</b> A pick on each open decision (each has my recommendation).</p>
+</div>
+
+<h2>Who can do what (my recommendation)</h2>
+<div class="tablewrap"><table>
+<tr><th>Action</th><th><span class="rb none">no role</span></th><th><span class="rb appr">apprentice</span></th><th><span class="rb lead">lead</span></th><th><span class="rb owner">owner</span></th></tr>
+<tr><td>Show the board, time left, artifacts, free questions</td><td class="n">no</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
+<tr><td>Vote on a team vote card</td><td class="n">no</td><td class="q">variant A: yes · B: no</td><td class="y">yes</td><td class="y">yes</td></tr>
+<tr><td>Start a session</td><td class="n">no</td><td class="n">no, asks a lead</td><td class="y">yes, after confirm (+ owner approval in variant A)</td><td class="y">yes</td></tr>
+<tr><td>Mark a question as a team vote, withdraw it, re-run a step</td><td class="n">no</td><td class="n">no</td><td class="y">yes, after confirm</td><td class="y">yes</td></tr>
+<tr><td>Break a tie, end a vote early (as today)</td><td class="n">no</td><td class="n">no</td><td class="y">yes</td><td class="y">yes</td></tr>
+<tr><td>Automatic-merge mode for a session</td><td class="n">no</td><td class="n">no</td><td class="q">answers the card (variant A or B)</td><td class="y">yes, at the terminal</td></tr>
+<tr><td>Merge, deploy, delete data, publish, change roles, sage mode on or off</td><td class="n">no</td><td class="n">no</td><td class="n">no, never from Discord</td><td class="y">at the terminal or in GitHub</td></tr>
+</table></div>
+<p class="sub" style="margin-top:6px">Owner decision (5 Oct): two roles only. A member holds <span class="rb appr">sage-apprentice</span> or <span class="rb lead">sage-lead</span>, never both. A lead has every apprentice right. The role sage-driver goes away. Who votes is still open: decision D1.</p>
+
+<h2 style="margin-bottom:0">The moments</h2>
+<p class="sub">12 moments. Pick a moment, then a step or a variant (dashed). Arrow keys move between steps. Each message says who can see it: <span class="vis pub">public</span> means everyone in the channel; <span class="vis me">only you</span> means an ephemeral reply that only that person sees.</p>
+</div>
+
+<div class="proto">
+<nav class="moments" id="moments" aria-label="Moments"></nav>
+<div class="stepbar" id="stepbar"></div>
+<div class="layout"><section class="stage" id="stage" aria-live="polite"></section><aside class="notes" id="notes"></aside></div>
+</div>
+
+<div class="doc tail">
+<h2 id="decisions">Open decisions</h2>
+<p class="sub">Each one becomes a question for the owner. My recommendation is in bold. The page shows the recommended option, unless a moment shows the variants.</p>
+<div id="declist"></div>
+
+<h2>Cases this request does not decide</h2>
+<p class="sub">Each case becomes a special case in code if nobody decides it. My suggestion is after the dash.</p>
+<ol>
+<li><b>A borderline request.</b> "Show me how dark mode would look." Is a mock-up a build? — Treat anything that changes a file or starts an agent run as a build; the helper may only describe.</li>
+<li><b>A lead loses the role</b> between the request and the confirm. — The bot checks the role again at the press; the press fails with a note.</li>
+<li><b>Two leads start the same feature</b> within minutes. — The second confirm card says "Jon asked for a similar session at 14:05" and asks again.</li>
+<li><b>Too many sessions on the Mac.</b> How many chief sessions may run at once? — 2 at most; a third start waits in a queue that the bot shows.</li>
+<li><b>Direct messages to the bot.</b> — The bot answers no direct messages and says to use #ask-sage, so every answer stays visible.</li>
+<li><b>An edited or deleted mention</b> after the reply. — The bot does not change its answer; a deleted request cancels an open confirm.</li>
+<li><b>Secrets in an answer.</b> The helper reads the logbook and the repository. — It never reads .env files, the bridge config or the gate file; answers go through the same allow-list cleaner as reasons.</li>
+<li><b>A private repository.</b> Can an apprentice without GitHub access read code through the bot? — Yes for the shared project only, because the owner shares it on purpose (D2).</li>
+<li><b>A long answer</b> over Discord's 2,000 characters. — The bot cuts it and attaches the full text as a .md file.</li>
+<li><b>An owner who is also a lead</b> asks for a session start in Discord. — No approval card for the owner's own request in variant A.</li>
+</ol>
+
+<h2>Options I rejected, and why</h2>
+<div class="tablewrap"><table>
+<tr><td style="width:28%"><b>Slash commands only</b>, no mentions</td><td>Exact and private, but a free question ("why do we vote in threads?") has no fixed command, and private answers teach nobody else. D13 keeps both forms.</td></tr>
+<tr><td><b>The live chief answers every question</b></td><td>It stops the chief's work for each question, and Discord text reaches the session that writes code.</td></tr>
+<tr><td><b>A private reply to every refusal of a mention</b></td><td>Discord cannot reply in private to a plain message. Only a button press or a slash command gets an ephemeral reply. A direct message hides the rule from the team.</td></tr>
+<tr><td><b>A "New session" form for apprentices</b></td><td>The owner said apprentices do not ask for builds. An "Ask a lead" button keeps the idea without the right (moment 5).</td></tr>
+<tr><td><b>A link to a newly published page for each artifact request</b></td><td>Each publish needs the owner's yes, so the reply waits for hours. Images already in the project answer at once (moment 3).</td></tr>
+</table></div>
+</div>
+
+<script>
+'use strict';
+// SAMPLE DATA ONLY. People: Maya and Ana (sage-apprentice), Jon (sage-lead), Sam (no role), Erick (owner, treated as a lead).
+const P = {
+  maya: { n: 'Maya', r: '<span class="rb appr">apprentice</span>' },
+  ana: { n: 'Ana', r: '<span class="rb appr">apprentice</span>' },
+  jon: { n: 'Jon', r: '<span class="rb lead">lead</span>' },
+  sam: { n: 'Sam', r: '<span class="rb none">no role</span>' },
+  erick: { n: 'Erick', r: '<span class="rb owner">owner</span> <span class="rb lead">lead</span>' },
+  bot: { n: 'sage-bot', r: '<span class="rb apptag">APP</span>' },
+};
+const BOT = '<span class="mention">@sage-bot</span>';
+const LEADS = '<span class="mention">@sage-lead</span>';
+const at = k => `<span class="mention">@${P[k].n}</span>`;
+const tk = t => `<span class="task">${t}</span>`;
+const PUB = '<span class="vis pub">public</span>';
+const ME = k => `<span class="vis me">only ${P[k].n}</span>`;
+function msg(who, time, html, o = {}) {
+  const ini = who === 'bot' ? 'sb' : P[who].n[0];
+  return `<div class="msg${o.eph ? ' eph' : ''}${o.hl ? ' hl' : ''}"><span class="av ${who}">${ini}</span><div class="body">
+    ${o.reply ? `<div class="reply">${o.reply}</div>` : ''}
+    <div class="meta"><b>${P[who].n}</b>${P[who].r}<span>${time}</span>${o.eph ? ME(o.eph) : PUB}</div>${html}
+    ${o.eph ? `<div class="ephnote">Only you can see this · Dismiss message</div>` : ''}</div></div>`;
+}
+// A slash command as Discord shows it: "Maya used /sage board", then the reply; private replies say so.
+function slash(who, time, cmd, html, priv = true) {
+  return `<div class="msg${priv ? ' eph' : ''}"><span class="av bot">sb</span><div class="body"><div class="reply">${P[who].n} used <b>${cmd}</b></div>
+    <div class="meta"><b>sage-bot</b>${P.bot.r}<span>${time}</span>${priv ? ME(who) : PUB}</div>${html}${priv ? `<div class="ephnote">Only you can see this · Dismiss message</div>` : ''}</div></div>`;
+}
+const typing = () => `<div class="typing"><span class="dots"><span></span><span></span><span></span></span> sage-bot is typing…</div>`;
+const btn = (label, cls = '', go = '', extra = '') => `<button class="db ${cls}"${go ? ` data-go="${go}"` : ''}${extra}>${label}</button>`;
+function app(channel, topic, stream, o = {}) {
+  const on = c => c === channel ? ' on' : '';
+  return `<div class="app modalwrap"><div class="srv"><div class="ws">Acme team <span class="rb none" style="font-size:.6rem">sample</span></div>
+    <div class="h">Text channels</div><div class="ch">#general</div><div class="ch${on('#ask-sage')}">#ask-sage</div>
+    <div class="ch${on('#sage-chief')}">#sage-chief</div><div class="ch sub${on('Session 14')}">Session 14 · Mon 5 Oct</div><div class="ch">#erick-chief</div>
+    <div class="h">Members</div>
+    <div class="mem"><span class="av sm erick">E</span>Erick<span class="dot${o.asleep ? ' off' : ''}" style="margin-left:auto"></span></div>
+    <div class="mem"><span class="av sm jon">J</span>Jon</div><div class="mem"><span class="av sm maya">M</span>Maya</div>
+    <div class="mem"><span class="av sm ana">A</span>Ana</div><div class="mem"><span class="av sm sam">S</span>Sam</div>
+    <div class="mem"><span class="av sm bot">sb</span>sage-bot<span class="dot${o.asleep ? ' off' : ''}" style="margin-left:auto"></span></div></div>
+    <div class="chan"><div class="hd">${channel}<span>${topic}</span></div><div class="stream">${stream}</div>
+    <div class="foot"><div class="composer">${o.composer || `Message ${channel}`}</div></div></div>${o.modal || ''}</div>`;
+}
+const ASK = 'Ask the bot · project sage-bot · read for apprentices, write for leads';
+
+// Sample diagrams for moment 3 (drawn here, labelled as sample images).
+const svgFlow = `<svg viewBox="0 0 230 120" role="img" aria-label="Sample image: the flow of one question from the chief to the team and back">
+  <rect width="230" height="120" fill="#fbfaf7"/><g font-size="9" font-family="sans-serif" fill="#1d1d1b">
+  <rect x="8" y="14" width="56" height="26" rx="5" fill="#efeafd"/><text x="18" y="31">chief</text>
+  <rect x="88" y="14" width="56" height="26" rx="5" fill="#e2f3f1"/><text x="96" y="31">bridge</text>
+  <rect x="166" y="14" width="56" height="26" rx="5" fill="#fdeee5"/><text x="176" y="31">team</text>
+  <path d="M64 27h22M144 27h20" stroke="#5f5e58" marker-end="url(#a)"/><path d="M194 42v28H36V44" stroke="#5f5e58" fill="none" stroke-dasharray="3 2" marker-end="url(#a)"/>
+  <text x="70" y="86">answer goes back to the chief</text><text x="8" y="110" fill="#9a5b00">sample image · docs/flow.svg</text></g>
+  <defs><marker id="a" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 6 3 0 6z" fill="#5f5e58"/></marker></defs></svg>`;
+const svgLife = `<svg viewBox="0 0 230 120" role="img" aria-label="Sample image: the states of a question, from open to decided">
+  <rect width="230" height="120" fill="#fbfaf7"/><g font-size="9" font-family="sans-serif" fill="#1d1d1b">
+  <rect x="8" y="20" width="50" height="22" rx="11" fill="#fdf1dc"/><text x="18" y="35">Open</text>
+  <rect x="88" y="20" width="56" height="22" rx="11" fill="#fdf1dc"/><text x="96" y="35">Voting</text>
+  <rect x="88" y="62" width="56" height="22" rx="11" fill="#fbe9e7"/><text x="102" y="77">Tied</text>
+  <rect x="166" y="40" width="58" height="22" rx="11" fill="#e6f4ec"/><text x="172" y="55">Decided</text>
+  <path d="M58 31h28M144 31l22 12M116 42v18M144 73l22-12" stroke="#5f5e58"/>
+  <text x="8" y="110" fill="#9a5b00">sample image · docs/life.svg</text></g></svg>`;
+const svgShot = `<svg viewBox="0 0 230 120" role="img" aria-label="Sample image: a screenshot of the vote card">
+  <rect width="230" height="120" fill="#fff"/><rect x="10" y="10" width="210" height="18" fill="#fdf1dc"/><g font-size="9" font-family="sans-serif" fill="#1d1d1b">
+  <text x="16" y="23">TEAM VOTE · B7 · 18 min left</text><rect x="16" y="38" width="198" height="16" rx="4" fill="#efeafd"/><text x="22" y="49">A  Only the visible columns</text>
+  <rect x="16" y="58" width="198" height="16" rx="4" fill="#fbfaf7" stroke="#e3e0d8"/><text x="22" y="69">B  All fields</text>
+  <text x="10" y="110" fill="#9a5b00">sample image · design/b2/shots/03.png</text></g></svg>`;
+
+// ---------- The board embed ----------
+const board = (o = {}) => `<div class="embed"><div class="et">Board · sage-bot</div>
+  <div class="cols">
+    <div class="col"><div class="ch">Design · 1</div>${tk('T69')} Ask by role</div>
+    <div class="col"><div class="ch">Build · 2</div>${tk('T66')} Board sort<br>${tk('T68')} Wake notes</div>
+    <div class="col"><div class="ch">Review · 1</div>${tk('T67')} Reason limit</div>
+    <div class="col"><div class="ch">QA · 1</div>${tk('T65')} Thread lock</div>
+    <div class="col"><div class="ch">Merged this week · 3</div>${tk('T62')} ${tk('T63')} ${tk('T64')}</div>
+  </div>
+  <div class="ef">
+    <div><div class="k">Open questions · 2</div><div class="v">G42 <span class="pill warn">voting · 12 min</span><br>G40 <span class="pill stop">tied · waits for a lead</span></div></div>
+    <div><div class="k">Open pull requests · 2</div><div class="v">#17 ${tk('T66')} <span class="pill stop">QA failed</span><br>#18 ${tk('T68')} <span class="pill grey">checks running</span></div></div>
+  </div>
+  <div class="btns">${btn('Session 14 thread', 'link')}${btn('Pull requests on GitHub', 'link')}</div>
+  <div class="efoot">From the sage logbook at 14:02 UTC · sample data</div></div>`;
+
+const M = [];
+const S = (label, stage, notes, o = {}) => Object.assign({ label, stage, notes }, o);
+
+// 1. Board
+M.push({ g: 'Apprentice', t: '1 Board', title: 'An apprentice asks for the board', steps: [
+  S('Ask', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + typing()),
+    `<h3>Maya asks for the board</h3><p>She types a plain mention in #ask-sage. The bot shows "typing" at once, so she knows it heard her.</p><p>Answers from the logbook take under 2 seconds (estimate, no measurement yet).</p>`),
+  S('Board', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '14:02', board(), { reply: 'Maya: @sage-bot show the board for sage-bot' })),
+    `<h3>The board comes back as one card</h3><ul><li>Tasks by step, merged this week</li><li>Open questions, with their state</li><li>Open pull requests, with their last verdict</li></ul><p>The bridge builds the card from the logbook. No AI is in this path, so the card is always the same for the same logbook.</p><div class="box see"><b>Who sees it</b>Everyone in #ask-sage. A reply to a mention cannot be private in Discord.</div><div class="box dec"><b>Decision D3</b>The bridge answers fixed asks (board, time, artifacts) alone; a read-only helper answers free questions.</div>`),
+  S('Slash form', () => `<div class="varhead">Same ask, slash-command form (D13)</div>` + app('#ask-sage', ASK, slash('maya', '14:02', '/sage board project:sage-bot', board()), { composer: '<b>/sage</b> board · task · gates · files · request (leads)' }),
+    `<h3>The slash-command form</h3><p>Maya types <code>/sage board</code>; Discord offers the project as a choice, so no typo is possible. The bridge answers in private: only Maya sees it.</p><p>Other commands: <code>/sage task T66</code> (one task), <code>/sage gates</code> (open questions), <code>/sage files</code> (moment 3).</p><div class="box see"><b>Who sees it</b>Only Maya. Good for a quick look; nobody else learns from it.</div><div class="box dec"><b>Decision D13</b>Mentions, slash commands, or both.</div>`, { v: 1 }),
+  S('Empty', () => app('#ask-sage', ASK, msg('maya', '09:15', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '09:15', `<div class="embed grey"><div class="et">Board · sage-bot</div><p>No open tasks, no open questions, no open pull requests.</p><p>Last merge: ${tk('T64')} on Sat 3 Oct.</p><div class="efoot">From the sage logbook at 09:15 UTC · sample data</div></div>`, { reply: 'Maya: @sage-bot show the board for sage-bot' })),
+    `<h3>Empty state</h3><p>Nothing is open. The card says so in words and gives the last merge, so "empty" does not look like "broken".</p>`),
+  S('Failure', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '14:02', `<p>I could not read the sage logbook just now. Nothing is lost. Please ask again in a minute.</p><p style="color:var(--muted);font-size:.84rem">Erick: the logbook check failed at 14:02 (logged on the Mac).</p>`, { reply: 'Maya: @sage-bot show the board for sage-bot' })),
+    `<h3>Failure state</h3><p>The logbook is locked or cannot be read. The bot says what failed in plain words and what to do. The detail goes to the Mac's log, not to Discord.</p>`),
+  S('Which project?', () => app('#general', 'Talk', msg('ana', '14:05', `<p>${BOT} show the board</p>`) + msg('bot', '14:05', `<p>Which project? The shared projects are <b>sage-bot</b> and <b>site</b>.</p><div class="btns">${btn('sage-bot', 'sec')}${btn('site', 'sec')}</div>`, { reply: 'Ana: @sage-bot show the board' })),
+    `<h3>Correction: no project named</h3><p>In #ask-sage the default project is sage-bot. Elsewhere (option C of moment 11) the bot asks, with one button per shared project. A press gives the board.</p><p>The list shows only shared projects (decision D2).</p>`),
+] });
+
+// 2. Time left
+const timeAns = `<div class="embed"><div class="et">Time left · sage-bot</div>
+  <p><b>About 5 to 11 hours of agent work.</b> At today's pace, done between Tue 6 Oct evening and Thu 8 Oct.</p>
+  <div class="ef"><div class="full"><div class="k">Basis</div><div class="v"><ul><li>6 open tasks with 17 steps left</li><li>The last 20 runs of this project took 12 to 95 minutes each, median 38</li><li>17 steps × 18 to 40 minutes = 5 to 11 hours</li></ul></div></div>
+  <div class="full"><div class="k">Not counted</div><div class="v">The time people take to answer the 2 open questions. G40 is tied and waits for a lead; T66 waits for it.</div></div>
+  <div class="full"><div class="k">Uncertainty</div><div class="v">T69 (a design) has no size yet. A failed QA adds about 1 to 2 hours a time.</div></div></div>
+  <div class="efoot">Estimate from the logbook at 14:10 UTC · sample data</div></div>`;
+M.push({ g: 'Apprentice', t: '2 Time left', title: 'An apprentice asks how much time is left', steps: [
+  S('Answer', () => app('#ask-sage', ASK, msg('maya', '14:10', `<p>${BOT} how much time is left?</p>`) + msg('bot', '14:10', timeAns, { reply: 'Maya: @sage-bot how much time is left?' })),
+    `<h3>A range, with its basis</h3><p>Sage gives costs with a basis and a range. The answer shows:</p><ul><li>the range first, in hours and in days</li><li>the basis: open steps and past run times</li><li>what it does not count: people's time on open questions</li><li>what makes it uncertain</li></ul><p>The bridge computes it from the logbook. No AI is in this path.</p>`),
+  S('No basis', () => app('#ask-sage', ASK, msg('ana', '11:00', `<p>${BOT} how much time is left for site?</p>`) + msg('bot', '11:00', `<div class="embed warn"><div class="et">Time left · site</div><p><b>I cannot give a range yet.</b> This project has 2 finished runs, and I need at least 5 to give a range.</p><p>Open: 3 tasks, 9 steps.</p><div class="efoot">From the logbook at 11:00 UTC · sample data</div></div>`, { reply: 'Ana: @sage-bot how much time is left for site?' })),
+    `<h3>No basis</h3><p>The bot says that it has no basis, and why, instead of a guess. The threshold of 5 runs is my proposal.</p>`),
+] });
+
+// 3. Artifacts
+const artV = {
+  A: `<p>Here are 3 pictures from the sage-bot project. They are already in the repository.</p><div class="att"><figure>${svgFlow}<figcaption>flow.svg · how one question travels</figcaption></figure><figure>${svgLife}<figcaption>life.svg · the states of a question</figcaption></figure><figure>${svgShot}<figcaption>03-batch-open.png · a vote card</figcaption></figure></div><p style="font-size:.84rem;color:var(--muted)">Ask "explain the flow picture" for a walk-through.</p>`,
+  B: `<p>The design page explains the project with clickable steps:</p><div class="linkcard"><div class="lh">claude.ai · published page</div><b>sage-bot: the vote cards (sample)</b><br>12 moments of the vote flow, with sample data.</div><p style="font-size:.84rem;color:var(--muted)">Only pages that Erick has published show here. To publish a new page, a lead asks Erick.</p>`,
+  C: `<p>Here are 2 pictures, and the page that explains them step by step.</p><div class="att"><figure>${svgFlow}<figcaption>flow.svg</figcaption></figure><figure>${svgLife}<figcaption>life.svg</figcaption></figure></div><div class="linkcard"><div class="lh">claude.ai · published page</div><b>sage-bot: the vote cards (sample)</b></div>`,
+};
+const artAsk = msg('ana', '14:20', `<p>${BOT} can you share some graphics or artifacts to help me understand the project?</p>`);
+M.push({ g: 'Apprentice', t: '3 Artifacts', title: 'An apprentice asks for graphics to understand the project', steps: [
+  S('A · images (recommended)', () => `<div class="varhead">Variant A · images attached · recommended</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.A, { reply: 'Ana: @sage-bot can you share some graphics…' })),
+    `<h3>Images, attached</h3><p>The bot attaches pictures that are already in the shared project: README graphics and design screenshots. It renders an SVG to PNG, because Discord does not show SVG.</p><p>Nothing new leaves the Mac except these files, and nothing gets published.</p><div class="box dec"><b>Decision D6</b>How to share artifacts. I recommend A: it answers at once and publishes nothing.</div>`, { v: 1 }),
+  S('B · link', () => `<div class="varhead">Variant B · link to a published page</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.B, { reply: 'Ana: @sage-bot can you share some graphics…' })),
+    `<h3>A link to a page</h3><p>Richer, because the page is clickable. But only pages that Erick already published can show. Each new publish needs Erick's yes, because publishing cannot be undone.</p>`, { v: 1 }),
+  S('C · both', () => `<div class="varhead">Variant C · both</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.C, { reply: 'Ana: @sage-bot can you share some graphics…' })),
+    `<h3>Both</h3><p>Pictures for a quick look and the page for depth. It has the same publish limit as B.</p>`, { v: 1 }),
+  S('Not shared', () => app('#ask-sage', ASK, msg('ana', '14:25', `<p>${BOT} can I see the T69 design page?</p>`) + msg('bot', '14:25', `<p>The T69 design page is on Erick's Mac and is not published. I can attach its 13 screenshots instead.</p><div class="btns">${btn('Attach the screenshots', 'pri')}</div>`, { reply: 'Ana: @sage-bot can I see the T69 design page?' })),
+    `<h3>An artifact that is not shared</h3><p>The owner keeps artifacts on his Mac unless he asks to publish them. The bot offers what it may share.</p>`),
+] });
+
+// 4. Free question
+const q4 = msg('maya', '14:30', `<p>${BOT} why do we vote in threads?</p>`);
+const a4 = `<p>Each chief session gets its own thread, so the questions of one session stay together and the team sees which work they belong to.</p><p>Erick decided this in G14 and G15. G16 adds that a session thread holds only the votes and the chief's posts, so the votes stay readable.</p><p style="font-size:.82rem;color:var(--muted)">Sources: README, "Session threads" · logbook G14, G15, G16. Answered by the read-only helper; it can be wrong.</p>`;
+M.push({ g: 'Apprentice', t: '4 Free question', title: 'An apprentice asks a free question', steps: [
+  S('Thinking', () => app('#ask-sage', ASK, q4 + typing()),
+    `<h3>Loading</h3><p>A free question goes to a read-only helper agent. It can read the project's README, logbook and code. It cannot write or run commands.</p><p>Time: no measurement yet. I expect 10 to 60 seconds; the trial measures it.</p>`),
+  S('Answer', () => app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
+    `<h3>The answer, with its sources</h3><p>Short, in plain words, with the decisions it rests on. The last line names the helper and says that it can be wrong.</p><div class="box dec"><b>Decision D3</b>Who answers free questions: the live chief, a read-only helper, or nobody (the bridge alone).</div><div class="box see"><b>Security</b>The Discord text now reaches a model. The bridge cleans it with an allow-list for that reader, and the helper has read-only tools.</div>`),
+  S('Correction', () => app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' }) + msg('maya', '14:31', `<p>${BOT} I meant: why threads and not one channel per session?</p>`, { reply: 'sage-bot: Each chief session gets its own thread…' }) + msg('bot', '14:31', `<p>Discord limits a server to 500 channels, and a thread archives itself when the session ends. One channel per session would fill the list and need cleaning by hand.</p><p style="font-size:.82rem;color:var(--muted)">Sources: README, "Session threads". Read-only helper.</p>`, { reply: 'Maya: @sage-bot I meant: why threads and not one channel…' })),
+    `<h3>Correction</h3><p>Maya replies to the answer. A reply to the bot counts as a follow-up: the helper gets the earlier question and answer too. Without a reply, each mention starts fresh.</p>`),
+  S('Failure', () => app('#ask-sage', ASK, q4 + msg('bot', '14:31', `<p>I could not answer in 60 seconds. Please ask again, or ask a lead: ${LEADS}.</p>`, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
+    `<h3>Failure</h3><p>The helper timed out or failed. The bot says so and gives a way forward. It does not retry by itself, so it does not spend twice.</p>`),
+] });
+
+// 5. Build refused
+const q5 = msg('maya', '14:40', `<p>${BOT} add a dark mode</p>`);
+const r5 = (pressed) => `<p>I cannot start work for you. Only a <b>sage-lead</b> can start a session; the leads are Jon and Erick.</p><p>I can ask a lead for you with your words, or you can mention ${LEADS} yourself.</p><div class="btns">${btn('Ask a lead', 'pri' + (pressed ? ' pressed' : ''), 'next')}</div>`;
+M.push({ g: 'Apprentice', t: '5 Build refused', title: 'An apprentice asks for a build', steps: [
+  S('Refusal', () => app('#ask-sage', ASK, q5 + msg('bot', '14:40', r5(false), { reply: 'Maya: @sage-bot add a dark mode' })),
+    `<h3>A polite refusal, with a way forward</h3><ul><li>What she cannot do, and why: the role</li><li>Who can: the leads, by name</li><li>How: one button</li></ul><p>The bot sorts the request as "build" because it asks to change the product. A request to change a file, start a run or start a session is a build.</p><div class="box see"><b>Who sees it</b>Public. The refusal also teaches the rule to others in the channel.</div>`),
+  S('Ask a lead', () => app('#ask-sage', ASK, q5 + msg('bot', '14:40', r5(true), { reply: 'Maya: @sage-bot add a dark mode' }) + msg('bot', '14:41', `<p>${LEADS} Maya asks for a session:</p><div class="embed"><div class="et">Request from Maya</div><p>"add a dark mode"</p><div class="efoot">A lead can start it as a session. Sample data.</div></div><div class="btns">${btn('Start as a session (leads)', 'ok', 'next')}${btn('Not now (leads)', 'sec')}</div>`)),
+    `<h3>The bot pings the leads</h3><p>The post quotes Maya's words and pings @sage-lead. Only a lead's press counts.</p><p>"Start as a session" opens the confirm of moment 7 for that lead.</p>`),
+  S('Someone else presses', () => app('#ask-sage', ASK, msg('bot', '14:41', `<p>${LEADS} Maya asks for a session:</p><div class="embed"><div class="et">Request from Maya</div><p>"add a dark mode"</p></div><div class="btns">${btn('Start as a session (leads)', 'ok pressed')}${btn('Not now (leads)', 'sec')}</div>`) + msg('bot', '14:42', `<p>Only a sage-lead can start a session. Nothing changed.</p>`, { eph: 'ana' })),
+    `<h3>An apprentice presses a lead button</h3><p>Discord shows every button to everyone. Ana's press gets an ephemeral note that only she sees.</p>`),
+] });
+
+// 6. No role
+const q6 = msg('sam', '15:00', `<p>${BOT} what is the team working on?</p>`);
+M.push({ g: 'No role', t: '6 No role', title: 'A person with no role mentions the bot', steps: [
+  S('B · one reply (recommended)', () => `<div class="varhead">Variant B · one short reply per person per day · recommended</div>` + app('#ask-sage', ASK, q6 + msg('bot', '15:00', `<p>I answer members with the <b>sage-apprentice</b> role. Ask Erick for the role.</p>`, { reply: 'Sam: @sage-bot what is the team working on?' }) + msg('sam', '15:02', `<p>${BOT} hello?</p>`) + `<div style="padding-left:52px"><span class="react">🔒 1</span></div>`),
+    `<h3>One reply, then a lock</h3><p>The first mention of the day gets one short reply: the role and who gives it. Later mentions that day get only a lock reaction, so the bot does not spam the channel.</p><div class="box dec"><b>Decision D8</b>Ignore, reply once a day, or react only.</div>`, { v: 1 }),
+  S('A · ignore', () => `<div class="varhead">Variant A · ignore</div>` + app('#ask-sage', ASK, q6),
+    `<h3>Ignore</h3><p>Quiet, but Sam cannot tell a refusal from a broken bot.</p>`, { v: 1 }),
+  S('C · reaction', () => `<div class="varhead">Variant C · reaction only</div>` + app('#ask-sage', ASK, q6 + `<div style="padding-left:52px"><span class="react">🔒 1</span></div>`),
+    `<h3>Reaction only</h3><p>Quiet and visible. But the lock does not say how to get access.</p>`, { v: 1 }),
+] });
+
+// 7. Lead starts a session
+const req7 = 'start a new session where we add this feature: export the board as a CSV file from Discord, with the same columns as the board card';
+const q7 = msg('jon', '15:10', `<p>${BOT} ${req7}</p>`);
+const frame = (o = {}) => `<div class="embed${o.cls ? ' ' + o.cls : ''}"><div class="et">${o.title || 'New session: please confirm'}</div><dl>
+  <dt>Project</dt><dd>sage-bot</dd><dt>Task</dt><dd>${o.task || 'Export the board as a CSV file'}</dd>
+  <dt>What changes</dt><dd>${o.what || 'A "Download CSV" button on the board card. Same columns as the card: task, title, step, open questions, pull request.'}</dd>
+  <dt>Not in scope</dt><dd>Exports of other projects; a schedule.</dd><dt>Size</dt><dd>small (sage's guess)</dd><dt>Asked by</dt><dd>Jon, sage-lead</dd></dl>
+  ${o.foot || ''}</div>`;
+const confirmBtns = (p) => `<div class="btns">${btn('Start session', 'ok' + (p === 'ok' ? ' pressed' : ''), 'next')}${btn('Edit', 'sec' + (p === 'edit' ? ' pressed' : ''), 'edit')}${btn('Cancel', 'sec')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Only Jon can press these. The card expires in 30 minutes.</p>`;
+const restate = (p) => msg('bot', '15:10', `<p>${at('jon')} I read your request as this task. Is it right?</p>${frame()}${confirmBtns(p)}`, { reply: 'Jon: @sage-bot start a new session where we add…' });
+const editModal = `<div class="modalbg"><div class="modal" role="dialog" aria-label="Edit the task (sample)"><h4>Edit the task</h4>
+  <label>What changes</label><textarea rows="3" readonly>A "Download CSV" button on the board card. Same columns as the card, plus the date of the last change.</textarea>
+  <label>Not in scope</label><textarea rows="2" readonly>Exports of other projects; a schedule.</textarea>
+  <div class="mb">${btn('Cancel', 'sec')}${btn('Save', 'pri', 'next')}</div></div></div>`;
+const approvalCard = (st) => msg('bot', '15:12', `<p>${at('erick')} Jon wants to start a session. It runs on your Mac.</p>${frame({ title: 'Owner approval: new session', what: 'A "Download CSV" button on the board card. Same columns as the card, plus the date of the last change.', cls: st === 'ok' ? 'ok' : st === 'no' ? 'stop' : 'warn',
+  foot: st === 'ok' ? '<p><span class="pill ok">approved by Erick at 15:20</span></p>' : st === 'no' ? '<p><span class="pill stop">declined by Erick at 15:20</span> "Wait until T66 merges."</p>' : `<div class="btns">${btn('Approve', 'ok pressed', 'next')}${btn('Decline', 'stop')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Only Erick can press these. Erick may also answer at the terminal. Open for 24 hours.</p>` })}`, { hl: true });
+const started = (t) => msg('bot', t, `<div class="embed ok"><div class="et">Session 15 started</div><p>${tk('T70')} Export the board as a CSV file · design step running.</p><div class="btns">${btn('Session 15 thread', 'link')}</div><div class="efoot">Started for Jon${t === '15:20' ? ', approved by Erick' : ''} · sample data</div></div>`);
+M.push({ g: 'Lead', t: '7 Start a session', title: 'A lead starts a new session', steps: [
+  S('Restate', () => app('#ask-sage', ASK, q7 + restate()),
+    `<h3>The bot restates the request as a task</h3><p>Jon's words become a task card: what changes, what is not in scope, a size guess. He confirms before anything runs.</p><p>The restatement is the only text that later reaches the chief, so Jon checks it.</p><div class="box chg"><b>Changes an earlier decision</b>"Only the owner starts work" (T1) and G16. A lead can now start a session from Discord.</div>`),
+  S('Slash form', () => `<div class="varhead">Same request, slash-command form (D13)</div>` + app('#ask-sage', ASK, slash('jon', '15:10', '/sage request', `<p>I read your request as this task. Is it right?</p>${frame()}${confirmBtns()}`), { composer: '<b>/sage request</b> project: sage-bot · request: export the board as a CSV file…' }),
+    `<h3>The slash-command form</h3><p>Jon types <code>/sage request</code> with two fields: project and request. The confirm comes back in private, so the channel does not fill with drafts.</p><p>Only leads see <code>/sage request</code> in the command list: Discord can hide a command from members without the role.</p><p>After Jon confirms, the owner's approval card (variant A) is public as in the mention form.</p>`, { v: 1 }),
+  S('Edit (correction)', () => app('#ask-sage', ASK, q7 + restate('edit'), { modal: editModal }),
+    `<h3>Correction: Jon edits the task</h3><p>A form with the two fields that most often need a fix. Save updates the card in place. Jon then confirms.</p>`),
+  S('A1 · owner approves', () => `<div class="varhead">Variant A · the owner approves · recommended</div>` + app('#ask-sage', ASK, q7 + restate('ok') + msg('bot', '15:12', `<p>Sent to Erick for approval. I post here when he answers.</p>`) + approvalCard()),
+    `<h3>Variant A: Erick approves on a card</h3><p>The card pings Erick in #ask-sage. He presses Approve on his phone, or answers at the terminal.</p><p>Why I recommend A: the session runs on Erick's Mac and spends his money; the approval costs him one tap; and Erick, not a model, reads the lead's text before it reaches the chief.</p><div class="box dec"><b>Decision D4</b>Variant A or B.</div>`, { v: 1 }),
+  S('A2 · started', () => `<div class="varhead">Variant A · approved</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('ok') + started('15:20')),
+    `<h3>Variant A: the session starts</h3><p>The card turns green and names who approved. The start note links to the new session thread under #sage-chief.</p>`, { v: 1 }),
+  S('A3 · declined', () => `<div class="varhead">Variant A · declined</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('no') + msg('bot', '15:20', `<p>${at('jon')} Erick declined the session: "Wait until T66 merges." Nothing started.</p>`)),
+    `<h3>Variant A: Erick declines</h3><p>Erick may add a reason. Jon gets a ping with it. After 24 hours with no answer, the card expires and says so.</p>`, { v: 1 }),
+  S('B · starts at once', () => `<div class="varhead">Variant B · starts at once</div>` + app('#ask-sage', ASK, q7 + restate('ok') + started('15:11')) +
+    `<div class="term"><div class="tt">Erick's terminal · notice</div><pre><span class="y">sage-bot:</span> Jon started Session 15 from Discord: T70 Export the board as a CSV file.
+<span class="g">To stop it, tell the chief in Session 15 to stop.</span></pre></div>`,
+    `<h3>Variant B: no approval</h3><p>Faster: the session starts within seconds of Jon's confirm. Erick gets a notice at the terminal and can stop it.</p><p>The cost: a model reads a lead's text and starts spending money with no human check besides Jon.</p>`, { v: 1 }),
+] });
+
+// 8. Other writes
+const w8 = {
+  vote: { q: 'mark G42 as a team vote', t: 'Mark G42 as a team vote?', b: `<dl><dt>Question</dt><dd>G42 · ${tk('T66')} "Which sort is the default on the board?"</dd><dt>Then</dt><dd>A vote card goes to the Session 14 thread and pings the voters (D1).</dd></dl>`, ok: 'Mark as vote', done: 'G42 is a team vote. The card is in the Session 14 thread.', cls: '' },
+  withdraw: { q: 'withdraw G42', t: 'Withdraw G42?', b: `<dl><dt>Question</dt><dd>G42 · ${tk('T66')} "Which sort is the default on the board?"</dd><dt>Votes so far</dt><dd>2 (Maya A, Jon B)</dd><dt>Then</dt><dd>The card closes with nothing decided. The votes are lost. You cannot undo this.</dd></dl>`, ok: 'Withdraw G42', done: 'G42 is withdrawn. Erick got a notice.', cls: 'stop' },
+  qa: { q: 're-run QA on PR 17', t: 'Re-run QA on PR #17?', b: `<dl><dt>Pull request</dt><dd>#17 · ${tk('T66')} Board sort · last QA failed at 13:40</dd><dt>Then</dt><dd>The chief of Session 14 starts a QA run at its next turn. Cost: one agent run.</dd></dl>`, ok: 'Re-run QA', done: 'QA on #17 is queued in Session 14. I post the verdict here.', cls: '' },
+};
+const w8step = (k, done) => { const w = w8[k]; return app('#ask-sage', ASK, msg('jon', '15:30', `<p>${BOT} ${w.q}</p>`) +
+  msg('bot', '15:30', `<div class="embed ${done ? 'ok' : w.cls || 'warn'}"><div class="et">${w.t}</div>${w.b}${done ? `<p><span class="pill ok">confirmed by Jon at 15:31</span></p>` : ''}</div>${done ? '' : `<div class="btns">${btn(w.ok, (w.cls === 'stop' ? 'stop' : 'ok'), 'next')}${btn('Cancel', 'sec')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Only Jon can press these.</p>`}`, { reply: `Jon: @sage-bot ${w.q}` }) +
+  (done ? msg('bot', '15:31', `<p>${w.done}</p>`) : '')); };
+M.push({ g: 'Lead', t: '8 Other writes', title: 'A lead asks for another write operation', steps: [
+  S('Mark as vote', () => w8step('vote'), `<h3>Every write asks first</h3><p>The bot says exactly what will happen, then waits for the lead's press. The same shape serves every write operation.</p><div class="box dec"><b>Decision D9</b>Which write operations leads may do from Discord.</div>`),
+  S('Done', () => w8step('vote', true), `<h3>Done</h3><p>The card turns green and names who confirmed. A follow-up says where the result is.</p>`),
+  S('Withdraw', () => w8step('withdraw'), `<h3>A write that cannot be undone</h3><p>Red button, the votes it will lose, and "you cannot undo this". Erick gets a notice after it.</p><div class="box chg"><b>Changes an earlier decision</b>Today only the owner withdraws a question, at the terminal.</div>`),
+  S('Re-run QA', () => w8step('qa'), `<h3>A write that the chief does</h3><p>The bridge cannot run QA. It records the request; the chief of the session starts the run at its next turn. If the chief is busy, see moment 10.</p>`),
+  S('Never', () => app('#ask-sage', ASK, msg('jon', '15:40', `<p>${BOT} merge PR 17</p>`) + msg('bot', '15:40', `<p>I never merge from Discord. Merges happen in GitHub, under the repository's rules.</p>`, { reply: 'Jon: @sage-bot merge PR 17' })),
+    `<h3>Never from Discord</h3><p>Merge, deploy, delete data, publish, role changes and sage mode on or off: the bot refuses them for everyone, also for leads, and says where they happen.</p>`),
+] });
+
+// 9. Tie-break (existing)
+const tie = (done) => `<div class="embed ${done ? 'ok' : 'warn'}"><div class="et">${done ? 'Decided' : 'Tied'} · G40 · ${tk('T66')} Board sort</div><p>Which column sorts the board by default?</p>
+  <ul><li>A · By step · Maya, Ana</li><li>B · By last change · Jon, Erick</li></ul><p style="font-size:.8rem;color:var(--muted)">Voters shown for variant A of D1.</p>
+  ${done ? `<p><span class="pill ok">A · tie broken by Jon at 16:05</span></p>` : `<p>The 30 minutes ended with a tie. A lead chooses one of the tied options.</p><div class="btns">${btn('Choose A', 'pri', 'next')}${btn('Choose B', 'pri')}</div>`}<div class="efoot">Sample data</div></div>`;
+const voteCard = (v) => `<div class="embed warn"><div class="et">Team vote · G42 · ${tk('T66')} Board sort · 18 min left</div><p>Which sort is the default on the board?</p>
+  <div class="btns">${btn('A · By step', 'pri' + (v === 'B' ? ' pressed' : ''))}${btn('B · By last change', 'pri')}</div>
+  <p style="font-size:.82rem;color:var(--muted);margin:6px 0 0">${v === 'A' ? 'Voters: apprentices and leads (Maya, Ana, Jon, Erick). Voted: Maya A, Jon B. Not yet: Ana, Erick.' : 'Voters: leads (Jon, Erick). Voted: Jon B. Not yet: Erick. Apprentices can read this card.'}</p><div class="efoot">Sample data</div></div>`;
+M.push({ g: 'Lead', t: '9 Votes and ties', title: 'Who votes, and a lead breaks a tie', steps: [
+  S('D1-A · all vote', () => `<div class="varhead">D1 variant A · apprentices and leads vote · recommended</div>` + app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '15:40', `<p><span class="mention">@sage-apprentice</span> <span class="mention">@sage-lead</span> ${tk('T66')} has a product question. Vote within 30 minutes.</p>${voteCard('A')}`)),
+    `<h3>Variant A: everyone with a role votes</h3><p>The card pings both roles. It works like today's vote, with sage-apprentice and sage-lead in place of sage-driver.</p><p>I recommend A: with 2 to 5 people, leads alone are often 1 or 2 voters.</p><div class="box dec"><b>Decision D1</b>Who votes.</div>`, { v: 1 }),
+  S('D1-B · leads vote', () => `<div class="varhead">D1 variant B · only leads vote</div>` + app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '15:40', `<p><span class="mention">@sage-lead</span> ${tk('T66')} has a product question. Vote within 30 minutes.</p>${voteCard('B')}`) + msg('bot', '15:41', `<p>Only a sage-lead votes on this card. Nothing changed.</p>`, { eph: 'maya' })),
+    `<h3>Variant B: only leads vote</h3><p>The card pings only leads. An apprentice's press gets an ephemeral note. Apprentices still read the card and can ask about it in #ask-sage.</p>`, { v: 1 }),
+  S('Tied', () => app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '16:00', `<p>${LEADS} G40 is tied. Please break the tie.</p>${tie(false)}`)),
+    `<h3>Tie-break: no change</h3><p>The tie-break works as today, in the session thread. It shows here for continuity: a lead is the same person in #ask-sage and in the thread.</p>`),
+  S('Decided', () => app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '16:00', `<p>${LEADS} G40 is tied. Please break the tie.</p>${tie(true)}`)),
+    `<h3>Decided</h3><p>The card names the lead (G11). T66 goes on.</p>`),
+] });
+
+// 10. Limits
+M.push({ g: 'Limits', t: '10 Limits', title: 'Limits: rate, project, Mac asleep, chief busy', steps: [
+  S('Rate limit', () => app('#ask-sage', ASK, msg('maya', '15:02', `<p>${BOT} how many tests does sage-bot have?</p>`) + msg('bot', '15:02', `<p>You asked 10 questions in the last hour; that is the limit. Your next question works at 15:12.</p><p style="font-size:.82rem;color:var(--muted)">The board and time left do not count toward the limit.</p>`, { reply: 'Maya: @sage-bot how many tests does sage-bot have?' })),
+    `<h3>Rate limit</h3><p>Proposal: 10 free questions per person per hour, and a daily spend cap for the helper that Erick sets. The board, time left and artifacts are cheap and do not count.</p><p>The reply gives the time when it works again, not a vague "later".</p><div class="box dec"><b>Decision D5</b>The limits.</div>`),
+  S('Cap reached', () => app('#ask-sage', ASK, msg('ana', '18:40', `<p>${BOT} explain the bridge code</p>`) + msg('bot', '18:40', `<p>Free questions are paused until 00:00 UTC: the team reached today's limit that Erick set. The board, time left and pictures still work.</p>`, { reply: 'Ana: @sage-bot explain the bridge code' })),
+    `<h3>The daily cap</h3><p>When the team's spend reaches Erick's cap, free questions pause for everyone. The cap amount has no basis yet; the trial measures the cost per question.</p>`),
+  S('Project not shared', () => app('#ask-sage', ASK, msg('ana', '15:05', `<p>${BOT} show the board for payroll</p>`) + msg('bot', '15:05', `<p>I do not know a shared project called "payroll". The shared projects are <b>sage-bot</b> and <b>site</b>.</p>`, { reply: 'Ana: @sage-bot show the board for payroll' })),
+    `<h3>A project that is not shared</h3><p>The words "a shared project called" matter: the bot does not say whether a private project exists, so it leaks no names.</p><div class="box dec"><b>Decision D2</b>Which projects apprentices can read.</div>`),
+  S('Mac asleep', () => app('#ask-sage', ASK, msg('jon', '23:40', `<p>${BOT} start a new session where we fix the reminder text</p>`) + msg('maya', '06:50', `<p>${BOT} show the board for sage-bot</p>`) +
+      `<div class="divider">Erick's Mac wakes at 08:05</div>` + msg('bot', '08:05', `<p>I was offline from 22:10 to 08:05 because Erick's Mac was asleep.</p><ul><li>${at('maya')}: your board question is answered below.</li><li>${at('jon')}: I did not start your session; requests to write never run late. Please ask again.</li></ul>`) + msg('bot', '08:05', board(), { reply: 'Maya: @sage-bot show the board for sage-bot' }), { asleep: false }),
+    `<h3>The Mac was asleep</h3><p>While the Mac sleeps, the bot shows offline and answers nothing. On wake it posts one note:</p><ul><li>read questions under 2 hours old: answered now</li><li>write requests: never run late; the person asks again</li></ul><div class="box dec"><b>Decision D10</b>What to do with missed mentions.</div>`),
+  S('Chief busy', () => app('#ask-sage', ASK, msg('jon', '15:30', `<p>${BOT} re-run QA on PR 17</p>`) + msg('bot', '15:31', `<div class="embed warn"><div class="et">Queued · re-run QA on #17</div><p>The chief of Session 14 is in a build run of ${tk('T68')} (started 15:02). Your QA run starts at its next turn: about 10 to 40 minutes, from the last 20 build runs.</p><div class="btns">${btn('Cancel the request', 'sec')}</div><div class="efoot">Confirmed by Jon at 15:31 · sample data</div></div>`)),
+    `<h3>The chief is busy</h3><p>A write that needs the chief waits in a queue. The bot says what the chief is doing, when the request likely starts (with a basis), and gives a Cancel button.</p>`),
+] });
+
+// 11. Where
+M.push({ g: 'Where', t: '11 Where', title: 'Where these exchanges happen', steps: [
+  S('Compare', () => `<div class="compare">
+    <div class="opt rec"><h4>A · one #ask-sage channel, replies in place <span class="rec-tag">recommended</span></h4><div class="mini"><div>#general</div><div class="on">#ask-sage</div><div>#sage-chief</div><div class="in">Session 14</div></div>
+      <ul><li>One place to look; others learn from each answer.</li><li>A default project per channel, so "the board" needs no name.</li><li>Rate limits and permissions on one channel.</li><li>Busy days get long; a reply link keeps each answer tied to its question.</li></ul></div>
+    <div class="opt"><h4>B · a thread per question</h4><div class="mini"><div class="on">#ask-sage</div><div class="in">Board for sage-bot</div><div class="in">Why vote in threads?</div><div class="in">Dark mode</div></div>
+      <ul><li>Tidy follow-ups.</li><li>The channel list fills with threads; each needs a name and an archive.</li><li>A thread per "show the board" is too heavy.</li></ul></div>
+    <div class="opt"><h4>C · replies in place, in any channel</h4><div class="mini"><div class="on">#general</div><div>#design</div><div>#ask-sage</div></div>
+      <ul><li>No new habit.</li><li>Answers mix with talk, and the bot needs to read every channel.</li><li>The bot must ask which project each time.</li></ul></div></div>`,
+    `<h3>Where</h3><p>I recommend A: one channel, #ask-sage, where the bot replies in place. Session threads stay votes only (G16 holds there). A mention elsewhere gets one pointer to #ask-sage.</p><div class="box dec"><b>Decision D7</b>A, B or C.</div>`),
+  S('Pointer', () => app('#general', 'Talk', msg('ana', '15:15', `<p>${BOT} show the board</p>`) + msg('bot', '15:15', `<p>I answer in #ask-sage, so everyone can find the answers. Please ask there.</p>`, { reply: 'Ana: @sage-bot show the board' })),
+    `<h3>A mention outside #ask-sage</h3><p>In option A the bot gives a one-line pointer and does nothing else.</p>`),
+] });
+
+// 12. Automatic-merge mode card
+const amCard = (st) => `<div class="embed ${st === 'yes' ? 'ok' : st === 'no' ? 'grey' : 'warn'}"><div class="et">Automatic merge for Session 14?</div>
+  <p>Turn on automatic merge for Session 14? Then pull requests that pass 2 clean cycles merge without Erick.</p>
+  <dl><dt>Session</dt><dd>14 · 4 tasks · 2 open pull requests (#17, #18)</dd><dt>Asked by</dt><dd>the chief, 16:30</dd></dl>
+  ${st === 'yes' ? '<p><span class="pill ok">Yes · Jon at 16:34</span></p>' : st === 'no' ? '<p><span class="pill grey">No · Jon at 16:34</span> automatic merge stays off</p>' :
+  `<div class="btns">${btn('Yes', 'ok' + (st === 'press' ? ' pressed' : ''), 'next')}${btn('No', 'sec', 'no')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Leads answer. The first lead's answer counts.</p>`}<div class="efoot">Sample data</div></div>`;
+const amPost = (st) => msg('bot', '16:30', `<p>${LEADS} the chief asks:</p>${amCard(st)}`);
+const termA = `<div class="term"><div class="tt">What Erick sees · terminal notice and phone</div><pre><span class="y">sage-bot:</span> Jon answered Yes at 16:34: automatic merge is now ON for Session 14.
+<span class="g">To turn it off, tell the chief at the terminal.</span></pre></div>`;
+const termB = `<div class="term"><div class="tt">What Erick sees · terminal</div><pre><span class="y">sage-bot:</span> Jon recommends automatic merge for Session 14 (Yes at 16:34).
+Automatic merge stays OFF until you turn it on here.
+<span class="g">Turn it on with your usual words at this terminal, or ignore this.</span></pre></div>`;
+M.push({ g: 'Auto-merge', t: '12 Auto-merge', title: 'The chief asks the leads about automatic merge', steps: [
+  S('Card', () => app('Session 14', 'Votes and the chief\'s posts only', amPost()),
+    `<h3>The card</h3><p>The chief asks whether to turn on automatic merge (sage's autopilot) for one session. The card says what it changes in one sentence, and pings @sage-lead.</p><div class="box chg"><b>Changes an earlier decision</b>T1 decided: switches only at the host, never in Discord.</div>`),
+  S('Not a lead presses', () => app('Session 14', 'Votes and the chief\'s posts only', amPost('press') + msg('bot', '16:32', `<p>Only a sage-lead answers this card. Nothing changed.</p>`, { eph: 'maya' }) + msg('bot', '16:33', `<p>You have no sage role, so your press does not count.</p>`, { eph: 'sam' })),
+    `<h3>An apprentice or a person with no role presses</h3><p>Each gets an ephemeral note that only they see. The card does not change.</p>`),
+  S('A · Yes switches', () => `<div class="varhead">Variant A · the leads' answer switches the mode</div>` + app('Session 14', 'Votes and the chief\'s posts only', amPost('yes') + msg('bot', '16:34', `<p>Automatic merge is ON for Session 14. Erick can turn it off at the terminal.</p>`)) + termA,
+    `<h3>Variant A: Yes switches it at once</h3><p>Fast. But a lead's press lets code merge without Erick's look, and Erick learns of it only after.</p>`, { v: 1 }),
+  S('B · Yes recommends', () => `<div class="varhead">Variant B · the leads recommend; Erick confirms · recommended</div>` + app('Session 14', 'Votes and the chief\'s posts only', amPost('yes') + msg('bot', '16:34', `<p>Jon recommends Yes. Erick decides at the terminal; until then automatic merge stays off.</p>`)) + termB,
+    `<h3>Variant B: Yes is a recommendation</h3><p>I recommend B. Merges are hard to undo, and Erick holds the merge right. The leads' Yes saves him the thinking; his confirm is one line at the terminal.</p><div class="box dec"><b>Decision D11</b>A or B.</div>`, { v: 1 }),
+  S('No', () => app('Session 14', 'Votes and the chief\'s posts only', amPost('no') + msg('bot', '16:34', `<p>Jon answered No. Automatic merge stays off for Session 14.</p>`)),
+    `<h3>No</h3><p>The same in both variants: nothing changes, and the chief gets the answer. Erick sees one line at the terminal.</p>`),
+] });
+
+// ---------- Decisions ----------
+const D = [
+  ['D1', 'Who votes on team-vote cards', 'The owner decided two roles (apprentice or lead, never both) and dropped sage-driver. Shown as variants in moment 9.', ['<b>A: apprentices and leads vote.</b> With a team of 2 to 5, a vote of leads only is often 1 or 2 people, and apprentices lose their voice in the product questions.', 'B: only leads vote. Fewer, more senior voters; apprentices read the cards.'], 0, 8],
+  ['D2', 'Which projects apprentices read', 'The bot must never show a private project.', ['<b>An allow-list in the bridge config, set by Erick; default: none.</b>', 'Every project in the logbook.', 'One project per channel.'], 0, 9],
+  ['D3', 'Who answers', 'Speed, cost and safety differ.', ['The live chief of the session.', '<b>The bridge alone for the board, time left and artifacts; a separate read-only helper agent for free questions.</b>', 'The bridge alone; free questions get "ask a lead".'], 1, 3],
+  ['D4', 'A lead\'s session start', 'Shown as variants A and B in moment 7.', ['<b>A: the owner approves on a card (or at the terminal).</b>', 'B: it starts at once; the owner gets a notice.'], 0, 6],
+  ['D5', 'Limits', 'Numbers are proposals with no measured basis yet.', ['<b>10 free questions per person per hour, plus a daily spend cap for the helper that Erick sets; the board, time and artifacts do not count.</b>', 'A per-person limit only.', 'No limits in the first trial.'], 0, 9],
+  ['D6', 'How artifacts are shared', 'Shown as variants in moment 3.', ['<b>A: attach images already in the shared project.</b>', 'B: a link to a page Erick has published.', 'C: both.'], 0, 2],
+  ['D7', 'Where exchanges happen', 'Shown in moment 11.', ['<b>A: one #ask-sage channel, replies in place.</b>', 'B: a thread per question.', 'C: replies in place in any channel.'], 0, 10],
+  ['D8', 'A person with no role', 'Shown as variants in moment 6.', ['Ignore.', '<b>One short reply per person per day, then a lock reaction.</b>', 'A reaction only.'], 1, 5],
+  ['D9', 'Which writes a lead may do', 'An allow-list of operations; all others are refused.', ['<b>Start a session, mark a question as a team vote, withdraw a question, re-run a step; each after a confirm, with a notice to Erick for a withdraw.</b>', 'The same, without withdraw (it stays the owner\'s, at the terminal).', 'Start a session only.'], 0, 7],
+  ['D10', 'Mentions missed while the Mac sleeps', 'Discord does not replay them; the bridge must read back.', ['<b>On wake: answer read questions under 2 hours old; never run a write late; post one note.</b>', 'Answer nothing; post one note.', 'Answer everything, also writes.'], 0, 9],
+  ['D11', 'Automatic merge from Discord', 'Shown as variants in moment 12.', ['A: the leads\' Yes switches it.', '<b>B: the leads recommend; Erick confirms at the terminal.</b>'], 1, 11],
+  ['D12', 'Does Erick need a sage-lead role?', 'Erick is the owner and the Discord admin.', ['<b>No: the bridge treats the owner as a lead by his id.</b>', 'Yes: he holds the role like anyone.'], 0],
+  ['D13', 'How people ask: mentions or slash commands', 'The owner asked for @sage-bot mentions; the PE prefers fixed slash commands answered by the bridge in private. Shown in moments 1 and 7.', ['Mentions only, in #ask-sage; every reply is public.', 'Slash commands only (/sage board, task, gates, files; /sage request for leads); replies are private.', '<b>Both: slash commands for the fixed asks and for a lead\'s request (exact, private, no model decides the role or the action); a mention in #ask-sage for free questions, answered in public.</b>'], 2, 0],
+];
+document.getElementById('declist').innerHTML = D.map(([id, t, why, opts, r, m]) => `<div class="dec" id="${id}"><h3>${id} · ${t}</h3><p class="why">${why}</p><ol type="a">${opts.map((o, i) => `<li${i === r ? ' class="r"' : ''}>${o}${i === r ? ' <span class="rec-tag">recommended</span>' : ''}</li>`).join('')}</ol>${m !== undefined ? `<div class="see"><button data-moment="${m}">See moment ${m + 1}</button></div>` : ''}</div>`).join('');
+
+// ---------- Control ----------
+let cur = 0, step = 0;
+const navEl = document.getElementById('moments'), barEl = document.getElementById('stepbar'), stageEl = document.getElementById('stage'), notesEl = document.getElementById('notes');
+function renderNav() {
+  let g = '';
+  navEl.innerHTML = M.map((m, i) => { const h = m.g !== g ? `<span class="grp">${m.g}</span>` : ''; g = m.g; return `${h}<button data-moment="${i}"${i === cur ? ' aria-current="true"' : ''}>${m.t}</button>`; }).join('');
+}
+function show(i, s = 0, push = true) {
+  cur = Math.max(0, Math.min(M.length - 1, i)); const m = M[cur]; step = Math.max(0, Math.min(m.steps.length - 1, s));
+  renderNav();
+  barEl.innerHTML = `<span class="lbl">${m.title}</span>` + m.steps.map((st, k) => `<button class="${st.v ? 'var' : ''}" data-step="${k}"${k === step ? ' aria-current="true"' : ''}>${st.label}</button>`).join('') +
+    `<span class="nav"><button data-nav="-1">Back</button><button data-nav="1">Next</button></span>`;
+  stageEl.innerHTML = m.steps[step].stage();
+  notesEl.innerHTML = `<div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Moment ${cur + 1} · step ${step + 1} of ${m.steps.length}</div>` + m.steps[step].notes;
+  if (push) history.replaceState(null, '', `#m${cur + 1}-${step + 1}`);
+}
+function move(d) { const m = M[cur]; if (step + d >= 0 && step + d < m.steps.length) show(cur, step + d); else if (d > 0 && cur < M.length - 1) show(cur + 1, 0); else if (d < 0 && cur > 0) show(cur - 1, M[cur - 1].steps.length - 1); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.moment !== undefined) { show(+b.dataset.moment, 0); document.querySelector('.proto').scrollIntoView({ behavior: 'smooth' }); }
+  else if (b.dataset.step !== undefined) show(cur, +b.dataset.step);
+  else if (b.dataset.nav) move(+b.dataset.nav);
+  else if (b.dataset.go === 'next') move(1);
+  else if (b.dataset.go === 'edit') show(cur, M[cur].steps.findIndex(x => x.label.startsWith('Edit')));
+  else if (b.dataset.go === 'no') show(cur, M[cur].steps.length - 1);
+});
+document.addEventListener('keydown', e => { if (e.target.closest('textarea, input')) return; if (e.key === 'ArrowRight') move(1); if (e.key === 'ArrowLeft') move(-1); });
+const h = /^#m(\d+)-(\d+)$/.exec(location.hash);
+show(h ? +h[1] - 1 : 0, h ? +h[2] - 1 : 0, false);
+</script>
+</body>
+</html>
