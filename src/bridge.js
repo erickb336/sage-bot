@@ -524,11 +524,14 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
 
   /**
    * The gate ids in the team votes file and in the leads-only file (T73). A refused file counts as both empty, so nothing is posted;
-   * the log says why once.
+   * the log says why once. A mark that moves a gate saves the two files one after the other, so a read across the move can find the
+   * gate in both: then it reads both files again, and only a gate still in both is an error (F-T73-12).
    */
   function teamVotes() {
     try {
-      const marks = { votes: loadVotes(votesPath), leads: loadLeads(leadsPath) };
+      const read = () => ({ votes: loadVotes(votesPath), leads: loadLeads(leadsPath) });
+      let marks = read();
+      if ([...marks.votes].some((id) => marks.leads.has(id))) marks = read();
       votesError = null;
       return marks;
     } catch (e) {
@@ -550,7 +553,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     for (const r of untracked) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
     // Only the gates that the chief marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
     // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
-    // A gate in both files is an error: neither rule holds for it, so it gets no card (F-T73-2).
+    // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
     const { votes, leads } = teamVotes();
     const fresh = untracked.filter((r) => {
       const why = votes.has(r.id) && leads.has(r.id) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'

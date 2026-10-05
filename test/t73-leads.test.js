@@ -5,11 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { load, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
-import { CHANNEL, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup } from './bridge-setup.js';
+import { SETTLE } from '../src/bridge.js';
+import { APPRENTICE, CHANNEL, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup } from './bridge-setup.js';
 
 const LEAD = '300000000000000002';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
@@ -198,7 +200,7 @@ test('F-T73-2: a gate in both the team votes file and the leads-only file gets n
   assert.equal(cards(b).length, 1);
 });
 
-test('F-T73-2: a mark that moves a gate saves the file that loses it first, so no read in between finds it in both', () => {
+test('F-T73-2: a mark that moves a gate saves the file that loses it first, then the file that gains it', () => {
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
@@ -208,6 +210,59 @@ test('F-T73-2: a mark that moves a gate saves the file that loses it first, so n
   assert.ok(savedAt(votesFile) < savedAt(leadsFile), 'to leads only: the team votes file first');
   assert.equal(vote(b, 'G1').out, 'team votes: G1');
   assert.ok(savedAt(leadsFile) < savedAt(votesFile), 'to a team vote: the leads-only file first');
+});
+
+test('F-T73-11: a team vote and the leads-only question of one task, asked together, get two cards, and the leads-only one is never in the batch', async () => {
+  const b = setup({ markAll: false });
+  b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
+  b.sh('gate', 'add', 'T1', '--question', 'Ship it?', '--options', 'Yes|No', '--recommend', 'No');
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
+  b.mark('G1');
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['G2']));
+  await b.post();
+  assert.deepEqual(cards(b).map((p) => [p.embeds[0].title, p.allowedMentions.roles]), [
+    ['Question G1 · T1 Ship the export page', [APPRENTICE, LEAD]],
+    ['Recommend for Erick: Question G2 · T1 Ship the export page', [LEAD]],
+  ]);
+  b.now += MINUTE;
+  assert.deepEqual(await b.press(MAYA, 'press:G2:0:0'), [NOTE]);
+  await b.bridge.loop();
+  assert.equal(b.answerOf('G2'), '');
+});
+
+/** Runs `during` once, when the bridge opens `path`: so it falls between the bridge's reads of the two files. */
+function onFirstOpen(path, during) {
+  const open = fs.openSync;
+  fs.openSync = (p, ...rest) => {
+    if (p === path) { fs.openSync = open; syncBuiltinESMExports(); during(); }
+    return open(p, ...rest);
+  };
+  syncBuiltinESMExports();
+}
+
+test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both" line, and the card comes; a gate truly in both still gets none', async () => {
+  const b = setup({ markAll: false });
+  b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
+  b.mark('G1');
+  // The bridge reads the team votes file (G1 in it), then the chief moves G1 to leads only, then the bridge reads the leads-only file.
+  let moved;
+  onFirstOpen(`${b.statePath}.votes.leads`, () => { moved = vote(b, '--leads', 'G1'); });
+  await b.bridge.loop();
+  assert.deepEqual(moved, { code: 0, out: 'team votes: none\nleads only: G1', err: '' });
+  b.now += SETTLE;
+  await b.bridge.loop();
+  assert.deepEqual(b.lines.filter((l) => l.includes('both')), []);
+  assert.deepEqual(cards(b).map((p) => p.embeds[0].title), ['Recommend for Erick: Question G1 · T1 Ship the export page']);
+  // A gate that stays in both files after the second read gets no card and one line.
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
+  b.mark('G2');
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['G1', 'G2']));
+  await b.post();
+  await b.bridge.loop();
+  assert.equal(cards(b).length, 1);
+  assert.deepEqual(b.lines.filter((l) => l.includes('both')),
+    ['G2 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs']);
 });
 
 test('F-T73-3: the terminal line after a No recommendation says to do nothing, and after a Yes says to switch the mode', async () => {

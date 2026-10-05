@@ -72,7 +72,7 @@ try {
         votes[mode === '--mark' ? 'add' : 'delete'](id);
         leads[mode === '--leads' ? 'add' : 'delete'](id);
       }
-      // The file that loses the gate is saved first, so that a read in between never finds the gate in both (F-T73-2).
+      // The file that loses the gate is saved first. A read between the two saves can still find the gate in both; the bridge then reads again (F-T73-12).
       const saveLeads = () => { if (mode === '--leads' || leads.size !== before) saveVotes(leadsPath, leads); }; // no leads-only file until the chief uses --leads
       if (mode === '--leads') { saveVotes(path, votes); saveLeads(); } else { saveLeads(); saveVotes(path, votes); }
     });
