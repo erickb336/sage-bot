@@ -38,15 +38,19 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.every(isId) && ne
 
 /**
  * @typedef {{ option: string, at: number, via: 'discord' | 'terminal', reason?: string }} Ballot
- * @typedef {{ status: 'open' } | { status: 'decided', option: string, how: 'votes' | 'lead-tiebreak' }} PartOutcome
+ * @typedef {{ status: 'open' } | { status: 'decided', option: string, how: 'votes' }
+ *   | { status: 'decided', option: string, how: 'lead-tiebreak', by?: string, at?: number }} PartOutcome
+ *   by and at: the lead who broke the tie and when (missing in a gate saved before T39)
  * @typedef {{ options: string[], ballots: [string, Ballot][], outcome: PartOutcome, tied?: string[] }} Part  read ballots with ballotsOf
  * @typedef {{ id: string, kind: 'single', askedBy: string, openedAt: number, lastAt: number,
  *   phase: 'open' | 'closed', options: string[],
  *   outcome: { status: 'open' } | { status: 'answered', option: string, by: string, via: 'discord' | 'terminal' }
  *     | { status: 'withdrawn' } }} SingleGate
  * @typedef {{ id: string, kind: 'batch', askedBy: string, openedAt: number, lastAt: number,
- *   phase: 'voting' | 'tied' | 'closed', endsAt: number, votingEndedAt: number | null, parts: Part[],
- *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate
+ *   phase: 'voting' | 'tied' | 'closed', endsAt: number, votingEndedAt: number | null,
+ *   endedBy?: string | null, parts: Part[],
+ *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate  endedBy: after the vote ended, the lead who
+ *   ended it early, or null at the time limit (missing in a gate saved before T39)
  * @typedef {SingleGate | BatchGate} Gate
  * @typedef {{ type: 'press', by: string, option: string, part?: number, at: number, via: 'discord' | 'terminal', reason?: string }
  *   | { type: 'end', by: string, at: number, via: 'discord' | 'terminal' }
@@ -183,7 +187,7 @@ function endVoting(gate, by, holders, at) {
     effects.push({ type: 'decided', part: i, option, how: 'votes' });
     return { ...part, outcome: { status: 'decided', option, how: 'votes' } };
   });
-  return finish({ ...gate, phase: 'tied', votingEndedAt: at, parts }, effects);
+  return finish({ ...gate, phase: 'tied', votingEndedAt: at, endedBy: by, parts }, effects);
 }
 
 /** A lead picks one option of an open part after the vote ended. */
@@ -193,7 +197,7 @@ function tiebreak(gate, event) {
   if (gate.phase !== 'tied' || part.outcome.status !== 'open') return ignore(gate, event, 'not-tied');
   if (!part.options.includes(event.option)) return ignore(gate, event, 'unknown-option');
   if (!part.tied.includes(event.option)) return ignore(gate, event, 'not-tied-option');
-  const parts = gate.parts.with(event.part, { ...part, outcome: { status: 'decided', option: event.option, how: 'lead-tiebreak' } });
+  const parts = gate.parts.with(event.part, { ...part, outcome: { status: 'decided', option: event.option, how: 'lead-tiebreak', by: event.by, at: event.at } });
   return finish({ ...gate, parts }, [{ type: 'decided', part: event.part, option: event.option, how: 'lead-tiebreak' }]);
 }
 
@@ -264,7 +268,8 @@ const BATCH_KEYS = [...SINGLE_KEYS.slice(0, -1), 'endsAt', 'votingEndedAt', 'par
 
 /** What is wrong with a gate, or '' when it is a gate that openGate and step could make. */
 function gateProblem(g) {
-  if (!keysAre(g, g?.kind === 'batch' ? BATCH_KEYS : SINGLE_KEYS) || !KINDS.has(g.kind)) return 'unknown fields or kind';
+  // A batch saved before T39 has no endedBy: it still loads, with the lead unknown.
+  if (!keysAre(g, ...(g?.kind === 'batch' ? [BATCH_KEYS, ['endedBy']] : [SINGLE_KEYS])) || !KINDS.has(g.kind)) return 'unknown fields or kind';
   if (!isId(g.id) || !isId(g.askedBy)) return 'no id or askedBy';
   const inTime = (t) => Number.isSafeInteger(t) && t >= g.openedAt && t <= g.lastAt;
   if (!Number.isSafeInteger(g.openedAt) || !inTime(g.lastAt)) return 'openedAt or lastAt is not a time';
@@ -280,11 +285,15 @@ function gateProblem(g) {
   if (g.endsAt !== g.openedAt + BATCH_LIMIT) return 'endsAt is not 30 minutes after openedAt';
   const ended = g.votingEndedAt;
   if (ended !== null && !(inTime(ended) && ended <= g.endsAt)) return 'votingEndedAt is not a time';
+  // A lead ends the vote only before the time limit; at the limit nobody ends it.
+  const by = g.endedBy;
+  if (by !== undefined && !(ended !== null && (ended < g.endsAt ? isId(by) : by === null))) return 'endedBy does not match votingEndedAt';
   if (!Array.isArray(g.parts) || g.parts.length === 0) return 'no parts';
   // Every ballot comes before the time limit: a ballot at or after it ends the vote first.
   const ballotTime = (t) => inTime(t) && t < g.endsAt;
   for (const part of g.parts) {
-    const problem = partProblem(part, ballotTime);
+    // A tie-break comes after the vote ended, at or before the last event.
+    const problem = partProblem(part, ballotTime, (t) => inTime(t) && ended !== null && t >= ended);
     if (problem) return problem;
   }
   const open = g.parts.filter((p) => p.outcome.status === 'open');
@@ -296,13 +305,16 @@ function gateProblem(g) {
   return ok ? '' : 'the phase and the outcomes do not match';
 }
 
-function partProblem(part, inTime) {
+function partProblem(part, inTime, breakTime) {
   if (!keysAre(part, ['options', 'ballots', 'outcome'], ['tied']) || !isOptions(part.options)) return 'a part is not options, ballots and outcome';
   const among = (option) => part.options.includes(option);
   if (part.tied !== undefined && !(isOptions(part.tied) && part.tied.every(among))) return 'a part has tied options that it does not have';
   const o = part.outcome;
-  const decided = keysAre(o, ['status', 'option', 'how']) && o.status === 'decided' && among(o.option)
-    && (o.how === 'votes' || (o.how === 'lead-tiebreak' && part.tied?.includes(o.option)));
+  // A tie-break saved before T39 has no by and at: it still loads, with the lead unknown.
+  const plain = keysAre(o, ['status', 'option', 'how']);
+  const named = keysAre(o, ['status', 'option', 'how', 'by', 'at']) && isId(o.by) && breakTime(o.at);
+  const decided = (plain || named) && o.status === 'decided' && among(o.option)
+    && (o.how === 'votes' ? plain : o.how === 'lead-tiebreak' && part.tied?.includes(o.option));
   if (!decided && !(keysAre(o, ['status']) && o.status === 'open')) return 'a part has no valid outcome';
   if (!Array.isArray(part.ballots)) return 'a part has no ballots';
   const seen = new Set();

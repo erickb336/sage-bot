@@ -139,7 +139,7 @@ test('a tie-break: only a lead, only a tied option, only on a tied part; then th
   assert.deepEqual(broken.effects, [{ type: 'decided', part: 1, option: 'A', how: 'lead-tiebreak' }, { type: 'closed', outcome: { status: 'decided' } }]);
   assert.equal(broken.reply.kind, 'update');
   assert.equal(broken.reply.embeds[0].description, 'Voting ended at <t:1791126060:t>. Closed: every part is decided. T7 goes on.');
-  assert.match(broken.reply.embeds[0].fields[1].value, /\*\*Decided: A\*\* · tie broken by a sage-lead$/);
+  assert.match(broken.reply.embeds[0].fields[1].value, /\*\*Decided: A\*\* · tie broken by Jon \(sage-lead\) at <t:1791133500:t>$/);
   assert.match(broken.reply.embeds[0].fields[0].value, /\*\*Decided: A\*\* · 2 of 3 votes$/);
   assert.ok(broken.reply.components.every((r) => r.components.every((c) => c.disabled)));
 });

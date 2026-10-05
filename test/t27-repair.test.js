@@ -68,17 +68,17 @@ test('F-T27-9, F-T27-30: 5 holders, 4 parts and 500-character reasons fit Discor
   assert.equal(ballotsOf(gate.parts[3]).get('h4').reason.length, 500); // the gate keeps the full text
   const [embed] = card(gate, ctx.ask, ctx.people).embeds;
   assert.ok(embedLength(embed) <= 6000, `embed length ${embedLength(embed)}`);
-  // 20 reasons of 200 characters do not fit beside 4 parts, so the oldest one (h0 on part 1) goes; the 19 newest show whole at 200.
+  // 20 reasons of 200 characters do not fit beside 4 parts, so the 2 oldest (h0 and h1 on part 1) go; the 18 newest show whole at 200.
   const reasons = embed.fields.slice(4);
-  assert.equal(embed.fields.length, 23);
-  assert.deepEqual(reasons.map((f) => f.name), [1, 2, 3, 4].flatMap((p) => [0, 1, 2, 3, 4].map((h) => `Holder Number ${h}, part ${p}`)).slice(1));
+  assert.equal(embed.fields.length, 22);
+  assert.deepEqual(reasons.map((f) => f.name), [1, 2, 3, 4].flatMap((p) => [0, 1, 2, 3, 4].map((h) => `Holder Number ${h}, part ${p}`)).slice(2));
   for (const f of reasons) assert.ok(f.value.length === 200 && f.value.endsWith('…'), f.value.length);
   assert.ok(embed.fields.every((f) => f.name.length <= 256 && f.value.length <= 1024));
   // 32-character names (Discord's longest) with markdown: more of the oldest reasons go; the shown ones still have their 200 characters.
   const names = new Map([...ctx.people.names].map(([id]) => [id, '*'.repeat(32)]));
   const [wide] = card(gate, ctx.ask, { ...ctx.people, names }).embeds;
   assert.ok(embedLength(wide) <= 6000, `embed length ${embedLength(wide)}`);
-  assert.ok(wide.fields.length < 23 && wide.fields.length > 10, `${wide.fields.length} fields`);
+  assert.ok(wide.fields.length < 22 && wide.fields.length > 10, `${wide.fields.length} fields`);
   assert.ok(wide.fields.slice(4).every((f) => f.value.length === 200 && f.value.endsWith('…')));
   assert.equal(wide.fields.at(-1).value, '34'.repeat(100).slice(0, 199) + '…'); // the newest reason, h4 on part 4
 });
@@ -170,7 +170,7 @@ test('F-T27-18: the form title shows the option within 45 characters; Cancel com
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 1).title, 'Your vote counts: B. No');
   assert.deepEqual(confirmEnd(openAsk('B9', T0), PEOPLE).components[0].components.map((c) => c.label), ['Cancel', 'End vote now']);
   const early = step(openAsk('B9', T0), { type: 'end', by: JON, at: clock(14, 50), via: 'discord' }, PEOPLE.holders, PEOPLE.leads).gate;
-  assert.match(card(early, ASKS.B9, PEOPLE).embeds[0].description, /^Ended early at <t:1791125400:t> by a sage-lead, with the votes so far\. /);
+  assert.match(card(early, ASKS.B9, PEOPLE).embeds[0].description, /^Ended early by Jon \(sage-lead\) at <t:1791125400:t>, with the votes so far\. /);
   const onTime = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.leads).gate;
   assert.match(card(onTime, ASKS.B9, PEOPLE).embeds[0].description, /^Voting ended at <t:1791126060:t>\. /);
 });

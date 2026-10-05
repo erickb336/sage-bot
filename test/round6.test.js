@@ -32,7 +32,7 @@ test('F-T1-66: a one-option part with one vote is decided by votes; with no vote
   const ended = step(voted, { type: 'tick', at: END }, HOLDERS, [LEA]).gate;
   assert.deepEqual(ended.parts.map((p) => p.outcome.status), ['decided', 'open']);
   const r = step(ended, { type: 'tiebreak', by: LEA, part: 1, option: 'only', at: END + 1, via: 'discord' }, HOLDERS, [LEA]);
-  assert.deepEqual(r.gate.parts[1].outcome, { status: 'decided', option: 'only', how: 'lead-tiebreak' });
+  assert.deepEqual(r.gate.parts[1].outcome, { status: 'decided', option: 'only', how: 'lead-tiebreak', by: LEA, at: END + 1 });
   assert.deepEqual(r.gate.outcome, { status: 'decided' });
 });
 

@@ -229,7 +229,7 @@ test('F-T1-32: a lead who is not a holder cannot end the vote or break a tie', (
 test('F-T1-32: the same lead, as a holder, ends the vote and breaks the tie', () => {
   const holders = [...THREE, LEA];
   const r = run(batch(), [[end(LEA, 1), holders], [tiebreak(LEA, 'B', 2), holders]]);
-  assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak' });
+  assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 2).at });
   assert.equal(r.gate.phase, 'closed');
 });
 
