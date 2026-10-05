@@ -2,9 +2,9 @@
 // src/bridge.js uses. The tests never run `start`: it is the only code that connects to Discord.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
+import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
-import { askCommand, createAsk, projectsOf, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, projectsOf, STOP, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
@@ -45,6 +45,12 @@ export async function parentOf(x, fetch) {
   return channel?.isThread() === true ? channel.parentId : null;
 }
 
+/** Whether a message is in a forum post (or a post of a media channel): a thread whose parent is a forum. */
+export async function inForum(x, fetch) {
+  const channel = x.channel ?? await fetch(x.channelId).catch(() => null);
+  return channel?.isThread() === true && [ChannelType.GuildForum, ChannelType.GuildMedia].includes(channel.parent?.type);
+}
+
 /** A /sage chat command as src/ask.js reads it. `parentId` is a promise: src/ask.js defers the reply before it waits for anything. */
 export const commandOf = (i, fetch) => ({
   user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), channelId: i.channelId, parentId: parentOf(i, fetch),
@@ -72,7 +78,7 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch)) : undefined;
-    if (i.isButton() && i.customId.startsWith(UNREGISTER)) {
+    if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP)) {
       return ask.press({ user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member), customId: i.customId,
         update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
     }
@@ -80,8 +86,11 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
   },
   message(m) {
     if (m.guildId !== config.guildId || m.author.bot || !m.mentions.users.has(botId)) return undefined;
-    return ask.mention({ user: { id: m.author.id, bot: false }, roles: rolesOf(m.member), channelId: m.channelId, parentId: parentOf(m, fetch),
-      content: m.content, reply: (payload) => m.reply(payload) });
+    return ask.mention({ id: m.id, user: { id: m.author.id, bot: false }, roles: rolesOf(m.member), channelId: m.channelId,
+      parentId: parentOf(m, fetch), forum: inForum(m, fetch), content: m.content, reply: (payload) => m.reply(payload),
+      // A public thread from the message (T131). Discord archives a quiet thread after a day; a mention in it opens it again.
+      startThread: async (name) => (await m.startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
+      post: async (thread, payload) => (await (await fetch(thread)).send(payload)).id });
   },
 });
 
@@ -99,7 +108,11 @@ export async function start(file) {
   lock(file.statePath);
   const channels = openChannels(file, projects, log); // a bad registry stops here, before Discord
   const config = withHome(file, channels);
-  const ask = createAsk({ config, channels, log });
+  // #sage-audit (T131): a copy of each lead log line. Without auditChannelId, the lead log only, and the start says so.
+  let auditChannel = null;
+  const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await client.channels.fetch(config.auditChannelId); await auditChannel.send(payload); } : undefined;
+  if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
+  const ask = createAsk({ config, channels, log, audit });
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
