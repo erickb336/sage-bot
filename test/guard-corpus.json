@@ -585,7 +585,8 @@
     "gh pr create --title x --body-file={SCRATCH}/body.md",
     "node --test --test-reporter=spec test/guard.test.js",
     "node {TOOL} status --project {WT}",
-    "ls -la src | grep js"
+    "ls -la src | grep js",
+    "ls {SCRATCH}/proj/*"
   ],
   "tools": {
     "refuse": [

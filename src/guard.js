@@ -456,17 +456,16 @@ function changesFiles(texts) {
 }
 
 /**
- * cd: only into a folder that exists now and that the system resolves (through every link) inside the worktree or the
+ * cd: only into a folder that exists now, resolved as the system resolves it (through every link), inside the worktree or the
  * scratch folder. Then the shell moves exactly where the checks of the later parts look; if the cd fails anyway, && stops.
+ * (A cd into a missing folder moved only the checks, not the shell: a later ../ path then reached outside.)
  */
 function cd(args, ctx) {
   const safe = 'cd <a folder in the worktree or the scratch folder> && <command>, or name the full path in the command';
   if (args.length !== 1) return how('cd with no folder, with options or with more than one folder', safe);
-  const p = expandHome(args[0], ctx);
-  let to;
-  try { to = realpathSync.native(isAbsolute(p) ? p : `${ctx.cwd}/${p}`); } catch { return how(`cd ${args[0]} (not an existing folder)`, safe); }
-  if (kindOf(to, ctx) !== 'folder' || readRefusal(to, ctx) || ![ctx.folders.worktree, ctx.folders.scratch].some((r) => within(to, r))) {
-    return how(`cd ${args[0]} (only into a folder in the worktree or the scratch folder)`, safe);
+  const to = physical(expandHome(args[0], ctx), ctx.cwd);
+  if (kindOf(to, ctx) !== 'folder' || ![ctx.folders.worktree, ctx.folders.scratch].some((r) => within(to, r))) {
+    return how(`cd ${args[0]} (only into an existing folder in the worktree or the scratch folder)`, safe);
   }
   ctx.cwd = to;
   return null;

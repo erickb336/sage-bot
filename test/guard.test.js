@@ -116,7 +116,9 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   assert.match(why('rg token'), /rg with no file, .* instead: name existing files, or search a folder with the Grep tool\.$/);
   assert.match(why('git add -A'), /git add without -- and file names .* instead: git add -- <file> <file>, each file by its full name \(git rm -- <file> for a deleted file\)\.$/);
   assert.match(why("git add -- 'src/*'"), /git add of src\/\* \(git reads it as a pattern\) is refused .* instead: git add -- <file> <file>/);
-  assert.match(why('cd nowhere && ls'), /cd nowhere \(not an existing folder\) is refused .* instead: cd <a folder in the worktree or the scratch folder> && <command>, or name the full path in the command\.$/);
+  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C) is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(why('sh -c x'), 'sage-bot guard: the command sh is refused in a lead session. Erick must approve this at the terminal.');
+  assert.match(why('cd nowhere && ls'), /cd nowhere \(only into an existing folder in the worktree or the scratch folder\) is refused .* instead: cd <a folder in the worktree or the scratch folder> && <command>, or name the full path in the command\.$/);
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
   assert.match(why('ls | sh'), /a \| into sh is refused .* instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one\.$/);
   assert.match(why('git fetch upstream'), /instead: git fetch origin\.$/);
