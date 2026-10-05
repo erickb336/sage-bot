@@ -4,12 +4,15 @@
 //   node scripts/vote.mjs [--config <config.json>] --unmark <gate id> [...]    unmarks gates (team votes and leads only)
 //   node scripts/vote.mjs [--config <config.json>] --list                      prints the lists
 // The config is the bridge's (default ~/.config/sage-bot/config.json); the list is its `votesPath`, or `<statePath>.votes`.
-// A leads-only gate is one Yes or No question that only the sage-leads answer, as a recommendation; the owner decides at the terminal.
+// A leads-only gate is the automatic-merge question (LEADS_QUESTION in src/bridge.js) with the options Yes|No. Only the sage-leads answer it,
+// as a recommendation; the owner decides at the terminal. --leads reads the gate from sage (the config's sagePath and project) and refuses any other.
 // Its list is `<votes list>.leads`. A gate is in one list at most: a mark moves it.
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { notLeadsOnly } from '../src/bridge.js';
 import { forTerminal } from '../src/clean.js';
+import { sageTool } from '../src/sage.js';
 import { alive, GATE_ID, leadsPathOf, loadLeads, loadVotes, saveVotes, unlock, votesPathOf } from '../src/state.js';
 
 /**
@@ -52,6 +55,11 @@ try {
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const path = votesPathOf(config);
   const leadsPath = leadsPathOf(config);
+  if (mode === '--leads') {
+    const row = (await sageTool({ sagePath: config.sagePath, project: config.project }).gates()).find((r) => r.id === args[0]);
+    const why = row ? notLeadsOnly(row) : `${args[0]} is not a gate of the sage project ${config.project}`;
+    if (why) throw new Error(`${why}. Nothing changed.`);
+  }
   if (mode !== '--list') {
     withLock(path, () => {
       const [votes, leads] = [loadVotes(path), loadLeads(leadsPath)];
@@ -60,8 +68,9 @@ try {
         votes[mode === '--mark' ? 'add' : 'delete'](id);
         leads[mode === '--leads' ? 'add' : 'delete'](id);
       }
-      saveVotes(path, votes);
-      if (mode === '--leads' || leads.size !== before) saveVotes(leadsPath, leads); // no leads-only file until the chief uses --leads
+      // The file that loses the gate is saved first, so that a read in between never finds the gate in both (F-T73-2).
+      const saveLeads = () => { if (mode === '--leads' || leads.size !== before) saveVotes(leadsPath, leads); }; // no leads-only file until the chief uses --leads
+      if (mode === '--leads') { saveVotes(path, votes); saveLeads(); } else { saveLeads(); saveVotes(path, votes); }
     });
   }
   const ids = [...loadVotes(path)];

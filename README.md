@@ -76,10 +76,10 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 
 Some questions are for the sage-leads alone, and only as advice. The first one is the owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads recommend Yes or No; Erick decides at the terminal.
 
-1. The chief asks the question as a normal sage gate with the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused.
+1. The chief asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
 2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
 3. Only a sage-lead can press. Anyone else gets the private note "Only a sage-lead can answer this. Erick decides."
-4. The first lead's press is the leads' recommendation. The bridge gives it to sage as usual ("A. Yes"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log: "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal."
+4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log: "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal."
 5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to the chief is final, also after the leads' recommendation (G10).
 
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
@@ -92,7 +92,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | --- | --- | --- |
 | Only the questions that the chief marks with `scripts/vote.mjs` go to Discord. Every other question stays at the terminal. (G13) | Most questions are for the owner alone. The chief chooses which ones the team votes on. | `src/bridge.js` |
 | A question about a merge is never posted, also when it is marked as a team vote. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
-| A leads-only question (`vote.mjs --leads`) is one Yes or No question on its own card. Only sage-leads answer it, and the answer is a recommendation: the owner decides at the terminal. It may be about a merge. sage-bot never switches a mode of sage. (G18) | The leads advise; the owner keeps the decision. | `src/bridge.js`, `src/handle.js`, `src/cards.js` |
+| A leads-only question (`vote.mjs --leads`) is only the automatic-merge question, Yes or No, on its own card. Only sage-leads answer it, and sage gets the answer marked as a recommendation: the owner decides at the terminal. sage-bot never switches a mode of sage. (G18) | The leads advise; the owner keeps the decision. | `src/bridge.js`, `src/handle.js`, `src/cards.js` |
 | One card holds the questions that one task asks within 30 seconds: 1 question, or a batch of 2 to 4. (G9) | Questions asked together belong together, so the team votes on them together. | `src/bridge.js` |
 | A task that asks 5 or more questions within 30 seconds keeps them at the terminal. | One card holds at most 4 parts (Discord allows 5 rows of buttons). | `src/bridge.js` |
 | Only members with the sage-apprentice or the sage-lead role answer or vote. The holders are exactly those members. Each person has one of the two roles; a member with both counts as a sage-lead, and the bridge logs a line with their name. | The Discord admin decides who is on the team, with no vote. | `src/handle.js`, `src/vote.js` |
