@@ -277,16 +277,19 @@ The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` f
 | Case | What the bridge does |
 | --- | --- |
 | One open gate of a task | A single question. The options are sage's options (`a\|b`), as A to E. The recommendation and the default mark the option with the same text or letter. |
-| 2 to 4 open gates of one task | One batch vote, one part per gate, in the order of the logbook. The card's id is the gate ids joined by `+`, for example `G3+G4`. The bridge waits 30 seconds after the newest gate of a task, so that the chief's `gate add` commands of one batch land on one card. |
-| 5 or more open gates of one task | Refused: no card. The terminal shows "not posted: T2 has 5 open gates, and a batch holds at most 4 parts. Answer them at the terminal." once. |
+| 2 to 4 open gates that one task asked together | One batch vote, one part per gate, in the order of the logbook. "Together" means that sage's `at` of each gate is at most 30 seconds after the first one; gates further apart get their own cards, also after a restart. The card's id is the gate ids joined by `+`, for example `G3+G4`. The bridge waits 30 seconds after the newest gate of a task, so that the chief's `gate add` commands of one batch land on one card. |
+| 5 or more gates that one task asked together | Refused: no card. The terminal shows "not posted: T2 asked 5 questions together, and a batch holds at most 4 parts. Answer them at the terminal." once. They stay at the terminal until each one has an answer: the answered ones still count, so no later card takes the rest. |
+| A gate that a task adds after its card was posted | Its own card, also within 30 seconds of the first. |
 | A gate with no option or more than 5 | Refused the same way: one row of Discord buttons holds 5. |
-| A gate whose question names a merge | Not posted. Merges never go to a vote; they stay at the terminal. |
+| A gate whose question or options name a merge ("merge", "merges", "merged", "merging") | Not posted. Merges never go to a vote; they stay at the terminal. |
 | A new card | The post mentions the sage-driver role, and only that role: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." |
-| The owner answers a posted gate at the terminal (`sage gate answer`) with an option (its letter, its text, or "A. text") | One press of the owner (`ownerId`) via the terminal: on a single gate it is the first answer; in a batch it is the owner's ballot on that part. The owner needs the sage-driver role like everyone else. |
-| The chief answers a posted gate with any other text | A withdraw by the asker (the owner): the card closes as withdrawn. A withdraw comes only from sage, never from Discord. |
+| The owner answers a posted gate at the terminal (`sage gate answer`) | Final, whatever the owner's roles. The card shows "Answered by Erick (terminal) at 14:05: B. text. Final." on that question, or on that part of a batch, and its buttons go grey. A press on it gets "Already answered by Erick at the terminal: … Your press did not count." The other parts of a batch keep voting, and the leads never get a tie for an answered part. The answer is no ballot. |
+| An answer in sage that the bridge did not write | The owner's. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
+| The chief answers an open single gate with text that names no option | A withdraw by the asker (the owner): the card closes as withdrawn. A withdraw comes only from sage, never from Discord. On a part of a batch, such text is the owner's final answer to that part. |
 | A single gate is answered in Discord | The bridge gives sage "B. Show a Session ended screen" (the letter and sage's option text). |
 | A batch closes as decided | The bridge gives sage the answer of every part, the same way. It acts only on the `'closed'` effect, never on a part's `'decided'` effect, which is provisional while another part is tied. A withdrawn gate gives sage nothing. |
-| A batch vote ends with tied parts | A post to the sage-lead role with each tied part and each voter's argument (the reason, made safe for the card and cut to 200 characters). |
+| A batch vote ends with tied parts | A post to the sage-lead role with each tied part and each voter's argument (the reason, made safe for the card and cut to 200 characters). The 2-hour reminders count from this post, so one loop never pings the leads twice, also after a sleep. |
+| A member gets or loses the sage-driver role | At the next turn of the loop the bridge redraws each open card, so the card counts the same votes as the tick. |
 | A lead breaks a tie | A post that names the lead: "Jon (sage-lead) broke the tie on part 2 of G3+G4: A." No one is pinged. |
 | The gate changed | The bridge edits the card with `card()`: after a ballot, a tick, an end, a tie-break, a terminal answer or a withdraw. A press after the time limit that the vote rules refuse still ends the vote first, so the bridge settles that too. |
 
@@ -294,7 +297,7 @@ Only a Discord id (17 to 20 digits) goes into an event's `by`. A press from any 
 
 ### The gate file
 
-The bridge keeps its gates, their asks and what it gave sage in one JSON file, `statePath` in the config. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
+The bridge keeps its gates, their asks, the owner's final answers and what it gave sage in one JSON file, `statePath` in the config. One bridge at a time: at start it creates `<statePath>.lock` with its pid (O_EXCL). When that lock belongs to a process that runs, the new bridge stops with "another sage bridge (pid 4242) runs on …"; a lock of a process that is gone is replaced, and a normal exit removes it. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
 
 ### Run it
 

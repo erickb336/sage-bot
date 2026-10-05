@@ -6,6 +6,7 @@ import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
+import { lock } from './state.js';
 
 /** The Keychain item that holds the bot token: a generic password with this service name. */
 export const KEYCHAIN_SERVICE = 'sage-bot';
@@ -30,11 +31,12 @@ export async function readToken(security = '/usr/bin/security') {
 export const memberOf = (m) => ({ id: m.id, name: m.displayName, roles: [...m.roles.cache.keys()], bot: m.user.bot === true });
 
 /**
- * Starts the bridge: reads the token, logs in, and runs the loop every LOOP ms.
+ * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
  * @param {{ guildId: string, channelId: string, ownerId: string, driverRole: string, leadRole: string,
  *   project: string, sagePath: string, statePath: string }} config
  */
 export async function start(config) {
+  lock(config.statePath);
   const token = await readToken();
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
