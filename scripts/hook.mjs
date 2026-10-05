@@ -6,10 +6,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import { forTerminal } from '../src/clean.js';
 import { loadProjects } from '../src/projects.js';
 import { record, sessionsPathOf } from '../src/sessions.js';
+import { defaultConfigPath } from '../src/lead-policy.js';
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash']);
 
@@ -26,7 +27,7 @@ function claudePid() {
 
 try {
   const args = process.argv.slice(2);
-  const configPath = args[0] === '--config' ? args[1] : join(homedir(), '.config', 'sage-bot', 'config.json');
+  const configPath = args[0] === '--config' ? args[1] : defaultConfigPath();
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const input = JSON.parse(readFileSync(0, 'utf8'));
   // A config whose projects the bridge cannot serve records nothing (G43 A).

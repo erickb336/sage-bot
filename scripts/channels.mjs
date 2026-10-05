@@ -9,13 +9,12 @@
 // registry and no channelId in the config, `register <id> <project> --home` makes the first one. The script cannot see Discord: the
 // bridge checks sage-bot's permissions in each registered channel at its next start and logs each missing one.
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { loadProjects } from '../src/projects.js';
 import { settled } from '../src/cards.js';
 import { change, channelsPathOf, FIRST, homeOf, loadChannels, migrate, NEEDED, saveChannels, staleOf } from '../src/channels.js';
 import { forTerminal } from '../src/clean.js';
 import { load, lock } from '../src/state.js';
+import { defaultConfigPath } from '../src/lead-policy.js';
 
 const USAGE = 'usage: node scripts/channels.mjs [--config <config.json>] list | register <channel id> <project> [--home] | unregister <channel id>';
 // The bridge of the README runs under launchd with KeepAlive: a killed bridge starts again and takes the lock again (F-T130-14).
@@ -25,7 +24,7 @@ const say = (line) => console.log(forTerminal(line));
 const args = process.argv.slice(2);
 try {
   const at = args.indexOf('--config');
-  const path = at === -1 ? join(homedir(), '.config', 'sage-bot', 'config.json') : args.splice(at, 2)[1];
+  const path = at === -1 ? defaultConfigPath() : args.splice(at, 2)[1];
   if (!path || path.startsWith('--')) throw new Error(`--config needs the path of the bridge's config file. ${USAGE}`);
   const [verb] = args;
   if (!['list', 'register', 'unregister'].includes(verb) || (verb === 'list' && args.length > 1)) throw new Error(USAGE);
