@@ -4,7 +4,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
-import { askCommand, createAsk } from './ask.js';
+import { askCommand, createAsk, projectsOf, UNREGISTER } from './ask.js';
+import { checkChannels, openChannels, withHome } from './channels.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
@@ -50,6 +51,7 @@ export const commandOf = (i, fetch) => ({
   sub: i.options.getSubcommand(false), options: { project: i.options.getString('project'), id: i.options.getString('id') },
   defer: (payload) => i.deferReply(payload),
   edit: (payload) => i.editReply(payload),
+  remove: () => i.deleteReply(),
 });
 
 /**
@@ -70,6 +72,10 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch)) : undefined;
+    if (i.isButton() && i.customId.startsWith(UNREGISTER)) {
+      return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member),
+        customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
+    }
     return accepts(i, config.channelId, fetch).then((ok) => ok && bridge.interaction(i));
   },
   message(m) {
@@ -80,15 +86,40 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 });
 
 /**
- * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
- * @param {{ guildId: string, channelId: string, ownerId: string, apprenticeRole: string, leadRole: string,
- *   project: string, sagePath: string, statePath: string }} config
+ * The start before Discord: refuses an old config, checks the projects, takes the lock on the gate file (one bridge at a time,
+ * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
+ * or a bad registry, stops here, before the Keychain. The returned config has the registry's home channel as its channelId: the votes
+ * and cards go there.
  */
-export async function start(config) {
-  refuseOldRoles(config); // before the lock and the Keychain: an old config never reaches Discord
+export function prepare(file, log) {
+  refuseOldRoles(file);
+  const projects = projectsOf(file);
+  lock(file.statePath);
+  const channels = openChannels(file, projects, log);
+  const config = withHome(file, channels);
+  return { config, channels, ask: createAsk({ config, channels, log }) };
+}
+
+/**
+ * The start after the login: fetches the guild and its members, sets /sage for this guild only, and logs each permission that sage-bot
+ * lacks in a registered channel. Returns the guild.
+ */
+export async function enter(client, { config, channels, ask, log }) {
+  const guild = await client.guilds.fetch(config.guildId);
+  await guild.members.fetch();
+  await guild.commands.set([askCommand(ask.projects)]);
+  for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
+  return guild;
+}
+
+/**
+ * Starts the bridge: `prepare`, then reads the token, logs in, `enter`, and runs the loop every LOOP ms.
+ * @param {{ guildId: string, channelId?: string, askChannelId?: string, ownerId: string, apprenticeRole: string, leadRole: string,
+ *   project: string, sagePath: string, statePath: string }} file
+ */
+export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const ask = createAsk({ config, log }); // the same: a config that is not safe stops here (T71)
-  lock(config.statePath);
+  const { config, channels, ask } = prepare(file, log);
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
@@ -96,9 +127,7 @@ export async function start(config) {
   const ready = new Promise((done) => client.once(Events.ClientReady, done));
   await client.login(token);
   await ready;
-  const guild = await client.guilds.fetch(config.guildId);
-  await guild.members.fetch();
-  await guild.commands.set([askCommand(ask.projects)]); // /sage, for this guild only
+  const guild = await enter(client, { config, channels, ask, log });
   const channel = await client.channels.fetch(config.channelId);
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({

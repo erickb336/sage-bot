@@ -1,4 +1,5 @@
-// The read commands of #ask-sage (T71, G18 option A): /sage board, task, gates and files, and one pointer for an @sage-bot mention.
+// The read commands of the registered channels (T71, G18 option A; T130): /sage board, task, gates and files, one pointer for an
+// @sage-bot mention, and /sage unregister for a sage-lead.
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
 // columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
 // and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. A member with neither sage role gets
@@ -9,6 +10,7 @@ import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
+import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 
 /** Asks per person in a rolling hour (G18 D5); every ask of a role holder counts, also a refused one. */
@@ -99,6 +101,7 @@ export function askCommand(projects) {
       .addStringOption(project))
     .addSubcommand((s) => s.setName('gates').setDescription('The open questions with their options').addStringOption(project))
     .addSubcommand((s) => s.setName('files').setDescription('The shared images and PDFs of a project').addStringOption(project))
+    .addSubcommand((s) => s.setName('unregister').setDescription('Stop sage-bot in this channel (sage-leads only)'))
     .toJSON();
 }
 
@@ -165,19 +168,33 @@ export function readShared(files) {
   return { attached, over };
 }
 
+/** The custom_id of the confirm button of /sage unregister: this prefix and the channel id. Its Cancel button is CANCEL. */
+export const UNREGISTER = 'channel-unregister:';
+export const CANCEL = `${UNREGISTER}cancel`;
+/** How long the confirm of /sage unregister works after Discord made it. */
+export const CONFIRM_FOR = 10 * 60_000;
+
 /**
- * The read commands for one bridge. `config` is the bridge config (askChannelId, apprenticeRole, leadRole, project, sagePath, statePath,
- * projects). `env` goes to the sage state tool (the tests give a scratch HOME). Throws a TypeError for a config that is not safe.
+ * The read commands for one bridge. `config` is the bridge config (apprenticeRole, leadRole, project, sagePath, statePath, projects).
+ * `channels` is the channel registry (src/channels.js openChannels); a lead's unregister changes it and saves it. `env` goes to the
+ * sage state tool (the tests give a scratch HOME). Throws a TypeError for a config that is not safe.
  */
-export function createAsk({ config, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env }) {
-  if (!SNOWFLAKE.test(config.askChannelId ?? '')) throw new TypeError('the config needs askChannelId as a Discord id (17 to 20 digits): the id of #ask-sage');
+export function createAsk({ config, channels, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env }) {
   const projects = projectsOf(config);
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
   const asks = new Map(); // person id → the times of their asks in the last hour; only in memory
   const warned = new Map(); // person id → until when a mention over the limit gets no second note
-  const daily = new Map(); // person id → the UTC day of their last pointer outside #ask-sage
+  const daily = new Map(); // person id → the UTC day of their last pointer in a channel that is not registered
   const say = (line) => log(forTerminal(line));
-  const here = `<#${config.askChannelId}>`;
+  /** The registered channel that a pointer names: the first one of the registry. */
+  const here = () => `<#${channels.keys().next().value}>`;
+  /** One pointer per person per UTC day in a channel that is not registered, else null. */
+  function pointer(id, text) {
+    const day = Math.floor(now() / DAY);
+    if (daily.get(id) === day) return null;
+    daily.set(id, day);
+    return text;
+  }
 
   /** Counts one ask of `id`. Returns null when it may go on, or the time when the next ask works. */
   function spend(id) {
@@ -189,19 +206,26 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
   }
   const limited = (at) => `You asked ${ASK_LIMIT} times in the last hour; that is the limit. Your next ask works at ${stamp(at)}.`;
   const isHolder = (roles) => roles.includes(config.apprenticeRole) || roles.includes(config.leadRole);
-  /** #ask-sage, or a thread of it (F-T71-5, as `accepts` does for the bridge channel). `parentId` is a thread's parent, or a promise of it. */
-  const inAsk = async (channelId, parentId) => channelId === config.askChannelId || (await parentId) === config.askChannelId;
+  /**
+   * The registered channel of a place: the channel, or the parent of a thread (F-T71-5, as `accepts` does for the home channel), as its
+   * id; null when neither is registered. `parentId` is a thread's parent, or a promise of it.
+   */
+  async function registered(channelId, parentId) {
+    if (channels.has(channelId)) return channelId;
+    const parent = await parentId;
+    return channels.has(parent) ? parent : null;
+  }
   const teamVotes = (p) => {
     if (p.project !== config.project) return new Set();
     try { return loadVotes(votesPathOf(config)); } catch { return new Set(); }
   };
 
-  /** The content (and files) of the answer to one /sage command. */
-  async function answer({ user, channelId, parentId, sub, options: o }) {
+  /** The content (and files) of the answer to one /sage command in the registered channel `at` (or a thread of it). */
+  async function answer({ user, roles, sub, options: o }, at) {
     const next = spend(user.id);
     if (next) return { content: limited(next) };
-    if (!await inAsk(channelId, parentId)) return { content: `I answer /sage in ${here}, so please ask there.` };
-    const p = o.project ? byName.get(o.project) : byName.get(projects[0].name);
+    if (sub === 'unregister') return unregisterAsk(roles, at);
+    const p = o.project ? byName.get(o.project) : byName.get(channels.get(at).project);
     if (!p) return { content: `I do not know a shared project called "${shown(o.project, 40)}".` };
     if (sub === 'files') {
       const { attached, over } = readShared(sharedFiles(p));
@@ -219,6 +243,15 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
     if (sub === 'gates') return { content: gates(p, data) };
     if (sub === 'task') return { content: task(p, data, String(o.id ?? '').trim().toUpperCase()) };
     return { content: POINTER };
+  }
+
+  /** The answer to /sage unregister: a confirm button for a sage-lead, a refusal for anyone else and for the home channel. */
+  function unregisterAsk(roles, at) {
+    if (!roles.includes(config.leadRole)) return { content: 'Only a sage-lead can unregister a channel. Ask a lead.' };
+    if (channels.get(at).home) return { content: `<#${at}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.` };
+    return { content: `Unregister <#${at}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`,
+      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${at}` },
+        { type: 2, style: 2, label: 'Cancel', custom_id: CANCEL }] }] };
   }
 
   function board(p, { tasks, open }) {
@@ -279,7 +312,15 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
         return;
       }
       let payload;
-      try { payload = await answer(i); } catch (e) {
+      try {
+        const at = await registered(i.channelId, i.parentId);
+        const text = at ? null : pointer(i.user.id, `I answer /sage in ${here()}, so please ask there.`);
+        if (!at && !text) { // ignored: the deferred reply goes again, so nothing stays in the channel
+          await i.remove().catch((e) => say(`Discord refused to remove a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`));
+          return;
+        }
+        payload = at ? await answer(i, at) : { content: text };
+      } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
       }
@@ -288,9 +329,48 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
       }
     },
     /**
-     * One message that mentions the bot: `{ user: { id, bot }, roles, channelId, parentId, content, reply }`. In #ask-sage or a thread
+     * A press of a button of the /sage unregister confirm: `{ user: { id, name, bot }, roles, customId, sentAt, update, reply }`, where
+     * `sentAt` is when Discord made the confirm. A sage-lead's press of the confirm removes the channel from the registry, saves it, logs
+     * it at the terminal with the lead's name and id, and replaces the confirm with the result; Cancel, or a confirm older than
+     * CONFIRM_FOR, changes nothing and closes the confirm. An apprentice's press changes nothing and gets a reply of its own, so the
+     * lead's confirm stays. A member with neither sage role, and a custom_id that is not CANCEL or a channel id, get nothing. Never rejects.
+     */
+    async press(b) {
+      const roles = b.roles ?? [];
+      if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '') || !isHolder(roles)) return;
+      const id = String(b.customId).slice(UNREGISTER.length);
+      if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
+      let content;
+      if (!roles.includes(config.leadRole)) {
+        await b.reply({ content: 'Only a sage-lead can unregister a channel. Nothing changed.', allowedMentions: NO_MENTIONS })
+          .catch((e) => say(`Discord refused the unregister reply: code ${e?.code ?? '-'}: ${e?.message}`));
+        return;
+      }
+      if (b.customId === CANCEL) content = 'Cancelled. Nothing changed.';
+      else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.';
+      else if (!channels.has(id)) content = `<#${id}> is not registered. Nothing changed.`;
+      else if (channels.get(id).home) content = `<#${id}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`;
+      else {
+        const { project } = channels.get(id);
+        const next = new Map(channels);
+        next.delete(id);
+        try { saveChannels(channelsPathOf(config), next); channels.delete(id); } catch (e) { // the registry in memory changes only after the save
+          say(`the channel registry could not be saved, so ${id} stays registered: ${e?.message}`);
+          content = 'I could not unregister this channel just now. Nothing changed. Please try again in a minute.';
+        }
+        if (!content) {
+          say(`the sage-lead ${b.user.name} (${b.user.id}) unregistered the channel ${id} (it was for the project ${project})`);
+          content = `<#${id}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`;
+        }
+      }
+      try { await b.update({ content, components: [], allowedMentions: NO_MENTIONS }); } catch (e) {
+        say(`Discord refused the unregister reply: code ${e?.code ?? '-'}: ${e?.message}`);
+      }
+    },
+    /**
+     * One message that mentions the bot: `{ user: { id, bot }, roles, channelId, parentId, content, reply }`. In a registered channel or a thread
      * of it: one public reply in place with the pointer (and a build line for a build: for a lead, that builds are not ready), counted
-     * like a command; over the limit, one note until the hour frees up. Elsewhere: one pointer to #ask-sage per person per UTC day.
+     * like a command; over the limit, one note until the hour frees up. Elsewhere: one pointer to a registered channel per person per UTC day (shared with /sage).
      * A bot and a member with neither sage role get nothing, and nothing counts (G20). Never rejects.
      */
     async mention(m) {
@@ -298,9 +378,8 @@ export function createAsk({ config, now = Date.now, log = (line) => process.stde
       if (m.user?.bot || !SNOWFLAKE.test(m.user?.id ?? '') || !isHolder(roles)) return;
       const id = m.user.id;
       let content = null;
-      if (!await inAsk(m.channelId, m.parentId)) {
-        const day = Math.floor(now() / DAY);
-        if (daily.get(id) !== day) { daily.set(id, day); content = `I answer in ${here}, so everyone can find the answers. Please ask there.`; }
+      if (!await registered(m.channelId, m.parentId)) {
+        content = pointer(id, `I answer in ${here()}, so everyone can find the answers. Please ask there.`);
       } else {
         const next = spend(id);
         if (!next) content = isBuild(m.content) ? `${POINTER} ${roles.includes(config.leadRole) ? LEAD_BUILDS : BUILDS}` : POINTER;
