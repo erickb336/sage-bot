@@ -8,8 +8,9 @@ import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
+import { sagePath } from '../scripts/sage-path.mjs';
 
-export const SAGE = process.env.SAGE_TOOL ?? '/Users/erickb336/.claude/plugins/cache/sage/sage/39e9bf767a1f/skills/sage/sage.mjs';
+export const SAGE = sagePath();
 export const DRIVER = '300000000000000001';
 export const LEADR = '300000000000000002';
 export const CHANNEL = '400000000000000001';

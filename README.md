@@ -6,13 +6,13 @@ This version has the vote rules (task B1), the Discord layer: the cards, the rea
 
 ## Try the demo
 
-See v1 work with no Discord account, no bot and no token. You need Node 22 or later, `npm install` once, and the sage plugin (or `SAGE_TOOL` set to its `sage.mjs`).
+See v1 work with no Discord account, no bot and no token. You need Node 22 or later, `npm install` once, and the sage plugin. The demo finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `~/.claude/plugins/cache/sage/sage/*/skills/sage/`; else it stops with a message that names `SAGE_TOOL`. The bridge tests use the same lookup.
 
 ```sh
 npm run demo
 ```
 
-The demo plays one chief session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel and its whole thread: the cards at their final state, the private notes that each person sees, the answers in sage and the reasons for the chief.
+The demo plays one chief session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in sage and the reasons for the chief.
 
 The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes command (`scripts/vote.mjs`) and bridge, on the fake Discord layer:
 
@@ -22,7 +22,7 @@ The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes
 4. In a second batch (T4), Erick answers part 1 at the terminal, and Jon ends the vote early.
 5. The session ends: its line says "ended", and its thread locks because no question is open.
 
-Everything goes into a new scratch folder (printed at the end), with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. Options: `--out <page.html>` writes the page there instead; `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
+Everything goes into a new scratch folder (printed at the end), with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. Options: `--out <page.html>` writes the page there instead (the demo checks this path before it starts, and stops with a message when it cannot make the folder or the path is a folder); `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
 
 ## The vote rules
 

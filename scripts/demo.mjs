@@ -6,17 +6,17 @@
 // are in it, so nothing touches the owner's home folder or real logbook.
 process.env.TZ = 'UTC'; // the title of a thread has the host's date
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { sageTool } from '../src/sage.js';
 import { MINUTE } from '../src/vote.js';
 import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
+import { sagePath } from './sage-path.mjs';
 
 // ---- Sample data -------------------------------------------------------------------------------------------------------------
-const SAGE = process.env.SAGE_TOOL ?? '/Users/erickb336/.claude/plugins/cache/sage/sage/39e9bf767a1f/skills/sage/sage.mjs';
 const [DRIVER, LEADR, CHANNEL] = ['300000000000000001', '300000000000000002', '400000000000000001'];
 const [ERICK, MAYA, JON, SAM] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004'];
 const MEMBERS = [
@@ -33,12 +33,19 @@ const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
 // ---- The scratch folder ------------------------------------------------------------------------------------------------------
 const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
-if (!existsSync(SAGE)) {
-  console.error(`sage-bot demo: the sage state tool is not at ${SAGE}. Install the sage plugin, or set SAGE_TOOL to its sage.mjs.`);
-  process.exit(1);
+const fail = (text) => { console.error(`sage-bot demo: ${text}`); process.exit(1); };
+// Both checks come before the run, so that a bad --out or a missing sage fails at once, with no scratch folder.
+const outArg = arg('--out') && resolve(arg('--out'));
+if (outArg) {
+  try { mkdirSync(dirname(outArg), { recursive: true }); } catch (e) {
+    fail(`cannot use --out ${outArg}: its folder ${dirname(outArg)} cannot be made (${e.code}). Give a page path in a folder.`);
+  }
+  if (statSync(outArg, { throwIfNoEntry: false })?.isDirectory()) fail(`--out ${outArg} is a folder. Give the path of the page, for example ${join(outArg, 'demo.html')}.`);
 }
+let SAGE;
+try { SAGE = sagePath(); } catch (e) { fail(e.message); }
 const root = mkdtempSync(join(tmpdir(), 'sage-bot-demo-'));
-const out = resolve(arg('--out') ?? join(root, 'demo.html'));
+const out = outArg ?? join(root, 'demo.html');
 const project = join(root, 'project');
 const statePath = join(root, 'state', 'gates.json');
 const configPath = join(root, 'config.json');
@@ -59,11 +66,15 @@ const terminal = (text) => story.push({ kind: 'terminal', at: now, text });
 
 const fake = fakeDiscord(MEMBERS);
 const postedAt = new Map();
+const editedAt = new Map(); // message id -> the time of each edit, in order: fake.messages has the payloads
 const discord = { ...fake, async post(target, payload) {
   const id = await fake.post(target, payload);
   postedAt.set(id, now);
   story.push({ kind: 'post', id });
   return id;
+}, async edit(target, id, payload) {
+  await fake.edit(target, id, payload);
+  editedAt.set(id, [...editedAt.get(id) ?? [], now]);
 } };
 const log = [];
 const bridge = createBridge({ sage: sageTool({ sagePath: SAGE, project, env }), discord, config: CONFIG, statePath, now: () => now, log: (l) => log.push(l) });
@@ -147,7 +158,7 @@ await advance(5 * MINUTE);
 await press(JON, 'Jon, a sage-lead, breaks the tie on part 2: B.', `tiebreak:${batch}:1:1`);
 step('Jon breaks the tie; the bridge gives sage the answers');
 
-// The owner answers one part of a second small batch at the terminal (G10 a).
+// The owner answers one part of a second small batch at the terminal: the owner's answer at the terminal is final.
 await advance(MINUTE);
 const g5 = gateAdd('T4', 'What does the empty reports page show?', 'An example report and a Create button|Only a Create button', 'An example report and a Create button');
 const g6 = gateAdd('T4', 'Does the empty page link to the help article?', 'Yes, under the button|No', 'Yes, under the button');
@@ -159,7 +170,7 @@ const second = `${g5}+${g6}`;
 step(`gate add ${g5}+${g6} (T4): a second batch card in the thread`);
 await advance(MINUTE);
 sage('gate', 'answer', g5, 'A');
-terminal(`Erick, the owner, answers ${g5} at the terminal: A. It is final (G10).`);
+terminal(`Erick, the owner, answers ${g5} at the terminal: A. The owner's answer at the terminal is final.`);
 await loop();
 step(`Erick answers ${g5} at the terminal: the card shows it as final`);
 await advance(MINUTE);
@@ -192,9 +203,14 @@ const reasons = [batch, second].map((id) => [id, node([script('reasons.mjs'), st
 // ---- The page ------------------------------------------------------------------------------------------------------------------
 const roles = (text) => text.replaceAll(`<@&${DRIVER}>`, '@sage-driver').replaceAll(`<@&${LEADR}>`, '@sage-lead');
 /** A message as Discord shows it: an edit replaces only the fields that it has, so a card keeps the text of its first post. */
-const latest = (id) => { const p = Object.assign({}, ...fake.messages.get(id)); return p.content ? { ...p, content: roles(p.content) } : p; };
+const show = (p) => (p.content ? { ...p, content: roles(p.content) } : p);
+const latest = (id) => show(Object.assign({}, ...fake.messages.get(id)));
+/** Each state of a message that looks different, with its time: the first post, then each edit that changed what people see. */
+function states(id) {
+  const all = fake.messages.get(id).map((_, i, ps) => ({ p: show(Object.assign({}, ...ps.slice(0, i + 1))), at: i ? editedAt.get(id)[i - 1] : postedAt.get(id) }));
+  return all.filter((s, i) => !i || message(s.p, s.at) !== message(all[i - 1].p, s.at));
+}
 const lineId = thread.from;
-const end = now;
 const shown = story.map((e) => {
   if (e.kind === 'post') return fake.where.get(e.id) === threadId ? message(latest(e.id), postedAt.get(e.id)) : '';
   if (e.kind === 'terminal') return `<div class="term"><b>Terminal</b> · ${hhmm(e.at / 1000)} · ${esc(e.text)}</div>`;
@@ -207,6 +223,7 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
   .chan { color: #949ba4; font-size: 13px; font-weight: 600; margin: 0 0 4px; } .chan b { color: #f2f3f5; }
   .tag { display: inline-block; background: #404249; border-radius: 3px; padding: 0 6px; font-size: 12px; color: #dbdee1; margin-left: 6px; }
   .term { margin-top: 10px; color: #b5bac1; font: 13px/1.4 ui-monospace, Menlo, monospace; background: #1e1f22; border-radius: 4px; padding: 6px 10px; }
+  .edited { margin: 6px 0 0 52px; border-left: 2px solid #404249; padding-left: 10px; font-size: 14px; } .when { color: #949ba4; font-size: 12px; }
   .act { margin-top: 14px; color: #949ba4; font-size: 13px; } .act b { color: #f2f3f5; }
   table { border-collapse: collapse; font-size: 13px; } td, th { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; } th { color: #949ba4; }
   pre { white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; background: #1e1f22; border-radius: 4px; padding: 8px 10px; margin: 6px 0 12px; }
@@ -215,7 +232,8 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 <section><h2>The sage-bot demo: one chief session</h2><p class="about">npm run demo played this session with the real sage state tool, the real hook,
 the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: owner, sage-driver and sage-lead;
 Maya: sage-driver; Jon: sage-driver and sage-lead; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
-<section id="channel"><p class="chan"># <b>sage-chief</b> · the parent channel</p>${message(latest(lineId), end)}
+<section id="channel"><p class="chan"># <b>sage-chief</b> · the parent channel. The bridge edits the session's line as the session goes on: first as posted, then each edit.</p>
+${states(lineId).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span><div>${md(s.p.content, s.at)}</div></div>` : message(s.p, s.at))).join('\n')}
 <p class="about">Thread: <b>${esc(thread.name)}</b><span class="tag">${thread.locked ? 'locked' : 'open'}</span><span class="tag">${thread.archived ? 'archived' : 'active'}</span>
 <span class="tag">${fake.in(threadId).length} messages</span></p></section>
 <section id="thread"><p class="chan">Thread <b>${esc(thread.name)}</b> · the session thread, in order. Each card shows its final state; the grey lines say what people and the terminal did.</p>
@@ -227,7 +245,6 @@ ${gates.map((g) => `<tr><td>${esc(g.id)}</td><td>${esc(g.task)}</td><td>${esc(g.
 ${reasons.map(([id, text]) => `<p class="about">node scripts/reasons.mjs &lt;gate file&gt; ${esc(id)}</p><pre>${esc(text)}</pre>`).join('\n')}</section>
 </body></html>
 `;
-mkdirSync(resolve(out, '..'), { recursive: true });
 writeFileSync(out, page);
 step(`page written`);
 
