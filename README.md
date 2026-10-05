@@ -34,7 +34,7 @@ All files go into a new scratch folder, so the demo never touches your home fold
 ![The flow of one question, in 9 numbered steps between five lanes: sage, the logbook, the bridge, the session thread and the team. 1, sage asks a question in the logbook. 2, sage marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-apprentice and sage-lead. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, sage reads it and goes on.](docs/flow.svg)
 
 1. sage asks a question in the logbook, as usual. Most questions stay at the terminal for the owner.
-2. When a question is for the team, sage marks it with `node scripts/vote.mjs G42`.
+2. When a question is for the team, sage marks it with `node scripts/vote.mjs G42`, in its project's folder. The script takes the project of that folder.
 3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
 4. It posts a card in the thread of sage's session, and pings the sage-apprentice and sage-lead roles.
 5. A member of the team presses an option on the card.
@@ -95,12 +95,13 @@ One bridge posts the cards of every project in the config's `projects` (T132). E
 | The session thread | `Session 3 · sage-bot · Tue 4 Oct`, in the home channel, as for one project |
 | The team votes list | `team votes: sage-bot/G1` |
 
-- sage marks a question of another project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the bridge's own `project`.
+- sage marks a question with `node scripts/vote.mjs G1` in the project's folder, or names the project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook); the bridge's own `project` only when no listed folder holds it.
 - A press records the answer in the logbook of the card's project only. A press on G1 of one project never changes G1 of another project.
 - Erick's answer at the terminal is final in every project (G10).
 - A project that is not in the config's `projects` gets no cards. `vote.mjs` and `reasons.mjs` refuse it.
 - The bridge's own `project` must be one of `projects`. A trailing slash or a symlink is the same folder. If no listed project has that folder, the bridge, the hook, `vote.mjs` and `reasons.mjs` stop with one line: add the project to `projects`, with a name.
-- A card of a project that you take out of `projects` takes no more presses. At its next start, the bridge closes each open card of that project once: the buttons go, and the card says "This question's project is no longer served; Erick answers it at the terminal." The card gets no reminders, and its thread can lock. A press on an old copy of the card gets the same note.
+- Each listed folder must exist. If one does not, the bridge stops at the start, before its lock and the Keychain, and `vote.mjs` and `reasons.mjs` stop too, with one line that names the project and its path: "the folder of project beta (/Users/you/beta) does not exist. Fix its path in projects, or take the project out. Nothing changed."
+- A card of a project that you take out of `projects` takes no more presses. At its next start, the bridge closes each open card of that project once, also across later restarts: the buttons go, and the card says "This question's project is no longer served; Erick answers it at the terminal." The card gets no reminders, and its thread can lock. A press on an old copy of the card gets the same note. When you put the project back in `projects`, its closed cards get their buttons back without the note, and then the reminders again.
 - Keep each project's name as it was at its first start. The bridge knows a project only by its name, so a new name is a new project: the cards of the old name stop, and a question that sage marks again under the new name is not posted while its old card exists. To find the name, look at a card title or a thread title (`Question sage-bot/G1`, `Session 3 · sage-bot · Tue 4 Oct`), or at the keys in the team votes list. At each start, the bridge logs one line that names every card and mark of a project that is not in `projects`, for example "the gate file holds cards of project 'project', which is not in projects: G1, G2; keep a project's name as it was at its first start". If you see that line after a rename, put the old name back.
 - With one project, you also see its name: in the card title, in the ping and in the thread title, as in the table above.
 - At the first start after the update, the bridge moves its gate file, its team votes list and its leads-only list to the new names, once. Each card from before keeps its old buttons until the bridge edits it. Until then, an old button still counts on that card.
@@ -274,13 +275,13 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 Run each command in the sage-bot folder.
 
 - `vote.mjs`, `reasons.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
-- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of another project in `projects`. Without it, the question is of the bridge's own `project`.
+- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of a project in `projects`. Without it, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook); the bridge's own `project` only when no listed folder holds it.
 - `bridge.mjs` and `launchd.mjs` take the path of the config file as their only argument.
 
 | You want to | Do this |
 | --- | --- |
-| Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
-| Send a question of another project to the team | `node scripts/vote.mjs --project <name> G42` |
+| Send a question to the team | `node scripts/vote.mjs G42` in the project's folder (several ids in one command for one batch) |
+| Send a question of a named project to the team, from any folder | `node scripts/vote.mjs --project <name> G42` |
 | Ask the sage-leads for a recommendation, as sage | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
 | Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
