@@ -6,8 +6,8 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renam
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Client, GatewayIntentBits, MessageFlags } from 'discord.js';
-import { askCommand, attachmentName, BUILDS, createAsk, HOUR, MAX_BYTES, NO_ROLE, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
+import { Client, GatewayIntentBits } from 'discord.js';
+import { askCommand, attachmentName, BUILDS, createAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
 import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
@@ -15,12 +15,12 @@ import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000001';
 const SECRET = 'ZZSECRET';
-const PRIVATE = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is private (checked in `answers`)
+const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20
 const ROLES = { [MAYA]: [APPRENTICE], [JON]: [LEADR] };
 
-/** The edits of a fake command's reply, after a check that its first call is one private defer. */
+/** The edits of a fake command's reply, after a check that its first call is one public defer: no flags, so not Ephemeral (64). */
 function answers(i) {
-  assert.deepEqual(i.replies[0], { kind: 'defer', flags: MessageFlags.Ephemeral });
+  assert.deepEqual(i.replies[0], { kind: 'defer' });
   assert.ok(i.replies.slice(1).every((r) => r.kind === 'edit'), JSON.stringify(i.replies));
   return i.replies.slice(1).map(({ kind, ...payload }) => payload);
 }
@@ -35,7 +35,7 @@ function world(t) {
   b.sh('task', 'add', '--title', 'Wake notes', '--size', 'tiny');
   b.sh('finding', 'add', 'T1', '--source', 'qa', '--severity', 'high', '--summary', `finding ${SECRET}`);
   b.sh('log', 'T1', `owner said ${SECRET}`, '--why', `security detail ${SECRET}`);
-  b.sh('gate', 'add', 'T1', '--question', 'Which sort is the default?', '--options', 'Name|Date', '--recommend', `Name ${SECRET}`, '--default', 'Name');
+  b.sh('gate', 'add', 'T1', '--question', 'Which sort is the default?', '--options', 'Name|Date', '--recommend', 'Name', '--default', 'Date');
   b.sh('gate', 'add', 'T2', '--question', 'Ship the wake note?', '--options', 'Yes|No', '--recommend', 'Yes');
   b.mark('G1');
   const book = b.sh('logbook');
@@ -59,60 +59,88 @@ function world(t) {
   return b;
 }
 
-const BOARD = '**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project\'s records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n- G2 (T2): Ship the wake note?';
-const GATES = '**Open questions · project** (2)\n- G1 (T1), team vote: Which sort is the default?\n  A. Name · B. Date\n- G2 (T2), answered at the terminal: Ship the wake note?\n  A. Yes · B. No';
+const G1 = '  A. Name · B. Date\n  Recommended: Name · Default: Date';
+const G2 = '  A. Yes · B. No\n  Recommended: Yes';
+const BOARD = `**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project's records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n${G1}\n- G2 (T2): Ship the wake note?\n${G2}`;
+const GATES = `**Open questions · project** (2)\n- G1 (T1), team vote: Which sort is the default?\n${G1}\n- G2 (T2), answered at the terminal: Ship the wake note?\n${G2}`;
 
-test('each command answers an apprentice and a lead in private, from the safe columns only', async (t) => {
+test('each command answers an apprentice and a lead in public (G20), from the safe columns only', async (t) => {
   const b = world(t);
   for (const who of [MAYA, JON]) {
-    assert.deepEqual(await b.cmd(who, 'board'), [{ content: BOARD, ...PRIVATE }]);
-    assert.deepEqual(await b.cmd(who, 'gates', { project: 'project' }), [{ content: GATES, ...PRIVATE }]);
-    assert.deepEqual(await b.cmd(who, 'task', { id: 't1' }), [{ content: '**T1 · Board sort**\nsmall · building · pull request #17', ...PRIVATE }]);
-    assert.deepEqual(await b.cmd(who, 'task', { id: 'T2' }), [{ content: '**T2 · Wake notes**\ntiny · framed · no pull request', ...PRIVATE }]);
-    assert.deepEqual(await b.cmd(who, 'task', { id: 'T9' }), [{ content: 'project has no task T9.', ...PRIVATE }]);
-    assert.deepEqual(await b.cmd(who, 'files'), [{ content: 'project shares no files.', ...PRIVATE }]);
+    assert.deepEqual(await b.cmd(who, 'board'), [{ content: BOARD, ...PUBLIC }]);
+    assert.deepEqual(await b.cmd(who, 'gates', { project: 'project' }), [{ content: GATES, ...PUBLIC }]);
+    assert.deepEqual(await b.cmd(who, 'task', { id: 't1' }), [{ content: '**T1 · Board sort**\nsmall · building · pull request #17', ...PUBLIC }]);
+    assert.deepEqual(await b.cmd(who, 'task', { id: 'T2' }), [{ content: '**T2 · Wake notes**\ntiny · framed · no pull request', ...PUBLIC }]);
+    assert.deepEqual(await b.cmd(who, 'task', { id: 'T9' }), [{ content: 'project has no task T9.', ...PUBLIC }]);
+    assert.deepEqual(await b.cmd(who, 'files'), [{ content: 'project shares no files.', ...PUBLIC }]);
   }
 });
 
 test('the PR of a task links to the repository when the project names one', async (t) => {
   const b = world(t);
   b.ask = b.makeAsk({ projects: [{ name: 'sage-bot', project: b.project, repo: 'https://github.com/sample/sage-bot' }] });
-  assert.deepEqual(await b.cmd(MAYA, 'task', { id: 'T1' }), [{ content: '**T1 · Board sort**\nsmall · building · pull request [#17](<https://github.com/sample/sage-bot/pull/17>)', ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'task', { id: 'T1' }), [{ content: '**T1 · Board sort**\nsmall · building · pull request [#17](<https://github.com/sample/sage-bot/pull/17>)', ...PUBLIC }]);
 });
 
-test('no answer holds text from decisions.tsv, findings, briefs, reports, a recommendation or a branch', async (t) => {
+test('no answer holds text from decisions.tsv, findings, briefs, reports, a why or a branch; the open questions show in full (G20)', async (t) => {
   const b = world(t);
+  b.sh('gate', 'add', 'T2', '--question', 'Rename the <@&300000000000000001> field?', '--options', 'Yes|**No**', '--recommend', '@everyone [x](https://evil.example)', '--default', '`No`');
   const all = [];
   for (const [sub, options] of [['board'], ['gates'], ['task', { id: 'T1' }], ['task', { id: 'T2' }], ['files']]) all.push(...await b.cmd(JON, sub, options));
   all.push(...await b.mention(MAYA, 'what is new?'));
   assert.equal(all.length, 6);
   for (const r of all) assert.ok(!JSON.stringify(r).toUpperCase().includes(SECRET), JSON.stringify(r));
+  // The recommendation and the default of each open question, escaped as all logbook text: no ping, no link, no markdown.
+  const g3 = 'G3 (T2), answered at the terminal: Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\*\n  Recommended: @everyone \\[x\\](https:// evil.example) · Default: No';
+  assert.deepEqual(all[1], { content: `${GATES.replace('(2)', '(3)')}\n- ${g3}`, ...PUBLIC });
+  assert.ok(all[0].content.endsWith(`\n- ${g3.replace(', answered at the terminal', '')}`), all[0].content);
 });
 
-test('a member with no role gets the role note; a bot gets nothing; both in private where there is a reply', async (t) => {
+test('G20: a member with neither sage role gets nothing for a command or a mention, and nothing counts; a bot gets nothing', async (t) => {
   const b = world(t);
-  assert.deepEqual(await b.cmd(SAM, 'board'), [{ content: NO_ROLE, ...PRIVATE }]);
+  const command = async (user, roles, channelId = ASK) => {
+    const i = fakeCommand({ user, roles, channelId, sub: 'board' });
+    await b.ask.command(i);
+    return i.replies;
+  };
+  const say = async (user, roles, content, channelId = ASK) => {
+    const m = fakeMention({ user, roles, channelId, content });
+    await b.ask.mention(m);
+    return m.replies;
+  };
+  for (let n = 1; n <= 12; n++) { // past the limit of 10: no note either
+    assert.deepEqual(await command(SAM, []), [], `command ${n}`);
+    assert.deepEqual(await command(SAM, ['300000000000000123'], ELSEWHERE), [], `command elsewhere ${n}`);
+    assert.deepEqual(await say(SAM, [], '<@1> what is new?'), [], `mention ${n}`);
+    assert.deepEqual(await say(SAM, [], '<@1> add a dark mode', ELSEWHERE), [], `mention elsewhere ${n}`);
+  }
+  assert.deepEqual(b.lines, []);
+  // Nothing counted: with a role, Sam gets his daily pointer elsewhere, 9 pointers and a 10th answer here, then the limit note.
+  assert.deepEqual(await say(SAM, [APPRENTICE], '<@1> board?', ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: { parse: [], repliedUser: false } }]);
+  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [APPRENTICE], 'hi'), [{ content: POINTER, allowedMentions: { parse: [], repliedUser: false } }], `ask ${n}`);
+  assert.deepEqual(await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }), [{ content: BOARD, ...PUBLIC }]);
+  assert.match((await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }))[0].content, /^You asked 10 times in the last hour/);
   assert.deepEqual(await b.cmd(BOT, 'board', {}, { roles: [APPRENTICE, LEADR], bot: true }), []);
   assert.deepEqual(await b.mention(BOT, 'hello', ASK, true), []);
 });
 
-test('a command outside #ask-sage gets a private pointer to it and no data', async (t) => {
+test('a command outside #ask-sage gets a public pointer to it and no data', async (t) => {
   const b = world(t);
-  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
 });
 
 test('a project that is not in the list is refused, and the reply names no other project', async (t) => {
   const b = world(t);
-  assert.deepEqual(await b.cmd(MAYA, 'board', { project: 'payroll' }), [{ content: 'I do not know a shared project called "payroll".', ...PRIVATE }]);
-  assert.deepEqual(await b.cmd(MAYA, 'board', { project: '<@&1> **x**' }), [{ content: 'I do not know a shared project called "\\<@&1\\> \\*\\*x\\*\\*".', ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', { project: 'payroll' }), [{ content: 'I do not know a shared project called "payroll".', ...PUBLIC }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', { project: '<@&1> **x**' }), [{ content: 'I do not know a shared project called "\\<@&1\\> \\*\\*x\\*\\*".', ...PUBLIC }]);
 });
 
-test('the 11th ask in a rolling hour is refused with the time of the next ask; refused asks count too', async (t) => {
+test('the 11th ask in a rolling hour is refused in public with the time of the next ask; refused asks count too', async (t) => {
   const b = world(t);
   await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }); // refused for the channel, still counts
   for (let n = 2; n <= 10; n++) { b.now += 60_000; assert.equal((await b.cmd(MAYA, 'task', { id: 'T1' }))[0].content.startsWith('**T1'), true); }
   const next = Math.floor((T0 + HOUR) / 1000);
-  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${next}:t>.`, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${next}:t>.`, ...PUBLIC }]);
   assert.equal((await b.cmd(JON, 'board'))[0].content, BOARD); // the limit is per person
   b.now = T0 + HOUR + 1;
   assert.equal((await b.cmd(MAYA, 'board'))[0].content, BOARD);
@@ -122,8 +150,8 @@ test('a mention in #ask-sage gets one public pointer that pings nobody; a build 
   const b = world(t);
   const quiet = { parse: [], repliedUser: false };
   assert.deepEqual(await b.mention(MAYA, '<@1> show the board'), [{ content: POINTER, allowedMentions: quiet }]);
-  assert.deepEqual(await b.mention(SAM, '<@1> add a dark mode'), [{ content: `${POINTER} ${BUILDS}`, allowedMentions: quiet }]);
-  for (let n = 2; n <= 10; n++) assert.equal((await b.mention(MAYA, 'hi')).length, 1);
+  assert.deepEqual(await b.mention(MAYA, '<@1> add a dark mode'), [{ content: `${POINTER} ${BUILDS}`, allowedMentions: quiet }]);
+  for (let n = 3; n <= 10; n++) assert.equal((await b.mention(MAYA, 'hi')).length, 1);
   assert.deepEqual((await b.mention(MAYA, 'hi'))[0].content, `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${Math.floor((T0 + HOUR) / 1000)}:t>.`);
   assert.deepEqual(await b.mention(MAYA, 'hi'), []); // one note, not one per mention
   assert.equal((await b.cmd(MAYA, 'board'))[0].content.startsWith('You asked 10 times'), true); // mentions and commands share the count
@@ -142,7 +170,7 @@ test('a mention outside #ask-sage gets one pointer per person per day, then noth
 test('untrusted logbook text is made safe: no mention, no link, no markdown from a title or a question', async (t) => {
   const b = world(t);
   b.sh('task', 'add', '--title', '@everyone <@&300000000000000001> [x](https://evil.example) **bold**', '--size', 'tiny');
-  assert.deepEqual(await b.cmd(MAYA, 'task', { id: 'T3' }), [{ content: '**T3 · @everyone \\<@&300000000000000001\\> \\[x\\](https:// evil.example) \\*\\*bold\\*\\***\ntiny · framed · no pull request', ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'task', { id: 'T3' }), [{ content: '**T3 · @everyone \\<@&300000000000000001\\> \\[x\\](https:// evil.example) \\*\\*bold\\*\\***\ntiny · framed · no pull request', ...PUBLIC }]);
 });
 
 /** A project folder with files for /sage files. */
@@ -174,7 +202,7 @@ test('/sage files attaches only allow-listed files: regular, inside the project,
     'design/shots/06.png', 'design/shots/07.png', 'design/shots/08.png', 'design/shots/09.png', 'design/shots/10.png'];
   assert.deepEqual(got, [{
     content: `10 shared file(s) of site:\n${names.map((n) => `- ${n}`).join('\n')}`,
-    files: names.map((n, k) => ({ name: n.split('/').at(-1), size: k + 1 })), ...PRIVATE }]);
+    files: names.map((n, k) => ({ name: n.split('/').at(-1), size: k + 1 })), ...PUBLIC }]);
   const one = createAsk({ config: { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath, projects: [{ name: 'site', project, files: ['docs/*.svg', 'docs/up/*.png', 'design/shots/big.png', 'design/shots/link.png'] }] }, log: () => {} });
   const j = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files' });
   await one.command(j);
@@ -263,7 +291,7 @@ test('F-T71-2: every /sage command defers in private before any file or logbook 
   assert.equal(board.content.split('\n')[1], '3 task(s) · building 1 · framed 2');
   const s = site(t, b, { 'a.svg': '<svg/>' }, ['shots/*.svg']);
   assert.deepEqual(await files(s.ask, { onDefer: () => writeFileSync(join(s.project, 'shots', 'b.svg'), '<svg>b</svg>') }),
-    [{ content: '2 shared file(s) of site:\n- shots/a.svg\n- shots/b.svg', files: [{ name: 'a.svg', size: 6 }, { name: 'b.svg', size: 12 }], ...PRIVATE }]);
+    [{ content: '2 shared file(s) of site:\n- shots/a.svg\n- shots/b.svg', files: [{ name: 'a.svg', size: 6 }, { name: 'b.svg', size: 12 }], ...PUBLIC }]);
   // A defer that Discord refuses (the interaction is gone) ends the command: no edit, one log line.
   const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'board' });
   i.defer = async () => { throw Object.assign(new Error('Unknown interaction'), { code: 10062 }); };
@@ -286,12 +314,12 @@ process.exit(spawnSync(process.execPath, [${JSON.stringify(SAGE)}, ...process.ar
   const lookups = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((l) => l === 'logbook').length : 0);
   b.ask = b.makeAsk({ sagePath: wrapper });
   writeFileSync(fail, '');
-  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: 'I could not read the records of project just now. Nothing is lost. Please ask again in a minute.', ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: 'I could not read the records of project just now. Nothing is lost. Please ask again in a minute.', ...PUBLIC }]);
   assert.equal(lookups(), 1);
   rmSync(fail);
-  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: BOARD, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: BOARD, ...PUBLIC }]);
   assert.equal(lookups(), 2);
-  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: GATES, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: GATES, ...PUBLIC }]);
   assert.equal(lookups(), 2);
 });
 
@@ -308,7 +336,7 @@ test('F-T71-1: /sage files sends at most 8 MB in one reply; the files that do no
   const mb = (n) => Buffer.alloc(n * 1024 * 1024);
   const mix = site(t, b, { 'b1.png': mb(5), 'b2.png': mb(4), 'b3.png': mb(3) }, ['shots/*.png']);
   assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.\n- shots/b2.png',
-    files: [{ name: 'b1.png', size: 5 * 1024 * 1024 }, { name: 'b3.png', size: 3 * 1024 * 1024 }], ...PRIVATE }]);
+    files: [{ name: 'b1.png', size: 5 * 1024 * 1024 }, { name: 'b3.png', size: 3 * 1024 * 1024 }], ...PUBLIC }]);
 });
 
 test('F-T71S-1: a file swapped between the check and the read is never sent: not for a symlink, not for another file', async (t) => {
@@ -335,10 +363,10 @@ test('F-T71S-2 and F-T71-3: a dangling symlink is skipped and the other files st
   const b = world(t);
   const s = site(t, b, { 'ok.svg': '<svg/>', 'real.svg': '<svg>r</svg>' }, ['shots/*.svg']);
   symlinkSync(join(s.root, 'missing.svg'), join(s.project, 'shots', 'gone.svg'));
-  assert.deepEqual(await files(s.ask), [{ content: '2 shared file(s) of site:\n- shots/ok.svg\n- shots/real.svg', files: [{ name: 'ok.svg', size: 6 }, { name: 'real.svg', size: 12 }], ...PRIVATE }]);
+  assert.deepEqual(await files(s.ask), [{ content: '2 shared file(s) of site:\n- shots/ok.svg\n- shots/real.svg', files: [{ name: 'ok.svg', size: 6 }, { name: 'real.svg', size: 12 }], ...PUBLIC }]);
   symlinkSync(join(s.project, 'shots', 'real.svg'), join(s.project, 'shots', 'inlink.svg'));
   const only = createAsk({ config: { ...s.config, projects: [{ name: 'site', project: s.project, files: ['shots/inlink.svg'] }] }, log: () => {} });
-  assert.deepEqual(await files(only), [{ content: 'site shares no files.', ...PRIVATE }]);
+  assert.deepEqual(await files(only), [{ content: 'site shares no files.', ...PUBLIC }]);
 });
 
 test('F-T71Q-2: an attachment name keeps only A-Z, a-z, 0-9, dot, dash and underscore: a sweep over every code point', async (t) => {
@@ -359,27 +387,24 @@ test('F-T71Q-2: an attachment name keeps only A-Z, a-z, 0-9, dot, dash and under
 
 test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #ask-sage; a thread of another channel does not', async (t) => {
   const b = world(t);
-  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ASK }), [{ content: BOARD, ...PRIVATE }]);
-  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: Promise.resolve(ASK) }), [{ content: BOARD, ...PRIVATE }]);
-  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ASK }), [{ content: BOARD, ...PUBLIC }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: Promise.resolve(ASK) }), [{ content: BOARD, ...PUBLIC }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
   const quiet = { parse: [], repliedUser: false };
   assert.deepEqual(await b.mention(MAYA, '<@1> hi', THREAD, false, ASK), [{ content: POINTER_TEXT, allowedMentions: quiet }]);
   assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
 });
 
-test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, a build verb that starts a sentence, a member with no role', async (t) => {
+test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, an apprentice, a build verb that starts a sentence', async (t) => {
   const b = world(t);
   const say = async (who, text) => (await b.mention(who, text))[0]?.content;
   assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
   assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
-  for (const text of ['<@1> any update on T7?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(SAM, text), POINTER_TEXT, text);
+  for (const text of ['<@1> any update on T7?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
+  b.now += HOUR; // a new hour, so that the limit does not end the list
   for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
-    assert.equal(await say(SAM, text), `${POINTER_TEXT} Builds are for sage-leads: ask a lead.`, text);
+    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for sage-leads: ask a lead.`, text);
   }
-  b.now += HOUR; // a new hour: Sam asks 10 times, then once more
-  for (let n = 1; n <= 10; n++) await say(SAM, 'hi');
-  assert.equal(await say(SAM, 'hi'), 'Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.');
-  assert.deepEqual(await b.cmd(SAM, 'board'), [{ content: 'Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.', ...PRIVATE }]);
 });
 
 test('F-T71Q-5: with no projects, a folder name that makes no valid name gets a message with the cause and the fix', () => {
@@ -415,9 +440,9 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : { isThread: () => false });
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
-  const defer = ['defer', { flags: MessageFlags.Ephemeral }];
-  // Roles come from the member: an option that names the lead role changes nothing.
-  assert.deepEqual(await run(chat({ roles: [], strings: { role: LEADR, roles: LEADR } })), [defer, ['edit', NO_ROLE]]);
+  const defer = ['defer', {}]; // public (G20)
+  // Roles come from the member: an option that names the lead role changes nothing, and a member with no role gets nothing (G20).
+  assert.deepEqual(await run(chat({ roles: [], strings: { role: LEADR, roles: LEADR } })), []);
   assert.deepEqual(await run(chat({ user: JON, roles: [LEADR] })), [defer, ['edit', BOARD]]);
   assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], guildId: '200000000000000002' })), []);
   assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], channelId: THREAD })), [defer, ['edit', BOARD]]); // a thread of #ask-sage, not in the cache
@@ -449,8 +474,8 @@ test('F-T71-10 and F-T71-12: an answered question is not open; merged, concluded
   b.sh('task', 'add', '--title', 'Dropped', '--size', 'tiny');
   setStates(b, { T1: 'merged', T3: 'concluded', T4: 'abandoned' });
   assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: ['**Board · project**', '4 task(s) · merged 1 · framed 1 · concluded 1 · abandoned 1',
-    "1 task(s) left. Time left is not estimated yet: the project's records have no estimate.", '1 open question(s):', '- G1 (T1): Which sort is the default?'].join('\n'), ...PRIVATE }]);
-  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: '**Open questions · project** (1)\n- G1 (T1), team vote: Which sort is the default?\n  A. Name · B. Date', ...PRIVATE }]);
+    "1 task(s) left. Time left is not estimated yet: the project's records have no estimate.", '1 open question(s):', '- G1 (T1): Which sort is the default?', G1].join('\n'), ...PUBLIC }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: `**Open questions · project** (1)\n- G1 (T1), team vote: Which sort is the default?\n${G1}`, ...PUBLIC }]);
 });
 
 test('F-T71-11: a folder symlink to a sibling folder whose name starts with the project name shares nothing from it', async (t) => {
@@ -459,17 +484,17 @@ test('F-T71-11: a folder symlink to a sibling folder whose name starts with the 
   mkdirSync(join(s.root, 'site-old'));
   writeFileSync(join(s.root, 'site-old', 'leak.svg'), SECRET);
   symlinkSync(join(s.root, 'site-old'), join(s.project, 'shots', 'old')); // inside the project, to /…/site-old
-  assert.deepEqual(await files(s.ask), [{ content: '1 shared file(s) of site:\n- shots/ok.svg', files: [{ name: 'ok.svg', size: 6 }], ...PRIVATE }]);
+  assert.deepEqual(await files(s.ask), [{ content: '1 shared file(s) of site:\n- shots/ok.svg', files: [{ name: 'ok.svg', size: 6 }], ...PUBLIC }]);
 });
 
 test('F-T71-13: a reply over 2000 characters is cut to 2000 with an ellipsis, as Discord allows no more', async (t) => {
   const b = world(t);
   const questions = Array.from({ length: 12 }, (_, n) => `Question ${n + 3} ${'x'.repeat(180)}?`);
   for (const q of questions) b.sh('gate', 'add', 'T2', '--question', q, '--options', 'Yes|No', '--recommend', 'Yes');
-  const full = [...BOARD.split('\n').slice(0, 3), '14 open question(s):', '- G1 (T1): Which sort is the default?', '- G2 (T2): Ship the wake note?',
-    ...questions.map((q, n) => `- G${n + 3} (T2): ${q}`)].join('\n');
+  const full = [...BOARD.split('\n').slice(0, 3), '14 open question(s):', '- G1 (T1): Which sort is the default?', G1, '- G2 (T2): Ship the wake note?', G2,
+    ...questions.map((q, n) => `- G${n + 3} (T2): ${q}\n${G2}`)].join('\n');
   assert.ok(full.length > 2000, String(full.length));
-  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `${full.slice(0, 1999)}…`, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `${full.slice(0, 1999)}…`, ...PUBLIC }]);
 });
 
 test('F-T71-13: the team vote label comes only from the bridge\'s own project, not from a gate of another project with the same id', async (t) => {
@@ -482,8 +507,8 @@ test('F-T71-13: the team vote label comes only from the bridge\'s own project, n
   sh('task', 'add', '--title', 'Other work', '--size', 'tiny');
   sh('gate', 'add', 'T1', '--question', 'Other question?', '--options', 'Yes|No', '--recommend', 'Yes');
   b.ask = b.makeAsk({ projects: [{ name: 'project', project: b.project }, { name: 'other', project: other }] });
-  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'other' }), [{ content: '**Open questions · other** (1)\n- G1 (T1), answered at the terminal: Other question?\n  A. Yes · B. No', ...PRIVATE }]);
-  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'project' }), [{ content: GATES, ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'other' }), [{ content: `**Open questions · other** (1)\n- G1 (T1), answered at the terminal: Other question?\n${G2}`, ...PUBLIC }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'project' }), [{ content: GATES, ...PUBLIC }]);
 });
 
 test('F-T71-13: a mention or a command from a user id that is not a Discord id gets nothing', async (t) => {

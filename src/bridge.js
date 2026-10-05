@@ -674,12 +674,13 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       await flush();
       await reconcile(); // again, for the lines of the sessions that got a card or an answer in this loop
     },
-    /** One Discord interaction (a button or the reason form). Never rejects. */
+    /** One Discord interaction (a button or the reason form). A member with neither sage role gets no reply, and nothing changes (G20). Never rejects. */
     async interaction(i) {
       const by = i?.user?.id;
       try {
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
+        if (!ppl.holders.has(by)) return;
         // The owner's answers at the terminal come first: a press never counts on a part that has one (G10).
         await takeOwner(await sage.gates(), ppl);
         const pressed = parseCustomId(i.customId);

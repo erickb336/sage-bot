@@ -139,8 +139,8 @@ step(`Maya answers ${single}: final`);
 await advance(20_000);
 await press(JON, 'Jon presses B, 20 seconds later.', `press:${single}:0:1`);
 await advance(MINUTE);
-await press(SAM, 'Sam has no role and presses part 1, A.', `press:${batch}:0:0`);
-step('Sam presses: refused, only Sam sees the note');
+await press(SAM, 'Sam has no role and presses part 1, A. sage-bot ignores the press: Sam gets no reply, and the vote does not change.', `press:${batch}:0:0`);
+step('Sam presses: no sage role, so the bridge ignores the press and Sam gets no reply');
 await advance(MINUTE);
 const vote = async (who, name, part, option, reason, form = false) => {
   await press(who, `${name} votes ${'AB'[option]} on part ${part + 1}; the reason form opens.`, `press:${batch}:${part}:${option}`, { form });
