@@ -11,10 +11,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
-import { sageTool } from '../src/sage.js';
+import { sagePath, sageTool } from '../src/sage.js';
 import { MINUTE } from '../src/vote.js';
 import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
-import { sagePath } from './sage-path.mjs';
 
 // ---- Sample data -------------------------------------------------------------------------------------------------------------
 const [APPRENTICE, LEADR, CHANNEL] = ['300000000000000001', '300000000000000002', '400000000000000001'];

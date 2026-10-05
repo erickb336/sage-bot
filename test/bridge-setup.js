@@ -6,9 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
-import { sageTool } from '../src/sage.js';
+import { sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
-import { sagePath } from '../scripts/sage-path.mjs';
 
 export const SAGE = sagePath();
 export const APPRENTICE = '300000000000000001';
