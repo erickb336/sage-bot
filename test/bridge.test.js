@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
 import { BOT, CONFIG, DRIVER, JON, LEADR, MAYA, MEMBERS, OWNER, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
+import { card as cardOf } from '../src/cards.js';
+import { peopleOf } from '../src/handle.js';
 import { sageTool } from '../src/sage.js';
 import { load, save } from '../src/state.js';
 import { ballotsOf, HOUR, MINUTE, openGate, parseGate, MAX_BALLOTS } from '../src/vote.js';
@@ -239,6 +241,33 @@ test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the leads, the 
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. p']);
   // The card was edited after each of the 5 changes: 3 ballots, the end, the tie-break.
   assert.equal(b.discord.messages.get(id).length, 1 + 5);
+});
+
+test('T39 with B3: after an early end and a lead tie-break, the bridge redraws the card with the lead name and time, and the gate file round trip keeps them', async () => {
+  const b = setup();
+  b.sh('gate', 'add', 'T7', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
+  b.sh('gate', 'add', 'T7', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
+  await b.post();
+  const [id] = b.discord.messages.keys();
+  await b.press(MAYA, 'press:G1+G2:0:0');
+  await b.press(OWNER, 'press:G1+G2:0:1');
+  await b.press(MAYA, 'press:G1+G2:1:0');
+  b.now += 5 * MINUTE;
+  const endAt = b.now;
+  await b.press(JON, 'end:G1+G2'); // asks to confirm; nothing ends yet
+  await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:G1+G2', ephemeral: true })); // the press on the private confirmation
+  b.now += MINUTE;
+  const breakAt = b.now;
+  await b.press(JON, 'tiebreak:G1+G2:0:1');
+  const drawn = card(b, id).embeds[0];
+  const s = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
+  assert.equal(drawn.description, `Ended early by Jon (sage-lead) at ${s(endAt)}, with the votes so far. Closed: every part is decided. T7 goes on.`);
+  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Jon (sage-lead) at ${s(breakAt)}`);
+  // A restart loads the gate through parseGate with endedBy, by and at, and draws the same card.
+  const again = b.make().entry('G1+G2');
+  assert.equal(again.gate.endedBy, JON);
+  assert.deepEqual(again.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt });
+  assert.equal(text(cardOf(again.gate, again.ask, peopleOf(MEMBERS, CONFIG))), text(card(b, id)));
 });
 
 test('reminders: an open single gate pings the holders every 2 hours from its opening, a tied batch pings the leads 2 hours after its vote ended', async () => {

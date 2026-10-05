@@ -11,6 +11,7 @@ import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
 import { CHANNEL, DRIVER, JON, LEADR, MAYA, OWNER, setAt, setup, T0 } from './bridge-setup.js';
+import { fakeInteraction } from '../src/fake-discord.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;
 const SESSION = new URL('../scripts/session.mjs', import.meta.url).pathname;
@@ -514,4 +515,42 @@ test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to
   assert.deepEqual([spool(b, S1).gates, spool(b, S1).endedAt], [['G1'], undefined]);
   assert.deepEqual(event(sub, 'SessionEnd'), { code: 0, out: '', err: '' });
   assert.equal(typeof spool(b, S1).endedAt, 'number');
+});
+
+test('T29 with T39: a session thread gets the tie post after a lead ends the vote early; after a restart the tie-break note and the card in the thread name the lead, and the version 2 file keeps the session, endedBy, by and at', async () => {
+  const b = setup();
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1', 'A?');
+  gateAdd(b, S1, 'T1', 'B?');
+  await b.post();
+  const thread = b.bridge.threadOf(S1);
+  const [cardId] = b.discord.in(thread);
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1+G2:0:0');
+  await b.press(JON, 'press:G1+G2:0:1');
+  await b.press(MAYA, 'press:G1+G2:1:0');
+  b.now += MINUTE;
+  const endAt = b.now;
+  await b.press(JON, 'end:G1+G2'); // asks to confirm
+  await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:G1+G2', ephemeral: true }));
+  const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
+  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> G1\\+G2 is tied after its vote`));
+  // The file on disk is version 2: the entry has its session and the lead who ended the vote.
+  const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
+  assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [2, S1, JON]);
+  // A restart: a new bridge loads the file, keeps the thread of S1, and the tie-break goes to the thread.
+  b.bridge = b.make();
+  assert.equal(b.bridge.threadOf(S1), thread);
+  b.now += MINUTE;
+  const breakAt = b.now;
+  await b.press(JON, 'tiebreak:G1+G2:0:1');
+  assert.equal(contents().at(-1), `Jon (sage-lead) broke the tie on part 1 of G1+G2: B.`);
+  const s = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
+  const drawn = b.discord.latest(cardId).embeds[0];
+  assert.equal(drawn.description, `Ended early by Jon (sage-lead) at ${s(endAt)}, with the votes so far. Closed: every part is decided. T1 goes on.`);
+  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Jon (sage-lead) at ${s(breakAt)}`);
+  assert.equal(b.discord.in(CHANNEL).filter((id) => /G1\+G2/.test(b.discord.latest(id).content ?? '')).length, 0);
+  const entry = load(b.statePath).entries[0];
+  assert.deepEqual([entry.session, entry.gate.endedBy, entry.gate.parts[0].outcome], [S1, JON, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt }]);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. x']);
 });

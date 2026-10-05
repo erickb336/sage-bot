@@ -79,10 +79,10 @@ test('F-T1-47: a tie-break may choose only a tied leader of the part', () => {
   const refused = step(tied, tiebreak(LEA, 'C', 31), holders, [LEA]);
   assert.deepEqual(refused.effects, [{ type: 'ignored', by: LEA, why: 'not-tied-option' }]);
   assert.equal(refused.gate, tied);
-  assert.deepEqual(step(tied, tiebreak(LEA, 'B', 31), holders, [LEA]).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak' });
+  assert.deepEqual(step(tied, tiebreak(LEA, 'B', 31), holders, [LEA]).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 31).at });
   // With 0 votes, every option is tied.
   const empty = play(batch(), [tick(30), tiebreak(LEA, 'C', 31)], holders).gate;
-  assert.deepEqual(empty.parts[0].outcome, { status: 'decided', option: 'C', how: 'lead-tiebreak' });
+  assert.deepEqual(empty.parts[0].outcome, { status: 'decided', option: 'C', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'C', 31).at });
 });
 
 test('F-T1-49: a single gate\'s outcome says how the answer came: discord or terminal', () => {
