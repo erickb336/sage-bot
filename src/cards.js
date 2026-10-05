@@ -257,7 +257,7 @@ function batch(gate, ask, holders, names) {
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. sage reminds @${LEAD} every 2 h.`
+      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable

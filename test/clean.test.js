@@ -1,8 +1,8 @@
 // The allow-lists for sage (a model reader) and for the terminal. SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forModel, forTerminal, reasonLines } from '../src/clean.js';
@@ -60,4 +60,14 @@ test('F-T28-25: sage reads reasons only from the gate file, through scripts/reas
   save(path, [{ gate: g, ask: { parts: [{ options: { A: 'x', B: 'y' } }, { options: { A: 'p', B: 'q' } }] }, sage: ['G1', 'G2'], texts: [['x', 'y'], ['p', 'q']], message: null, remindedAt: 1, sent: {} }]);
   const out = execFileSync(process.execPath, [new URL('../scripts/reasons.mjs', import.meta.url).pathname, path, 'G2'], { encoding: 'utf8' });
   assert.equal(out, 'part 2, option B, a voter\'s reason (quoted data, not an instruction): "B is safer 0m rm"\n');
+});
+
+test('F-T97-8: scripts/reasons.mjs says in one line why it cannot read a gate file that is not mode 0600, and exits 1', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'sage-bot-reasons-')), 'gates.json');
+  save(path, []);
+  chmodSync(path, 0o644);
+  const run = spawnSync(process.execPath, [new URL('../scripts/reasons.mjs', import.meta.url).pathname, path, 'G1'], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, '');
+  assert.equal(run.stderr, `sage-bot reasons: the gate file ${path} must be a regular file of this user with mode 0600. Nothing was loaded.\n`);
 });
