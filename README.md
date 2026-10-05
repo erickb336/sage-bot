@@ -166,7 +166,16 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   launchctl load ~/Library/LaunchAgents/com.sage.bot.plist
   ```
 
-  *Why:* the first run by hand shows a setup error at once. The log of the launchd agent is `~/Library/Logs/sage-bot.log`.
+  The script refuses a config file that does not exist, is not JSON or lacks a field of step 3. It then prints no plist and exits 1, so fix the path and run it again.
+
+  The plist runs node through a path that a Node upgrade keeps, such as `/opt/homebrew/bin/node`. When the script prints "warning: … make the plist again after each Node upgrade", your node has no such path: after each Node upgrade, run the command above again and load the new plist. To see the node path of the plist, read the first entry of `ProgramArguments`:
+
+  <!-- check: run -->
+  ```sh
+  plutil -p ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  *Why:* the first run by hand shows a setup error at once. The log of the launchd agent is `~/Library/Logs/sage-bot.log`. When the node path of the plist does not exist, launchd cannot start the bridge, and this log gets no line.
 - [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
   *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
 

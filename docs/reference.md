@@ -360,7 +360,7 @@ The steps to set up the bridge are in the README: [Set up a live trial](../READM
 node scripts/launchd.mjs ~/.config/sage-bot/config.json > ~/Library/LaunchAgents/com.sage.bot.plist
 ```
 
-The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. The script only prints it: it never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
+The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. Its node path is one that a Node upgrade keeps: a Homebrew link (`/opt/homebrew/bin/node`, then `/usr/local/bin/node`) when it resolves to the running node, else the running formula's link `<prefix>/opt/<formula>/bin/node`. It is never a path under `Cellar/<version>`; a Homebrew node with no link stops the script. Any other node (for example of nvm) goes in as `process.execPath`, and the script prints a warning: make the plist again after each Node upgrade. The script stops with exit 1 and prints no plist when the config file does not exist, is not JSON, or lacks one of `guildId`, `channelId`, `ownerId`, `driverRole`, `leadRole`, `project`, `sagePath` and `statePath`. The script only prints it: it never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
 
 ### The reason contract
 
