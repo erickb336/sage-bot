@@ -12,7 +12,7 @@ import { card } from '../src/cards.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { step } from '../src/vote.js';
 import { embedLength } from 'discord.js';
-import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, clock, openAsk } from '../examples/sample.js';
+import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, clock, openAsk } from '../examples/sample.js';
 import { openGate } from '../src/vote.js';
 import { CSS, esc, message, modalHtml, noteHtml } from './render.mjs';
 
@@ -59,20 +59,18 @@ send('B7', { type: 'tick', at: clock(15, 1) }); ctx.now = clock(15, 1);
 moment('05-tie-at-limit', 'At 30 minutes the vote ends; part 2 is tied 1-1-1', 'Parts 1 and 3 are provisional; the tie-break buttons show the tied options only.', 'B7');
 await press(JON, 'tiebreak:B7:1:0', clock(17, 5));
 moment('06-lead-tie-break', 'Jon, a lead, breaks the tie: the batch is decided', 'Every part is decided; T7 goes on.', 'B7');
-// 7 to 11: the batch vote of T9: a lead ends it early; a non-lead and a person with no role press; then a withdraw.
+// 7 to 10: the batch vote of T9: a lead ends it early; a non-lead presses End vote now; then a withdraw.
 open('B9', clock(15, 10));
 for (const [who, option] of [[ERICK, 0], [JON, 0], [MAYA, 1]]) await press(who, `press:B9:0:${option}`, clock(15, 15));
 const confirm = await press(JON, 'end:B9', clock(15, 28));
 moment('07-end-early-confirm', 'Jon, a lead, presses End vote now', 'The private confirm says what each part gets with the votes so far.', 'B9', { confirm });
 const notLead = await press(MAYA, 'end:B9', clock(15, 28, 10));
 moment('08-not-a-lead', 'Maya is not a lead and presses End vote now', 'Discord shows every button to everyone; only a lead can end the vote.', 'B9', { note: notLead });
-const noRole = await press(SAM, 'press:B9:0:0', clock(15, 29));
-moment('09-no-role-note', 'Sam has no role and presses a button', 'The tally does not change; only Sam sees the note.', 'B9', { note: noRole });
 const ended = await press(JON, 'end!:B9', clock(15, 28, 20), undefined, true); // from the private confirm
-moment('10-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a lead.', 'B9', { note: ended });
+moment('09-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a lead.', 'B9', { note: ended });
 send('B9', { type: 'withdraw', by: ERICK, at: clock(15, 30) }); ctx.now = clock(15, 30);
-moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
-// 12: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9), and display names
+moment('10-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
+// 11: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9), and display names
 // at Discord's 32-character limit, so that the budget drops the oldest reasons and the description counts them (F-T27-35).
 {
   const names = ['Erick Alexander Benitez-Castillo', 'Maya Lindqvist-Oyelaran Nkemelu', 'Jon Kristoffer Vandenbroucke Jr', 'Ana Lucía Fernández de la Vega', 'Lea Marguerite Schönberg-Dubois'];
@@ -89,7 +87,7 @@ moment('11-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button i
   }
   ctx.now = clock(16, 21);
   const c = cardOf('B12', big);
-  moments.push({ file: '12-five-by-four-limits', title: 'A team of 5 with 32-character names, 4 parts, a 500-character reason from everyone on every part',
+  moments.push({ file: '11-five-by-four-limits', title: 'A team of 5 with 32-character names, 4 parts, a 500-character reason from everyone on every part',
     about: `Each reason shows cut to 200 characters; the gate keeps the full text. The oldest reasons go first, and the description counts them. ${c.embeds[0].fields.length} fields of 25; ${embedLength(c.embeds[0])} characters of 6000.`,
     now: ctx.now, card: c });
 }

@@ -84,7 +84,7 @@ test('preview.mjs --out writes the page there and leaves design/b2 in the repo a
     const out = join(home, 'page', 'index.html');
     const r = spawnSync(process.execPath, [join(ROOT, 'scripts/preview.mjs'), '--out', out], { encoding: 'utf8', env: { ...process.env, HOME: home } });
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(r.stdout, `wrote ${out} with 12 moments\n`);
+    assert.equal(r.stdout, `wrote ${out} with 11 moments\n`);
     assert.equal(readFileSync(out, 'utf8'), readFileSync(repoPage, 'utf8'));
     assert.equal(statSync(repoPage).mtimeMs, before);
     assert.equal(existsSync(join(home, 'page', 'shots')), false);

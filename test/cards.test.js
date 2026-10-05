@@ -29,7 +29,7 @@ test('an open batch card: a live countdown, the tally per part with voters and n
     '**A.** Only the columns visible in the table · Recommended · 2 votes (Erick (terminal), Jon)',
     '**B.** All fields, also the hidden ones · 0 votes',
     '**C.** Visible columns, plus an "Include hidden fields" box · 0 votes',
-    'The chief recommends A: A matches what the user sees; B can leak internal ids.',
+    'sage recommends A: A matches what the user sees; B can leak internal ids.',
     'Voted: Erick (terminal), Jon · Not voted: Maya',
     'Ahead: A',
   ].join('\n'));
@@ -71,7 +71,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
   assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 of 3 votes$/);
-  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\. The chief reminds @sage-lead every 2 h\.$/);
+  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
   assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 of 3 votes$/);
   assert.deepEqual(buttons(c), [
     ['press:B7:0:0 Part 1, A: Only the columns visible in the table s3 off', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2 off',
@@ -83,7 +83,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
   assert.equal(e.embeds[0].description, `Ended early by Jon (sage-lead) at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
-  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\. The chief reminds @sage-lead every 2 h\.$/);
+  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
   assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (sage-lead only) s4']);
 });
 

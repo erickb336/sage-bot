@@ -103,7 +103,7 @@ test('F-T27-30: property test: every card of a team of 2 to 5 with 1 to 4 parts 
         assert.ok(name.startsWith(`Part ${idx + 1} · `), label);
         for (const k of keys) assert.ok(value.includes(`**${k}.** `), `${label}: part ${idx + 1} ${k}`);
         assert.ok((value.match(/ · \d+ votes?(\n| \()/g) ?? []).length >= keys.length, `${label}: part ${idx + 1} counts`);
-        assert.match(value, new RegExp(`\\nThe chief recommends ${p.recommended}: `), label);
+        assert.match(value, new RegExp(`\\nsage recommends ${p.recommended}: `), label);
         assert.match(value, /\nVoted: .+ · Not voted: .+/, label);
       });
       for (const f of e.fields.slice(parts.length)) assert.match(f.name, /, part [1-4]$/, label);
@@ -144,7 +144,7 @@ test('F-T27-30: the QA repro (a team of 5, 4 parts, 5 options, long questions, e
     // Each part field first went within 1024 on its own: the voter lists end in "and 4 more" and the why is cut at a word; the labels are whole.
     e.fields.slice(0, 4).forEach((f, idx) => {
       for (const k of ['A', 'B', 'C', 'D', 'E']) assert.ok(f.value.includes(`**${k}.** ${`${k.toLowerCase()} `.repeat(50).trim()} ·`), `${question}: ${k}`);
-      assert.match(f.value, /\nThe chief recommends A: why( why)+…\nVoted: Member number 0!{17} and 4 more · Not voted: nobody\n/);
+      assert.match(f.value, /\nsage recommends A: why( why)+…\nVoted: Member number 0!{17} and 4 more · Not voted: nobody\n/);
       assert.ok(f.name.length <= 256 && f.name.startsWith(`Part ${idx + 1} · q q q`), f.name);
       if (question + 9 <= 256) assert.equal(f.name, `Part ${idx + 1} · ${'q '.repeat(question / 2).trim()}`); // the name is cut only for the 256 limit
     });
@@ -159,7 +159,7 @@ test('F-T27-30: with no reason to drop, the budget cuts in order: the voter list
   for (const f of e.fields) {
     assert.ok(f.value.length <= 1024 && f.value.length > 900, `${f.value.length}`);
     assert.match(f.value, /Voted: Member number 0!{17} and 4 more · Not voted: nobody/);
-    assert.match(f.value, /The chief recommends A: why( why)+…\n/);
+    assert.match(f.value, /sage recommends A: why( why)+…\n/);
     for (const k of ['A', 'B', 'C', 'D', 'E']) assert.match(f.value, new RegExp(`\\*\\*${k}\\.\\*\\* ${k.toLowerCase()}( ${k.toLowerCase()}){24} ·`));
     assert.equal(f.name, `Part ${e.fields.indexOf(f) + 1} · ${'q '.repeat(50).trim()}`);
   }
@@ -168,7 +168,7 @@ test('F-T27-30: with no reason to drop, the budget cuts in order: the voter list
   const [w] = card(wide.gate, wide.ask, wide.people).embeds;
   for (const f of w.fields) {
     assert.ok(f.value.length <= 1024, `${f.value.length}`);
-    assert.match(f.value, /The chief recommends A: …\n/);
+    assert.match(f.value, /sage recommends A: …\n/);
     assert.match(f.value, /\*\*E\.\*\* e( e){50,} ?…/);
   }
   // A 1000-character question, cut only in the name, never past 256; and the question falls further only when nothing else is left.
@@ -264,7 +264,7 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
 test('F-T27-30 to F-T27-33: the README states the premise of safe, the budget order and the fallback name', () => {
   const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ["cleaned by B3's own allow-list", 'at most 3 combining marks on a letter', 'drops the oldest reason fields', 'cuts the voter lists', 'then the why, then the option labels, then the question',
-    'The keys, the counts and "The chief recommends A" never shrink', 'The single card shrinks the same way', '"member …6789" (the last 4 digits of an id of 4 or more digits) or "member"']) {
+    'The keys, the counts and "sage recommends A" never shrink', 'The single card shrinks the same way', '"member …6789" (the last 4 digits of an id of 4 or more digits) or "member"']) {
     assert.ok(readme.includes(line), line);
   }
   assert.ok(!readme.includes('cannot spell hidden ASCII to a model'));

@@ -1,4 +1,4 @@
-// T73, the owner's decision G18 item 8: the chief marks a Yes or No question "leads only" with scripts/vote.mjs --leads. Only the
+// T73, the owner's decision G18 item 8: sage marks a Yes or No question "leads only" with scripts/vote.mjs --leads. Only the
 // sage-leads can answer its card; their answer reaches sage as a recommendation, and the owner decides at the terminal (G10).
 // sage-bot never switches a mode of sage. Through the fake Discord layer and a scratch sage logbook.
 // SAMPLE DATA ONLY: every id, name and question is made up. Nothing connects to Discord or reads the Keychain.
@@ -39,7 +39,7 @@ function voteWith(b, sage, ...args) {
   const r = spawnSync(process.execPath, [VOTE, ...args], { env, encoding: 'utf8' });
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
-/** A scratch project whose chief asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
+/** A scratch project where sage asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
 async function asked({ question = QUESTION[0], options = QUESTION[1], members } = {}) {
   const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
@@ -103,7 +103,7 @@ test('T73: a lead\'s press records the answer in sage, posts the recommendation 
     'G1: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal.']);
   assert.deepEqual((await b.sage.decisions()).map((d) => d.decision), ['Switch the automatic-merge mode on for this session? → A. Yes (sage-leads recommend; the owner decides)']);
   assert.match(text(b), /\*\*Recommended by Jon \(sage-lead\) at <t:\d+:t>: A\. Yes\. Erick decides at the terminal\.\*\*/);
-  // Every text that the bridge and vote.mjs made: the posts and edits, the replies, the log and the output of the chief's command.
+  // Every text that the bridge and vote.mjs made: the posts and edits, the replies, the log and the output of sage's command.
   const all = JSON.stringify([[...b.discord.messages.values()], replies, b.lines, vote(b, '--list'), vote(b, '--leads', 'G1', 'G2')]);
   assert.deepEqual(switchesIn(all), []);
   assert.deepEqual(switchesIn(`Turn ${SWITCHES[2]} now`), [PILOT, SWITCHES[2]]); // the check finds a phrase when one is there
@@ -245,7 +245,7 @@ test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both"
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G1');
-  // The bridge reads the team votes file (G1 in it), then the chief moves G1 to leads only, then the bridge reads the leads-only file.
+  // The bridge reads the team votes file (G1 in it), then sage moves G1 to leads only, then the bridge reads the leads-only file.
   let moved;
   onFirstOpen(`${b.statePath}.votes.leads`, () => { moved = vote(b, '--leads', 'G1'); });
   await b.bridge.loop();

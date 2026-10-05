@@ -1,4 +1,4 @@
-// The Discord thread of a chief session (T29): node scripts/session.mjs [--config <config.json>] thread <session id>.
+// The Discord thread of a sage session (T29): node scripts/session.mjs [--config <config.json>] thread <session id>.
 // It prints the thread's id, from the bridge's gate file. A session gets a thread at its first team vote, so it may have none yet.
 // The config is the bridge's (default ~/.config/sage-bot/config.json).
 import { readFileSync } from 'node:fs';

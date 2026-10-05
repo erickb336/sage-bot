@@ -188,7 +188,7 @@ test('F-T28-7: holders and leads come fresh from the members as Sets: a role tak
   assert.deepEqual(await b.press(SAM, 'press:G1:0:1'), []); // also no "Already answered" note for a member with no role (G20)
 });
 
-test('F-T28-9: a withdraw comes only from the chief side; an answer at the terminal is one press on a normal gate', async () => {
+test('F-T28-9: a withdraw comes only from sage side; an answer at the terminal is one press on a normal gate', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T2', '--question', 'R?', '--options', 'x|y', '--recommend', 'x');
@@ -197,7 +197,7 @@ test('F-T28-9: a withdraw comes only from the chief side; an answer at the termi
   assert.equal((await b.press(OWNER, 'withdraw:G1'))[0].content, 'I do not know this button or its question. Nothing changed.');
   // The owner answers G1 at the terminal with an option: it is final on the card (G10); the bridge writes nothing back.
   b.sh('gate', 'answer', 'G1', 'y');
-  // The chief answers G2 with no option: that withdraws it.
+  // sage answers G2 with no option: that withdraws it.
   b.sh('gate', 'answer', 'G2', 'dropped: the task changed');
   await b.bridge.loop();
   assert.deepEqual(b.bridge.entry('G1').ask.parts[0].final, { by: OWNER, at: b.now, option: 'B', text: 'B. y' });

@@ -1,4 +1,4 @@
-// The owner's decision G13: the bridge posts only the gates that the chief marked as team votes (scripts/vote.mjs).
+// The owner's decision G13: the bridge posts only the gates that sage marked as team votes (scripts/vote.mjs).
 // Through the fake Discord layer and a scratch sage logbook. SAMPLE DATA ONLY: every id, name and question is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ test('G13: an unlisted gate gets no card and one log line in all; a listed gate 
   await b.bridge.loop();
   await b.bridge.loop();
   assert.deepEqual(titles(b), ['Question G2 · T2 ']);
-  assert.deepEqual(kept(b), ['G1 stays at the terminal: the chief did not mark it as a team vote']);
+  assert.deepEqual(kept(b), ['G1 stays at the terminal: sage did not mark it as a team vote']);
   assert.equal(b.answerOf('G1'), '');
 });
 
@@ -124,7 +124,7 @@ test('G13: scripts/vote.mjs marks, lists and unmarks gates, and refuses an id th
   assert.deepEqual([...loadVotes(other)], ['G7']);
 });
 
-test('end to end, G13: two gates are added, the chief marks one with scripts/vote.mjs; only that one is posted and answered', async () => {
+test('end to end, G13: two gates are added, sage marks one with scripts/vote.mjs; only that one is posted and answered', async () => {
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', 'Which columns?', '--options', 'Visible only|All fields', '--recommend', 'Visible only');
@@ -138,5 +138,5 @@ test('end to end, G13: two gates are added, the chief marks one with scripts/vot
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. All fields', '']);
   assert.equal(titles(b).length, 1);
-  assert.deepEqual(kept(b), ['G2 stays at the terminal: the chief did not mark it as a team vote']);
+  assert.deepEqual(kept(b), ['G2 stays at the terminal: sage did not mark it as a team vote']);
 });

@@ -1,4 +1,4 @@
-// Chief sessions (T29). A session is one Claude Code session id. scripts/hook.mjs writes one spool file per session from three
+// Sage sessions (T29). A session is one Claude Code session id. scripts/hook.mjs writes one spool file per session from three
 // hooks (SessionStart, PostToolUse on Bash, SessionEnd); the bridge reads the spool folder at each loop. The rest of this file is
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';

@@ -1,7 +1,7 @@
 // The Claude Code hook of the sage bridge (T29): node scripts/hook.mjs [--config <config.json>], for SessionStart, SessionEnd and
 // PostToolUse on Bash. It reads the hook's JSON on stdin and records the session in the bridge's spool (src/sessions.js record).
 // It never blocks or fails the session: it always exits 0 and prints nothing on stdout (Claude Code would add SessionStart's stdout
-// to the chief's context). A refusal goes to stderr, one line, through the terminal allow-list.
+// to sage's context). A refusal goes to stderr, one line, through the terminal allow-list.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

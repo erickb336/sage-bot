@@ -1,4 +1,4 @@
-// T29: one Discord thread per chief session and one line per session in the parent channel. Through the fake Discord layer, a scratch
+// T29: one Discord thread per sage session and one line per session in the parent channel. Through the fake Discord layer, a scratch
 // sage logbook and a scratch spool; the hook runs as Claude Code runs it, with its JSON on stdin. SAMPLE DATA ONLY: every id is made up.
 process.env.TZ = 'UTC'; // the title of a thread has the host's date: 2026-10-04 is a Sunday in UTC
 import { test } from 'node:test';
@@ -99,7 +99,7 @@ test('hook.mjs: bad input is refused with one line on stderr, writes nothing, an
   assert.deepEqual(readSpools(spoolDir(b)).refused, [`the spool file ${S2}.json is refused: not a spool file of the sage-bot hook`]);
 });
 
-test('a session whose gates the chief did not mark gets no line and no thread; its first marked gate makes both, and the card goes to the thread', async () => {
+test('a session whose gates sage did not mark gets no line and no thread; its first marked gate makes both, and the card goes to the thread', async () => {
   const b = setup({ markAll: false });
   hook(b, S1, 'SessionStart', { source: 'startup' });
   gateAdd(b, S1, 'T1');
@@ -341,7 +341,7 @@ test('scripts/session.mjs thread <session id> prints the thread id; a session wi
   assert.match(run('lines').err, /^sage-bot session: usage:/);
 });
 
-test('end to end: SessionStart, gate add and its PostToolUse, the chief marks the gate, a press in the thread, then SessionEnd; all through scripts/hook.mjs', async () => {
+test('end to end: SessionStart, gate add and its PostToolUse, sage marks the gate, a press in the thread, then SessionEnd; all through scripts/hook.mjs', async () => {
   const b = setup({ markAll: false });
   const event = (name, extra = {}) => runHook(b, { session_id: S1, cwd: b.project, hook_event_name: name, ...extra });
   assert.equal(event('SessionStart', { source: 'startup' }).code, 0);
