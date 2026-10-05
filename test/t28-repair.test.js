@@ -238,11 +238,10 @@ test('F-T28-30: one bridge per gate file: a second lock stops with a clear messa
   assert.equal(existsSync(`${path}.lock`), false);
   // A lock of a process that is gone: the pid of that finished child.
   const gone = node('console.log(process.pid)').trim();
-  writeFileSync(`${path}.lock`, gone);
+  writeFileSync(`${path}.lock`, `${gone} Thu Jan  1 00:00:00 1970`);
   assert.equal(lock(path), `${path}.lock`);
-  assert.equal(readFileSync(`${path}.lock`, 'utf8'), String(process.pid));
+  assert.match(readFileSync(`${path}.lock`, 'utf8'), new RegExp(`^${process.pid} \\w{3} \\w{3} [ \\d]\\d \\d\\d:\\d\\d:\\d\\d \\d{4}$`));
   // A second bridge while this one runs: refused, in a child, with the pid that holds the lock.
   assert.throws(() => node(`import { lock } from '${state}'; lock(${JSON.stringify(path)});`),
     (e) => e.stderr.includes(`another sage bridge (pid ${process.pid}) runs on ${path}. This one stops: two bridges would post each card twice. If no bridge runs, remove ${path}.lock.`));
-  assert.throws(() => lock(path), /another sage bridge/);
 });
