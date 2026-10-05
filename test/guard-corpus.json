@@ -2145,7 +2145,9 @@
     "ls {SCRATCH}/s* | grep x > {SCRATCH}/list.txt",
     "git -C {SCRATCH}/proj add -- '[c]onfig/.env'",
     "node --test \"{SCRATCH}/[s]age.mjs\"",
-    "git add -- \"{SCRATCH}/[s]age.mjs\""
+    "git add -- \"{SCRATCH}/[s]age.mjs\"",
+    "git add 'app/[id]/page.tsx'",
+    "node --test 'test/[a].test.js'"
   ],
   "pattern": [
     "git -C {SCRATCH}/proj add ':(glob)**/.e*'",

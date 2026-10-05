@@ -62,7 +62,7 @@ const bash = (command) => tool('Bash', { command });
 const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
 const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
 const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
-const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>).';
+const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.';
 const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
 
 test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}), of wildcards (${CORPUS.wildcard.length}) and of pattern characters (${CORPUS.pattern.length}), each once`, () => {
@@ -106,6 +106,9 @@ test('T133 (G44 A): a wildcard in a part that runs or writes that may match the 
   assert.deepEqual(CORPUS.wildcard.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(WILDCARD)), []);
   assert.equal(guard(bash('git add scripts/*.mjs')).reason, `sage-bot guard: the wildcard scripts/*.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
   assert.equal(guard(bash('cp {SCRATCH}/[ab].txt {SCRATCH}/c.txt')).reason, `sage-bot guard: the wildcard [ in /sample/scratch/[ab].txt (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  // A real file name with [ (a Next.js route folder) gets the folder form too (F-T133-55).
+  assert.equal(guard(bash("git add 'app/[id]/page.tsx'")).reason, "sage-bot guard: the wildcard [ in app/[id]/page.tsx (in a part that runs or writes) is refused in a lead session. sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.");
+  assert.equal(guard(bash('git add app/')).decision, 'allow');
   // A quoted [ is no wildcard, and a wildcard that cannot match the name passes.
   for (const c of ["git commit -m '[T133] x'", 'node --test {WT}/test/*.test.js', 'cp {SCRATCH}/*.txt {SCRATCH}/out', 'cp {SCRATCH}/a?.json {SCRATCH}/out']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
@@ -223,7 +226,7 @@ test('T133: an Agent or Task call with an isolation field is refused; one withou
   }
 });
 
-test('T133: WebFetch reaches only a global unicast address: each special-purpose range, multicast, 240/4, the broadcast address and IPv6 outside 2000::/3 are refused', () => {
+test('T133: WebFetch, by the host text in the URL: an address must be global unicast, so each special-purpose range, multicast, 240/4, the broadcast address and IPv6 outside 2000::/3 are refused', () => {
   const fetch = (host) => guard(tool('WebFetch', { url: `https://${host}/`, prompt: 'x' })).reason ?? null;
   for (const host of ['198.18.0.1', '198.19.255.254', '192.0.0.1', '224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255', '0.1.2.3']) {
     assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.`);
@@ -231,6 +234,8 @@ test('T133: WebFetch reaches only a global unicast address: each special-purpose
   for (const host of ['::1', '::', 'fe80::1', 'fd00::1', 'ff02::1', '2001:db8::1', '2002:a00:1::1', '64:ff9b::7f00:1', '100::1']) assert.match(fetch(`[${host}]`), /\(not a global unicast address\)/, host);
   assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   for (const host of ['8.8.8.8', '198.20.0.1', '223.255.254.1', '[2606:4700:4700::1111]', 'example.com']) assert.equal(fetch(host), null, host);
+  // The hook reads only the text: a name that resolves to this Mac passes, so it is no network boundary (F-T133-54; T134 adds the rule).
+  for (const host of ['127.0.0.1.nip.io', 'localtest.me:8080']) assert.equal(fetch(host), null, host);
 });
 
 test('T133: in a lead session, every normal developer command of the corpus is allowed', () => {

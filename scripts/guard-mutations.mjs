@@ -87,6 +87,7 @@ const MUTATIONS = [
   ['the state tool: a wildcard ?', "p === '?' ? '.'", "false ? '.'"],
   ['the state tool: the wildcards are checked', 'return /[*?]/.test(chars) && mayMatchStateTool(text, env) ?', 'return false ?'],
   ['the state tool: a wildcard gets the safe-form hint (F-T133-44)', '? how(`the wildcard ${text} (it can match the sage state tool)`, WILDCARD) : null;', '? STATE_TOOL : null;'],
+  ['the wildcard hint names the folder form (F-T133-55)', ', or add its folder (git add <folder>); for the tests:', ' (for the tests:'],
   ['no [ wildcard in a part that runs or writes', ": chars.includes('[') && ['['];", ': false;'],
   ['the wildcards of a part that runs or writes are checked', '    const why = wildcard(w.text, w.glob, env);', '    const why = null;'],
   // F-T133-46 (G46 A): git and node --test expand a pattern in an operand themselves, also a quoted one.

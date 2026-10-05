@@ -18,7 +18,8 @@
 //   operand that git or node --test expands as a pattern is a wildcard also inside quotes; a file tool's strings are
 //   checked one by one, and its paths are printable ASCII.
 // - The Grep tool, and an Agent or Task call with an isolation field, are refused. Any tool that is not in TOOLS is refused.
-// - WebFetch reaches only a host name or a global unicast address.
+// - WebFetch is checked by the host text in the URL, as a second layer: a name that resolves to a local address passes;
+//   T134 adds the WebFetch permission rule (T156).
 //
 // The environment (set by sage-bot, never by the session's model): SAGE_ORIGIN, and optionally SAGE_TOOL (the sage state
 // tool, sage.mjs; a file named sage.mjs is the state tool too).
@@ -280,7 +281,7 @@ function mayMatchStateTool(glob, env) {
 const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee']);
 const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
 const ASCII = /^[\x20-\x7e]*$/;
-const WILDCARD = 'name each file in full instead of a wildcard (for the tests: npm test, or node --test <file>)';
+const WILDCARD = 'name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>';
 
 /**
  * Why a wildcard is refused, or null: a [ (or, in a `pattern` operand, any pattern character but * and ?), or a * or ? that
@@ -404,9 +405,11 @@ const TOOLS = {
   Skill: allow, ExitPlanMode: allow, BashOutput: allow, TaskOutput: allow, KillShell: allow, KillBash: allow, TaskStop: allow,
 };
 
-// WebFetch reaches an address only in the global unicast space (IPv4 1 to 223, IPv6 2000::/3) and not in a special-purpose
-// range inside it (the IANA registries): an allow-list, so 0/8, multicast, 240/4, the broadcast address and every IPv6
-// address outside 2000::/3 (::1, fe80::/10, fc00::/7, ff00::/8, ::ffff:0:0/96, 64:ff9b::/96) never pass.
+// WebFetch is checked by the host text in the URL, as a second layer; a name that resolves to a local address passes; T134
+// adds the WebFetch permission rule (T156). An address in the URL must be in the global unicast space (IPv4 1 to 223, IPv6
+// 2000::/3) and not in a special-purpose range inside it (the IANA registries): an allow-list, so 0/8, multicast, 240/4, the
+// broadcast address and every IPv6 address outside 2000::/3 (::1, fe80::/10, fc00::/7, ff00::/8, ::ffff:0:0/96,
+// 64:ff9b::/96) never pass.
 const UNICAST = new BlockList();
 UNICAST.addRange('1.0.0.0', '223.255.255.255', 'ipv4');
 UNICAST.addSubnet('2000::', 3, 'ipv6');
@@ -417,7 +420,7 @@ for (const range of ['10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/
 // IETF protocol assignments with Teredo, documentation, 6to4 (it holds an IPv4 address), documentation.
 for (const range of ['2001::/23', '2001:db8::/32', '2002::/16', '3fff::/20']) SPECIAL.addSubnet(range.split('/')[0], Number(range.split('/')[1]), 'ipv6');
 
-/** WebFetch: http or https to a public host name or a global unicast address; never this Mac, the local network or a .local name. */
+/** WebFetch, by the host text in the URL, as a second layer: http or https to a name that is not local, or to a global unicast address. A name that resolves to a local address passes; T134 adds the WebFetch permission rule (T156). */
 function webRefusal(url) {
   let u;
   try { u = new URL(String(url)); } catch { return 'a fetch of a URL that does not parse'; }
