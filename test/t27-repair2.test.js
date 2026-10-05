@@ -144,7 +144,7 @@ test('F-T27-23, F-T27-29: the form title drops its prefix first, then cuts at th
 });
 
 test('F-T27-20, F-T27-22: the README tells B3 about replyError, the full not-lead note, the 4-part limit and the cancel button', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   assert.ok(readme.includes('`replyError`'));
   assert.ok(readme.includes('"Only a sage-lead can do this. Your votes on the parts count like everyone\'s."'));
   assert.ok(readme.includes('B3 refuses an ask with more than 4 parts'));

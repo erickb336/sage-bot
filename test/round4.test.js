@@ -84,7 +84,7 @@ test('F-T1-52: a withdraw after the time limit, with no tick and a tied part, ca
 });
 
 test('F-T1-53: the README names every export; a withdrawn batch keeps its ballots; nextReminderAt refuses a missing gate', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const name of Object.keys(vote)) assert.match(readme, new RegExp(`(\`|### )${name}\\b`), `README must name ${name}`);
   assert.ok(readme.includes("the parts of a withdrawn batch show `{ status: 'open' }` and keep their ballots"));
   const r = play(batch(), [ballot(MAYA, 'A', T0), withdraw(T0 + MINUTE)]);

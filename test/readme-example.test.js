@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 const file = new URL('../examples/vote-example.mjs', import.meta.url);
 
 test('F-T1-40: the README example is the examples/ file and prints the documented effects', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   assert.ok(readme.includes('```js\n' + readFileSync(file, 'utf8') + '```'), 'README must hold examples/vote-example.mjs in a js code block');
   const out = execFileSync(process.execPath, [file.pathname], { encoding: 'utf8' });
   assert.equal(out, [

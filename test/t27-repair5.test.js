@@ -192,7 +192,7 @@ test('F-T27-37: handle returns stored: true only when the event changed the gate
 });
 
 test('F-T27-35 to F-T27-42: the README states the allow-list, the dropped-reasons line, stored, the URL break and the fallback name, and no claim about models', () => {
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ['nothing else reads it', '`safe` keeps only what a person needs', 'at most 3 combining marks on a letter', 'Arabic, Syriac, the Indic scripts, Myanmar or Khmer',
     'breaks every `://` to `:// `', 'the oldest reasons go first', 'more reasons; the chief has them all', '`{ gate, effects, stored }`', 'With `stored: false` nothing changed',
     'an id of 4 or more digits', 'still stores the ballot and shows the reason form', 'B3 refuses an ask with more than 4 parts']) {
