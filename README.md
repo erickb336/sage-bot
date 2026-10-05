@@ -1,431 +1,298 @@
 # sage-bot
 
-sage-bot is the sage bridge. It is a Discord app that runs on the owner's Mac. It will post sage's gates as cards with buttons, check the voters' roles, record answers and votes, and give the final answers back to sage's logbook with `sage gate answer`.
+**sage-bot lets your team answer the chief's questions in Discord.** When a [sage](https://github.com/erickb336/sage) chief asks a product question, the chief can mark it as a team vote. A small service on the owner's Mac, the bridge, then posts the question as a card with buttons, counts the presses of the team, and gives the final answer back to sage. Nothing that the team types in Discord ever reaches the chief as an instruction: only the chosen option goes back.
 
-This version has the vote rules (task B1), the Discord layer: the cards, the reason form and the private notes (task B2), and the bridge service (task B3): it reads sage's open gates, posts the cards, turns presses into vote events and gives each final answer back to sage. The tests run it against a fake Discord layer and a scratch logbook; no test connects to Discord. It also keeps one Discord thread per chief session and one line per session in the parent channel (task T29).
+> **Status: built and tested on a fake Discord; the live trial has not run yet.** Every part below runs in the tests and in the demo, with no Discord account. The first trial on a real Discord server is the next step: see [Set up a live trial](#set-up-a-live-trial).
 
-## Try the demo
+**Contents:** [Try it](#try-it) · [How it works](#how-it-works) · [Rules held in code](#rules-held-in-code) · [Set up a live trial](#set-up-a-live-trial) · [Concepts](#concepts) · [What to do](#what-to-do) · [FAQ](#faq) · [Under the hood](#under-the-hood) · [Licence](#licence)
 
-See v1 work with no Discord account, no bot and no token. You need Node 22 or later, `npm install` once, and the sage plugin. The demo finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `~/.claude/plugins/cache/sage/sage/*/skills/sage/`; else it stops with a message that names `SAGE_TOOL`. The bridge tests use the same lookup.
+## Try it
 
+You need Node 22 or later and the [sage](https://github.com/erickb336/sage) plugin in Claude Code. You do not need a Discord account, an app or a token. In the sage-bot folder, run:
+
+<!-- check: run, prints "Page: " -->
 ```sh
+npm ci
 npm run demo
 ```
 
-The demo plays one chief session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in sage and the reasons for the chief.
+The demo plays one chief session from start to end, with sample people and a scripted clock. It uses the real sage state tool, the real hook and the real bridge, on a fake Discord. It prints each step, the answers that sage got, and the path of one HTML page. Open the page to see:
 
-The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes command (`scripts/vote.mjs`) and bridge, on the fake Discord layer:
+- the session's line in the parent channel, from "running" to "ended";
+- the session thread, with each card at its final state;
+- the private notes that each person sees, for example "Your press did not count";
+- the answers in sage, and the reasons that the chief can read.
 
-1. The chief adds a single question (T1), a batch of 2 questions (T2) and one question that stays at the terminal (T3), and marks the team votes.
-2. Maya answers the single question first: her answer is final. Sam has no role: his press does not count.
-3. Maya and Jon vote on the batch with reasons. Part 2 is tied when the vote ends at 30 minutes; the tie post goes to the thread, and Jon (a sage-lead) breaks the tie.
-4. In a second batch (T4), Erick answers part 1 at the terminal, and Jon ends the vote early.
-5. The session ends: its line says "ended", and its thread locks because no question is open.
+In the demo, Maya answers a single question first, so her answer is final. Sam has no role, so his press does not count. A batch vote ends in a tie, and Jon, a sage-lead, breaks it. Erick, the owner, answers one question at the terminal, and that answer is final. When the session ends, its thread locks.
 
-Everything goes into a new scratch folder (printed at the end), with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. Options: `--out <page.html>` writes the page there instead (the demo checks this path before it starts, and stops with a message when it cannot make the folder or the path is a folder); `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
+All files go into a new scratch folder, so the demo never touches your home folder or a real logbook. To write the page to a path of your own, run `npm run demo -- --out <page.html>`. More options are in the [reference](docs/reference.md#the-demo).
 
-## The vote rules
+## How it works
 
-`src/vote.js` holds the rules as data and pure functions. A gate and an event go in; the new gate and its effects come out. Each event carries its time, so the rules never read the clock.
+### The flow of one question
 
-| Case | Rule |
-| --- | --- |
-| Who counts | Only a holder: a Discord user id on the holder list that the bridge passes in with each event. The Discord admin gives and removes the role; there is no vote on it. Each id counts once. |
-| Leads | A separate list of ids with the sage-lead role, which the admin gives. The bridge passes it in with each event. A lead action (end early, tie-break) counts only from a lead who is also a holder, and only from Discord, never from the terminal. |
-| Kinds | Two only: single and batch. Any other kind is refused. |
-| Single gate | One question with options, each option once. The first answer from a holder is final at once. A later press is ignored. A single answer has no reason. |
-| Batch gate | The task's one batch of product questions, as parts, each with its own options (each option once in a part). It is a vote: every holder may vote on each part, and the last ballot of each person on each part counts. |
-| Time limit | A batch vote ends 30 minutes after it opens (at 29:59.999 it is still open). Each part goes to the option with the most votes cast; people who did not vote do not count. The countdown keeps running while the owner's Mac sleeps: when the bridge wakes after the limit, its tick closes the vote with the votes cast so far. |
-| Tie | A part with a tie, or with no votes, stays open. Only a lead decides it, by choosing one of the tied options (with no votes, every option is tied). While a part is tied, the batch is not closed: sage gets the answers only when every part is decided. |
-| End early | A lead may end a batch vote at any time. The parts are then decided as at the time limit. |
-| Holder list changes | A holder added to the list counts at once. A removed holder's ballot does not count at the time limit. Nothing is decided with no holders. |
-| Reminder | A single gate with no answer: to the holders every 2 hours from opening. A batch with tied parts: to the leads every 2 hours after its vote ended, also when a lead ended it early. |
-| Reason | Optional on a batch ballot, at most 500 characters (Unicode code points). A longer reason is cut to 500, with no error. The cut never splits an emoji or another character of two UTF-16 units; a lone surrogate becomes U+FFFD. An empty reason means no reason. B1 does not clean a reason in any other way (see below). |
-| Terminal answer | The owner's answer at the terminal counts as the first answer on a single gate, and as one ballot in a batch. It counts only from a holder: the owner needs the sage-driver role like everyone else. |
-| Outcome | Single: open, answered (option, who, and via Discord or the terminal), or withdrawn. Batch: each part is open or decided (by votes or by a lead's tie-break); the batch closes when every part is decided. |
-| Withdraw | The person who asked may withdraw the gate. A withdraw while any part is still open cancels the whole gate: no part of a withdrawn batch stays decided, also when the vote already decided it. A step that ends withdrawn gives only the `'closed'` effect, also when the time limit passed before it. Once a gate closes as decided, a withdraw has no effect. A withdraw at or after the time limit, with no tick before it, comes after the limit: the vote ends first, so the withdraw has no effect when the vote decided every part. |
-| Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate, as `nextReminderAt` and `parseGate` do. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as The chief (sage, at the terminal)
+    participant L as The sage logbook
+    participant B as The bridge (on the owner's Mac)
+    participant T as The session thread (Discord)
+    actor Team as The team
+    C->>L: asks a question (sage gate add)
+    C->>B: marks it as a team vote (scripts/vote.mjs)
+    B->>L: reads the open questions, every 15 s
+    B->>T: posts a card and pings the sage-driver role
+    Team->>T: presses an option
+    T->>B: the press
+    B->>B: checks the role, applies the vote rules, edits the card
+    B->>L: gives the final answer (sage gate answer)
+    L->>C: the chief reads the answer and goes on
+```
 
-### Reasons are untrusted text
+1. The chief asks a question in sage, as usual. Most questions stay at the terminal for the owner.
+2. When a question is for the team, the chief marks it with `node scripts/vote.mjs G12`.
+3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
+4. It posts a card in the thread of the chief's session, and pings the sage-driver role.
+5. The team presses buttons on the card. The bridge checks each person's role and applies the vote rules.
+6. When the question is decided, the bridge runs `sage gate answer` with the option's letter and text.
+7. The chief reads the answer in the logbook and goes on with the work.
 
-B1 stores reasons as typed. They are untrusted text. The bridge must clean and frame them before any reason reaches the chief or a log. A reason can hold `<`, `>`, backticks, newlines, mentions and invisible characters. Cleaning belongs to B3, in one place where reasons leave the bridge.
+The bridge only reads the logbook and calls the sage state tool. It never writes a logbook file itself.
 
-## The API
+### A question's life
 
-Import the functions from `src/vote.js`. All times are whole milliseconds (safe integers) from the bridge's own clock.
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Open: single question
+    [*] --> Voting: batch of 2 to 4
+    Open --> Decided: first press of a sage-driver
+    Voting --> Decided: 30 min end, a clear leader
+    Voting --> Decided: a sage-lead ends the vote
+    Voting --> Tied: 30 min end, a tie or no votes
+    Tied --> Decided: a sage-lead breaks the tie
+    Open --> AnsweredAtTerminal: the owner answers
+    Voting --> AnsweredAtTerminal: the owner answers
+    Tied --> AnsweredAtTerminal: the owner answers
+    Open --> Withdrawn: the asker withdraws
+    Decided --> [*]: the bridge gives sage the answer
+    AnsweredAtTerminal --> [*]: sage has it already
+    Withdrawn --> [*]: sage gets nothing
+```
 
-It also exports these constants, all in ms except the last:
-
-| Constant | Value |
-| --- | --- |
-| `MINUTE` | 60,000 |
-| `HOUR` | 60 minutes |
-| `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote |
-| `REMINDER_EVERY` | 2 hours |
-| `REASON_MAX` | 500: the most characters (code points) in a ballot reason; a longer one is cut |
-| `MAX_OPTIONS` | 5: the most options of a single gate or of one batch part (one row of Discord buttons) |
-| `MAX_BALLOTS` | 1000: the most voters on one part; the next new voter gets `full` |
-
-### openGate({ id, kind, options, parts, askedBy, at })
-
-Makes a new gate.
-
-| Field | Type | Meaning |
+| State | What it means | What the card shows |
 | --- | --- | --- |
-| `id` | non-empty string | The gate's id in sage. |
-| `kind` | `'single'` or `'batch'` | The kind of gate. |
-| `options` | array of unique non-empty strings | Single only: the options. |
-| `parts` | array of such arrays | Batch only: the options of each part. Parts count from 0. |
-| `askedBy` | non-empty string | The id of the person who asked. Only this person may withdraw. |
-| `at` | safe integer (ms) | The time the gate opens. A batch vote ends at `at + 30 minutes` (`gate.endsAt`). |
+| Open | A single question waits for its first answer. | The options, the chief's recommendation and the default, one button per option. |
+| Voting | A question in a batch vote. The team votes for 30 minutes, and each person can change a vote. | The votes and voters so far, each reason, and the time when the vote closes. |
+| Tied | The 30 minutes ended with a tie or no votes. The question waits for a sage-lead. | "Tied: A, B at 1 vote each", and a tie-break button for each tied option. |
+| Decided | A press, the votes or a sage-lead decided it. | The answer, who gave it, and the time. For a tie-break or an early end, the name of the lead. |
+| Answered at the terminal | The owner answered in sage. This answer is final. | "Answered by Erick (terminal)", and the buttons go grey. |
+| Withdrawn | The owner, who asked, took the question back at the terminal. | "Withdrawn by Erick at 15:30. Closed: nothing is decided." |
 
-It throws:
+A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share one card, one part for each question. The batch closes and goes to sage only when every part is decided.
 
-- a RangeError for a kind other than `'single'` or `'batch'`, or for an `at` that is not a safe integer;
-- a TypeError for a missing `id` or `askedBy`, or for empty or duplicate options or parts, or for more than `MAX_OPTIONS` (5) options in one list.
+### Session threads
 
-### step(gate, event, holders, leads)
+```mermaid
+flowchart LR
+    P["The parent channel, for example sage-chief<br/>one line per chief session"] --> L1["Session 14 · Tue 4 Oct<br/>running · 4 tasks · 2 open questions"]
+    P --> L2["Session 15 · Wed 5 Oct<br/>ended 18:02"]
+    L1 --> T1["Its thread: the cards, tie posts,<br/>reminders and wake notes"]
+    L2 --> T2["Its thread: locked"]
+```
 
-Applies one event to a gate and returns `{ gate, effects }`. It does not change its input gate.
+- Each chief session that has a team vote gets one line in the parent channel and one thread.
+- The thread is titled "Session N · weekday day month", for example "Session 14 · Tue 4 Oct".
+- The bridge edits the line when a count changes, and when the session ends.
+- When the session ended and all its questions are settled, the bridge archives and locks the thread. A resume opens it again.
+- A session thread holds the votes and the bridge's posts only. To chat with the chief, use a separate channel.
 
-- `gate`: a gate from `openGate`, an earlier `step` or `parseGate`.
-- `holders`: the ids that may answer and vote. `leads`: the ids with the sage-lead role. Each is any iterable of strings: an Array, a Set or a Map's `keys()`. Anything else, also a string, counts as empty. For long lists, pass a Set: `step` then uses it as it is.
+The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
 
-`step` never throws for odd events: it ignores them, with the reason. It throws a TypeError for a missing or wrong gate.
+## Rules held in code
 
-**The bridge must send a tick at `gate.endsAt`.** The vote also ends at the first event at or after that time, before the event applies.
+These are the owner's decisions. Each one is in code and has tests. The ids in brackets (G10 to G16) are the owner's decisions in the sage logbook.
 
-### The events
-
-Every event has `type` and `at`. `via` is `'discord'` or `'terminal'`. `part` is the part's index, from 0.
-
-| `type` | Fields | What it does |
+| Rule | Why | Where |
 | --- | --- | --- |
-| `press` | `by`, `option`, `at`, `via`; batch: `part`, optional `reason` (string, stored as typed and cut to 500 characters) | Single: the answer. Batch: a ballot on one part. |
-| `end` | `by`, `at`, `via` | A lead ends the batch vote early. Discord only. |
-| `tiebreak` | `by`, `part`, `option`, `at`, `via` | A lead decides a tied part. Discord only, after the vote ended. |
-| `withdraw` | `by`, `at` | The asker cancels the gate. |
-| `tick` | `at` | The time moved on. The bridge sends one at `gate.endsAt`. |
+| Only the questions that the chief marks with `scripts/vote.mjs` go to Discord. Every other question stays at the terminal. (G13) | Most questions are for the owner alone. The chief chooses which ones the team votes on. | `src/bridge.js` |
+| A question about a merge is never posted, also when it is marked. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
+| A task that asks 5 or more questions at once keeps them at the terminal. | One card holds at most 4 parts (Discord allows 5 rows of buttons). | `src/bridge.js` |
+| Only members with the sage-driver role answer or vote. The holders are exactly those members. | The Discord admin decides who is on the team, with no vote. | `src/handle.js`, `src/vote.js` |
+| On a single question, the first answer from a sage-driver is final. | One answer is enough, and the work goes on at once. | `src/vote.js` |
+| A batch is a 30-minute team vote. The last ballot of each person counts. | The team can discuss and change their minds. | `src/vote.js` |
+| A tie, or a part with no votes, waits for a sage-lead. A lead acts only in Discord. | A person, not a coin, breaks a tie. | `src/vote.js` |
+| The card names the lead who broke a tie or ended a vote early. (G11) | The team sees who decided. | `src/cards.js` |
+| Reminders go out every 2 hours: to sage-driver for an open single question, to sage-lead for a tie. | A question must not wait in silence. | `src/vote.js`, `src/bridge.js` |
+| The owner's answer at the terminal is final. A press never replaces it. (G10) | The owner has the last word. | `src/bridge.js` |
+| Only the asker withdraws a question, and only from the terminal. | Nobody in Discord can cancel the chief's question. | `src/vote.js`, `src/bridge.js` |
+| One thread per chief session, only for a session that acts as chief and has a team vote, titled "Session N · weekday day month". It locks when the session ended and its questions are settled. (G14, G15) | Each session's questions stay together, and an old thread takes no more presses. | `src/sessions.js`, `src/bridge.js` |
+| A session thread holds the votes and the bridge's posts only. Chat with the chief is in a separate channel. (G16) | Votes stay readable, and no chat text goes near the chief's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
+| No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
+| One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
 
-### The effects
+## Set up a live trial
 
-| Effect | When |
+> **The live trial has not run yet.** This checklist comes from the principal engineer's check (run R260) for tasks T53 and T54. Every command in it runs in the tests, except the ones that need Discord, the Keychain or launchctl.
+
+The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
+
+- [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Invite it to your server with the `bot` scope.
+  *Why:* the bridge reads the members' roles to know who may vote. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach the chief's chat.
+- [ ] **2. Make two roles: `sage-driver` and `sage-lead`.** Make sage-driver **mentionable**. Give sage-driver to each person who votes, and sage-lead to the people who break ties. A lead needs sage-driver too.
+  *Why:* a new card pings @sage-driver. If the role is not mentionable, the ping notifies nobody.
+- [ ] **3. Fill in the config.** Copy the example, then put in the 5 Discord ids: the server (`guildId`), the parent channel (`channelId`), the owner (`ownerId`) and the two roles (`driverRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+  Keep the folder of `statePath` at mode 0700 (only you can read and write it).
+  *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
+
+  <!-- check: skip, the test writes a filled-in sample config in its place -->
+  ```sh
+  mkdir -p ~/.config/sage-bot
+  cp examples/config.example.json ~/.config/sage-bot/config.json
+  ```
+
+- [ ] **4. Set the parent channel's permissions.**
+
+  | Who | Permissions in the parent channel |
+  | --- | --- |
+  | @everyone | No Send Messages. |
+  | sage-driver | Send Messages in Threads. |
+  | The sage-bot app | View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads. |
+
+  **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
+  *Why:* if the plugin watches it, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+- [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the app's token as the password. Never type the token in a shell.
+  *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
+- [ ] **6. Add the hook lines.** Put these lines in the sage project's `.claude/settings.local.json`. Use the absolute path of your sage-bot folder.
+
+  ```json
+  {
+    "hooks": {
+      "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+      "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+      "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }]
+    }
+  }
+  ```
+
+  *Why:* without the hook, the bridge does not know the chief's sessions, and every card goes to the parent channel.
+- [ ] **7. Deny the Discord plugin's `fetch_messages` tool** in the same settings file. Its name is probably `mcp__plugin_discord_discord__fetch_messages`: confirm the exact name with `/mcp` first.
+
+  ```json
+  { "permissions": { "deny": ["mcp__plugin_discord_discord__fetch_messages"] } }
+  ```
+
+  *Why:* the tie posts hold reasons that are cleaned for people, not for a model. The chief must not read them.
+- [ ] **8. Start the bridge by hand once, then with launchd.** First run it in a terminal and read its log:
+
+  <!-- check: skip, needs Discord and the Keychain -->
+  ```sh
+  node scripts/bridge.mjs ~/.config/sage-bot/config.json
+  ```
+
+  When it works, stop it with Ctrl+C. Then print its launchd agent, so that it starts at each login and again after it stops:
+
+  <!-- check: run -->
+  ```sh
+  node scripts/launchd.mjs ~/.config/sage-bot/config.json > ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  The script only prints the plist. You load it yourself:
+
+  <!-- check: skip, changes the Mac's login items; the test never runs launchctl -->
+  ```sh
+  launchctl load ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  *Why:* the first run by hand shows a setup error at once. The log of the launchd agent is `~/Library/Logs/sage-bot.log`.
+- [ ] **9. Do a smoke test.** Ask the chief for one test question. Mark it with the id that `sage gate add` printed, for example G12:
+
+  <!-- check: run, prints "team votes: G12" -->
+  ```sh
+  node scripts/vote.mjs G12
+  ```
+
+  While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
+
+  Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and the chief gets it in sage.
+
+**What the first live trial checks first:**
+
+1. The thread lock and unlock: a thread locks when its session ended and its questions are settled, and a resume opens it again.
+2. The permission codes: what Discord answers when a permission is missing (for example 50001, Missing Access), and that the card then goes to the parent channel.
+3. A press in a thread: it reaches the bridge, it counts, and the card changes.
+
+## Concepts
+
+| Word | Meaning |
 | --- | --- |
-| `{ type: 'vote-ended', by }` | The batch vote ended. `by` is the lead's id, or `null` at the time limit. |
-| `{ type: 'decided', part, option, how }` | A part is decided. `how` is `'votes'` or `'lead-tiebreak'`. |
-| `{ type: 'closed', outcome }` | The gate closed with this outcome. |
-| `{ type: 'ignored', by, why }` | The event did nothing. `by` is the event's `by`, or `null`. |
+| **Question** | A sage gate: a question that the chief parks for the owner, with options, a recommendation and a default. |
+| **The chief** | The sage session that frames the work and asks the questions. It changes no files. |
+| **The owner** | The person who runs sage at the terminal. In the demo, Erick. |
+| **The team** | The members of the Discord server with the sage-driver role. |
+| **sage-lead** | A role for the people who break ties and end votes early. |
+| **Team vote** | A question that the chief marked with `scripts/vote.mjs`. Only these go to Discord. |
+| **Card** | The Discord message of one question or one batch, with a button for each option. |
+| **Batch** | 2 to 4 questions of one task, asked within 30 seconds, on one card. |
+| **Session thread** | The Discord thread of one chief session. It holds that session's cards. |
+| **Parent channel** | The channel that holds one line per chief session. People only read it. |
+| **The bridge** | The service on the owner's Mac: `scripts/bridge.mjs`. |
+| **Holder** | A member with the sage-driver role. Only holders count. |
 
-The bridge acts only on the `'closed'` effect: it gives the outcome to sage then. The other effects are for the card on Discord. A step that ends with the gate withdrawn gives no `'vote-ended'` or `'decided'` effect, only `'closed'` with `{ status: 'withdrawn' }`.
+## What to do
 
-The `why` codes:
+Run each command in the sage-bot folder. The config is `~/.config/sage-bot/config.json` unless you give `--config <file>` as the first argument.
 
-| `why` | Meaning |
+| You want to | Do this |
 | --- | --- |
-| `bad-event` | The event is not an object, has an unknown type, or `by`, `via`, `option` or `reason` is missing or of the wrong type. |
-| `bad-time` | `at` is missing or not a safe integer. |
-| `out-of-order` | `at` is earlier than the last applied event. |
-| `not-holder` | `by` is not a holder. |
-| `not-lead` | `by` is a holder but not a lead. |
-| `lead-needs-discord` | A lead action came from the terminal. |
-| `not-asker` | A withdraw from someone other than the asker. |
-| `unknown-option` | The gate or part does not have this option. |
-| `unknown-part` | The batch does not have this part, or `part` is missing or not an integer. |
-| `wrong-kind` | An `end` or `tiebreak` on a single gate. |
-| `not-tied` | A tie-break while the vote is open, or on a decided part. |
-| `not-tied-option` | A tie-break for an option that is not among the tied leaders of the part. |
-| `closed` | The gate or the vote is already closed. |
-| `full` | The part already has `MAX_BALLOTS` voters, and `by` is not one of them. |
+| Send a question to the team | `node scripts/vote.mjs G12` (several ids in one command for one batch) |
+| Take a question back to the terminal | `node scripts/vote.mjs --unmark G12`, before the card is posted |
+| See the marked questions | `node scripts/vote.mjs --list` |
+| Answer a question yourself | `sage gate answer G12 <answer>` at the terminal, as usual. Your answer is final. |
+| Withdraw a single question | Answer it at the terminal with text that names no option. |
+| Read the team's reasons, as the chief | `node scripts/reasons.mjs <gate file> <gate id>` |
+| Find a session's thread | `node scripts/session.mjs thread <session id>` |
 
-### The gate and its outcome
+## FAQ
 
-| Field | Single | Batch |
-| --- | --- | --- |
-| `phase` | `'open'` or `'closed'` | `'voting'`, `'tied'` or `'closed'` |
-| `outcome` | `{ status: 'open' }`, `{ status: 'answered', option, by, via }` or `{ status: 'withdrawn' }` | `{ status: 'open' }`, `{ status: 'decided' }` or `{ status: 'withdrawn' }` |
-| `id`, `kind`, `askedBy` | as given to `openGate` | as given to `openGate` |
-| `openedAt` | the `at` of `openGate` | the `at` of `openGate` |
-| `lastAt` | the time of the last applied event (`openedAt` at first) | the same |
-| other | `options` | `endsAt`, `votingEndedAt`, `endedBy` (after the vote ended), `parts` |
+**Does a Discord message ever reach the chief?** No. The bridge gives sage only the final answer: the option's letter and sage's own option text. The chief reads the reasons only through `scripts/reasons.mjs`, which keeps only letters, digits, spaces and `. , : -`, and frames each reason as quoted data. Two settings of the owner keep Discord text away from the chief too: the Discord plugin does not watch the parent channel ([step 4](#set-up-a-live-trial)), and its `fetch_messages` tool is denied ([step 7](#set-up-a-live-trial)). Those two are settings, not code.
 
-A batch also has `endedBy` once its vote ended: the id of the lead who ended it early, or `null` at the time limit. Each part of a batch has `options`, `outcome` (`{ status: 'open' }`, `{ status: 'decided', option, how: 'votes' }` or `{ status: 'decided', option, how: 'lead-tiebreak', by, at }`, with the lead's id and the time of the tie-break) and, after the vote ended with no single leader, `tied` (the tied options). The final answers of a decided batch are the parts' outcomes; the parts of a withdrawn batch show `{ status: 'open' }` and keep their ballots. A part also has `ballots`, stored as `[id, ballot]` pairs so that the gate stays plain JSON. Do not read `ballots` directly: call `ballotsOf(part)`. It returns a Map from id to `{ option, at, via, reason? }`, the last ballot of each person.
+**Can a teammate start work?** No. A session starts only at the owner's terminal: there is no "New session" button. A press can only answer or vote on a question that the chief marked. Chat with the chief happens in a separate channel, through the Discord plugin and its own settings, not through sage-bot.
 
-A gate from `openGate`, `step` or `parseGate` is frozen all through: its parts, arrays, outcomes and ballots. `step` shares the unchanged parts between the old and the new gate, so the freeze keeps a change to one gate from reaching another.
+**What if the Mac sleeps?** The bridge stops while the Mac sleeps, so a press in that time fails in Discord ("This interaction failed"). The 30-minute clock keeps running. When the Mac wakes, the bridge ends each vote that passed its limit with the votes cast, sends each due reminder once, and posts "The host was asleep from 22:10 to 08:05. Presses in that time did not count. Please press again on any open question." With launchd, the bridge also starts again after a crash or a restart.
 
-A gate is plain JSON: it keeps one ballot per person on each part, so its size grows with the people, not with the presses, and its depth stays the same.
+**What if two people press at once?** The bridge is one process, and it decides each press in one step before it takes the next one. On a single question, the first press that reaches the bridge is final. The second person gets the private note "Already answered by Maya: A". In a batch, both votes count, and each person's last vote counts.
 
-### parseGate(value)
+**How do I take a question back to the terminal?** Before the card is posted, unmark it: `node scripts/vote.mjs --unmark G12`. After the card is posted, unmarking does not take the card back. Then answer the question at the terminal: your answer is final, the card shows "Answered by Erick (terminal)", and its buttons go grey. To cancel a single question, answer it with text that names no option: the card shows it as withdrawn.
 
-Checks a loaded gate, freezes it all through and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, more than `MAX_BALLOTS` ballots or `MAX_OPTIONS` options on a part, a reason that is empty, longer than 500 characters or has a lone surrogate, a time that is not a safe integer or is later than `lastAt`, a tie-break time before the end of the vote, or an `endedBy` that does not match the end (an id for an early end, `null` at the time limit). A gate saved before T39, without `endedBy` or a tie-break's `by` and `at`, still loads. `step` and `nextReminderAt` make the same check.
+**What if the owner answers at the terminal while the team votes?** The owner's answer wins (G10). The bridge reads the logbook before each press and before each answer that it gives sage, so it never replaces the owner's answer. If the owner types an answer at the same moment that the bridge records a Discord answer, the bridge puts the owner's answer back and logs one line.
 
-### nextReminderAt(gate, now)
+**Who sees a reason?** People see it on the card, cleaned for a person to read. The chief, a model, sees it only through `scripts/reasons.mjs`, cleaned by a separate allow-list for a model. No AI reads card text.
 
-Returns the next reminder strictly after `now`, as `{ at, to }`, or `null` when no reminder is due. `to` is `'holders'` for a single gate with no answer, and `'leads'` for a batch with tied parts. It returns `null` for a `now` that is not a safe integer, and throws a TypeError for a missing or wrong gate.
+## Under the hood
 
-### An example
-
-This is `examples/vote-example.mjs`. Run it with `node examples/vote-example.mjs`.
-
-```js
-// A batch vote with two parts, from opening to the final answers. Sample ids and times only.
-import { openGate, step, MINUTE } from '../src/vote.js';
-
-const holders = new Set(['maya', 'jon', 'ana']);
-const leads = new Set(['jon']);
-const t0 = 1_800_000_000_000; // the bridge's own clock, in ms
-
-let gate = openGate({ id: 'g1', kind: 'batch', parts: [['x', 'y'], ['p', 'q']], askedBy: 'owner', at: t0 });
-const send = (event) => {
-  const out = step(gate, event, holders, leads);
-  gate = out.gate;
-  for (const effect of out.effects) console.log(JSON.stringify(effect));
-};
-
-send({ type: 'press', by: 'maya', part: 0, option: 'x', at: t0 + MINUTE, via: 'discord' });
-send({ type: 'press', by: 'ana', part: 0, option: 'x', at: t0 + 2 * MINUTE, via: 'discord', reason: 'cheaper' });
-send({ type: 'press', by: 'jon', part: 1, option: 'p', at: t0 + 3 * MINUTE, via: 'discord' });
-send({ type: 'press', by: 'ana', part: 1, option: 'q', at: t0 + 4 * MINUTE, via: 'discord' });
-send({ type: 'tick', at: gate.endsAt }); // part 0 goes to x; part 1 is tied, so the batch stays open
-send({ type: 'tiebreak', by: 'jon', part: 1, option: 'q', at: gate.endsAt + MINUTE, via: 'discord' });
-console.log(gate.phase, JSON.stringify(gate.outcome));
-```
-
-It prints:
-
-```text
-{"type":"vote-ended","by":null}
-{"type":"decided","part":0,"option":"x","how":"votes"}
-{"type":"decided","part":1,"option":"q","how":"lead-tiebreak"}
-{"type":"closed","outcome":{"status":"decided"}}
-closed {"status":"decided"}
-```
-
-## The Discord layer
-
-`src/cards.js` and `src/handle.js` turn a gate into Discord JSON and a Discord interaction into an event for the vote rules. They use the builders of discord.js (pinned to one exact version) for the shapes, and nothing else of it: no Client, no login, no network. `src/fake-discord.js` makes an interaction-like object that records its replies, so the tests and the preview run with no Discord account.
-
-### The ask
-
-A card needs the gate and its ask: what sage asked, in words. B3 builds the ask from sage's logbook. `kind` and the option keys match the gate; the labels are only for the card.
-
-```js
-{ kind: 'batch', task: 'T7', title: 'CSV export for reports', parts: [
-  { question: 'How do dates look in the file?', why: 'A sorts well.', recommended: 'A', options: { A: '2026-10-04 (ISO)', B: '04/10/2026' } },
-] }
-```
-
-A single question has one part, with an optional `default`. `examples/sample.js` holds sample asks, members and a config, and `openAsk` opens the gate of an ask.
-
-### peopleOf(members, config)
-
-Builds `{ holders, leads, names }` from the guild members (`{ id, name, roles, bot }`, with `roles` a list of role ids and `bot` discord.js's `member.user.bot`) and the config `{ driverRole, leadRole }`. The holders are exactly the members with the sage-driver role, and the leads exactly the members with the sage-lead role: the owner is not added by default, and a bot is neither, whatever its roles. The bridge passes `holders` and `leads` to the vote rules, which also need a lead to be a holder.
-
-### card(gate, ask, people)
-
-The card of a gate as `{ embeds, components, allowedMentions }`. Times are Discord timestamps, so each viewer's Discord shows them in the viewer's own zone, and the 30-minute countdown runs live with no edit of the card.
-
-| State | The card |
+| Path | What it is |
 | --- | --- |
-| Single, open | The question, the options with Recommended and Default, the rule, one button per option. |
-| Single, answered | "Answered by Maya at 14:22: A. … Final." The buttons are off; the chosen one is green. |
-| Batch, voting | "Vote on each part; change your vote until the vote ends. The work on the task goes on. Closes at 15:01 (in 18 minutes)". Per part: each option with its votes and voters ("Erick (terminal), Jon"), the chief's recommendation, "Voted: … · Not voted: …", and "Ahead: A", "Even so far" or "No votes yet". Each reason as one line, cut to 200 characters; when the card is full, the oldest reasons go first and one line says "N more reasons; the chief has them all"; a visibly empty reason (nothing but spaces, hidden characters or combining marks) shows no line. A button per option of each part, "Part 1, A: Only the columns visible in the table" (cut to 80 characters), and "End vote now (sage-lead only)". |
-| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." (with every part tied: "2 parts are tied: they wait for a sage-lead. T7 waits."). After a lead's early end: "Ended early by Jon (sage-lead) at 15:28, with the votes so far." A tied part shows "Tied: A, B at 1 vote each. A sage-lead breaks the tie. The chief reminds @sage-lead every 2 h." (plain text: it pings nobody) and a button "Part 2, break the tie: A (sage-lead only)" for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 of 3 votes". |
-| Batch, decided | "Voting ended at 15:01. Closed: every part is decided. T7 goes on." A part that a lead decided says "Decided: A · tie broken by Jon (sage-lead) at 17:05". Every button is off. |
-| Withdrawn | "Withdrawn by Erick at 15:30. Closed: nothing is decided." Every button is off. |
+| `src/vote.js` | The vote rules: pure functions, no clock and no Discord. |
+| `src/cards.js`, `src/handle.js` | The cards, the reason form, the private notes, and the handler of a press. |
+| `src/bridge.js`, `src/discord.js` | The bridge's loop, and the only code that connects to Discord. |
+| `src/state.js`, `src/sessions.js`, `src/sage.js` | The gate file and its lock, the session threads, and the calls to the sage state tool. |
+| `src/clean.js` | The allow-lists for the terminal and for the chief. |
+| `src/fake-discord.js` | The fake Discord for the tests and the demo. |
+| `scripts/` | The commands: `bridge`, `vote`, `reasons`, `session`, `hook`, `launchd`, `demo` and `preview`. |
+| `design/b2/` | The card design: one page and its screenshots, made by `node scripts/preview.mjs`. |
+| `docs/reference.md` | **The full reference:** the vote rules and their API, the card states, every bridge case, the gate file, the hook and the checks. |
 
-The words "Voting ended at" are for the vote; "Closed" is only for a decided or withdrawn gate. The card names the lead who broke a tie or ended the vote early (owner decision G11), from the gate's `by` and `at` and its `endedBy`, through the same name lookup and `safe` as every other name. A gate saved before T39 does not have these fields: its card says "tie broken by a sage-lead" and "Ended early by a sage-lead at 15:28".
+To run the checks:
 
-**Untrusted text.** A reason and a display name are text that a person reads on the card, and nothing else reads it: the chief gets the reasons from the stored ballot, cleaned by B3's own allow-list. `safe` keeps only what a person needs: a whole RGI emoji (a family, a skin tone, a keycap, the Scotland flag), a letter, a number, punctuation, a symbol (also a bare pictograph such as ™, ©, ✔ or ⚠; a variation selector after it stays only when the pair is an RGI emoji), a space, at most 3 combining marks on a letter that pile on it (the non-spacing marks, Unicode `Mn`) and at most 4 spacing or enclosing marks (Unicode `Mc` and `Me`, such as a vowel sign, a musical stem or a ring; they do not count toward the 3, so Burmese ကျော် stays whole), and a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar or Khmer) when a letter or mark of one follows, or when the joiner follows a mark such as a final virama; never two joiners in a row. So a Persian word, a Hindi or Bengali conjunct and a Malayalam chillu stay whole, and a stack of marks is cut to 3 non-spacing and 4 spacing or enclosing marks on one letter. Everything else goes: the backtick (no code span), every format character, variation selector, control, private-use and unassigned code point, and the six characters that look blank (the four Hangul fillers, the blank Braille cell U+2800 and the musical null notehead U+1D159). Then `safe` escapes Discord markdown (discord.js `escapeMarkdown`), every `[`, `]`, `<` and `>` (no masked link, mention, timestamp, emoji code or quote; "A > B" and "x <= y" show as typed) and a leading `-#` (no subtext), breaks every `://` to `:// ` so that no URL is clickable (Discord does not link `www.` or a bare domain), and folds white space to one line. A text with nothing visible left gives `''`. Every message also carries `allowedMentions: { parse: [] }`, so nothing pings anyone. The reason form sets `max_length` to 500.
-
-**Discord's limits.** One message holds 5 rows of buttons; an embed holds 25 fields and 6000 characters in all, a title of at most 256 characters, a description of at most 4096, and each field a name of at most 256 and a value of at most 1024; a button label holds 80 characters and a form title 45. A card uses one row per part, one more while the vote is open, and one field per part and per reason. B3 refuses an ask with more than 4 parts: `card` throws a RangeError for more than 5 rows, which a batch of 5 or more parts reaches while the vote is open; through `handle`, a press on such a batch still stores the ballot and shows the reason form (no card is built), and the form's submit then rejects and stores nothing. `card` never throws for a team of 2 to 5 with at most 4 parts, whatever the ask's texts hold: one budget builds the whole embed, measures every limit and shrinks it in a fixed order until all hold. First each text goes within its own limit (a field value in 1024), then the whole embed within 6000 characters and 25 fields. The budget drops the oldest reason fields (one at a time, for the whole embed only; the description then says "N more reasons; the chief has them all", a line that never shrinks), then cuts the voter lists (to "and N more"), then the why, then the option labels, then the question in the field name; the title is cut to 256 and a button label to 80. The lead's private confirm is budgeted the same way: in its 2000 characters, the voter lists shrink to "and N more" for a team far larger than 5. The keys, the counts and "The chief recommends A" never shrink. The single card shrinks the same way: the why, then the labels, then the question, so its description stays in 4096. B3 also keeps the texts of an ask reasonable, so that nothing is cut: with a team of 5, three labels of 80 characters and a why of 300 fit whole. The card shows each reason cut to 200 characters (the gate keeps the full 500), never through a flag or a family emoji, and the newest reasons that fit: how many depends on the names and on the ask's texts; a team of 5 with 4 parts, short questions and a 500-character reason from everyone shows most of the 20 reasons, and the description counts the rest. A randomized test of 2000 cards (a team of 2 to 5, 1 to 4 parts, 2 to 5 options, every gate state, questions to 1000 characters, labels to 500, a why to 4000, reasons to 500, names with markdown) proves that every limit holds. No field is ever empty, because Discord refuses an empty name or value: a reason that `safe` reduces to nothing gets no field, and a member whose name is missing or visibly empty shows as "member …6789" (the last 4 digits of an id of 4 or more digits) or "member" for any other id, everywhere, never as the raw id. `handle` builds its reply before it stores the new gate, so a card that cannot be built leaves the gate as it was.
-
-### handle(interaction, { gates, people, clock })
-
-Takes one interaction (a button press or the reason form) and answers it. `gates` is a Map from gate id to `{ gate, ask }`; the handler sets the new gate there. It returns `{ gate, effects, stored }`: the gate after the event (null for an unknown card), the vote rules' effects, and `stored`, true when the event changed the gate and the new gate is in `gates`. A batch press that counts gives `effects: []` and `stored: true`; an unknown card, a forged index, the end confirm, a cancel or an event that the vote rules ignored gives `stored: false` (also when the time limit passed inside the step: then the gate changed, and `stored` is true beside the `'ignored'` effect). `handle` rejects only for a programming error: a wrong `interaction` (no `user`, no `reply`) or `ctx` (no `gates`, `people` or `clock`), or `card`'s RangeError for an ask of more than 4 parts. It never rejects because Discord refused the reply (an unknown interaction, a network error): then it returns `{ gate, effects, stored, replyError }`, with the gate, the effects and `stored` as they are after the store. With `stored: false` nothing changed; with `stored: true` the gate changed (a ballot that Discord did not confirm is still stored). `replyError` is the error that Discord gave. B3 acts on the returned effects (a `closed` effect still reaches sage), then edits the card message with `card(...)`. Of `replyError` B3 logs only its `code`, `status` and `message`, never the whole error: it holds the interaction token.
-
-| The interaction reads | What the handler does |
-| --- | --- |
-| `interaction.user.id` | `by`, always. |
-| `interaction.customId` | The action, the gate id, and the part and option indexes. Never the option text. The option comes from the gate: a forged gate, part, index or option text gets a private note and no event. |
-| `interaction.fields` | The reason of the form (input id `reason`), as typed; the vote rules cut it to 500 characters. A `reason:` id with no fields, or without that field, gets a private note and no event. |
-| `interaction.message.flags` | Only for `end!:` and `cancel:`: they count only from the lead's private confirm (the Ephemeral flag). From any other message they are unknown buttons: a private note, and the card does not change. |
-| The injected `clock()` | `at`, always. Not the interaction's data. |
-| nothing | `via` is always `'discord'`. |
-
-The custom_id grammar: `press:<gate>:<part>:<index>`, `reason:<gate>:<part>:<index>` (the form), `tiebreak:<gate>:<part>:<index>`, `end:<gate>` (the confirm), `end!:<gate>` (the confirmed end), `cancel:<gate>`. A single question uses part 0.
-
-| Press | The reply |
-| --- | --- |
-| An option of a single question | The updated card. A later press: the private note "Already answered by Maya: A". |
-| An option of a batch part | The vote counts at once; the reply is the reason form (optional, 500 characters; its title is "Your vote counts: A. Only the columns visible in the table" or, when that does not fit in 45 characters, the option alone, cut at a word). Its submit replaces the ballot with the reason and updates the card. A dismissed form sends nothing: the ballot stays, and B3 edits the card at its next chance. |
-| End vote now | The end runs through the vote rules first, without a store. When they would refuse it (not a lead, a single question, the vote ended, closed or withdrawn, or past the time limit by the clock), the reply is that refusal's private note, so the confirm never shows false facts. Otherwise a private confirm: what each part gets with the votes so far ("Part 1 goes to A: 2 of 3 votes (Erick, Jon)."), with "Cancel" and "End vote now". The confirmed end runs through the vote rules; the reply updates the private confirm, so B3 edits the card. |
-| A tie-break button, by a lead | The updated card. |
-| Cancel, on the private confirm | The confirm becomes "Cancelled. The vote goes on." or, when the vote ended meanwhile, "The vote on B9 ended at 15:01 meanwhile. Nothing to cancel." (on a withdrawn gate: "B9 was withdrawn by Erick. Nothing to answer."). A `cancel:` press from any private message only answers and changes nothing: no event, no store. |
-| Anything the vote rules ignore | A private note for its `why` code. Every code has one; a non-holder gets "Your press did not count. Only people with the sage-driver role can answer or vote. You can still read this thread." |
-
-Discord shows every button of a message to everyone, so a non-lead sees "End vote now" and the tie-break buttons too; a press gets the private note "Only a sage-lead can do this. Your votes on the parts count like everyone's." B3 must: call `parseGate` on each loaded gate; send the tick at `gate.endsAt` and the withdraw from sage through `step`; and edit the card message with `card(...)` whenever the gate changed but the reply was not the card (after a confirmed end, a dismissed form, a tick or a withdraw).
-
-### The fake layer
-
-`src/fake-discord.js` exports `fakeInteraction({ user, customId, fields, ephemeral, refuse })`: an interaction-like object for the tests and the preview, with the shape that `handle` reads and a `replies` list that records every answer as `{ kind, ...payload }` (kind `'reply'`, `'update'` or `'modal'`).
-
-- `user`: the user id; `customId`: the button's or form's custom id.
-- `fields`: the form's inputs by input id, only for a form submit; the reason form has one input, `'reason'`. A button press has no `fields`, as in discord.js, and `getTextInputValue('reason')` throws for a missing input, as in discord.js.
-- `ephemeral`: true when the pressed message was private (the lead's confirm); it sets the Ephemeral flag of `message.flags`.
-- `refuse`: an Error; every reply then rejects with it and records nothing, as Discord does for an unknown interaction.
-
-### The preview
-
-`node scripts/preview.mjs` renders the card JSON of the design's eleven moments, plus a card of a team of 5 with 4 parts and 500-character reasons, to `design/b2/index.html` with sample data, through `scripts/render.mjs` (the demo uses it too). With `--shots` it also screenshots each moment to `design/b2/shots/` with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder. Chrome runs with `--disable-gpu`, so the shots are byte-identical from one cold run to the next (the GPU raster path draws the rounded border corner by one shade differently in some runs).
-
-## The bridge service
-
-`src/bridge.js` is the bridge. It runs on the owner's Mac, as one process for one sage project and one Discord channel. Every 15 seconds it does one turn of its loop:
-
-1. It notices a sleep of the Mac (two turns more than 75 seconds apart). When a gate is open, it posts: "The host was asleep from 22:10 to 08:05. Presses in that time did not count. Please press again on any open question." A press while the Mac slept never reached the bridge: Discord showed "This interaction failed".
-2. It sends the tick at `gate.endsAt` to each batch vote at or after its limit, also after a sleep.
-3. It sends each reminder that is due, once, also after a sleep: to the sage-driver role for a single gate with no answer, and to the sage-lead role for a batch with tied parts.
-4. It reads the logbook (see below) and posts the new gates that the chief marked as team votes.
-5. It gives sage each final answer that sage does not have yet.
-
-Each event gets its time from the bridge's own clock: the wall clock (it runs on while the Mac sleeps), never earlier than its last value. No time comes from Discord data.
-
-### Which questions go to Discord
-
-Only the questions that the chief marks as team votes go to Discord. Every other gate stays at the terminal: it gets no card, and the bridge logs one line for it, "G5 stays at the terminal: the chief did not mark it as a team vote". This is the owner's decision G13: most gates are questions for the owner alone, and the team votes only on the questions that the chief chooses for it.
-
-The chief marks gates with `scripts/vote.mjs`:
-
-```sh
-node scripts/vote.mjs G4 G5          # mark G4 and G5 as team votes
-node scripts/vote.mjs --unmark G5    # unmark G5
-node scripts/vote.mjs --list         # print the list: "team votes: G4"
-```
-
-Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`. The list is the team votes file: `votesPath` in the config, or `<statePath>.votes`. It is a JSON list of gate ids, mode 0600, written whole with a new file and a rename. The script refuses an id that is not a sage gate id (G and digits) and then changes nothing. The bridge reads the file at each turn of the loop, and refuses a file that another user owns, that others can read or write, or that is not a list of gate ids: then it posts nothing and logs why once.
-
-- Mark the gates of one batch with one command. Each rule below works on the marked gates only: two marked gates of one task, asked within 30 seconds, share a card; 5 marked gates asked together stay at the terminal.
-- A gate marked after it was added is posted at the next turn of the loop. When its task's card is already out, it gets its own card.
-- A marked question about a merge is still not posted, and the bridge logs "G5 stays at the terminal: it is about a merge, and a merge never goes to a vote".
-- Unmarking a gate that has a card does not take the card back.
-
-### How a sage gate becomes a card
-
-The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` finds the logbook, and `sage gate answer <G> <answer>` records an answer. It reads `gates.tsv` and `tasks.tsv`, and never writes a logbook file itself.
-
-| Case | What the bridge does |
-| --- | --- |
-| One open gate of a task | A single question. The options are sage's options (`a\|b`), as A to E. The recommendation and the default mark the option with the same text or letter. |
-| 2 to 4 open gates that one task asked together | One batch vote, one part per gate, in the order of the logbook. "Together" means that sage's `at` of each gate is at most 30 seconds after the first one; gates further apart get their own cards, also after a restart. The card's id is the gate ids joined by `+`, for example `G3+G4`. The bridge waits 30 seconds after the newest gate of a task, so that the chief's `gate add` commands of one batch land on one card. |
-| 5 or more gates that one task asked together | Refused: no card. The terminal shows "not posted: T2 asked 5 questions together, and a batch holds at most 4 parts. Answer them at the terminal." once. They stay at the terminal until each one has an answer: the answered ones still count, so no later card takes the rest. |
-| A gate that a task adds after its card was posted | Its own card, also within 30 seconds of the first. |
-| A gate with no option or more than 5 | Refused the same way: one row of Discord buttons holds 5. |
-| A marked gate whose question or options name a merge ("merge", "merges", "merged", "merging") | Not posted. Merges never go to a vote; they stay at the terminal. |
-| A new card | The post mentions the sage-driver role, and only that role: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." |
-| The owner answers a posted gate at the terminal (`sage gate answer`) | Final, whatever the owner's roles. The card shows "Answered by Erick (terminal) at 14:05: B. text. Final." on that question, or on that part of a batch, and its buttons go grey. A press on it gets "Already answered by Erick at the terminal: … Your press did not count." The other parts of a batch keep voting, and the leads never get a tie for an answered part. The answer is no ballot. |
-| An answer in sage that the bridge did not write | The owner's. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
-| The chief answers an open single gate with text that names no option | A withdraw by the asker (the owner): the card closes as withdrawn. A withdraw comes only from sage, never from Discord. On a part of a batch, such text is the owner's final answer to that part. |
-| A single gate is answered in Discord | The bridge gives sage "B. Show a Session ended screen" (the letter and sage's option text). |
-| A batch closes as decided | The bridge gives sage the answer of every part, the same way. It acts only on the `'closed'` effect, never on a part's `'decided'` effect, which is provisional while another part is tied. A withdrawn gate gives sage nothing. |
-| A batch vote ends with tied parts | A post to the sage-lead role with each tied part and each voter's argument (the reason, made safe for the card and cut to 200 characters). The 2-hour reminders count from this post, so one loop never pings the leads twice, also after a sleep. |
-| A member gets or loses the sage-driver role | At the next turn of the loop the bridge redraws each open card, so the card counts the same votes as the tick. |
-| A lead breaks a tie | A post that names the lead: "Jon (sage-lead) broke the tie on part 2 of G3+G4: A." No one is pinged. |
-| The gate changed | The bridge edits the card with `card()`: after a ballot, a tick, an end, a tie-break, a terminal answer or a withdraw. A press after the time limit that the vote rules refuse still ends the vote first, so the bridge settles that too. |
-
-Only a Discord id (17 to 20 digits) goes into an event's `by`. A press from any other user id gets "I do not know this account. Nothing changed." The holders and leads are Sets, read fresh from the guild members at each press and each turn. When `handle` throws (a card that cannot be built), the person gets "The bridge could not handle this press. Nothing changed. Please tell the owner." and the gate stays as it was.
-
-### The gate file
-
-The bridge keeps its gates, their asks, the owner's final answers and what it gave sage in one JSON file, `statePath` in the config. One bridge at a time: at start it takes `<statePath>.lock`, which holds its pid and its start time (from `/bin/ps`). It writes them to a temp file and links that file to the lock name, so the lock is never empty and only one of many starts gets it. When the lock belongs to a bridge that runs (a process with that pid and that start time), the new bridge stops with "another sage bridge (pid 4242) runs on …". It replaces a lock of a process that is gone, of another process that got the pid after a reboot, or with its own pid. A lock with no start time (empty, or written by an earlier version) counts as held for 10 s, then it is replaced; in that time a start stops with "a sage bridge may still be starting … Try again in 10 s, or remove <lock>". When `/bin/ps` fails for another reason than "no such process", the start stops with "could not check whether the bridge with pid N still runs" and leaves the lock: it never replaces the lock of a bridge that it could not check. A lock that the bridge cannot read (no read permission, or a folder) stops the start with a message that names the path. Only one start at a time removes a stale lock, under `<lock>.break`; a start that finds a break file of under 10 s stops and names it, and a later start removes an older one. A start also removes the temp files `<lock>.<pid>.tmp` of starts that crashed (their pid no longer runs). An exit removes the lock, also a stop by SIGTERM (launchd at logout or shutdown), SIGINT or SIGHUP. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
-
-The file is version 2: each entry has its chief session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 file: its entries have no session. Each card stays in the parent channel with its tie posts and reminders, and the bridge still edits it there. The next save writes version 2.
-
-### Run it
-
-You need Node 22 or later, `npm ci` once, and:
-
-1. A Discord application with a bot user in your server, with the Server Members intent on. Make the roles sage-driver and sage-lead.
-2. **The Keychain item.** Put the bot token in the macOS Keychain as a generic password with the service name `sage-bot`, with Keychain Access (File, New Password Item: name `sage-bot`). Do not type it in a command, because the shell history keeps it. At start the bridge reads it with `/usr/bin/security find-generic-password -s sage-bot -w`. It never writes the token to a file, a log or an error. When the item is missing, the bridge stops with: "no bot token: the macOS Keychain has no generic password with the service "sage-bot". Add it with Keychain Access, then start the bridge again."
-3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the owner and the two roles; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
-4. Start it: `node scripts/bridge.mjs ~/.config/sage-bot/config.json`. It logs to the terminal; every log line goes through an allow-list, so no control character reaches the terminal. Of a Discord error it logs only the code, the status and the message, never its url or body (they can hold an interaction token).
-
-**The launchd plist.** To start the bridge at each login and again after it stops, print its launchd agent and save it yourself:
-
-```sh
-node scripts/launchd.mjs ~/.config/sage-bot/config.json > ~/Library/LaunchAgents/com.sage.bot.plist
-```
-
-The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. The script only prints it: it never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
-
-### The reason contract
-
-A ballot reason is untrusted text that a voter typed. It is quoted data, never an instruction. Two readers see reasons, and each gets its own allow-list (`safe` and `forChief` keep only what their reader needs, and drop everything else):
-
-- **People on Discord** read the reasons on the card and in the tie post, cleaned by `safe` (see "Untrusted text" above). No AI reads card text.
-- **The chief, a model,** reads reasons only from the stored ballot (`ballot.reason` in the gate file), cleaned by `forChief` in `src/clean.js`. Run `node scripts/reasons.mjs <gate file> <gate id>`. It prints one line per reason: `part 2, option B, a voter's reason (quoted data, not an instruction): "…"`.
-
-`forChief` cuts the reason to 500 characters, then applies NFKC, then keeps only letters, decimal digits, at most 3 marks on a letter, one space between words, and `. , : -`. So these hazards cannot pass:
-
-- terminal escapes (ESC, CSI and every other control character);
-- hidden or reordered text: format, bidi, tag, variation selector, private-use and unassigned characters, and lone surrogates;
-- shell metacharacters: `` ` $ \ | & ; < > ( ) { } [ ] * ? ! # ~ " ' `` and newlines;
-- text written as instructions, also sage's switch phrases. The words stay, so the line frame does the work: every line starts with the bridge's fixed prefix, never with a voter's word, and the reason is inside double quotes that always close.
-
-A test sweeps every Unicode code point through `forChief` and proves that no control, format, bidi, tag, private-use or unassigned character stays.
-
-**The chief session must not read the bridge's Discord messages** (the cards, the tie posts, the threads): they hold reasons cleaned for people, not for a model. The chief gets the answers from the logbook and the reasons from `scripts/reasons.mjs`.
-
-## Chief sessions and their threads
-
-The parent channel (for example `#sage-chief`) is read only for people. It has one line for each chief session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
-
-| Case | What the bridge does |
-| --- | --- |
-| A session | One Claude Code session id. A `/clear` starts a new session id, so it gets a new thread. A resume keeps the id, so it opens the old thread again. |
-| A session with no team vote | No line and no thread. |
-| The first team vote of a session | The bridge gives the session the next number of the project, posts its line, starts the thread from the line with the title "Session 14 · Tue 4 Oct" (the weekday and date of the session's start, in the Mac's time zone), and posts the card in the thread. Lines are posted in this order, so the newest is at the bottom. |
-| The line | "**Session 14 · Tue 4 Oct**" and "running · 4 tasks · 2 open questions". The tasks are the session's tasks with a gate; the open questions are the questions of its cards that still wait for an answer. The bridge edits it when a number changes. |
-| A gate that no hook saw | It goes to the newest running session. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). A card in the parent channel stays there with all its posts, also when a session starts later. |
-| Two spool files list the same gate id (for example from an older logbook) | The gate goes to the session that started last before sage asked the gate. |
-| Discord refuses the line or the thread (for example without Create Public Threads) | The card goes to the parent channel, and the log says the refusal once. The next card of the session tries again. When Discord made the thread but its answer was lost (code 160004 at the next try), the bridge takes the thread of the line. |
-| A member deletes a session's thread, or the bot loses access to it (code 10003 or 50001) | The card goes to the parent channel in the same turn of the loop, and the log says it once. The next card of the session starts a new thread from the line. When the line is gone too, or Discord keeps the deleted thread on the line, that card posts a new line and starts the thread from it. The cards that were in the deleted thread are not posted again. |
-| A session ends (SessionEnd, a `/clear`, or its Claude Code process is gone) | The line says "ended" and the time at once. The thread stays open while a question of the session waits: the team votes on there, and the reminders and tie posts go there. At the first turn of the loop after the last question is answered, decided or withdrawn, the bridge archives and locks the thread. A later card of the session opens the thread again. |
-| A resume of an ended session | At the next turn of the loop the bridge opens the thread again (unarchives and unlocks it) before it posts or edits anything in it, and the line says "running" again. |
-| A press in a thread of the parent channel | It counts, also when the thread is not in the bot's cache: the bridge then asks Discord for the thread. A press in another channel, or in a thread of another channel, is ignored. |
-
-**The hook.** `scripts/hook.mjs` records the sessions. Claude Code runs it at SessionStart, at SessionEnd and after each Bash command (PostToolUse). It reads the hook's JSON on stdin and writes one spool file per session in the spool folder: `sessionsPath` in the config, or `<statePath>.sessions`. The folder is mode 0700, each file 0600, and each write is a new file renamed over the old one.
-
-- SessionStart writes the session id, the folder, the start time and the pid of the Claude Code process. A resume takes away the end.
-- After a Bash command that runs the sage state tool with `gate add` (`node <path>/sage.mjs gate add T7 …`), it reads the fixed line of its output ("G12 open · …"), and adds the gate id and the task id of the command to the session. Any other command is ignored, also when its output has such a line.
-- SessionEnd writes the end. A session whose Claude Code process no longer runs also counts as ended.
-
-The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a config with no `project`; then it writes nothing and prints one line on stderr. It records an event in the config's `project` folder or in a folder inside it (a subfolder, a worktree in it, also through a link), and ignores an event in any other folder without a line. It ignores a `gate add` whose `--project` names a folder outside the project. In `--project`, a leading `~`, `$HOME` or `${HOME}` is the hook's HOME; a `gate add` whose `--project` has any other `$` or a backtick is ignored, because only the shell knows that folder. A folder whose name starts with two dots (for example `..cache`) is a folder inside the project. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
-
-**What the owner adds.** These steps are for the owner; the bridge changes no settings file.
-
-1. The hook lines, in the project's `.claude/settings.local.json` (use the absolute path of this folder):
-
-   ```json
-   {
-     "hooks": {
-       "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
-       "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
-       "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }]
-     }
-   }
-   ```
-
-2. The Discord permissions. The bridge's app: View Channel, Send Messages, Create Public Threads, Send Messages in Threads and Manage Threads in the parent channel. The parent channel: @everyone without Send Messages; the sage-driver role with Send Messages in Threads.
-3. A deny rule for the Discord plugin's `fetch_messages` tool in the chief's project, for example `"permissions": { "deny": ["mcp__plugin_discord_discord__fetch_messages"] }` (check the tool's name with `/mcp`). The tie posts in a thread hold reasons cleaned for people, not for a model, so the chief must not read them (see "The reason contract").
-
-**The thread of a session.** `node scripts/session.mjs [--config <config.json>] thread <session id>` prints the thread id of a session, from the gate file. A session with no thread yet, or an id that is not a UUID, gives one line on stderr and exit code 1.
-
-## Run the checks
-
-You need Node 22 or later, and `npm install` once (discord.js and playwright-core, both pinned to one exact version).
-
+<!-- check: skip, the check runs this test itself -->
 ```sh
 npm run check
 ```
 
-The check runs `node --check` on every source file, then the tests in `test/`. A test runs the example above and checks that this README holds it. The tests use sample ids only. The bridge tests run the sage state tool (`SAGE_TOOL`, by default the sage plugin's `sage.mjs`) with `HOME` and `SAGE_HOME` in a new scratch folder, so they never touch a real logbook, and they use the fake Discord layer, so they never connect to Discord. One test runs npm itself from another folder with `HOME` set to a scratch folder, to prove the `.npmrc`: npm writes and deletes no log file anywhere (`logs-dir=/dev/null`, `logs-max=0`). For a debug log of one command: `npm --logs-dir=/tmp/npm-logs --logs-max=5 <command>`.
+The check runs every test with sample data and a fake Discord. No test connects to Discord or reads the Keychain. `test/readme.test.js` runs the shell commands of this README and of the reference in a scratch home folder, and checks every relative link.
+
+## Licence
+
+Private, not licensed for use by others (`UNLICENSED` in `package.json`). sage-bot uses [discord.js](https://discord.js.org) for the shapes of Discord messages and [playwright-core](https://playwright.dev) for the screenshots. It is built for, and follows the rules of, [sage](https://github.com/erickb336/sage).
