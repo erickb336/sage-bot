@@ -3,7 +3,7 @@
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
 // src/discord.js, the tests use src/fake-discord.js. Each chief session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that the chief marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
-import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
+import { card, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
@@ -300,8 +300,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   async function postCard(id, ppl, at) {
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
-    const owner = nameOf(config.ownerId, ppl.names);
-    const text = (ask.leads ? `${ask.task} asks the ${LEAD}s for a recommendation to ${owner}. The first ${LEAD} answer is the recommendation; ${owner} decides at the terminal.`
+    const text = (ask.leads ? `${ask.task} asks the ${LEAD}s for a recommendation to ${OWNER}. The first ${LEAD} answer is the recommendation; ${OWNER} decides at the terminal.`
       : gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
       : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
@@ -500,10 +499,11 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     if (ask.leads && answered) {
       // T73: the leads only recommend. sage gets the answer marked as their recommendation, and the owner decides at the terminal (G10). The bridge never
       // switches a mode of sage, and its texts name the switch only in words.
-      const owner = nameOf(config.ownerId, ppl.names);
+      // The next step follows the advice: only a Yes asks the owner to switch the mode on (F-T73-3).
       const { sage: [sageId], texts: [texts] } = meta.get(id);
-      await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${owner} decides at the terminal.`, allowedMentions: NO_MENTIONS });
-      say(`${sageId}: sage-leads recommend ${texts[KEYS.indexOf(answered.outcome.option)]}. If you agree, switch the mode yourself at the terminal.`);
+      const advice = texts[KEYS.indexOf(answered.outcome.option)];
+      await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${OWNER} decides at the terminal.`, allowedMentions: NO_MENTIONS });
+      say(`${sageId}: sage-leads recommend ${advice}. ${/^yes$/i.test(advice) ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
     }
   }
 
@@ -683,7 +683,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;
         if (final || (target && target.gate.phase !== 'closed' && !waits(pressed.gateId))) {
-          const text = final ? `Already answered by ${nameOf(final.by, ppl.names)} at the terminal: ${final.text}. Your press did not count.`
+          const text = final ? `Already answered by ${target.ask.leads ? OWNER : nameOf(final.by, ppl.names)} at the terminal: ${final.text}. Your press did not count.`
             : `Every part of ${pressed.gateId} is decided or answered at the terminal. Your press did not count.`;
           await i.reply(ephemeral(text));
           return;

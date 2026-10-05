@@ -12,6 +12,8 @@ import { ballotsOf, REASON_MAX } from './vote.js';
 /** The people who may answer and vote: a member with either role (T70). */
 const HOLDERS = 'sage-apprentice or sage-lead';
 export const LEAD = 'sage-lead';
+/** The owner who decides a leads-only question (T73). The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
+export const OWNER = 'Erick';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
 const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x8a8a8a };
@@ -181,7 +183,7 @@ const leaders = (counts) => {
 export const settled = (gate, ask) => gate.phase === 'closed'
   || (gate.parts ?? [gate]).every((p, i) => ask.parts[i].final || p.outcome.status === 'decided');
 /** The line of a part that the owner answered at the terminal. */
-const finalLine = (f, names) => `**Answered by ${who(f.by, names)} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
+const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
 
 /**
  * The card of a gate: `{ embeds, components, allowedMentions }`. The embed is plain data, not an EmbedBuilder: the builder's setters
@@ -208,7 +210,7 @@ function single(gate, ask, names) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
   // A leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
-  const owner = who(gate.askedBy, names);
+  const owner = ask.leads ? OWNER : who(gate.askedBy, names);
   const build = ({ why, label: cap, question }) => ({
     title: cut(`${ask.leads ? `Recommend for ${owner}: ` : ''}Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     description: [
@@ -219,10 +221,10 @@ function single(gate, ask, names) {
       ...(ask.leads ? [`**Rule:** the first ${LEAD} answer is the leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
         `**Who can answer:** every ${LEAD}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
-      ...(p.final ? ['', finalLine(p.final, names)]
+      ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
         : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${lead(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${owner} decides at the terminal.**`]
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
-        : o.status === 'withdrawn' ? ['', `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
+        : o.status === 'withdrawn' ? ['', `**Withdrawn by ${owner} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
   });
   const row = new ActionRowBuilder().addComponents(gate.options.map((k, i) => button(customId('press', gate.id, 0, i), `${k}. ${label(p, k)}`,
@@ -253,7 +255,7 @@ function batch(gate, ask, holders, names) {
     const notYet = [...holders].filter((id) => !ballots.has(id));
     const o = part.outcome;
     const state = withdrawn ? ''
-      : p.final ? finalLine(p.final, names)
+      : p.final ? finalLine(p.final, who(p.final.by, names))
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
       : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. The chief reminds @${LEAD} every 2 h.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
@@ -334,9 +336,9 @@ export function confirmEnd(gate, { holders, names }) {
 }
 
 /** The private note for a `why` code of the vote rules (or the bridge's own `unknown-gate`). */
-export function note(why, gate, names) {
+export function note(why, gate, names, ask) {
   const text = NOTES[why] ?? NOTES['bad-event'];
-  return ephemeral(text(gate, names));
+  return ephemeral(text(gate, names, ask));
 }
 const NOTES = {
   'unknown-gate': () => 'I do not know this button or its question. Nothing changed.',
@@ -344,7 +346,7 @@ const NOTES = {
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
   'not-holder': () => `Your press did not count. Only people with the ${HOLDERS} role can answer or vote. You can still read this thread.`,
-  'leads-only': (g, names) => `Only a ${LEAD} can answer this. ${who(g.askedBy, names)} decides.`,
+  'leads-only': () => `Only a ${LEAD} can answer this. ${OWNER} decides.`,
   'not-lead': () => `Only a ${LEAD} can do this. Your votes on the parts count like everyone's.`,
   'lead-needs-discord': () => `A ${LEAD} action works only here in Discord, not at the terminal.`,
   'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,
@@ -354,7 +356,10 @@ const NOTES = {
   'not-tied': () => 'This part is not tied, so there is no tie to break.',
   'not-tied-option': () => 'Only one of the tied options can break the tie.',
   full: () => 'This part already has the most voters it can count. Your press did not count.',
-  closed: (g, names) => g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
+  // On a leads-only card (T73) every press is a recommendation, also the owner's own: the owner decides only at the terminal.
+  closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${lead(g.outcome.by, names)}: ${g.outcome.option}. `
+      + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${OWNER} decides at the terminal. Your press did not count.`
+    : g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
     : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${who(g.askedBy, names)}. Nothing to answer.`
     : `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your press did not count.`,
 };

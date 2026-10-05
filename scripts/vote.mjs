@@ -56,7 +56,11 @@ try {
   const path = votesPathOf(config);
   const leadsPath = leadsPathOf(config);
   if (mode === '--leads') {
-    const row = (await sageTool({ sagePath: config.sagePath, project: config.project }).gates()).find((r) => r.id === args[0]);
+    // A missing or wrong sagePath gives one line, never the child's stack (F-T73-7).
+    const rows = await sageTool({ sagePath: config.sagePath, project: config.project }).gates().catch(() => {
+      throw new Error(`could not read the gates with the sage state tool of the config field sagePath (${config.sagePath ?? 'missing'}). Nothing changed.`);
+    });
+    const row = rows.find((r) => r.id === args[0]);
     const why = row ? notLeadsOnly(row) : `${args[0]} is not a gate of the sage project ${config.project}`;
     if (why) throw new Error(`${why}. Nothing changed.`);
   }

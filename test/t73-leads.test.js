@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { saveVotes } from '../src/state.js';
+import { load, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
-import { CHANNEL, JON, MAYA, SAGE, SAM, setup } from './bridge-setup.js';
+import { CHANNEL, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup } from './bridge-setup.js';
 
 const LEAD = '300000000000000002';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
@@ -26,16 +26,20 @@ const switchesIn = (text) => SWITCHES.filter((p) => text.toLowerCase().includes(
 
 /** Runs scripts/vote.mjs with HOME in the scratch folder and the scratch config (with the scratch logbook) as the default config file. */
 function vote(b, ...args) {
+  return voteWith(b, { sagePath: SAGE }, ...args);
+}
+/** The same with `sage` as the sage fields of the config: { sagePath } or {} for none. */
+function voteWith(b, sage, ...args) {
   const home = join(b.root, 'home');
   mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
-  writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify({ statePath: b.statePath, sagePath: SAGE, project: b.project }));
+  writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify({ statePath: b.statePath, ...sage, project: b.project }));
   const env = { PATH: process.env.PATH, HOME: home, SAGE_HOME: join(home, 'sage') };
   const r = spawnSync(process.execPath, [VOTE, ...args], { env, encoding: 'utf8' });
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
 /** A scratch project whose chief asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
-async function asked({ question = QUESTION[0], options = QUESTION[1] } = {}) {
-  const b = setup({ markAll: false });
+async function asked({ question = QUESTION[0], options = QUESTION[1], members } = {}) {
+  const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', question, '--options', options, '--recommend', 'No');
   saveVotes(`${b.statePath}.votes.leads`, new Set(['G1']));
@@ -204,4 +208,92 @@ test('F-T73-2: a mark that moves a gate saves the file that loses it first, so n
   assert.ok(savedAt(votesFile) < savedAt(leadsFile), 'to leads only: the team votes file first');
   assert.equal(vote(b, 'G1').out, 'team votes: G1');
   assert.ok(savedAt(leadsFile) < savedAt(votesFile), 'to a team vote: the leads-only file first');
+});
+
+test('F-T73-3: the terminal line after a No recommendation says to do nothing, and after a Yes says to switch the mode', async () => {
+  const no = await asked();
+  no.now += MINUTE;
+  await no.press(JON, 'press:G1:0:1');
+  await no.bridge.loop();
+  assert.equal(no.answerOf('G1'), 'B. No (sage-leads recommend; the owner decides)');
+  assert.deepEqual(no.discord.posts.at(-1).content, 'Recommendation recorded: Jon recommends No. Erick decides at the terminal.');
+  assert.deepEqual(no.lines.filter((l) => l.startsWith('G1:')), ['G1: sage-leads recommend No. If you agree, do nothing; the mode stays off.']);
+  const yes = await asked();
+  yes.now += MINUTE;
+  await yes.press(JON, 'press:G1:0:0');
+  assert.deepEqual(yes.lines.filter((l) => l.startsWith('G1:')), ['G1: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal.']);
+});
+
+test('F-T73-4: a gate file with ask.leads on a batch or with a value other than true is refused at load', async () => {
+  const b = await asked();
+  const file = JSON.parse(readFileSync(b.statePath, 'utf8'));
+  assert.equal(file.entries[0].ask.leads, true);
+  assert.equal(load(b.statePath).entries[0].ask.leads, true); // the file as the bridge wrote it loads
+  const refused = (edit) => {
+    const copy = structuredClone(file);
+    edit(copy.entries[0]);
+    writeFileSync(b.statePath, JSON.stringify(copy));
+    return () => load(b.statePath);
+  };
+  assert.throws(refused((e) => { e.ask.kind = 'batch'; }), { message: 'the gate file has an entry that the bridge did not write' });
+  assert.throws(refused((e) => { e.ask.leads = 'yes'; }), { message: 'the gate file has an entry that the bridge did not write' });
+  assert.throws(refused((e) => { e.ask.leads = false; }), { message: 'the gate file has an entry that the bridge did not write' });
+});
+
+test('F-T73-5: a press after the recommendation, also Erick\'s own, gets a note that it is a recommendation and did not count', async () => {
+  const done = 'Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count.';
+  const b = await asked();
+  b.now += MINUTE;
+  await b.press(JON, 'press:G1:0:0');
+  b.now += MINUTE;
+  assert.deepEqual((await b.press(OWNER, 'press:G1:0:1')).map((r) => r.content), [done]);
+  assert.deepEqual((await b.press(JON, 'press:G1:0:1')).map((r) => r.content), [done]);
+  await b.bridge.loop();
+  assert.equal(b.answerOf('G1'), 'A. Yes (sage-leads recommend; the owner decides)');
+
+  // Erick holds sage-lead too: his press in Discord is a recommendation like any lead's, never his final answer (G10).
+  const own = await asked();
+  own.now += MINUTE;
+  await own.press(OWNER, 'press:G1:0:1');
+  await own.bridge.loop();
+  assert.equal(own.answerOf('G1'), 'B. No (sage-leads recommend; the owner decides)');
+  assert.match(text(own), /\*\*Recommended by Erick \(sage-lead\) at <t:\d+:t>: B\. No\. Erick decides at the terminal\.\*\*$/);
+  assert.deepEqual(own.lines.filter((l) => l.startsWith('G1:')), ['G1: sage-leads recommend No. If you agree, do nothing; the mode stays off.']);
+  own.now += MINUTE;
+  assert.deepEqual((await own.press(JON, 'press:G1:0:0')).map((r) => r.content),
+    ['Already recommended by Erick (sage-lead): B. No. A recommendation only; Erick decides at the terminal. Your press did not count.']);
+});
+
+test('F-T73-6: with the owner missing from the member list, every leads-only text still names Erick, with a capital at each sentence start', async () => {
+  const b = await asked({ members: MEMBERS.filter((m) => m.id !== OWNER) });
+  assert.deepEqual(b.discord.posts.map((p) => [p.content, p.embeds?.[0].title]), [[
+    `<@&${LEAD}> T1 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal.`,
+    'Recommend for Erick: Question G1 · T1 Ship the export page',
+  ]]);
+  assert.match(text(b), /\*\*Rule:\*\* the first sage-lead answer is the leads' recommendation to Erick · Erick decides at the terminal ·/);
+  b.now += MINUTE;
+  assert.deepEqual(await b.press(MAYA, 'press:G1:0:0'), [NOTE]);
+  await b.press(JON, 'press:G1:0:1');
+  await b.bridge.loop();
+  assert.deepEqual(b.discord.posts.at(-1).content, 'Recommendation recorded: Jon recommends No. Erick decides at the terminal.');
+  assert.match(text(b), /\*\*Recommended by Jon \(sage-lead\) at <t:\d+:t>: B\. No\. Erick decides at the terminal\.\*\*$/);
+  b.sh('gate', 'answer', 'G1', 'B. No');
+  b.now += MINUTE;
+  await b.bridge.loop();
+  assert.match(text(b), /\*\*Answered by Erick \(terminal\) at <t:\d+:t>: B\. No\. Final\.\*\*$/);
+  assert.deepEqual((await b.press(JON, 'press:G1:0:0')).map((r) => r.content), ['Already answered by Erick at the terminal: B. No. Your press did not count.']);
+  const all = JSON.stringify([[...b.discord.messages.values()], b.lines]);
+  assert.deepEqual(all.match(/member/gi), null); // never "a member" or "member …0001"
+});
+
+test('F-T73-7: vote.mjs --leads with no sagePath or a wrong one prints one line, exits 1 and writes nothing', () => {
+  const b = setup({ markAll: false });
+  b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
+  const wrong = join(b.root, 'no-such-sage.mjs');
+  assert.deepEqual(voteWith(b, {}, '--leads', 'G1'), { code: 1, out: '',
+    err: 'sage-bot vote: could not read the gates with the sage state tool of the config field sagePath (missing). Nothing changed.' });
+  assert.deepEqual(voteWith(b, { sagePath: wrong }, '--leads', 'G1'), { code: 1, out: '',
+    err: `sage-bot vote: could not read the gates with the sage state tool of the config field sagePath (${wrong}). Nothing changed.` });
+  assert.equal(existsSync(`${b.statePath}.votes`) || existsSync(`${b.statePath}.votes.leads`), false);
 });
