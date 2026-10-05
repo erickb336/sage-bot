@@ -431,3 +431,91 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [POINTER_TEXT]);
   assert.deepEqual(pressed, []);
 });
+
+// ---- Repair round 2 (R351): the mutations that survived code review R347. ----
+
+/** Sets the state of tasks in tasks.tsv. The state tool lets a task reach merged or concluded only through its route, so the test writes the row. */
+function setStates(b, states) {
+  const path = join(b.sh('logbook'), 'tasks.tsv');
+  const [head, ...rows] = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  const col = head.split('\t').indexOf('state');
+  writeFileSync(path, `${[head, ...rows.map((l) => { const v = l.split('\t'); if (v[0] in states) v[col] = states[v[0]]; return v.join('\t'); })].join('\n')}\n`);
+}
+
+test('F-T71-10 and F-T71-12: an answered question is not open; merged, concluded and abandoned tasks are not left', async (t) => {
+  const b = world(t);
+  b.sh('gate', 'answer', 'G2', 'Yes');
+  b.sh('task', 'add', '--title', 'Spike', '--size', 'tiny');
+  b.sh('task', 'add', '--title', 'Dropped', '--size', 'tiny');
+  setStates(b, { T1: 'merged', T3: 'concluded', T4: 'abandoned' });
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: ['**Board · project**', '4 task(s) · merged 1 · framed 1 · concluded 1 · abandoned 1',
+    "1 task(s) left. Time left is not estimated yet: the project's records have no estimate.", '1 open question(s):', '- G1 (T1): Which sort is the default?'].join('\n'), ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates'), [{ content: '**Open questions · project** (1)\n- G1 (T1), team vote: Which sort is the default?\n  A. Name · B. Date', ...PRIVATE }]);
+});
+
+test('F-T71-11: a folder symlink to a sibling folder whose name starts with the project name shares nothing from it', async (t) => {
+  const b = world(t);
+  const s = site(t, b, { 'ok.svg': '<svg/>' }, ['shots/*.svg', 'shots/old/*.svg']);
+  mkdirSync(join(s.root, 'site-old'));
+  writeFileSync(join(s.root, 'site-old', 'leak.svg'), SECRET);
+  symlinkSync(join(s.root, 'site-old'), join(s.project, 'shots', 'old')); // inside the project, to /…/site-old
+  assert.deepEqual(await files(s.ask), [{ content: '1 shared file(s) of site:\n- shots/ok.svg', files: [{ name: 'ok.svg', size: 6 }], ...PRIVATE }]);
+});
+
+test('F-T71-13: a reply over 2000 characters is cut to 2000 with an ellipsis, as Discord allows no more', async (t) => {
+  const b = world(t);
+  const questions = Array.from({ length: 12 }, (_, n) => `Question ${n + 3} ${'x'.repeat(180)}?`);
+  for (const q of questions) b.sh('gate', 'add', 'T2', '--question', q, '--options', 'Yes|No', '--recommend', 'Yes');
+  const full = [...BOARD.split('\n').slice(0, 3), '14 open question(s):', '- G1 (T1): Which sort is the default?', '- G2 (T2): Ship the wake note?',
+    ...questions.map((q, n) => `- G${n + 3} (T2): ${q}`)].join('\n');
+  assert.ok(full.length > 2000, String(full.length));
+  assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `${full.slice(0, 1999)}…`, ...PRIVATE }]);
+});
+
+test('F-T71-13: the team vote label comes only from the bridge\'s own project, not from a gate of another project with the same id', async (t) => {
+  const b = world(t); // its G1 is marked as a team vote
+  const other = join(b.root, 'other');
+  mkdirSync(other);
+  const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
+  const sh = (...args) => spawnSync(process.execPath, [SAGE, ...args, '--project', other], { env, encoding: 'utf8' });
+  sh('init');
+  sh('task', 'add', '--title', 'Other work', '--size', 'tiny');
+  sh('gate', 'add', 'T1', '--question', 'Other question?', '--options', 'Yes|No', '--recommend', 'Yes');
+  b.ask = b.makeAsk({ projects: [{ name: 'project', project: b.project }, { name: 'other', project: other }] });
+  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'other' }), [{ content: '**Open questions · other** (1)\n- G1 (T1), answered at the terminal: Other question?\n  A. Yes · B. No', ...PRIVATE }]);
+  assert.deepEqual(await b.cmd(MAYA, 'gates', { project: 'project' }), [{ content: GATES, ...PRIVATE }]);
+});
+
+test('F-T71-13: a mention or a command from a user id that is not a Discord id gets nothing', async (t) => {
+  const b = world(t);
+  for (const id of ['', 'abc', '1234', `${MAYA}x`]) {
+    const m = fakeMention({ user: id, roles: [APPRENTICE], channelId: ASK, content: '<@1> hi' });
+    await b.ask.mention(m);
+    assert.deepEqual(m.replies, [], id);
+    const i = fakeCommand({ user: id, roles: [APPRENTICE], channelId: ASK, sub: 'board' });
+    await b.ask.command(i);
+    assert.deepEqual(i.replies, [], id);
+  }
+  assert.deepEqual(await b.mention(MAYA, '<@1> hi'), [{ content: POINTER_TEXT, allowedMentions: { parse: [], repliedUser: false } }]); // a real id still gets the pointer
+});
+
+/** A button press or a form as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
+const press = ({ guildId = CONFIG_GUILD, channelId = CONFIG.channelId, channel = null, customId, modal = false }) => ({ guildId, channelId, channel, customId,
+  isChatInputCommand: () => false, isButton: () => !modal, isModalSubmit: () => modal });
+
+test('F-T71-9: routes send a button or a form in the bridge channel or its thread to the bridge; another guild or channel gets nothing', async (t) => {
+  const b = world(t);
+  const pressed = [];
+  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: CONFIG.channelId } : { isThread: () => false });
+  const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i.customId); } }, fetch, botId: BOT_USER });
+  for (const i of [
+    press({ customId: 'button-in-channel' }),
+    press({ customId: 'form-in-channel', modal: true }),
+    press({ customId: 'button-in-thread', channelId: THREAD }),
+    press({ customId: 'other-guild', guildId: '200000000000000002' }),
+    press({ customId: 'other-guild-form', guildId: '200000000000000002', modal: true }),
+    press({ customId: 'other-channel', channelId: ASK }),
+    press({ customId: 'thread-of-other', channelId: '400000000000000078', channel: { isThread: () => true, parentId: ASK } }),
+  ]) await on.interaction(i);
+  assert.deepEqual(pressed, ['button-in-channel', 'form-in-channel', 'button-in-thread']);
+});
