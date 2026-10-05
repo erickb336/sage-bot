@@ -65,6 +65,7 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .notes .box b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
 .notes .box.dec { background: var(--warn-soft); border: 1px dashed var(--warn); color: #6b4200; }
 .notes .box.see { background: var(--bg); border: 1px solid var(--line); }
+.notes .box.done { background: var(--ok-soft); border: 1px solid #b9dcc8; color: #17603c; }
 .notes .box.chg { background: var(--stop-soft); border: 1px solid #f2c4bf; color: var(--stop); }
 .notes ul { margin: 4px 0; padding-left: 18px; }
 
@@ -155,6 +156,9 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .opt { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px; font-size: .86rem; }
 .opt.rec { border: 2px solid var(--accent); }
 .opt h4 { margin: 0 0 6px; font-size: .95rem; }
+.done-tag, .open-tag { font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
+.done-tag { background: var(--ok); color: #fff; } .open-tag { background: var(--warn-soft); color: #6b4200; border: 1px dashed var(--warn); }
+.varhead.done { background: var(--ok-soft); border: 1px solid #b9dcc8; color: #17603c; }
 .rec-tag { font-size: .72rem; font-weight: 700; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
 .mini { border: 1px solid var(--line); border-radius: 8px; background: var(--app-side); padding: 6px 8px; font-size: .78rem; margin-bottom: 8px; }
 .mini div { padding: 1px 4px; border-radius: 4px; }
@@ -169,6 +173,10 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .dec ol { margin: 4px 0; padding-left: 22px; font-size: .9rem; }
 .dec li { margin: 3px 0; }
 .dec li.r { font-weight: 600; }
+.dec.decided { border-color: #b9dcc8; }
+.dec .pick { margin: 4px 0 6px; padding: 6px 10px; background: var(--ok-soft); border-radius: 6px; color: #17603c; font-size: .9rem; }
+.dec li.off { color: var(--muted); }
+.dec li.chosen { font-weight: 600; color: var(--text); }
 .dec .see { font-size: .8rem; color: var(--muted); }
 .dec .see button { border: 0; background: none; color: var(--accent); text-decoration: underline; padding: 0; font-size: .8rem; }
 
@@ -195,27 +203,28 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 
 <div class="doc">
 <h1>Ask @sage-bot in Discord, by role</h1>
-<p class="sub">Task T69 · run R313 · design branch <code>design/t69-roles</code> · nothing is built</p>
+<p class="sub">Task T69 · runs R313 to R318 · design branch <code>design/t69-roles</code> · nothing is built</p>
 <div class="lead">
 <p><b>What this is.</b> A clickable design of what the team can ask <span class="mention">@sage-bot</span> in Discord, by role. A <span class="rb appr">sage-apprentice</span> reads and asks questions. A <span class="rb lead">sage-lead</span> also starts sessions and does other write operations, each after a confirm. People with no role get a short refusal.</p>
-<p><b>Where it fits.</b> Today the bridge only posts vote cards in session threads, and only the owner chats with the chief (decision G16). The owner's new request opens the bot to the team. This page comes before any build. Next: you answer the 13 open decisions at the end, then a PE checks the plan.</p>
+<p><b>Where it fits.</b> Today the bridge only posts vote cards in session threads, and only the owner chats with the chief (decision G16). The owner's new request opens the bot to the team. This page comes before any build. Next: you answer the 4 decisions that are still open, then a PE checks the plan.</p>
+<p><b>Erick's answers (G18, 5 Oct).</b> Build option A first: the bridge answers the fixed asks (board, time left, artifacts), with no AI. A read-only AI helper for free questions comes only after the live trial (option B). Discord text never goes into the live chief. Erick also decided D1 to D7, D11 and D13; each is marked "Decided by Erick" below.</p>
 <p><b>What changes from earlier decisions.</b> G16 (only the owner chats), "only the owner starts work", "only the owner withdraws a question" and "switches only at the host" each change in some moments. Each moment says so in a red box.</p>
 <p><b>Two forms of asking.</b> The owner asked for <span class="mention">@sage-bot</span> mentions. The PE prefers fixed slash commands (<code>/sage board</code>, <code>/sage task</code>, <code>/sage gates</code>, <code>/sage files</code>, and <code>/sage request</code> for leads) that the bridge answers in private. Moments 1 and 7 show both forms; decision D13 picks.</p>
-<p><b>What I need from you.</b> A pick on each open decision (each has my recommendation).</p>
+<p><b>What I need from you.</b> A pick on the 4 open decisions: D8, D9, D10 and D12 (each has my recommendation).</p>
 </div>
 
-<h2>Who can do what (my recommendation)</h2>
+<h2>Who can do what (with Erick's G18 answers)</h2>
 <div class="tablewrap"><table>
 <tr><th>Action</th><th><span class="rb none">no role</span></th><th><span class="rb appr">apprentice</span></th><th><span class="rb lead">lead</span></th><th><span class="rb owner">owner</span></th></tr>
-<tr><td>Show the board, time left, artifacts, free questions</td><td class="n">no</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
-<tr><td>Vote on a team vote card</td><td class="n">no</td><td class="q">variant A: yes · B: no</td><td class="y">yes</td><td class="y">yes</td></tr>
-<tr><td>Start a session</td><td class="n">no</td><td class="n">no, asks a lead</td><td class="y">yes, after confirm (+ owner approval in variant A)</td><td class="y">yes</td></tr>
+<tr><td>Show the board, time left, artifacts; free questions after the live trial</td><td class="n">no</td><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
+<tr><td>Vote on a team vote card</td><td class="n">no</td><td class="y">yes (D1 A)</td><td class="y">yes</td><td class="y">yes</td></tr>
+<tr><td>Start a session</td><td class="n">no</td><td class="n">no, asks a lead</td><td class="y">yes, after confirm and Erick's Approve (D4 A)</td><td class="y">yes</td></tr>
 <tr><td>Mark a question as a team vote, withdraw it, re-run a step</td><td class="n">no</td><td class="n">no</td><td class="y">yes, after confirm</td><td class="y">yes</td></tr>
 <tr><td>Break a tie, end a vote early (as today)</td><td class="n">no</td><td class="n">no</td><td class="y">yes</td><td class="y">yes</td></tr>
-<tr><td>Automatic-merge mode for a session</td><td class="n">no</td><td class="n">no</td><td class="q">answers the card (variant A or B)</td><td class="y">yes, at the terminal</td></tr>
+<tr><td>Automatic-merge mode for a session</td><td class="n">no</td><td class="n">no</td><td class="y">recommends on the card; Erick confirms (D11 B)</td><td class="y">yes, at the terminal</td></tr>
 <tr><td>Merge, deploy, delete data, publish, change roles, sage mode on or off</td><td class="n">no</td><td class="n">no</td><td class="n">no, never from Discord</td><td class="y">at the terminal or in GitHub</td></tr>
 </table></div>
-<p class="sub" style="margin-top:6px">Owner decision (5 Oct): two roles only. A member holds <span class="rb appr">sage-apprentice</span> or <span class="rb lead">sage-lead</span>, never both. A lead has every apprentice right. The role sage-driver goes away. Who votes is still open: decision D1.</p>
+<p class="sub" style="margin-top:6px">Owner decision (5 Oct): two roles only. A member holds <span class="rb appr">sage-apprentice</span> or <span class="rb lead">sage-lead</span>, never both. A lead has every apprentice right. The role sage-driver goes away. Who votes: Erick decided D1 A (G18). Apprentices and leads vote, a lead breaks a tie, and an apprentice's first answer on a single question is final.</p>
 
 <h2 style="margin-bottom:0">The moments</h2>
 <p class="sub">12 moments. Pick a moment, then a step or a variant (dashed). Arrow keys move between steps. Each message says who can see it: <span class="vis pub">public</span> means everyone in the channel; <span class="vis me">only you</span> means an ephemeral reply that only that person sees.</p>
@@ -228,8 +237,8 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 </div>
 
 <div class="doc tail">
-<h2 id="decisions">Open decisions</h2>
-<p class="sub">Each one becomes a question for the owner. My recommendation is in bold. The page shows the recommended option, unless a moment shows the variants.</p>
+<h2 id="decisions">Decisions</h2>
+<p class="sub">Erick decided 9 of the 13 on 5 Oct (G18); each shows "Decided by Erick" and the chosen variant. D8, D9, D10 and D12 are still open; my recommendation is in bold.</p>
 <div id="declist"></div>
 
 <h2>Cases this request does not decide</h2>
@@ -238,7 +247,7 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 <li><b>A borderline request.</b> "Show me how dark mode would look." Is a mock-up a build? — Treat anything that changes a file or starts an agent run as a build; the helper may only describe.</li>
 <li><b>A lead loses the role</b> between the request and the confirm. — The bot checks the role again at the press; the press fails with a note.</li>
 <li><b>Two leads start the same feature</b> within minutes. — The second confirm card says "Jon asked for a similar session at 14:05" and asks again.</li>
-<li><b>Too many sessions on the Mac.</b> How many chief sessions may run at once? — 2 at most; a third start waits in a queue that the bot shows.</li>
+<li><b>Too many sessions on the Mac.</b> How many chief sessions may run at once? — Decided by Erick (D5): 2 at most. Suggestion: a third start waits in a queue that the bot shows.</li>
 <li><b>Direct messages to the bot.</b> — The bot answers no direct messages and says to use #ask-sage, so every answer stays visible.</li>
 <li><b>An edited or deleted mention</b> after the reply. — The bot does not change its answer; a deleted request cancels an open confirm.</li>
 <li><b>Secrets in an answer.</b> The helper reads the logbook and the repository. — It never reads .env files, the bridge config or the gate file; answers go through the same allow-list cleaner as reasons.</li>
@@ -350,9 +359,9 @@ M.push({ g: 'Apprentice', t: '1 Board', title: 'An apprentice asks for the board
   S('Ask', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + typing()),
     `<h3>Maya asks for the board</h3><p>She types a plain mention in #ask-sage. The bot shows "typing" at once, so she knows it heard her.</p><p>Answers from the logbook take under 2 seconds (estimate, no measurement yet).</p>`),
   S('Board', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '14:02', board(), { reply: 'Maya: @sage-bot show the board for sage-bot' })),
-    `<h3>The board comes back as one card</h3><ul><li>Tasks by step, merged this week</li><li>Open questions, with their state</li><li>Open pull requests, with their last verdict</li></ul><p>The bridge builds the card from the logbook. No AI is in this path, so the card is always the same for the same logbook.</p><div class="box see"><b>Who sees it</b>Everyone in #ask-sage. A reply to a mention cannot be private in Discord.</div><div class="box dec"><b>Decision D3</b>The bridge answers fixed asks (board, time, artifacts) alone; a read-only helper answers free questions.</div>`),
+    `<h3>The board comes back as one card</h3><ul><li>Tasks by step, merged this week</li><li>Open questions, with their state</li><li>Open pull requests, with their last verdict</li></ul><p>The bridge builds the card from the logbook. No AI is in this path, so the card is always the same for the same logbook.</p><div class="box see"><b>Who sees it</b>Everyone in #ask-sage. A reply to a mention cannot be private in Discord.</div><div class="box dec"><div class="box done"><b>Decided by Erick · D3</b>The bridge answers the fixed asks (board, time, artifacts) alone, with no AI. Free questions wait until after the live trial.</div>`),
   S('Slash form', () => `<div class="varhead">Same ask, slash-command form (D13)</div>` + app('#ask-sage', ASK, slash('maya', '14:02', '/sage board project:sage-bot', board()), { composer: '<b>/sage</b> board · task · gates · files · request (leads)' }),
-    `<h3>The slash-command form</h3><p>Maya types <code>/sage board</code>; Discord offers the project as a choice, so no typo is possible. The bridge answers in private: only Maya sees it.</p><p>Other commands: <code>/sage task T66</code> (one task), <code>/sage gates</code> (open questions), <code>/sage files</code> (moment 3).</p><div class="box see"><b>Who sees it</b>Only Maya. Good for a quick look; nobody else learns from it.</div><div class="box dec"><b>Decision D13</b>Mentions, slash commands, or both.</div>`, { v: 1 }),
+    `<h3>The slash-command form</h3><p>Maya types <code>/sage board</code>; Discord offers the project as a choice, so no typo is possible. The bridge answers in private: only Maya sees it.</p><p>Other commands: <code>/sage task T66</code> (one task), <code>/sage gates</code> (open questions), <code>/sage files</code> (moment 3).</p><div class="box see"><b>Who sees it</b>Only Maya. Good for a quick look; nobody else learns from it.</div><div class="box done"><b>Decided by Erick · D13</b>Both: slash commands and @sage-bot mentions.</div>`, { v: 1 }),
   S('Empty', () => app('#ask-sage', ASK, msg('maya', '09:15', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '09:15', `<div class="embed grey"><div class="et">Board · sage-bot</div><p>No open tasks, no open questions, no open pull requests.</p><p>Last merge: ${tk('T64')} on Sat 3 Oct.</p><div class="efoot">From the sage logbook at 09:15 UTC · sample data</div></div>`, { reply: 'Maya: @sage-bot show the board for sage-bot' })),
     `<h3>Empty state</h3><p>Nothing is open. The card says so in words and gives the last merge, so "empty" does not look like "broken".</p>`),
   S('Failure', () => app('#ask-sage', ASK, msg('maya', '14:02', `<p>${BOT} show the board for sage-bot</p>`) + msg('bot', '14:02', `<p>I could not read the sage logbook just now. Nothing is lost. Please ask again in a minute.</p><p style="color:var(--muted);font-size:.84rem">Erick: the logbook check failed at 14:02 (logged on the Mac).</p>`, { reply: 'Maya: @sage-bot show the board for sage-bot' })),
@@ -383,27 +392,28 @@ const artV = {
 };
 const artAsk = msg('ana', '14:20', `<p>${BOT} can you share some graphics or artifacts to help me understand the project?</p>`);
 M.push({ g: 'Apprentice', t: '3 Artifacts', title: 'An apprentice asks for graphics to understand the project', steps: [
-  S('A · images (recommended)', () => `<div class="varhead">Variant A · images attached · recommended</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.A, { reply: 'Ana: @sage-bot can you share some graphics…' })),
-    `<h3>Images, attached</h3><p>The bot attaches pictures that are already in the shared project: README graphics and design screenshots. It renders an SVG to PNG, because Discord does not show SVG.</p><p>Nothing new leaves the Mac except these files, and nothing gets published.</p><div class="box dec"><b>Decision D6</b>How to share artifacts. I recommend A: it answers at once and publishes nothing.</div>`, { v: 1 }),
+  S('A · images (recommended)', () => `<div class="varhead done">Variant A · images attached · decided by Erick</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.A, { reply: 'Ana: @sage-bot can you share some graphics…' })),
+    `<h3>Images, attached</h3><p>The bot attaches pictures that are already in the shared project: README graphics and design screenshots. It renders an SVG to PNG, because Discord does not show SVG.</p><p>Nothing new leaves the Mac except these files, and nothing gets published.</p><div class="box done"><b>Decided by Erick · D6</b>Variant A: share only images that already exist in shared folders. It answers at once and publishes nothing.</div>`, { v: 1 }),
   S('B · link', () => `<div class="varhead">Variant B · link to a published page</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.B, { reply: 'Ana: @sage-bot can you share some graphics…' })),
     `<h3>A link to a page</h3><p>Richer, because the page is clickable. But only pages that Erick already published can show. Each new publish needs Erick's yes, because publishing cannot be undone.</p>`, { v: 1 }),
   S('C · both', () => `<div class="varhead">Variant C · both</div>` + app('#ask-sage', ASK, artAsk + msg('bot', '14:20', artV.C, { reply: 'Ana: @sage-bot can you share some graphics…' })),
     `<h3>Both</h3><p>Pictures for a quick look and the page for depth. It has the same publish limit as B.</p>`, { v: 1 }),
   S('Not shared', () => app('#ask-sage', ASK, msg('ana', '14:25', `<p>${BOT} can I see the T69 design page?</p>`) + msg('bot', '14:25', `<p>The T69 design page is on Erick's Mac and is not published. I can attach its 13 screenshots instead.</p><div class="btns">${btn('Attach the screenshots', 'pri')}</div>`, { reply: 'Ana: @sage-bot can I see the T69 design page?' })),
-    `<h3>An artifact that is not shared</h3><p>The owner keeps artifacts on his Mac unless he asks to publish them. The bot offers what it may share.</p>`),
+    `<h3>An artifact that is not shared</h3><p>Erick keeps artifacts on their Mac unless they ask to publish them. The bot offers what it may share.</p>`),
 ] });
 
 // 4. Free question
 const q4 = msg('maya', '14:30', `<p>${BOT} why do we vote in threads?</p>`);
 const a4 = `<p>Each chief session gets its own thread, so the questions of one session stay together and the team sees which work they belong to.</p><p>Erick decided this in G14 and G15. G16 adds that a session thread holds only the votes and the chief's posts, so the votes stay readable.</p><p style="font-size:.82rem;color:var(--muted)">Sources: README, "Session threads" · logbook G14, G15, G16. Answered by the read-only helper; it can be wrong.</p>`;
-M.push({ g: 'Apprentice', t: '4 Free question', title: 'An apprentice asks a free question', steps: [
-  S('Thinking', () => app('#ask-sage', ASK, q4 + typing()),
-    `<h3>Loading</h3><p>A free question goes to a read-only helper agent. It can read the project's README, logbook and code. It cannot write or run commands.</p><p>Time: no measurement yet. I expect 10 to 60 seconds; the trial measures it.</p>`),
-  S('Answer', () => app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
-    `<h3>The answer, with its sources</h3><p>Short, in plain words, with the decisions it rests on. The last line names the helper and says that it can be wrong.</p><div class="box dec"><b>Decision D3</b>Who answers free questions: the live chief, a read-only helper, or nobody (the bridge alone).</div><div class="box see"><b>Security</b>The Discord text now reaches a model. The bridge cleans it with an allow-list for that reader, and the helper has read-only tools.</div>`),
-  S('Correction', () => app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' }) + msg('maya', '14:31', `<p>${BOT} I meant: why threads and not one channel per session?</p>`, { reply: 'sage-bot: Each chief session gets its own thread…' }) + msg('bot', '14:31', `<p>Discord limits a server to 500 channels, and a thread archives itself when the session ends. One channel per session would fill the list and need cleaning by hand.</p><p style="font-size:.82rem;color:var(--muted)">Sources: README, "Session threads". Read-only helper.</p>`, { reply: 'Maya: @sage-bot I meant: why threads and not one channel…' })),
+const LATER = '<div class="varhead">After the live trial (option B) · not in the first build</div>';
+M.push({ g: 'Apprentice', t: '4 Free question (after trial)', title: 'An apprentice asks a free question · after the live trial', steps: [
+  S('Thinking', () => LATER + app('#ask-sage', ASK, q4 + typing()),
+    `<div class="box done"><b>Decided by Erick · D3</b>Free questions come after the live trial (option B), not in the first build. Discord text never goes into the live chief.</div><h3>Loading</h3><p>After the trial, a free question goes to a read-only helper agent. It can read the project's README, logbook and code. It cannot write or run commands.</p><p>Time: no measurement yet. I expect 10 to 60 seconds; the trial measures it.</p>`),
+  S('Answer', () => LATER + app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
+    `<h3>The answer, with its sources</h3><p>Short, in plain words, with the decisions it rests on. The last line names the helper and says that it can be wrong.</p><div class="box done"><b>Decided by Erick · D3</b>The bridge alone in the first build. The read-only helper comes only after the live trial; never the live chief.</div><div class="box see"><b>Security</b>The Discord text now reaches a model. The bridge cleans it with an allow-list for that reader, and the helper has read-only tools.</div>`),
+  S('Correction', () => LATER + app('#ask-sage', ASK, q4 + msg('bot', '14:30', a4, { reply: 'Maya: @sage-bot why do we vote in threads?' }) + msg('maya', '14:31', `<p>${BOT} I meant: why threads and not one channel per session?</p>`, { reply: 'sage-bot: Each chief session gets its own thread…' }) + msg('bot', '14:31', `<p>Discord limits a server to 500 channels, and a thread archives itself when the session ends. One channel per session would fill the list and need cleaning by hand.</p><p style="font-size:.82rem;color:var(--muted)">Sources: README, "Session threads". Read-only helper.</p>`, { reply: 'Maya: @sage-bot I meant: why threads and not one channel…' })),
     `<h3>Correction</h3><p>Maya replies to the answer. A reply to the bot counts as a follow-up: the helper gets the earlier question and answer too. Without a reply, each mention starts fresh.</p>`),
-  S('Failure', () => app('#ask-sage', ASK, q4 + msg('bot', '14:31', `<p>I could not answer in 60 seconds. Please ask again, or ask a lead: ${LEADS}.</p>`, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
+  S('Failure', () => LATER + app('#ask-sage', ASK, q4 + msg('bot', '14:31', `<p>I could not answer in 60 seconds. Please ask again, or ask a lead: ${LEADS}.</p>`, { reply: 'Maya: @sage-bot why do we vote in threads?' })),
     `<h3>Failure</h3><p>The helper timed out or failed. The bot says so and gives a way forward. It does not retry by itself, so it does not spend twice.</p>`),
 ] });
 
@@ -455,8 +465,8 @@ M.push({ g: 'Lead', t: '7 Start a session', title: 'A lead starts a new session'
     `<h3>The slash-command form</h3><p>Jon types <code>/sage request</code> with two fields: project and request. The confirm comes back in private, so the channel does not fill with drafts.</p><p>Only leads see <code>/sage request</code> in the command list: Discord can hide a command from members without the role.</p><p>After Jon confirms, the owner's approval card (variant A) is public as in the mention form.</p>`, { v: 1 }),
   S('Edit (correction)', () => app('#ask-sage', ASK, q7 + restate('edit'), { modal: editModal }),
     `<h3>Correction: Jon edits the task</h3><p>A form with the two fields that most often need a fix. Here Jon adds the date of the last change. Save updates the card in place. Jon then confirms.</p>`),
-  S('A1 · owner approves', () => `<div class="varhead">Variant A · the owner approves · recommended</div>` + app('#ask-sage', ASK, q7 + restate('ok') + msg('bot', '15:12', `<p>Sent to Erick for approval. I post here when he answers.</p>`) + approvalCard()),
-    `<h3>Variant A: Erick approves on a card</h3><p>The approval card always repeats the text that Jon confirmed, word for word.</p><p>The card pings Erick in #ask-sage. He presses Approve on his phone, or answers at the terminal.</p><p>Why I recommend A: the session runs on Erick's Mac and spends his money; the approval costs him one tap; and Erick, not a model, reads the lead's text before it reaches the chief.</p><div class="box dec"><b>Decision D4</b>Variant A or B.</div>`, { v: 1 }),
+  S('A1 · owner approves', () => `<div class="varhead done">Variant A · Erick approves · decided by Erick</div>` + app('#ask-sage', ASK, q7 + restate('ok') + msg('bot', '15:12', `<p>Sent to Erick for approval. I post here when Erick answers.</p>`) + approvalCard()),
+    `<h3>Variant A: Erick approves on a card</h3><p>The approval card always repeats the text that Jon confirmed, word for word.</p><p>The card pings Erick in #ask-sage. Erick presses Approve on their phone, or answers at the terminal.</p><p>Why A: the session runs on Erick's Mac and spends Erick's money; the approval costs Erick one tap; and Erick, not a model, reads the lead's text before it reaches the chief.</p><div class="box done"><b>Decided by Erick · D4</b>Variant A.</div>`, { v: 1 }),
   S('A2 · started', () => `<div class="varhead">Variant A · approved</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('ok') + started('15:20')),
     `<h3>Variant A: the session starts</h3><p>The card turns green and names who approved. The start note links to the new session thread under #sage-chief.</p>`, { v: 1 }),
   S('A3 · declined', () => `<div class="varhead">Variant A · declined</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('no') + msg('bot', '15:20', `<p>${at('jon')} Erick declined the session: "Wait until T66 merges." Nothing started.</p>`)),
@@ -493,8 +503,8 @@ const voteCard = (v) => `<div class="embed warn"><div class="et">Team vote · G4
   <div class="btns">${btn('A · By step', 'pri' + (v === 'B' ? ' pressed' : ''))}${btn('B · By last change', 'pri')}</div>
   <p style="font-size:.82rem;color:var(--muted);margin:6px 0 0">${v === 'A' ? 'Voters: apprentices and leads (Maya, Ana, Jon, Erick). Voted: Maya A, Jon B. Not yet: Ana, Erick.' : 'Voters: leads (Jon, Erick). Voted: Jon B. Not yet: Erick. Apprentices can read this card.'}</p><div class="efoot">Sample data</div></div>`;
 M.push({ g: 'Lead', t: '9 Votes and ties', title: 'Who votes, and a lead breaks a tie', steps: [
-  S('D1-A · all vote', () => `<div class="varhead">D1 variant A · apprentices and leads vote · recommended</div>` + app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '15:40', `<p><span class="mention">@sage-apprentice</span> <span class="mention">@sage-lead</span> ${tk('T66')} has a product question. Vote within 30 minutes.</p>${voteCard('A')}`)),
-    `<h3>Variant A: everyone with a role votes</h3><p>The card pings both roles. It works like today's vote, with sage-apprentice and sage-lead in place of sage-driver.</p><p>I recommend A: with 2 to 5 people, leads alone are often 1 or 2 voters.</p><div class="box dec"><b>Decision D1</b>Who votes.</div>`, { v: 1 }),
+  S('D1-A · all vote', () => `<div class="varhead done">D1 variant A · apprentices and leads vote · decided by Erick</div>` + app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '15:40', `<p><span class="mention">@sage-apprentice</span> <span class="mention">@sage-lead</span> ${tk('T66')} has a product question. Vote within 30 minutes.</p>${voteCard('A')}`)),
+    `<h3>Variant A: everyone with a role votes</h3><p>The card pings both roles. It works like today's vote, with sage-apprentice and sage-lead in place of sage-driver.</p><p>I recommend A: with 2 to 5 people, leads alone are often 1 or 2 voters.</p><div class="box done"><b>Decided by Erick · D1</b>Variant A. A lead breaks a tie. An apprentice's first answer on a single question is final.</div>`, { v: 1 }),
   S('D1-B · leads vote', () => `<div class="varhead">D1 variant B · only leads vote</div>` + app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '15:40', `<p><span class="mention">@sage-lead</span> ${tk('T66')} has a product question. Vote within 30 minutes.</p>${voteCard('B')}`) + msg('bot', '15:41', `<p>Only a sage-lead votes on this card. Nothing changed.</p>`, { eph: 'maya' })),
     `<h3>Variant B: only leads vote</h3><p>The card pings only leads. An apprentice's press gets an ephemeral note. Apprentices still read the card and can ask about it in #ask-sage.</p>`, { v: 1 }),
   S('Tied', () => app('Session 14', 'Votes and the chief\'s posts only', msg('bot', '16:00', `<p>${LEADS} G40 is tied. Please break the tie.</p>${tie(false)}`)),
@@ -505,12 +515,12 @@ M.push({ g: 'Lead', t: '9 Votes and ties', title: 'Who votes, and a lead breaks 
 
 // 10. Limits
 M.push({ g: 'Limits', t: '10 Limits', title: 'Limits: rate, project, Mac asleep, chief busy', steps: [
-  S('Rate limit', () => app('#ask-sage', ASK, msg('maya', '15:02', `<p>${BOT} how many tests does sage-bot have?</p>`) + msg('bot', '15:02', `<p>You asked 10 questions in the last hour; that is the limit. Your next question works at 15:12.</p><p style="font-size:.82rem;color:var(--muted)">The board and time left do not count toward the limit.</p>`, { reply: 'Maya: @sage-bot how many tests does sage-bot have?' })),
-    `<h3>Rate limit</h3><p>Proposal: 10 free questions per person per hour, and a daily spend cap for the helper that Erick sets. The board, time left and artifacts are cheap and do not count.</p><p>The reply gives the time when it works again, not a vague "later".</p><div class="box dec"><b>Decision D5</b>The limits.</div>`),
+  S('Rate limit', () => app('#ask-sage', ASK, msg('maya', '15:02', `<p>${BOT} how many tests does sage-bot have?</p>`) + msg('bot', '15:02', `<p>You asked 10 questions in the last hour; that is the limit. Your next question works at 15:12.</p>`, { reply: 'Maya: @sage-bot how many tests does sage-bot have?' })),
+    `<h3>Rate limit</h3><p>The limits that Erick set: 10 asks per person per hour, 1 open request per lead, and at most 2 sessions at once.</p><p>The reply gives the time when it works again, not a vague "later".</p><div class="box done"><b>Decided by Erick · D5</b>10 asks per person per hour; 1 open request per lead; at most 2 sessions.</div>`),
   S('Cap reached', () => app('#ask-sage', ASK, msg('ana', '18:40', `<p>${BOT} explain the bridge code</p>`) + msg('bot', '18:40', `<p>Free questions are paused until 00:00 UTC: the team reached today's limit that Erick set. The board, time left and pictures still work.</p>`, { reply: 'Ana: @sage-bot explain the bridge code' })),
-    `<h3>The daily cap</h3><p>When the team's spend reaches Erick's cap, free questions pause for everyone. The cap amount has no basis yet; the trial measures the cost per question.</p>`),
+    `<h3>The daily cap</h3><p><b>After the live trial (option B) only:</b> the helper is the only part that costs money. When the team's spend reaches Erick's cap, free questions pause for everyone. The cap amount has no basis yet; the trial measures the cost per question.</p>`),
   S('Project not shared', () => app('#ask-sage', ASK, msg('ana', '15:05', `<p>${BOT} show the board for payroll</p>`) + msg('bot', '15:05', `<p>I do not know a shared project called "payroll". The shared projects are <b>sage-bot</b> and <b>site</b>.</p>`, { reply: 'Ana: @sage-bot show the board for payroll' })),
-    `<h3>A project that is not shared</h3><p>The words "a shared project called" matter: the bot does not say whether a private project exists, so it leaks no names.</p><div class="box dec"><b>Decision D2</b>Which projects apprentices can read.</div>`),
+    `<h3>A project that is not shared</h3><p>The words "a shared project called" matter: the bot does not say whether a private project exists, so it leaks no names.</p><div class="box done"><b>Decided by Erick · D2</b>Listed projects only, starting with sage-bot.</div>`),
   S('Mac asleep', () => app('#ask-sage', ASK, msg('jon', '23:40', `<p>${BOT} start a new session where we fix the reminder text</p>`) + msg('maya', '06:50', `<p>${BOT} show the board for sage-bot</p>`) +
       `<div class="divider">Erick's Mac wakes at 08:05</div>` + msg('bot', '08:05', `<p>I was offline from 22:10 to 08:05 because Erick's Mac was asleep.</p><ul><li>${at('maya')}: your board question is answered below.</li><li>${at('jon')}: I did not start your session; requests to write never run late. Please ask again.</li></ul>`) + msg('bot', '08:05', board(), { reply: 'Maya: @sage-bot show the board for sage-bot' }), { asleep: false }),
     `<h3>The Mac was asleep</h3><p>While the Mac sleeps, the bot shows offline and answers nothing. On wake it posts one note:</p><ul><li>read questions under 2 hours old: answered now</li><li>write requests: never run late; the person asks again</li></ul><div class="box dec"><b>Decision D10</b>What to do with missed mentions.</div>`),
@@ -521,13 +531,13 @@ M.push({ g: 'Limits', t: '10 Limits', title: 'Limits: rate, project, Mac asleep,
 // 11. Where
 M.push({ g: 'Where', t: '11 Where', title: 'Where these exchanges happen', steps: [
   S('Compare', () => `<div class="compare">
-    <div class="opt rec"><h4>A · one #ask-sage channel, replies in place <span class="rec-tag">recommended</span></h4><div class="mini"><div>#general</div><div class="on">#ask-sage</div><div>#sage-chief</div><div class="in">Session 14</div></div>
+    <div class="opt rec"><h4>A · one #ask-sage channel, replies in place <span class="done-tag">Decided by Erick</span></h4><div class="mini"><div>#general</div><div class="on">#ask-sage</div><div>#sage-chief</div><div class="in">Session 14</div></div>
       <ul><li>One place to look; others learn from each answer.</li><li>A default project per channel, so "the board" needs no name.</li><li>Rate limits and permissions on one channel.</li><li>Busy days get long; a reply link keeps each answer tied to its question.</li></ul></div>
     <div class="opt"><h4>B · a thread per question</h4><div class="mini"><div class="on">#ask-sage</div><div class="in">Board for sage-bot</div><div class="in">Why vote in threads?</div><div class="in">Dark mode</div></div>
       <ul><li>Tidy follow-ups.</li><li>The channel list fills with threads; each needs a name and an archive.</li><li>A thread per "show the board" is too heavy.</li></ul></div>
     <div class="opt"><h4>C · replies in place, in any channel</h4><div class="mini"><div class="on">#general</div><div>#design</div><div>#ask-sage</div></div>
       <ul><li>No new habit.</li><li>Answers mix with talk, and the bot needs to read every channel.</li><li>The bot must ask which project each time.</li></ul></div></div>`,
-    `<h3>Where</h3><p>I recommend A: one channel, #ask-sage, where the bot replies in place. Session threads stay votes only (G16 holds there). A mention elsewhere gets one pointer to #ask-sage.</p><div class="box dec"><b>Decision D7</b>A, B or C.</div>`),
+    `<h3>Where</h3><p>Erick decided A: one channel, #ask-sage, where the bot replies in place. Session threads stay votes only (G16 holds there). A mention elsewhere gets one pointer to #ask-sage.</p><div class="box done"><b>Decided by Erick · D7</b>Variant A.</div>`),
   S('Pointer', () => app('#general', 'Talk', msg('ana', '15:15', `<p>${BOT} show the board</p>`) + msg('bot', '15:15', `<p>I answer in #ask-sage, so everyone can find the answers. Please ask there.</p>`, { reply: 'Ana: @sage-bot show the board' })),
     `<h3>A mention outside #ask-sage</h3><p>In option A the bot gives a one-line pointer and does nothing else.</p>`),
 ] });
@@ -551,29 +561,29 @@ M.push({ g: 'Auto-merge', t: '12 Auto-merge', title: 'The chief asks the leads a
     `<h3>An apprentice or a person with no role presses</h3><p>Each gets an ephemeral note that only they see. The card does not change.</p>`),
   S('A · Yes switches', () => `<div class="varhead">Variant A · the leads' answer switches the mode</div>` + app('Session 14', 'Votes and the chief\'s posts only', amPost('yes') + msg('bot', '16:34', `<p>Automatic merge is ON for Session 14. Erick can turn it off at the terminal.</p>`)) + termA,
     `<h3>Variant A: Yes switches it at once</h3><p>Fast. But a lead's press lets code merge without Erick's look, and Erick learns of it only after.</p>`, { v: 1 }),
-  S('B · Yes recommends', () => `<div class="varhead">Variant B · the leads recommend; Erick confirms · recommended</div>` + app('Session 14', 'Votes and the chief\'s posts only', amPost('yes') + msg('bot', '16:34', `<p>Jon recommends Yes. Erick decides at the terminal; until then automatic merge stays off.</p>`)) + termB,
-    `<h3>Variant B: Yes is a recommendation</h3><p>I recommend B. Merges are hard to undo, and Erick holds the merge right. The leads' Yes saves him the thinking; his confirm is one line at the terminal.</p><div class="box dec"><b>Decision D11</b>A or B.</div>`, { v: 1 }),
+  S('B · Yes recommends', () => `<div class="varhead done">Variant B · the leads recommend; Erick confirms · decided by Erick</div>` + app('Session 14', 'Votes and the chief\'s posts only', amPost('yes') + msg('bot', '16:34', `<p>Jon recommends Yes. Erick decides at the terminal; until then automatic merge stays off.</p>`)) + termB,
+    `<h3>Variant B: Yes is a recommendation</h3><p>Erick decided B. Merges are hard to undo, and Erick holds the merge right. The leads' Yes saves Erick the thinking; Erick's confirm is one line at the terminal.</p><div class="box done"><b>Decided by Erick · D11</b>Variant B.</div>`, { v: 1 }),
   S('No', () => app('Session 14', 'Votes and the chief\'s posts only', amPost('no') + msg('bot', '16:34', `<p>Jon answered No. Automatic merge stays off for Session 14.</p>`)),
     `<h3>No</h3><p>The same in both variants: nothing changes, and the chief gets the answer. Erick sees one line at the terminal.</p>`),
 ] });
 
 // ---------- Decisions ----------
 const D = [
-  ['D1', 'Who votes on team-vote cards', 'The owner decided two roles (apprentice or lead, never both) and dropped sage-driver. Shown as variants in moment 9.', ['<b>A: apprentices and leads vote.</b> With a team of 2 to 5, a vote of leads only is often 1 or 2 people, and apprentices lose their voice in the product questions.', 'B: only leads vote. Fewer, more senior voters; apprentices read the cards.'], 0, 8],
-  ['D2', 'Which projects apprentices read', 'The bot must never show a private project.', ['<b>An allow-list in the bridge config, set by Erick; default: none.</b>', 'Every project in the logbook.', 'One project per channel.'], 0, 9],
-  ['D3', 'Who answers', 'Speed, cost and safety differ.', ['The live chief of the session.', '<b>The bridge alone for the board, time left and artifacts; a separate read-only helper agent for free questions.</b>', 'The bridge alone; free questions get "ask a lead".'], 1, 3],
-  ['D4', 'A lead\'s session start', 'Shown as variants A and B in moment 7.', ['<b>A: the owner approves on a card (or at the terminal).</b>', 'B: it starts at once; the owner gets a notice.'], 0, 6],
-  ['D5', 'Limits', 'Numbers are proposals with no measured basis yet.', ['<b>10 free questions per person per hour, plus a daily spend cap for the helper that Erick sets; the board, time and artifacts do not count.</b>', 'A per-person limit only.', 'No limits in the first trial.'], 0, 9],
-  ['D6', 'How artifacts are shared', 'Shown as variants in moment 3.', ['<b>A: attach images already in the shared project.</b>', 'B: a link to a page Erick has published.', 'C: both.'], 0, 2],
-  ['D7', 'Where exchanges happen', 'Shown in moment 11.', ['<b>A: one #ask-sage channel, replies in place.</b>', 'B: a thread per question.', 'C: replies in place in any channel.'], 0, 10],
+  ['D1', 'Who votes on team-vote cards', 'The owner decided two roles (apprentice or lead, never both) and dropped sage-driver. Shown as variants in moment 9.', ['<b>A: apprentices and leads vote.</b> With a team of 2 to 5, a vote of leads only is often 1 or 2 people, and apprentices lose their voice in the product questions.', 'B: only leads vote. Fewer, more senior voters; apprentices read the cards.'], 0, 8, { i: 0, text: "Variant A. Apprentices and leads vote. A lead breaks a tie. An apprentice's first answer on a single question is final." }],
+  ['D2', 'Which projects apprentices read', 'The bot must never show a private project.', ['<b>An allow-list in the bridge config, set by Erick; default: none.</b>', 'Every project in the logbook.', 'One project per channel.'], 0, 9, { i: 0, text: "Variant a. Apprentices read listed projects only. The list starts with sage-bot." }],
+  ['D3', 'Who answers', 'Speed, cost and safety differ.', ['The live chief of the session.', '<b>The bridge alone for the board, time left and artifacts; a separate read-only helper agent for free questions.</b>', 'The bridge alone; free questions get "ask a lead".'], 1, 3, { i: 2, text: "Variant c for the first build (option A): the bridge alone answers the fixed asks, with no AI. A read-only AI helper comes only after the live trial (option B). Discord text never goes into the live chief." }],
+  ['D4', 'A lead\'s session start', 'Shown as variants A and B in moment 7.', ['<b>A: the owner approves on a card (or at the terminal).</b>', 'B: it starts at once; the owner gets a notice.'], 0, 6, { i: 0, text: "Variant A. A lead's session start waits for Erick's Approve, on the card or at the terminal." }],
+  ['D5', 'Limits', 'Numbers are proposals with no measured basis yet.', ['<b>10 free questions per person per hour, plus a daily spend cap for the helper that Erick sets; the board, time and artifacts do not count.</b>', 'A per-person limit only.', 'No limits in the first trial.'], 0, 9, { i: -1, text: "Erick's own numbers: 10 asks per person per hour; 1 open request per lead; at most 2 sessions at once." }],
+  ['D6', 'How artifacts are shared', 'Shown as variants in moment 3.', ['<b>A: attach images already in the shared project.</b>', 'B: a link to a page Erick has published.', 'C: both.'], 0, 2, { i: 0, text: "Variant A. Share only images that already exist in shared folders." }],
+  ['D7', 'Where exchanges happen', 'Shown in moment 11.', ['<b>A: one #ask-sage channel, replies in place.</b>', 'B: a thread per question.', 'C: replies in place in any channel.'], 0, 10, { i: 0, text: "Variant A. One #ask-sage channel, replies in place." }],
   ['D8', 'A person with no role', 'Shown as variants in moment 6.', ['Ignore.', '<b>One short reply per person per day, then a lock reaction.</b>', 'A reaction only.'], 1, 5],
   ['D9', 'Which writes a lead may do', 'An allow-list of operations; all others are refused.', ['<b>Start a session, mark a question as a team vote, withdraw a question, re-run a step; each after a confirm, with a notice to Erick for a withdraw.</b>', 'The same, without withdraw (it stays the owner\'s, at the terminal).', 'Start a session only.'], 0, 7],
   ['D10', 'Mentions missed while the Mac sleeps', 'Discord does not replay them; the bridge must read back.', ['<b>On wake: answer read questions under 2 hours old; never run a write late; post one note.</b>', 'Answer nothing; post one note.', 'Answer everything, also writes.'], 0, 9],
-  ['D11', 'Automatic merge from Discord', 'Shown as variants in moment 12.', ['A: the leads\' Yes switches it.', '<b>B: the leads recommend; Erick confirms at the terminal.</b>'], 1, 11],
-  ['D12', 'Does Erick need a sage-lead role?', 'Erick is the owner and the Discord admin.', ['<b>No: the bridge treats the owner as a lead by his id.</b>', 'Yes: he holds the role like anyone.'], 0],
-  ['D13', 'How people ask: mentions or slash commands', 'The owner asked for @sage-bot mentions; the PE prefers fixed slash commands answered by the bridge in private. Shown in moments 1 and 7.', ['Mentions only, in #ask-sage; every reply is public.', 'Slash commands only (/sage board, task, gates, files; /sage request for leads); replies are private.', '<b>Both: slash commands for the fixed asks and for a lead\'s request (exact, private, no model decides the role or the action); a mention in #ask-sage for free questions, answered in public.</b>'], 2, 0],
+  ['D11', 'Automatic merge from Discord', 'Shown as variants in moment 12.', ['A: the leads\' Yes switches it.', '<b>B: the leads recommend; Erick confirms at the terminal.</b>'], 1, 11, { i: 1, text: "Variant B. The leads recommend; Erick confirms at the terminal." }],
+  ['D12', 'Does Erick need a sage-lead role?', 'Erick is the owner and the Discord admin.', ['<b>No: the bridge treats Erick as a lead by their Discord id.</b>', 'Yes: Erick holds the role like anyone.'], 0],
+  ['D13', 'How people ask: mentions or slash commands', 'The owner asked for @sage-bot mentions; the PE prefers fixed slash commands answered by the bridge in private. Shown in moments 1 and 7.', ['Mentions only, in #ask-sage; every reply is public.', 'Slash commands only (/sage board, task, gates, files; /sage request for leads); replies are private.', '<b>Both: slash commands for the fixed asks and for a lead\'s request (exact, private, no model decides the role or the action); a mention in #ask-sage for free questions, answered in public.</b>'], 2, 0, { i: 2, text: "Variant c, both. Slash commands and @sage-bot mentions, in the one #ask-sage channel." }],
 ];
-document.getElementById('declist').innerHTML = D.map(([id, t, why, opts, r, m]) => `<div class="dec" id="${id}"><h3>${id} · ${t}</h3><p class="why">${why}</p><ol type="a">${opts.map((o, i) => `<li${i === r ? ' class="r"' : ''}>${o}${i === r ? ' <span class="rec-tag">recommended</span>' : ''}</li>`).join('')}</ol>${m !== undefined ? `<div class="see"><button data-moment="${m}">See moment ${m + 1}</button></div>` : ''}</div>`).join('');
+document.getElementById('declist').innerHTML = D.map(([id, t, why, opts, r, m, d]) => `<div class="dec${d ? ' decided' : ''}" id="${id}"><h3>${id} · ${t} ${d ? '<span class="done-tag">Decided by Erick</span>' : '<span class="open-tag">Open</span>'}</h3><p class="why">${why}</p>${d ? `<p class="pick"><b>Erick's pick (G18, 5 Oct):</b> ${d.text}</p>` : ''}<ol type="a">${opts.map((o, i) => d ? `<li class="${i === d.i ? 'chosen' : 'off'}">${o.replace(/<\/?b>/g, '')}${i === d.i ? ' <span class="done-tag">Chosen</span>' : ''}</li>` : `<li${i === r ? ' class="r"' : ''}>${o}${i === r ? ' <span class="rec-tag">recommended</span>' : ''}</li>`).join('')}</ol>${m !== undefined ? `<div class="see"><button data-moment="${m}">See moment ${m + 1}</button></div>` : ''}</div>`).join('');
 
 // ---------- Control ----------
 let cur = 0, step = 0;
