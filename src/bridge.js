@@ -272,7 +272,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       for (const [i, sageId] of m.sage.entries()) {
         const { gate, ask } = gates.get(id);
         const said = byId.get(sageId)?.answer ?? '';
-        if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn') continue;
+        // A gate with an open check of the trail waits for it: the answer in sage may be the bridge's write back of an older owner answer.
+        if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || m.restore?.[sageId]) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
         const option = optionOf(said, m.texts[i]);
         if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
@@ -293,13 +294,17 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const flush = () => (flushing = flushing.then(sendAnswers).catch((e) => say(`the answers to sage failed: ${e?.message}`)));
   async function sendAnswers() {
     for (const [id, m] of meta) {
+      for (const sageId of Object.keys(m.restore ?? {})) await keepOwner(id, sageId); // a check that a failure or a stop left open
       for (const [sageId, text] of answersOf(id)) {
-        if (m.sent[sageId] === text) continue;
+        if (m.sent[sageId] === text || m.restore?.[sageId]) continue;
         // The decisions before the gate rows: an answer that the read of the rows misses is after `mark` in the trail (F-T43-1).
         const mark = (await sage.decisions()).length;
         // The row again, just before the answer: an answer that the owner typed meanwhile is final, and the bridge skips it (G10).
         await readOwner(await sage.gates());
         if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text) continue;
+        // Saved before the write, so that the check of the trail survives a failed write back and a stop of the bridge (F-T43-5).
+        (m.restore ??= {})[sageId] = { mark, wrote: text, from: 0 };
+        persist();
         try {
           await sage.answer(sageId, text);
         } catch (e) {
@@ -309,31 +314,49 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         m.sent[sageId] = text;
         persist();
         say(`sage gate ${sageId} answered: ${text}`);
-        await keepOwner(sageId, text, mark);
+        await keepOwner(id, sageId);
       }
     }
   }
 
   /**
    * Writes back an answer that the owner typed between the bridge's last read and its own write, which sage replaced (F-T43-1).
-   * gates.tsv keeps only the last write, but decisions.tsv keeps each answer in the order of the writes. So an answer of the gate
-   * after `mark` and just before the bridge's own row is the owner's, and final (G10 a). An answer after the bridge's row is in
-   * gates.tsv already, and the bridge leaves it. The check runs again after each write back, for an answer in that window too.
-   * `m.sent` keeps the bridge's text, so the next read of the rows takes the owner's answer as final and the bridge never sends again.
+   * gates.tsv keeps only the last write, but decisions.tsv keeps each answer in the order of the writes. `m.restore[sageId]` is the
+   * bridge's last write (or try) of the gate: `wrote`, in the answers of the gate after `mark` from index `from` on. An answer of the
+   * gate in that window just before `wrote` is the owner's, and final (G10 a): the bridge saves it as its next write, then writes it back.
+   * An answer after `wrote` stands (the owner's later answer). The marker is in the gate file until a check finds nothing to write back,
+   * so a write back that sage refused, or a stop of the bridge, is done again at the next flush (F-T43-5). Then the card shows the
+   * answer in sage as final in the same turn (F-T43-6). `m.sent` keeps the bridge's text, so the bridge never sends again.
    */
-  async function keepOwner(sageId, text, mark) {
+  async function keepOwner(id, sageId) {
+    const m = meta.get(id);
     const row = (await sage.gates()).find((r) => r.id === sageId);
     const head = `${row.question} → `;
-    for (let wrote = text, from = 0; ;) {
+    for (;;) {
+      const { mark, wrote, from } = m.restore[sageId];
       const said = (await sage.decisions()).slice(mark).filter((d) => d.task === row.task && d.decision.startsWith(head))
-        .map((d) => d.decision.slice(head.length));
+        .map((d) => d.decision.slice(head.length)).slice(from);
       const mine = said.lastIndexOf(wrote);
-      if (mine <= from || mine < said.length - 1) return; // nothing between the reads and the write, or a later answer stands
-      wrote = said[mine - 1];
-      await sage.answer(sageId, wrote);
-      say(`${sageId}: the owner answered at the terminal just before the bridge; the bridge wrote the owner's answer back: ${wrote}`);
-      from = mine + 1;
+      if (mine === -1 && from > 0 && said.length === 0) {
+        // a write back that did not land, and no answer after it: write it again
+      } else if (mine <= 0 || mine < said.length - 1) {
+        // no answer between the reads and the write, a write of the bridge that did not land, or a later answer that stands
+        delete m.restore[sageId];
+        persist();
+        break;
+      } else {
+        m.restore[sageId] = { mark, wrote: said[mine - 1], from: from + mine + 1 };
+        persist();
+      }
+      try {
+        await sage.answer(sageId, m.restore[sageId].wrote);
+      } catch (e) {
+        say(`sage did not record the owner's answer of ${sageId} again; the bridge tries again: ${e.message}`);
+        return;
+      }
+      say(`${sageId}: the owner answered at the terminal just before the bridge; the bridge wrote the owner's answer back: ${m.restore[sageId].wrote}`);
     }
+    await readOwner(await sage.gates());
   }
 
   /** After the gate of `id` changed: save it, edit the card, and post what the effects call for. `by` is who caused it. */
