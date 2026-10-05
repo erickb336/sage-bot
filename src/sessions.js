@@ -12,19 +12,38 @@ export const TASK_ID = /^T\d{1,9}$/;
 const GATE_OPEN = /^(G\d{1,9}) open · /m;
 /** A run of the sage state tool with `gate add` and its task: `node <…/>sage.mjs gate add T7 …`, the path bare or in quotes (F-T29-11). */
 const GATE_ADD = /(?:^|[\s;&|(])node\s+(?:"(?:[^"]*\/)?sage\.mjs"|'(?:[^']*\/)?sage\.mjs'|(?:[^\s;&|"'`$]*\/)?sage\.mjs)\s+gate\s+add\s+(T\d{1,9})\b/;
-/** The folder after `--project` (or `--project=`) in a command, as one shell word: in double or single quotes, or up to a space or ;&|. */
-const PROJECT = /--project(?:=|\s+)(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/;
+/** One piece of a shell word: double-quoted, single-quoted, bare up to a space or ;&|, or a quote that does not close. */
+const PIECE = /"([^"]*)"|'([^']*)'|([^\s;&|"']+)|(["'])/g;
+/** The folder after `--project` (or `--project=`) in a command, as one shell word: its pieces with no space between them. */
+const PROJECT = /--project(?:=|\s+)((?:"[^"]*"|'[^']*'|[^\s;&|"']+|["'])+)/;
+/** `$HOME` or `${HOME}`, where the shell reads that name and no longer one. */
+const HOME = /\$HOME(?![\w])|\$\{HOME\}/g;
 
 /**
- * The folder that a `--project` word names, as the shell gives it, or undefined when only the shell knows it (F-T29-11). A single-quoted
- * word is literal. A leading `$HOME` or `${HOME}` (bare or in double quotes) and a leading `~` or `~/` (bare) become `home`; any other
- * `$`, a backtick, or a quote or backslash in a bare word is a value that only the shell knows.
+ * The folder that a `--project` word names, as the shell gives it, or undefined when only the shell knows it (F-T29-11, F-T55-1). The
+ * word is pieces with no space between them, as in `"$HOME"/project` or `~/'x y'`. A single-quoted piece is literal. In a double-quoted
+ * or bare piece, `$HOME` and `${HOME}` become `home`. A `~` at the start of the word, bare and before a `/` or the end, becomes `home`.
+ * Any other `$`, a backtick, a backslash, a quote that does not close, another `~` at the start, or a bare `$HOME` whose value has a
+ * space (the shell splits it into two words) is a value that only the shell knows.
  */
-export function projectOf([double, single, bare], home) {
-  if (single !== undefined) return single;
-  const word = (double ?? bare).replace(/^(?:\$HOME|\$\{HOME\})(?=\/|$)/, home);
-  const expanded = bare === undefined ? word : word.replace(/^~(?=\/|$)/, home);
-  return (bare === undefined ? /[$`\\]/ : /[$`\\"']|^~/).test(expanded) ? undefined : expanded;
+export function projectOf(word, home) {
+  const pieces = [...word.matchAll(PIECE)];
+  let out = '';
+  for (const [i, [, double, single, bare]] of pieces.entries()) {
+    if (single !== undefined) { out += single; continue; }
+    if (double === undefined && bare === undefined) return undefined; // a quote that does not close
+    let text = double ?? bare;
+    if (i === 0 && bare !== undefined && text.startsWith('~')) {
+      if (!text.startsWith('~/') && !(text === '~' && pieces.length === 1)) return undefined;
+      out = home;
+      text = text.slice(1);
+    }
+    const parts = text.split(HOME);
+    if (parts.some((p) => /[$`\\]/.test(p))) return undefined;
+    if (bare !== undefined && parts.length > 1 && /[ \t\n]/.test(home)) return undefined; // the shell splits a bare $HOME at its spaces
+    out += parts.join(home);
+  }
+  return out;
 }
 
 /** A path with its links resolved; a path that does not exist stays as it is. */
@@ -152,7 +171,7 @@ export function record(input, { project, dir, pid, now, home }) {
     task = add[1];
     const word = command.slice(add.index).match(PROJECT);
     if (word) {
-      const named = projectOf(word.slice(1), home);
+      const named = projectOf(word[1], home);
       if (named === undefined) return 'a project that only the shell knows';
       if (!inside(resolve(input.cwd, named), project)) return 'another project';
     }
