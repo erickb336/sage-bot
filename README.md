@@ -135,7 +135,10 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | The channel registry is a 0600 file, written whole by the holder of the bridge lock only. A symlink, a wrong mode or bad JSON stops the bridge at start. | Nobody else can change which channel reads which project. | `src/channels.js` |
 | sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
 | An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
-| Each sage-apprentice and sage-lead can ask 10 times in a rolling hour; every ask counts. The limit note is public too. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
+| Each sage-apprentice and sage-lead can ask 10 times in a rolling hour, across all channels; every `/sage` command and every mention counts, and a mention that opens a thread counts once. The limit note is public too. (G27) | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
+| Every @sage-bot mention in a registered channel opens a public thread, named from the request, and the answer goes there. A mention in that thread continues it. A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel. The bridge answers read asks itself, with no AI. (G27) | Each request and its answer stay together, and the channel stays readable. | `src/ask.js`, `src/threads.js` |
+| Every message of a sage-lead to sage-bot, and every message of an apprentice in a lead thread, goes into the lead log first: one line each, with a hash chain, in a 0600 file outside every project. A copy goes to #sage-audit and pings nobody. An apprentice's text is kept only as quoted data. (G22) | Erick and the leads can see everything that a lead sent toward sage. `verify` shows an edit, a removal or a reorder of a line that has lines after it; the #sage-audit copy shows the rest (see [the lead log](#mention-threads-the-lead-log-and-the-kill-switch)). | `src/audit.js` |
+| A sage-lead or Erick can turn off the link from Discord to sage with `/sage stop` and a confirm, in any channel and also over the hourly limit. The confirm has a Cancel button and expires after 10 minutes. Erick can also turn it off at the terminal. Only Erick turns it on again, at the terminal. While it is off, read asks still work. A flag file that cannot be checked counts as off. No sage session starts from Discord yet: a lead's "talk" is recorded and gets the reply that sessions are not on yet. (G22, G27) | One press stops everything that a lead could send to sage. | `src/audit.js`, `src/ask.js`, `scripts/leads.mjs` |
 
 ## Set up a live trial
 
@@ -269,6 +272,10 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 | **Parent channel** | The channel that holds one line per sage session. People only read it. |
 | **The bridge** | The service on the owner's Mac: `scripts/bridge.mjs`. |
 | **Holder** | A member with the sage-apprentice or the sage-lead role. Only holders count. |
+| **Answer thread** | A thread that sage-bot opens for a mention. It answers read asks there, with no AI. |
+| **Lead thread** | A thread that a sage-lead's "talk" opens. Each message there goes into the lead log. |
+| **Lead log** | The append-only record of every message that a sage-lead sends to sage-bot, with a hash chain. |
+| **Kill switch** | `/sage stop`: it turns off the link from Discord to sage until Erick turns it on at the terminal. |
 
 ## What to do
 
@@ -300,8 +307,10 @@ In a registered channel, or a thread of it, a sage-apprentice or a sage-lead typ
 | See the open questions with their options, sage's recommendation, the default, and which ones are team votes | `/sage gates [project]` |
 | Get the shared images and PDFs of a project | `/sage files [project]` |
 | Stop sage-bot in this channel (sage-leads only; a button confirms it) | `/sage unregister` |
+| Turn off the link from Discord to sage (sage-leads and Erick; a button confirms it) | `/sage stop` |
+| Ask in a thread of its own | `@sage-bot board`, `@sage-bot gates`, `@sage-bot files` or `@sage-bot T7` |
 
-Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in a registered channel, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." In a channel that is not registered, sage-bot ignores `/sage` and mentions, except one pointer to a registered channel per person per day.
+Time left is not estimated yet: the board shows the count of tasks left. In a channel that is not registered, sage-bot ignores `/sage` and mentions, except one pointer to a registered channel per person per day, and the `/sage stop` of a sage-lead or Erick. See [Mention threads](#mention-threads-the-lead-log-and-the-kill-switch) for what a mention does.
 
 ### Channels
 
@@ -345,6 +354,47 @@ node scripts/channels.mjs list                                       # print the
 **A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". A lead's press of the first removes the channel, and the terminal log gives the lead's name and id. The confirm works for 10 minutes. A sage-apprentice cannot unregister a channel. Nobody can register a channel from Discord.
 
 sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
+
+### Mention threads, the lead log and the kill switch
+
+**A mention opens a thread.** Mention @sage-bot in a registered channel, and sage-bot opens a public thread from your message, named from your request. The answer goes into the thread. To ask again, mention @sage-bot in that thread: sage-bot cannot read a message that does not mention it.
+
+| Thread | Who opens it | What sage-bot does there |
+| --- | --- | --- |
+| Answer thread | A sage-apprentice, or a sage-lead with a read ask | Answers a mention that names `board`, `gates` (or `questions`), `files` or a task id such as `T7`, like the `/sage` command. Any other mention gets a pointer to these words. No AI. |
+| Lead thread | A sage-lead whose mention holds the word "talk" | Records each message in the lead log and replies that sessions with sage are not on yet. No sage session starts: that comes in a later step. An apprentice may write there too; the log keeps their text only as quoted data. When a sage-lead talks in an answer thread, it becomes a lead thread: the apprentice's earlier mentions there go into the lead log first, in order, as quoted data. A lead's read ask keeps it an answer thread. |
+
+- A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel.
+- When sage-bot lacks a right for its thread, it replies once in place and names the right: "Create Public Threads" or "Send Messages in Threads".
+- The threads are in `<statePath>.threads` (0600), so a thread continues after a restart.
+
+**The lead log.** Every message of a sage-lead to sage-bot, a `/sage stop`, and every message of an apprentice in a lead thread, goes into the lead log before anything else. Each line holds the time, the message id, the author id, their roles at that time, the sha256 of the raw text, the cleaned text, the thread, the project and the outcome. Each line also holds the hash of the line before it. The log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600.
+
+What the hash chain shows, and what it does not:
+
+| A change to the log | `leads.mjs verify` | Only the #sage-audit copy shows it |
+| --- | --- | --- |
+| An edit, a removal or a reorder of a line that has lines after it | A break at that line | |
+| The last lines cut off | Intact | Yes: the copy has lines that the log has not |
+| An older copy of the log put back | Intact | Yes |
+| Every line written and hashed again | Intact | Yes: the hashes in the copy differ |
+
+The chain has no key, so anyone who can write the file can make a new chain that verifies. Anchoring the chain outside the Mac is follow-up task T135.
+
+The 0700 folder and the 0600 file keep other users out, but not a session: a sage session runs as Erick's user, so it could change the log or remove the kill switch flag. When sessions start from Discord (a later step), their sandbox must deny the state folder (T134). Until then, no session starts from Discord.
+
+**#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each log line there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
+
+**The kill switch.** A sage-lead or Erick types `/sage stop`, in any channel, and presses the button within 10 minutes. `/sage stop` does not count toward the hourly limit. Cancel, or a press after 10 minutes, changes nothing. sage-bot then posts a public notice, and nothing of a lead goes to sage until Erick turns the link on again at the terminal. Read asks keep working. The switch is the flag file `<statePath>.leads-off` (or `killPath` in the config); a flag that the bridge cannot check counts as set.
+
+<!-- check: run, prints "the link from Discord to sage is on" -->
+```sh
+node scripts/leads.mjs status    # is the link on or off?
+node scripts/leads.mjs stop      # turn the link off at the terminal
+node scripts/leads.mjs restore   # turn the link on again (only Erick, at the terminal)
+node scripts/leads.mjs verify    # check the hash chain of the lead log; exits 1 at a break
+node scripts/leads.mjs read 20   # print the last 20 lines of the lead log; a line from a break on starts with UNVERIFIED
+```
 
 ## FAQ
 

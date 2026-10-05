@@ -10,7 +10,7 @@ import { Client, GatewayIntentBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
 import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
 import { rolesOf, routes } from '../src/discord.js';
-import { fakeCommand, fakeMention } from '../src/fake-discord.js';
+import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
 
 const ASK = '400000000000000009';
@@ -58,10 +58,13 @@ function world(t) {
     await b.ask.command(i);
     return o.bot ? i.replies : answers(i);
   };
-  b.mention = async (user, content, channelId = ASK, bot = false, parentId = null) => {
-    const m = fakeMention({ user, roles: ROLES[user] ?? [], bot, channelId, parentId, content });
+  b.place = fakeDiscord([]);
+  /** One mention; returns what the person sees: the replies in place, then the posts in the thread that it opened or continued (T131). */
+  b.mention = async (user, content, channelId = ASK, bot = false, parentId = null, roles = ROLES[user] ?? []) => {
+    const m = fakeMention({ user, roles, bot, channelId, parentId, content, place: b.place });
+    const before = b.place.posts.length;
     await b.ask.mention(m);
-    return m.replies;
+    return [...m.replies, ...b.place.posts.slice(before)];
   };
   return b;
 }
@@ -159,11 +162,7 @@ test('G20: a member with neither sage role gets nothing for a command or a menti
     await b.ask.command(i);
     return i.replies;
   };
-  const say = async (user, roles, content, channelId = ASK) => {
-    const m = fakeMention({ user, roles, channelId, content });
-    await b.ask.mention(m);
-    return m.replies;
-  };
+  const say = (user, roles, content, channelId = ASK) => b.mention(user, content, channelId, false, null, roles);
   for (let n = 1; n <= 12; n++) { // past the limit of 10: no note either
     assert.deepEqual(await command(SAM, []), [], `command ${n}`);
     assert.deepEqual(await command(SAM, ['300000000000000123'], ELSEWHERE), [], `command elsewhere ${n}`);
@@ -173,7 +172,7 @@ test('G20: a member with neither sage role gets nothing for a command or a menti
   assert.deepEqual(b.lines, []);
   // Nothing counted: with a role, Sam gets his daily pointer elsewhere, 9 pointers and a 10th answer here, then the limit note.
   assert.deepEqual(await say(SAM, [APPRENTICE], '<@1> board?', ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: { parse: [], repliedUser: false } }]);
-  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [APPRENTICE], 'hi'), [{ content: POINTER, allowedMentions: { parse: [], repliedUser: false } }], `ask ${n}`);
+  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [APPRENTICE], 'hi'), [{ content: POINTER, allowedMentions: { parse: [] } }], `ask ${n}`);
   assert.deepEqual(await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }), [{ content: BOARD, ...PUBLIC }]);
   assert.match((await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }))[0].content, /^You asked 10 times in the last hour/);
   assert.deepEqual(await b.cmd(BOT, 'board', {}, { roles: [APPRENTICE, LEADR], bot: true }), []);
@@ -206,10 +205,10 @@ test('the 11th ask in a rolling hour is refused in public with the time of the n
   assert.equal((await b.cmd(MAYA, 'board'))[0].content, BOARD);
 });
 
-test('a mention in #ask-sage gets one public pointer that pings nobody; a build ask gets the lead line; the limit holds with one note', async (t) => {
+test('a mention in #ask-sage gets its answer in a new thread that pings nobody; a build ask gets the build line; the limit holds with one note', async (t) => {
   const b = world(t);
-  const quiet = { parse: [], repliedUser: false };
-  assert.deepEqual(await b.mention(MAYA, '<@1> show the board'), [{ content: POINTER, allowedMentions: quiet }]);
+  const quiet = { parse: [] };
+  assert.deepEqual(await b.mention(MAYA, '<@1> what is new?'), [{ content: POINTER, allowedMentions: quiet }]);
   assert.deepEqual(await b.mention(MAYA, '<@1> add a dark mode'), [{ content: `${POINTER} ${BUILDS}`, allowedMentions: quiet }]);
   for (let n = 3; n <= 10; n++) assert.equal((await b.mention(MAYA, 'hi')).length, 1);
   assert.deepEqual((await b.mention(MAYA, 'hi'))[0].content, `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${Math.floor((T0 + HOUR) / 1000)}:t>.`);
@@ -283,7 +282,7 @@ test('the config is checked at load: a traversal, a type or an absolute file ent
     [{ name: 'site', project: '/p', sagePath: '/o/sage.mjs', files: ['design/b2/shots/*.png'] }]);
 });
 
-test('the /sage command has five subcommands (unregister has no options), guild only, with the listed projects as the only choices', () => {
+test('the /sage command has six subcommands (unregister has no options), guild only, with the listed projects as the only choices', () => {
   const json = askCommand([{ name: 'sage-bot' }, { name: 'site' }]);
   assert.equal(json.name, 'sage');
   assert.deepEqual(json.contexts, [0]);
@@ -293,6 +292,7 @@ test('the /sage command has five subcommands (unregister has no options), guild 
     ['gates', [['project', false, ['sage-bot', 'site']]]],
     ['files', [['project', false, ['sage-bot', 'site']]]],
     ['unregister', []],
+    ['stop', []],
   ]);
 });
 
@@ -325,7 +325,7 @@ test('launchd.mjs refuses a config whose projects the bridge would refuse, with 
 
 // ---- Repair round 1 (R333): the findings of R329, R330 and R332. ----
 
-const POINTER_TEXT = "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead.";
+const POINTER_TEXT = POINTER;
 const THREAD = '400000000000000077';
 
 /** A project folder `site` with the given files (name → content), and an ask whose only project is it, with `files` as its allow-list. */
@@ -451,7 +451,8 @@ test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: Promise.resolve(ASK) }), [{ content: BOARD, ...PUBLIC }]);
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
   const quiet = { parse: [], repliedUser: false };
-  assert.deepEqual(await b.mention(MAYA, '<@1> hi', THREAD, false, ASK), [{ content: POINTER_TEXT, allowedMentions: quiet }]);
+  // T131: a thread of #ask-sage that sage-bot did not open gets the pointer to the channel, where a mention opens a thread.
+  assert.deepEqual(await b.mention(MAYA, '<@1> hi', THREAD, false, ASK), [{ content: `I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`, allowedMentions: quiet }]);
   assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
 });
 
@@ -460,7 +461,7 @@ test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, an appren
   const say = async (who, text) => (await b.mention(who, text))[0]?.content;
   assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
   assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
-  for (const text of ['<@1> any update on T7?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
+  for (const text of ['<@1> any update?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
   b.now += HOUR; // a new hour, so that the limit does not end the list
   for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
     assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for sage-leads: ask a lead.`, text);
@@ -488,16 +489,19 @@ function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [APPRENTICE], chann
 /** A message as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
 function message({ guildId = CONFIG_GUILD, author = MAYA, bot = false, roles = [APPRENTICE], mentions = [BOT_USER], channelId = ASK, channel = null, content = '<@1> hi' } = {}) {
   const calls = [];
-  return { calls, guildId, author: { id: author, bot }, member: { roles }, mentions: { users: new Map(mentions.map((id) => [id, {}])) }, channelId, channel, content,
-    reply: async (p) => { calls.push(p.content); } };
+  return { calls, id: '700000000000000001', guildId, author: { id: author, bot }, member: { roles }, mentions: { users: new Map(mentions.map((id) => [id, {}])) }, channelId, channel, content,
+    reply: async (p) => { calls.push(p.content); },
+    startThread: async ({ name }) => { calls.push(`thread: ${name}`); return { id: OPENED }; } };
 }
+const OPENED = '400000000000000088'; // the thread that a mention opens in `routes`
 const CONFIG_GUILD = '200000000000000001';
 const BOT_USER = '100000000000000099';
 
 test('F-T71-4: routes take roles from the member, never from options, and answer only their own guild and mentions of the bot', async (t) => {
   const b = world(t);
   const pressed = [];
-  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : { isThread: () => false });
+  const sent = [];
+  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
   const defer = ['defer', {}]; // public (G20)
@@ -512,8 +516,10 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   assert.deepEqual(await run(message({ guildId: '200000000000000002' }), 'message'), []);
   assert.deepEqual(await run(message({ bot: true }), 'message'), []);
   assert.deepEqual(await run(message({ mentions: [JON] }), 'message'), []);
-  assert.deepEqual(await run(message({ author: JON, roles: [LEADR], content: '<@1> fix the login' }), 'message'), [`${POINTER_TEXT} Builds from Discord are not ready yet.`]);
-  assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [POINTER_TEXT]);
+  // T131: a mention in the channel opens a thread named from the request, and the answer goes there.
+  assert.deepEqual(await run(message({ author: JON, roles: [LEADR], content: '<@1> fix the login' }), 'message'), ['thread: fix the login']);
+  assert.deepEqual(sent, [`${POINTER_TEXT} Builds from Discord are not ready yet.`]);
+  assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [`I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`]);
   assert.deepEqual(pressed, []);
 });
 
@@ -581,7 +587,7 @@ test('F-T71-13: a mention or a command from a user id that is not a Discord id g
     await b.ask.command(i);
     assert.deepEqual(i.replies, [], id);
   }
-  assert.deepEqual(await b.mention(MAYA, '<@1> hi'), [{ content: POINTER_TEXT, allowedMentions: { parse: [], repliedUser: false } }]); // a real id still gets the pointer
+  assert.deepEqual(await b.mention(MAYA, '<@1> hi'), [{ content: POINTER_TEXT, allowedMentions: { parse: [] } }]); // a real id still gets the pointer, in a thread
 });
 
 /** A button press or a form as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
