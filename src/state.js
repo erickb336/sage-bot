@@ -3,8 +3,8 @@
 // user owns or that others may write. Every gate in it goes through parseGate on fresh JSON.parse output. The bridge loads
 // it only from this path, never from Discord or a shared place.
 import { execFileSync } from 'node:child_process';
-import { closeSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { parseGate } from './vote.js';
 
 const isText = (x) => typeof x === 'string';
@@ -118,17 +118,24 @@ const GRACE = 10_000;
 
 /**
  * The start time of the process with this pid, as ps prints it ('' when no process has it). The fixed locale and time zone make the
- * text the same for every reader, so a bridge under launchd and one from a shell compare equal.
+ * text the same for every reader, so a bridge under launchd and one from a shell compare equal. Throws when ps fails for another
+ * reason (EAGAIN, ENOMEM, a signal): an unknown answer must never make the lock of a live bridge stale (F-T40-4).
  */
 export function startOf(pid) {
   try {
     return execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch { return ''; } // ps exits 1 when no process has the pid
+  } catch (e) {
+    if (e.status === 1 && !e.stdout?.trim()) return ''; // ps exits 1 and prints nothing when no process has the pid
+    throw new Error(`could not check whether the bridge with pid ${pid} still runs: ${e.message}. Nothing was started.`);
+  }
 }
 
 /** The text and the age of a file, or undefined when there is none. */
 function read(file) {
-  try { return { text: readFileSync(file, 'utf8'), age: Date.now() - statSync(file).mtimeMs }; } catch (e) { if (e.code === 'ENOENT') return undefined; throw e; }
+  try { return { text: readFileSync(file, 'utf8'), age: Date.now() - statSync(file).mtimeMs }; } catch (e) {
+    if (e.code === 'ENOENT') return undefined;
+    throw new Error(`the bridge cannot read ${file} (${e.code}). If no bridge runs, remove ${file}. Nothing was started.`);
+  }
 }
 
 /**
@@ -146,7 +153,10 @@ export function lock(path) {
   if (!start) throw new Error(`/bin/ps gave no start time for this process, so the bridge cannot take the lock ${file}. Nothing was started.`);
   const mine = `${process.pid} ${start}`;
   const tmp = `${file}.${process.pid}.tmp`;
-  rmSync(tmp, { force: true });
+  for (const name of readdirSync(dirname(file))) { // the temp files of crashed starts, and an old one of this pid
+    const pid = name.startsWith(`${basename(file)}.`) && /^\.(\d+)\.tmp$/.exec(name.slice(basename(file).length))?.[1];
+    if (pid && (Number(pid) === process.pid || !alive(Number(pid)))) rmSync(join(dirname(file), name), { force: true });
+  }
   writeFileSync(tmp, mine, { mode: 0o600, flag: 'wx' });
   try {
     for (let tries = 0; tries < 20; tries++) {
@@ -160,13 +170,15 @@ export function lock(path) {
       if (!held) continue; // its holder just removed it
       const [, pid, since] = /^(\d+)(?: (.+))?$/s.exec(held.text) ?? [];
       const stale = Number(pid) === process.pid || (since ? startOf(pid) !== since : held.age > GRACE);
+      if (!stale && !since) throw new Error(`a sage bridge may still be starting on ${path} (pid ${pid ?? 'unknown'}). Try again in 10 s, or remove ${file}.`);
       if (!stale) {
-        throw new Error(`another sage bridge (pid ${pid ?? 'unknown'}) runs on ${path}. This one stops: two bridges would post each card twice. If no bridge runs, remove ${file}.`);
+        throw new Error(`another sage bridge (pid ${pid}) runs on ${path}. This one stops: two bridges would post each card twice. If no bridge runs, remove ${file}.`);
       }
       unlock(file, held.text);
     }
   } finally { rmSync(tmp, { force: true }); }
-  throw new Error(`the bridge could not take the lock ${file}. Nothing was started.`);
+  const guard = existsSync(`${file}.break`) ? `: another start holds ${file}.break. That file clears itself after 10 s: try again then` : '';
+  throw new Error(`the bridge could not take the lock ${file}${guard}. Nothing was started.`);
 }
 
 /**

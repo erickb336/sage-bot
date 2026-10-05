@@ -68,7 +68,7 @@ test('T40: an empty lock (a bridge that just made it) is not replaced within the
   const path = gatesIn('empty');
   node(`lock(${JSON.stringify(path)});`); // makes the folder; the lock goes at the exit
   writeFileSync(`${path}.lock`, '');
-  assert.throws(() => node(`lock(${JSON.stringify(path)});`), (e) => e.stderr.includes(`another sage bridge (pid unknown) runs on ${path}.`));
+  assert.throws(() => node(`lock(${JSON.stringify(path)});`), (e) => e.stderr.includes(`a sage bridge may still be starting on ${path} (pid unknown). Try again in 10 s, or remove ${path}.lock.`));
   assert.equal(readFileSync(`${path}.lock`, 'utf8'), '');
 });
 
