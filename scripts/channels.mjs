@@ -4,7 +4,8 @@
 //   node scripts/channels.mjs [--config <config.json>] unregister <channel id>
 // The config is the bridge's (default ~/.config/sage-bot/config.json); the registry is `<statePath>.channels`.
 // `list` only reads, so it works while the bridge runs. `register` and `unregister` change the registry only while the bridge is
-// stopped: they take the bridge's own lock, so they refuse while a bridge runs, and a bridge cannot start while they work. With no
+// stopped: they take the bridge's own lock, so they refuse while a bridge runs (and print the launchctl lines that stop and start
+// it), and a bridge cannot start while they work. With no
 // registry and no channelId in the config, `register <id> <project> --home` makes the first one. The script cannot see Discord: the
 // bridge checks sage-bot's permissions in each registered channel at its next start and logs each missing one.
 import { readFileSync } from 'node:fs';
@@ -17,6 +18,9 @@ import { forTerminal } from '../src/clean.js';
 import { load, lock } from '../src/state.js';
 
 const USAGE = 'usage: node scripts/channels.mjs [--config <config.json>] list | register <channel id> <project> [--home] | unregister <channel id>';
+// The bridge of the README runs under launchd with KeepAlive: a killed bridge starts again and takes the lock again (F-T130-14).
+const STOP = 'launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand)';
+const START = 'launchctl load ~/Library/LaunchAgents/com.sage.bot.plist';
 const say = (line) => console.log(forTerminal(line));
 const args = process.argv.slice(2);
 try {
@@ -43,7 +47,7 @@ try {
   } else {
     try { lock(config.statePath); } catch (e) {
       if (!/^(another sage bridge|a sage bridge may still be starting)/.test(e.message)) throw e;
-      throw new Error(`a sage bridge runs on ${config.statePath}, and only one of the two may change the channel registry. Stop the bridge, then run this again; list works while it runs. If no bridge runs, remove ${config.statePath}.lock. Nothing was changed.`);
+      throw new Error(`a sage bridge runs on ${config.statePath}, and only one of the two may change the channel registry. Stop the bridge with: ${STOP}, run this again, then start the bridge with: ${START}. list works while it runs. If no bridge runs, remove ${config.statePath}.lock. Nothing was changed.`);
     }
     const home = verb === 'register' && args[3] === '--home';
     const channels = loadChannels(file) ?? migrate(config, projects, say) ?? new Map();

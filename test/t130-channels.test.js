@@ -44,7 +44,8 @@ test('T130 file safety: the registry is 0600 and written whole; a symlink, a wro
   assert.equal(mode(b.registry), 0o600);
   assert.deepEqual(readdirSync(dirname(b.registry)).filter((n) => n.endsWith('.tmp')), []); // the temp file was renamed over it
   const good = readFileSync(b.registry, 'utf8');
-  const stops = (why) => assert.throws(() => openChannels(b.config, projects), { message: `the channel registry ${b.registry} ${why}` });
+  const aside = `Move it aside with: mv ${b.registry} ${b.registry}.bad, then register the home channel again with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home`;
+  const stops = (why, fix = aside) => assert.throws(() => openChannels(b.config, projects), { message: `the channel registry ${b.registry} ${why} ${fix}` });
   // A symlink: the open refuses it (O_NOFOLLOW), also when it points to a good file.
   writeFileSync(join(b.root, 'elsewhere.json'), good, { mode: 0o600 });
   rmSync(b.registry);
@@ -54,7 +55,7 @@ test('T130 file safety: the registry is 0600 and written whole; a symlink, a wro
   // A wrong mode.
   writeFileSync(b.registry, good, { mode: 0o644 });
   chmodSync(b.registry, 0o644);
-  stops('must be a regular file of this user with mode 0600. Nothing was loaded.');
+  stops('must be a regular file of this user with mode 0600. Nothing was loaded.', `Fix it with: chmod 600 ${b.registry}`);
   chmodSync(b.registry, 0o600);
   // Bad JSON, a wrong shape, a project that the config does not list, and two home channels.
   writeFileSync(b.registry, '{"version":1,');
@@ -132,7 +133,7 @@ test('T130 terminal: the script refuses while a bridge holds the lock, and chang
   const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } }).trim();
   writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`); // this test process stands in for a running bridge
   const r = script(b, 'register', OTHER, 'project');
-  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge, then run this again; list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
   assert.equal(existsSync(b.registry), false);
   // F-T130-5: list only reads, so it works while the bridge runs.
   openChannels(b.config, projectsOf(b.config));
@@ -408,4 +409,119 @@ test('F-T130-4: the script gives one clear line for a wrong verb, a missing conf
   assert.deepEqual([r.status, r.stderr], [1, `sage-bot channels: cannot read the config ${join(b.root, 'nothing.json')} (ENOENT). Give the bridge's config with --config <config.json>.\n`]);
   r = run('list', '--config');
   assert.deepEqual([r.status, r.stderr], [1, `sage-bot channels: --config needs the path of the bridge's config file. ${usage}\n`]);
+});
+
+// ---- Repair round 2 (R410): the findings of QA R409 and code review R407. ----
+
+/** Runs one printed repair line as Erick would: the shell for chmod and mv, the script for the register line (its placeholders filled in). */
+function follow(b, line) {
+  const reg = /^node scripts\/channels\.mjs --config <config\.json> (register) <channel id> <project> (--home)$/.exec(line);
+  if (!reg) { execFileSync('/bin/sh', ['-c', line]); return; }
+  const r = script(b, reg[1], CHANNEL, 'project', reg[2]);
+  assert.equal(r.status, 0, r.err);
+}
+
+test('F-T130-13: each broken registry stops the start, list and register with the exact repair; following it lets prepare() pass', (t) => {
+  const FIRST_LINE = 'node scripts/channels.mjs --config <config.json> register <channel id> <project> --home';
+  const reg = (channels) => JSON.stringify({ version: 1, channels });
+  const cases = [
+    ['bad JSON', 'is not JSON. Nothing was loaded.', (p) => writeFileSync(p, '{"version":1,', { mode: 0o600 })],
+    ['a wrong mode', 'must be a regular file of this user with mode 0600. Nothing was loaded.', (p) => { writeFileSync(p, reg({ [CHANNEL]: { project: 'project', home: true } })); chmodSync(p, 0o644); }, 'chmod'],
+    ['no read bit', 'must be a regular file of this user with mode 0600. Nothing was loaded.', null, 'chmod'], // filled in below: mode 0o200 is refused by the open itself
+    ['a symlink', 'must be a regular file of this user with mode 0600. Nothing was loaded.', (p, b) => { writeFileSync(join(b.root, 'elsewhere.json'), reg({ [CHANNEL]: { project: 'project', home: true } }), { mode: 0o600 }); symlinkSync(join(b.root, 'elsewhere.json'), p); }],
+    ['a folder in its place', 'must be a regular file of this user with mode 0600. Nothing was loaded.', (p) => mkdirSync(p)],
+    ['two homes', 'must have exactly one home channel (the channel of the votes and cards). Nothing was loaded.', (p) => writeFileSync(p, reg({ [ASK]: { project: 'project', home: true }, [CHANNEL]: { project: 'project', home: true } }), { mode: 0o600 })],
+    ['zero channels', 'must have exactly one home channel (the channel of the votes and cards). Nothing was loaded.', (p) => writeFileSync(p, reg({}), { mode: 0o600 })],
+    ['a bad id', 'has an entry that the bridge did not write. Nothing was loaded.', (p) => writeFileSync(p, reg({ abc: { project: 'project', home: true } }), { mode: 0o600 })],
+    ['an entry the bridge did not write', 'has an entry that the bridge did not write. Nothing was loaded.', (p) => writeFileSync(p, reg({ [CHANNEL]: { project: 'project', home: true, admin: true } }), { mode: 0o600 })],
+    // F-T130-15: "home": false is refused like any other entry that the bridge did not write (it writes no home key on a normal channel).
+    ['"home": false', 'has an entry that the bridge did not write. Nothing was loaded.', (p) => writeFileSync(p, reg({ [CHANNEL]: { project: 'project', home: true }, [ASK]: { project: 'project', home: false } }), { mode: 0o600 })],
+  ];
+  cases[2][2] = (p) => { writeFileSync(p, reg({ [CHANNEL]: { project: 'project', home: true } })); chmodSync(p, 0o200); };
+  for (const [name, why, make, kind] of cases) {
+    const b = world(t);
+    mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });
+    make(b.registry, b);
+    const fix = kind === 'chmod' ? `Fix it with: chmod 600 ${b.registry}`
+      : `Move it aside with: mv ${b.registry} ${b.registry}.bad, then register the home channel again with: ${FIRST_LINE}`;
+    const message = `the channel registry ${b.registry} ${why} ${fix}`;
+    assert.throws(() => prepare(b.config, () => {}), { message }, name); // the bridge stops before Discord
+    rmSync(`${b.statePath}.lock`); // this test process took the lock in prepare(): the stopped bridge gives it back
+    for (const args of [['list'], ['register', OTHER, 'project']]) {
+      assert.deepEqual(Object.values(script(b, ...args)).slice(0, 3), [1, '', `sage-bot channels: ${message}\n`], `${name}: ${args[0]}`);
+    }
+    // Erick follows the printed lines, as printed.
+    const lines = kind === 'chmod' ? [`chmod 600 ${b.registry}`] : [/Move it aside with: (.+), then/.exec(message)[1], FIRST_LINE];
+    for (const line of lines) follow(b, line);
+    const { config, channels } = prepare(b.config, () => {});
+    assert.equal(config.channelId, CHANNEL, name);
+    assert.equal(channels.get(CHANNEL).home, true, name);
+    if (kind !== 'chmod') assert.equal(existsSync(`${b.registry}.bad`), true, name); // the bad file is kept, aside
+  }
+});
+
+test('F-T130-13: a path with a space or a quote is one shell word in the printed repair', (t) => {
+  const b = world(t);
+  const path = join(b.root, "Erick's state", 'gates.json.channels');
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, '{', { mode: 0o600 });
+  let message = '';
+  try { loadChannels(path); } catch (e) { message = e.message; }
+  const mv = /Move it aside with: (.+), then register/.exec(message)[1];
+  assert.equal(mv, `mv '${b.root}/Erick'\\''s state/gates.json.channels' '${b.root}/Erick'\\''s state/gates.json.channels.bad'`);
+  execFileSync('/bin/sh', ['-c', mv]); // the printed line, as printed
+  assert.equal(existsSync(`${path}.bad`), true);
+  assert.equal(loadChannels(path), undefined);
+});
+
+test('F-T130-14: the refusal while the bridge runs gives the launchctl lines that stop and start it, and the manual case', (t) => {
+  const b = world(t);
+  mkdirSync(dirname(b.statePath), { recursive: true });
+  const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } }).trim();
+  writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`);
+  const r = script(b, 'unregister', OTHER);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
+  // The README and the reference give the same two lines beside register and unregister.
+  for (const doc of ['README.md', 'docs/reference.md']) {
+    const text = readFileSync(join(ROOT, doc), 'utf8');
+    assert.match(text, /launchctl unload ~\/Library\/LaunchAgents\/com\.sage\.bot\.plist/, doc);
+    assert.match(text, /launchctl load ~\/Library\/LaunchAgents\/com\.sage\.bot\.plist/, doc);
+    assert.match(text, /Ctrl\+C/, doc);
+  }
+});
+
+test('F-T130-15: askChannelId equal to channelId migrates to one home entry for the first project, also when the bridge\'s own project is not first', (t) => {
+  const b = world(t);
+  b.config = { ...b.config, askChannelId: CHANNEL, projects: [{ name: 'beta', project: join(b.root, 'beta') }, { name: 'alpha', project: b.project }] };
+  openChannels(b.config, projectsOf(b.config));
+  assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'beta', home: true } });
+});
+
+test('F-T130-15: the migration refuses a channelId or askChannelId that is not a Discord id, and writes nothing', (t) => {
+  const b = world(t);
+  assert.throws(() => openChannels({ ...b.config, channelId: '12345' }, projectsOf(b.config)), { message: 'the config: channelId must be a Discord id (17 to 20 digits)' });
+  assert.throws(() => openChannels({ ...b.config, askChannelId: `${ASK}x` }, projectsOf(b.config)), { message: 'the config: askChannelId must be a Discord id (17 to 20 digits)' });
+  assert.equal(existsSync(b.registry), false);
+});
+
+test('F-T130-15: register with an unknown option is refused, and the registry stays as it was', (t) => {
+  const b = world(t);
+  openChannels(b.config, projectsOf(b.config));
+  const before = readFileSync(b.registry, 'utf8');
+  const r = script(b, 'register', OTHER, 'project', '--hom');
+  assert.deepEqual([r.status, r.err], [1, 'sage-bot channels: unknown option --hom\n']);
+  assert.equal(readFileSync(b.registry, 'utf8'), before);
+});
+
+test('F-T130-15: scripts/launchd.mjs makes the plist for a config with no channelId and no askChannelId (a new install)', (t) => {
+  const b = world(t);
+  const sample = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
+  delete sample.channelId;
+  delete sample.askChannelId;
+  const path = join(b.root, 'new-install.json');
+  writeFileSync(path, JSON.stringify(sample));
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'launchd.mjs'), path], { encoding: 'utf8', env: { ...process.env, HOME: b.env.HOME } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<!DOCTYPE plist/);
+  assert.match(r.stdout, new RegExp(`<string>${path}</string>`));
 });

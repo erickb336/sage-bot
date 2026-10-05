@@ -3,6 +3,7 @@
 // The file is <statePath>.channels, beside the gate file, and it is safe like the gate file: 0600, replaced whole by a rename
 // (writeWhole), read through readOwn (no symlink, this user's own file). Only the holder of the bridge lock writes it: the bridge
 // (a lead's unregister) or scripts/channels.mjs (Erick, while the bridge is stopped). A bad file stops the bridge at start.
+import { lstatSync } from 'node:fs';
 import { PermissionFlagsBits } from 'discord.js';
 import { readOwn, writeWhole } from './state.js';
 
@@ -17,15 +18,29 @@ export const NEEDED = [['ViewChannel', 'View Channel'], ['SendMessages', 'Send M
   ['CreatePublicThreads', 'Create Public Threads'], ['SendMessagesInThreads', 'Send Messages in Threads'], ['ManageThreads', 'Manage Threads'],
   ['EmbedLinks', 'Embed Links']];
 
+/** How Erick makes the first registry when the config has no channelId (the README, Channels). */
+export const FIRST = 'node scripts/channels.mjs --config <config.json> register <channel id> <project> --home';
+
+/** A path as one shell word: as it is when it is plain, else in single quotes. */
+const word = (path) => (/^[\w./~+-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`);
+
 /**
  * The registry: a Map of channel id to `{ project, home? }`, in the order of the file; undefined when there is no file. Throws for a
  * file that is not this user's 0600 file, a symlink, bad JSON, an entry that the bridge did not write, or not exactly one home channel.
- * It does not check the projects: `staleOf` names the ones that the config does not list.
+ * Each message ends with the commands that repair it (F-T130-13): `chmod 600` for a wrong mode; else move the file aside and register
+ * the home channel again. It does not check the projects: `staleOf` names the ones that the config does not list.
  */
 export function loadChannels(path) {
-  const text = readOwn(path, 'channel registry');
+  const aside = `Move it aside with: mv ${word(path)} ${word(`${path}.bad`)}, then register the home channel again with: ${FIRST}`;
+  const bad = (why, fix = aside) => new TypeError(`the channel registry ${path} ${why}. Nothing was loaded. ${fix}`);
+  let text;
+  try { text = readOwn(path, 'channel registry'); } catch (e) {
+    const st = lstatSync(path, { throwIfNoEntry: false });
+    const own = st?.isFile() && st.uid === process.getuid();
+    if (!st || (own && (st.mode & 0o477) === 0o400)) throw e; // the file is good: the fault is elsewhere (its folder), and the message says it
+    throw bad('must be a regular file of this user with mode 0600', own ? `Fix it with: chmod 600 ${word(path)}` : aside);
+  }
   if (text === undefined) return undefined;
-  const bad = (why) => new TypeError(`the channel registry ${path} ${why}. Nothing was loaded.`);
   let data;
   try { data = JSON.parse(text); } catch { throw bad('is not JSON'); }
   if (shape(data) !== 'channels,version' || data.version !== 1 || shape(data.channels) === null) throw bad('is not a version 1 registry');
@@ -50,9 +65,6 @@ export const saveChannels = (path, map) => writeWhole(path, `${JSON.stringify({ 
 export const homeOf = (map) => [...map].find(([, e]) => e.home)[0];
 /** The bridge config with its channelId set to the registry's home channel: the votes and cards post there (src/discord.js start). */
 export const withHome = (config, map) => ({ ...config, channelId: homeOf(map) });
-
-/** How Erick makes the first registry when the config has no channelId (the README, Channels). */
-export const FIRST = 'node scripts/channels.mjs --config <config.json> register <channel id> <project> --home';
 
 /**
  * A new registry made from the config of the time before T130, saved, so that an existing install keeps working: askChannelId (the old
