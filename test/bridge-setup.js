@@ -1,7 +1,7 @@
 // The scratch logbook and the bridge on the fake Discord layer, for the bridge tests. SAMPLE DATA ONLY: every id and name is made up.
 // The sage state tool runs with HOME and SAGE_HOME in a scratch folder, so no test touches a real logbook.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, SETTLE } from '../src/bridge.js';
@@ -24,6 +24,10 @@ export const MEMBERS = [
 ];
 export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
+/** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
+export const NAME = 'project';
+/** The key of a gate of the scratch project, as the bridge names it (T132). */
+export const key = (id) => `${NAME}/${id}`;
 
 /**
  * A scratch project with a sage logbook, and a bridge on it with the fake Discord layer and a clock that the test moves.
@@ -31,7 +35,7 @@ export const T0 = Date.UTC(2026, 9, 4, 14, 0);
  * the G13 tests pass `markAll: false` and mark gates with `b.mark`.
  */
 export function setup({ members = MEMBERS, markAll = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-b3-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-b3-'))); // the folder as the disk spells it, as loadProjects resolves it
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
@@ -46,10 +50,10 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const discord = fakeDiscord(members);
   const lines = [];
   const b = { root, project, sh, discord, lines, now: T0, statePath };
-  /** Marks sage gates as team votes, as scripts/vote.mjs does. */
-  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Set([...loadVotes(`${statePath}.votes`), ...ids]));
+  /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys, with the folder of the project (G45 A). */
+  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Map([...loadVotes(`${statePath}.votes`), ...ids.map((id) => [`${NAME}/${id}`, project])]));
   b.sage = sageTool({ sagePath: SAGE, project, env });
-  b.make = () => createBridge({ sage: b.sage, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
+  b.make = () => createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
   b.bridge = b.make();
   b.gates = () => readFileSync(join(sh('logbook'), 'gates.tsv'), 'utf8');
   b.answerOf = (id) => b.gates().split('\n').find((l) => l.startsWith(`${id}\t`)).split('\t')[6];

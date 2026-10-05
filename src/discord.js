@@ -4,9 +4,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
-import { askCommand, createAsk, projectsOf, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
 import { sageTool } from './sage.js';
+import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
 
@@ -95,7 +96,7 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 });
 
 /**
- * The start before Discord: refuses an old config, checks the projects, takes the lock on the gate file (one bridge at a time,
+ * The start before Discord: refuses an old config, checks the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
  * or a bad registry, stops here, before the Keychain. Then it opens the lead log and reads the kill switch (createAsk, T131).
  * `fetchChannel(id)` gives a Discord channel after the login: the #sage-audit copy of each lead log line goes through it. The returned
@@ -103,7 +104,8 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
  */
 export function prepare(file, log, fetchChannel) {
   refuseOldRoles(file);
-  const projects = projectsOf(file);
+  const projects = loadProjects(file); // a config whose projects the bridge cannot serve stops here, before the lock (G43 A)
+  const own = pickProject(projects).name;
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
@@ -111,7 +113,7 @@ export function prepare(file, log, fetchChannel) {
   let auditChannel = null;
   const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
   if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
-  return { config, channels, ask: createAsk({ config, channels, log, audit }) };
+  return { config, channels, projects, own, ask: createAsk({ config, channels, projects, log, audit }) };
 }
 
 /**
@@ -133,7 +135,7 @@ export async function enter(client, { config, channels, ask, log }) {
  */
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const { config, channels, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any lead log line
+  const { config, channels, projects, own, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any lead log line
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
@@ -145,7 +147,8 @@ export async function start(file) {
   const channel = await client.channels.fetch(config.channelId);
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({
-    sage: sageTool(config),
+    sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
+    own,
     config,
     statePath: config.statePath,
     log,

@@ -29,6 +29,8 @@ export function sageTool({ sagePath, project, env = process.env }) {
   const logbook = () => (dir ??= sage('logbook').catch((e) => { dir = undefined; throw e; }));
   const table = async (name) => rows(await readFile(join(await logbook(), `${name}.tsv`), 'utf8'));
   return {
+    /** The folder of the project (loadProjects): the identity that the bridge saves with each card and mark (G45 A). */
+    folder: project,
     /** Every gate row: { id, task, question, options, recommendation, default, answer, at }. */
     gates: () => table('gates'),
     /** Every task row: { id, title, ... }. */

@@ -29,7 +29,7 @@ test('the demo page shows the session line, the thread in order with the private
   // The line in the parent channel goes from "running" with its counts, as first posted, through each edit to "ended" (F-T51-3).
   const line = page.slice(page.indexOf('<section id="channel">'), page.indexOf('<section id="thread">'));
   assert.match(line, /^<section id="channel"><p class="chan"># <b>sage<\/b> · the parent channel\./); // the example channel is #sage (T97)
-  const states = [...line.matchAll(/(?:· (\d\d:\d\d)<\/div><div>|edited · (\d\d:\d\d)<\/span><div>)<b>Session 1 · Sun 4 Oct<\/b><br>(.+?)<\/div>/g)]
+  const states = [...line.matchAll(/(?:· (\d\d:\d\d)<\/div><div>|edited · (\d\d:\d\d)<\/span><div>)<b>Session 1 · project · Sun 4 Oct<\/b><br>(.+?)<\/div>/g)]
     .map((m) => `${m[1] ?? `edited ${m[2]}`} ${m[3].replace(/<\/?time>/g, '')}`);
   assert.deepEqual(states, [
     '14:01 running · 3 tasks · 3 open questions',
@@ -44,16 +44,16 @@ test('the demo page shows the session line, the thread in order with the private
   ]);
   assert.match(page, /<span class="tag">locked<\/span><span class="tag">archived<\/span>/);
   // The single question: Maya's first answer is final; Jon's late press gets a private note.
-  assert.match(page, /@sage-apprentice @sage-lead T1 needs one product answer\. The first answer is final\./);
+  assert.match(page, /@sage-apprentice @sage-lead project T1 needs one product answer\. The first answer is final\./);
   assert.match(page, /Answered by Maya at <time>14:02<\/time>: A\. Sign in\. Final\./);
   assert.match(page, /Only Jon can see this · Dismiss message<\/div><div>Already answered by Maya: A/);
   // Sam has no role: sage-bot ignores the press, so Sam gets no note (G20).
   assert.match(page, /Sam has no role and presses part 1, A\. sage-bot ignores the press: Sam gets no reply, and the vote does not change\./);
   assert.doesNotMatch(page, /Only Sam can see this/);
   // The batch: the tie post in the thread, then Jon's tie-break.
-  assert.match(page, /@sage-lead G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
+  assert.match(page, /@sage-lead project\/G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
   assert.match(page, /<b>Decided: B<\/b> · tie broken by Jon \(sage-lead\) at <time>14:36<\/time>/);
-  assert.match(page, /Jon \(sage-lead\) broke the tie on part 2 of G2\+G3: B\./);
+  assert.match(page, /Jon \(sage-lead\) broke the tie on part 2 of project\/G2\+G3: B\./);
   // The owner's answer at the terminal is final on the card, and a later press on that part does not count.
   // The rule in plain words, and no rule code that the page does not explain (F-T51-5).
   assert.match(page, /Erick, the owner, answers G5 at the terminal: A\. The owner's answer at the terminal is final\./);

@@ -7,7 +7,8 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAsk, HOUR, POINTER, projectsOf, STOP, STOP_CANCEL } from '../src/ask.js';
+import { createAsk, HOUR, POINTER, STOP, STOP_CANCEL } from '../src/ask.js';
+import { loadProjects } from '../src/projects.js';
 import { auditPathOf, forLead, killPathOf, openLog, quoted, verifyLog } from '../src/audit.js';
 import { LOOKS_GT, LOOKS_LT } from '../src/clean.js';
 import { openChannels, withHome } from '../src/channels.js';
@@ -32,7 +33,7 @@ function world(t) {
   b.copies = [];
   b.place = fakeDiscord([]);
   b.start = () => {
-    const channels = openChannels(b.config, projectsOf(b.config));
+    const channels = openChannels(b.config, loadProjects(b.config));
     b.ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, now: () => b.now, log: (l) => b.lines.push(l),
       audit: async (payload) => { b.copies.push(payload); } });
   };
@@ -201,7 +202,7 @@ test('T131: the lead log is append-only with a hash chain; the terminal command 
 
 test('T131: lead log file safety: a symlink, a wrong mode, an open folder and a folder in a project are refused', async (t) => {
   const b = world(t);
-  const projects = projectsOf(b.config);
+  const projects = loadProjects(b.config);
   const dir = join(b.root, 'logs');
   mkdirSync(dir, { mode: 0o700 });
   const path = join(dir, 'leads.jsonl');
@@ -288,7 +289,7 @@ test('T131: 10 mentions per person per hour across all channels; a mention that 
   const b = world(t);
   const OTHER = '400000000000000011';
   b.config.projects = [{ name: 'project', project: b.project }];
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   channels.set(OTHER, { project: 'project' });
   b.ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, now: () => b.now, log: (l) => b.lines.push(l) });
   for (let n = 1; n <= 5; n++) await b.say(MAYA, '<@1> hi');
@@ -339,7 +340,7 @@ test('T131: the lead-text cleaner keeps newlines and printable characters, maps 
 test('T131 dry run: no code in src/ can start a claude process; only the three known tools run as child processes', () => {
   const src = join(ROOT, 'src');
   const users = readdirSync(src).filter((f) => /child_process/.test(readFileSync(join(src, f), 'utf8'))).sort();
-  assert.deepEqual(users, ['discord.js', 'sage.js', 'state.js']); // the Keychain tool, the sage state tool (node), /bin/ps
+  assert.deepEqual(users, ['discord.js', 'projects.js', 'sage.js', 'state.js']); // the Keychain tool, git (a folder in git, as the state tool asks), the sage state tool (node), /bin/ps
   for (const f of readdirSync(src)) assert.ok(!/['"`]claude['"`]|\/claude\b|spawn\(/.test(readFileSync(join(src, f), 'utf8')), `${f} names a claude process or a spawn`);
   assert.match(readFileSync(join(src, 'sage.js'), 'utf8'), /run\(process\.execPath, \[sagePath,/); // the sage state tool runs as node <sage.mjs>
 });
@@ -494,7 +495,7 @@ test('F-T131-12: a forum post gets the pointer to the first registered channel; 
   const b = world(t);
   const OTHER = '400000000000000011';
   b.config.projects = [{ name: 'project', project: b.project }];
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   channels.set(OTHER, { project: 'project' });
   b.ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, now: () => b.now, log: (l) => b.lines.push(l) });
   const first = channels.keys().next().value;
@@ -540,7 +541,7 @@ test('F-T131-12: after a break, new lines chain on the last line as it is, and v
 test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, in any channel, to ask.press, never to the bridge', async (t) => {
   const b = world(t);
   const GUILD = '200000000000000001';
-  const config = { ...withHome(b.config, openChannels(b.config, projectsOf(b.config))), guildId: GUILD };
+  const config = { ...withHome(b.config, openChannels(b.config, loadProjects(b.config))), guildId: GUILD };
   const pressed = [];
   const on = routes({ config, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i.customId); } }, fetch: async () => ({ isThread: () => false }), botId: '100000000000000099' });
   const button = (customId, { user = JON, roles = [LEADR], channelId = '400000000000000077', age = 0 } = {}) => {

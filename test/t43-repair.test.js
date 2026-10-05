@@ -38,12 +38,12 @@ test('T43 repair: the write back fails once (the logbook is busy), and the next 
     return real();
   });
   await oneGate(b);
-  await b.press(MAYA, 'press:G1:0:0');
+  await b.press(MAYA, 'press:project/G1:0:0');
   assert.equal(b.answerOf('G1'), 'A. Old page'); // the write back failed: the owner's answer is only in decisions.tsv
   b.now += 15_000;
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), 'New page');
-  assert.equal(b.bridge.entry('G1').ask.parts[0].final.text, 'B. New page');
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'B. New page');
   assert.match(cardText(b), /Answered by Erick \(terminal\) at <t:\d+:t>: B\. New page\. Final\./);
   for (let i = 0; i < 10; i++) { b.now += 60_000; await b.bridge.loop(); } // no flip over many loops
   await b.make().loop(); // nor after a restart
@@ -62,14 +62,14 @@ test('T43 repair: the bridge stops between its write and the write back, and the
     return new Promise(() => {}); // the bridge stops just after sage wrote its answer, before it saved anything
   });
   await oneGate(b);
-  b.press(MAYA, 'press:G1:0:0'); // never returns
+  b.press(MAYA, 'press:project/G1:0:0'); // never returns
   while (!stopped) await new Promise((r) => setTimeout(r, 20));
   assert.equal(b.answerOf('G1'), 'A. Old page');
   b.sage = b.real;
   const restart = b.make();
   await restart.loop();
   assert.equal(b.answerOf('G1'), 'New page');
-  assert.equal(restart.entry('G1').ask.parts[0].final.text, 'B. New page');
+  assert.equal(restart.entry('project/G1').ask.parts[0].final.text, 'B. New page');
   for (let i = 0; i < 5; i++) { b.now += 60_000; await restart.loop(); }
   assert.equal(b.answerOf('G1'), 'New page');
   assert.deepEqual(restored(b), [RESTORED('G1', 'New page')]);
@@ -82,9 +82,9 @@ test('T43 repair: right after the write back, in the same turn, the card shows t
     return real();
   });
   await oneGate(b);
-  await b.press(MAYA, 'press:G1:0:0'); // no loop after the press
+  await b.press(MAYA, 'press:project/G1:0:0'); // no loop after the press
   assert.equal(b.answerOf('G1'), 'New page');
-  assert.equal(b.bridge.entry('G1').ask.parts[0].final.text, 'B. New page');
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'B. New page');
   assert.match(cardText(b), /Answered by Erick \(terminal\) at <t:\d+:t>: B\. New page\. Final\./);
   assert.doesNotMatch(cardText(b), /Old page\. Final/);
 });
@@ -101,11 +101,11 @@ test('T43 repair: a write back that sage refused never lands over a later owner 
     return real();
   });
   await oneGate(a);
-  await a.press(MAYA, 'press:G1:0:0');
+  await a.press(MAYA, 'press:project/G1:0:0');
   assert.equal(a.answerOf('G1'), 'New page');
   await a.bridge.loop();
   assert.equal(a.answerOf('G1'), 'Old page after all');
-  assert.equal(a.bridge.entry('G1').ask.parts[0].final.text, 'Old page after all');
+  assert.equal(a.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
   for (let i = 0; i < 5; i++) { a.now += 60_000; await a.bridge.loop(); }
   assert.equal(a.answerOf('G1'), 'Old page after all');
   assert.deepEqual(restored(a), [RESTORED('G1', 'New page'), RESTORED('G1', 'Old page after all')]);
@@ -119,11 +119,11 @@ test('T43 repair: a write back that sage refused never lands over a later owner 
     return real();
   });
   await oneGate(b);
-  await b.press(MAYA, 'press:G1:0:0');
+  await b.press(MAYA, 'press:project/G1:0:0');
   b.sh('gate', 'answer', 'G1', 'Old page after all');
   for (let i = 0; i < 5; i++) { b.now += 60_000; await b.bridge.loop(); }
   assert.equal(b.answerOf('G1'), 'Old page after all');
   assert.equal(n, 2);
   assert.deepEqual(restored(b), []);
-  assert.equal(b.bridge.entry('G1').ask.parts[0].final.text, 'Old page after all');
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
 });

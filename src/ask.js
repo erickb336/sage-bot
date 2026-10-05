@@ -11,6 +11,7 @@ import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
+import { loadProjects, pickProject, TYPES } from './projects.js';
 import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 import { auditPathOf, entryOf, forLead, killPathOf, linkOff, openLog, quoted, setLinkOff } from './audit.js';
@@ -25,14 +26,6 @@ const DAY = 24 * HOUR;
  * 8 MiB stays under Discord's upload limit for a server with no boosts (10 MB a message) with room for the rest of the request. */
 export const MAX_FILES = 10;
 export const MAX_BYTES = 8 * 1024 * 1024;
-const TYPES = ['png', 'jpg', 'svg', 'pdf'];
-/** A project name: also the value of the slash command's project choice. */
-const NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
-/** One allow-listed file or glob, relative to the project: folders and a file name of safe characters, `*` only in the file name. */
-const DIR_PART = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
-const FILE_PART = new RegExp(`^[A-Za-z0-9_*-][A-Za-z0-9_.*-]*\\.(?:${TYPES.join('|')})$`);
-/** A GitHub repository, for the link of a pull request. */
-const REPO = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 const TASK_ID = /^T\d{1,9}$/;
 const DONE = new Set(['merged', 'concluded', 'abandoned']);
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -52,48 +45,6 @@ const BUILD = /(?:^|[.!?\n]\s*)(?:please\s+|(?:can|could|would)\s+you\s+(?:pleas
 const isBuild = (text) => BUILD.test(String(text ?? '').replace(/<[@#][!&]?\d+>/g, '').trim());
 /** The name of an attached file, for the people who download it: only A-Z, a-z, 0-9, dot, dash and underscore; any other character becomes "_". */
 export const attachmentName = (name) => name.replace(/[^A-Za-z0-9._-]/gu, '_');
-
-/**
- * The projects that /sage reads, from the config: `projects`, or else the bridge's own project with no files. Throws a TypeError that
- * names the field for a config that is not safe: a name that is not lower-case letters, digits and dashes, a path that is not absolute,
- * a file entry that leaves the project or is not a .png, .jpg, .svg or .pdf.
- * @returns {{ name: string, project: string, sagePath: string, files: string[], repo?: string }[]}
- */
-export function projectsOf(config) {
-  const fallback = config.projects === undefined;
-  if (fallback) {
-    // No projects: the bridge's own project, named after its folder. A folder name that makes no valid name says what to add (F-T71Q-5).
-    if (typeof config.project !== 'string' || !isAbsolute(config.project)) throw new TypeError('the config: project must be an absolute path');
-    const folder = basename(config.project);
-    const name = folder.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-    if (!NAME.test(name)) {
-      throw new TypeError(`the config has no projects, and the folder name of project (${JSON.stringify(forTerminal(folder))}) makes no valid project name: add a projects entry with a name of lower-case letters, digits and dashes (at most 32)`);
-    }
-    config = { ...config, projects: [{ name, project: config.project, files: [] }] };
-  }
-  const list = config.projects;
-  if (!Array.isArray(list) || list.length < 1 || list.length > 25) throw new TypeError('the config needs projects as a list of 1 to 25 projects');
-  const names = new Set();
-  return list.map((p, n) => {
-    const at = fallback ? 'the config: ' : `projects[${n}].`; // with no projects, a message names the field that the owner wrote
-    const sagePath = p.sagePath ?? config.sagePath;
-    if (!NAME.test(p.name ?? '') || names.has(p.name)) throw new TypeError(`${at}name must be a new name of lower-case letters, digits and dashes (at most 32)`);
-    names.add(p.name);
-    for (const [key, path] of [['project', p.project], ['sagePath', sagePath]]) {
-      if (typeof path !== 'string' || !isAbsolute(path)) throw new TypeError(`${at}${key} must be an absolute path`);
-    }
-    const files = p.files ?? [];
-    if (!Array.isArray(files)) throw new TypeError(`${at}files must be a list`);
-    for (const f of files) {
-      const parts = String(f).split('/');
-      if (typeof f !== 'string' || !parts.slice(0, -1).every((d) => DIR_PART.test(d) && !d.includes('*')) || !FILE_PART.test(parts.at(-1))) {
-        throw new TypeError(`${at}files: ${JSON.stringify(f)} must be a path in the project, such as "docs/*.svg", with no "..", and end in .${TYPES.join(', .')}`);
-      }
-    }
-    if (p.repo !== undefined && !REPO.test(p.repo)) throw new TypeError(`${at}repo must be https://github.com/<owner>/<name>`);
-    return { name: p.name, project: p.project, sagePath, files, ...(p.repo && { repo: p.repo }) };
-  });
-}
 
 /** The /sage command, for the guild's command list: four subcommands, the project as a choice of the listed projects. */
 export function askCommand(projects) {
@@ -189,12 +140,11 @@ const NO_RIGHT = new Set([50001, 50013]);
 /**
  * The read commands and the mention threads for one bridge. `config` is the bridge config (apprenticeRole, leadRole, ownerId, project,
  * sagePath, statePath, projects, and optionally auditPath and killPath). `channels` is the channel registry (src/channels.js
- * openChannels); a lead's unregister changes it and saves it. `audit` posts a copy of each lead log line to #sage-audit (none: the
+ * openChannels); `projects` are the bridge's (src/projects.js loadProjects). A lead's unregister changes it and saves it. `audit` posts a copy of each lead log line to #sage-audit (none: the
  * log only). `env` goes to the sage state tool (the tests give a scratch HOME). Throws for a config that is not safe, and for a
  * thread map or a lead log that is not safe.
  */
-export function createAsk({ config, channels, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit }) {
-  const projects = projectsOf(config);
+export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit }) {
   const threadsPath = threadsPathOf(config);
   const threads = loadThreads(threadsPath); // thread id → { kind, channel, project, by, at }
   const leadLog = openLog(auditPathOf(config), projects);
@@ -235,9 +185,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     const parent = await parentId;
     return channels.has(parent) ? parent : null;
   }
-  const teamVotes = (p) => {
-    if (p.project !== config.project) return new Set();
-    try { return loadVotes(votesPathOf(config)); } catch { return new Set(); }
+  const teamVotes = () => { // the team votes of every project (T132): gate key → the folder of its project (G45 A)
+    try { return loadVotes(votesPathOf(config)); } catch { return new Map(); }
   };
 
   /** The content (and files) of the answer to one /sage command in the registered channel `at` (or a thread of it). */
@@ -365,8 +314,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
-    const votes = teamVotes(p);
-    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(g.id) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
+    const votes = teamVotes();
+    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.get(`${p.name}/${g.id}`) === p.project ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
   }
   /** One open question in full (G20): its text and its options. */
   const question = (g, how) => [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`];

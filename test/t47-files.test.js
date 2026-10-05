@@ -3,13 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load, loadVotes, readOwn } from '../src/state.js';
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
-const scratch = (name) => mkdtempSync(join(tmpdir(), `sage-bot-t47-${name}-`));
+const scratch = (name) => realpathSync.native(mkdtempSync(join(tmpdir(), `sage-bot-t47-${name}-`))); // the real path, as loadProjects names a project
 const own = (path, text) => writeFileSync(path, text, { mode: 0o600 });
 const REFUSED = (what, path) => `the ${what} ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`;
 
@@ -56,10 +56,10 @@ test('F-T47-1: a folder that group or other users may write is refused without t
   for (const [mode, ok] of [[0o700, true], [0o755, true], [0o770, false], [0o777, false], [0o1777, true], [0o1770, true]]) {
     const dir = scratch('dir');
     const path = join(dir, 'gates.json.votes');
-    own(path, '["G7"]');
+    own(path, '{"project/G7":"/p"}');
     chmodSync(dir, mode);
     try {
-      if (ok) assert.deepEqual([...loadVotes(path)], ['G7'], `mode ${mode.toString(8)}`);
+      if (ok) assert.deepEqual([...loadVotes(path).keys()], ['project/G7'], `mode ${mode.toString(8)}`);
       else {
         assert.throws(() => loadVotes(path), {
           message: `the team votes file ${path} is in a folder that other users may write. Make the folder 0700. Nothing was loaded.`,
@@ -74,9 +74,9 @@ function votesSetup(name) {
   const dir = scratch(name);
   const votes = join(dir, 'state', 'gates.json.votes');
   const config = join(dir, 'config.json');
-  writeFileSync(config, JSON.stringify({ votesPath: votes }));
-  const run = (...args) => spawn(process.execPath, [VOTE, '--config', config, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-  const runSync = (...args) => spawnSync(process.execPath, [VOTE, '--config', config, ...args], { encoding: 'utf8' });
+  writeFileSync(config, JSON.stringify({ votesPath: votes, project: dir, sagePath: '/sample/sage.mjs', projects: [{ name: 'project', project: dir }] }));
+  const run = (...args) => spawn(process.execPath, [VOTE, '--config', config, ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  const runSync = (...args) => spawnSync(process.execPath, [VOTE, '--config', config, ...args], { cwd: dir, encoding: 'utf8' });
   return { votes, run, runSync };
 }
 
@@ -95,8 +95,8 @@ test('F-T47-1: 20 vote.mjs runs at once (10 marks, 10 unmarks of other ids) end 
     const runs = [...ids(1, 10).map((id) => v.run('--unmark', id)), ...ids(11, 20).map((id) => v.run(id))];
     const results = await Promise.all(runs.map(exited));
     assert.deepEqual(results.filter((r) => r.code !== 0), [], `round ${round}`);
-    const list = JSON.parse(readFileSync(v.votes, 'utf8'));
-    if (JSON.stringify(list) !== JSON.stringify(ids(11, 20))) lost.push(`round ${round}: ${list.join(' ')}`);
+    const list = Object.keys(JSON.parse(readFileSync(v.votes, 'utf8')));
+    if (JSON.stringify(list) !== JSON.stringify(ids(11, 20).map((id) => `project/${id}`))) lost.push(`round ${round}: ${list.join(' ')}`);
     assert.equal(existsSync(`${v.votes}.lock`), false);
   }
   assert.deepEqual(lost, []);
@@ -115,6 +115,6 @@ test('F-T47-1: a vote lock of a live run blocks a change for 2 s; a stale lock (
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
   own(`${v.votes}.lock`, String(dead));
   const r = v.runSync('G5');
-  assert.equal(r.stdout, 'team votes: G5\n');
+  assert.equal(r.stdout, 'team votes: project/G5\n');
   assert.equal(existsSync(`${v.votes}.lock`), false);
 });
