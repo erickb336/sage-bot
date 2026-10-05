@@ -318,7 +318,7 @@ Only a Discord id (17 to 20 digits) goes into an event's `by`. A press from any 
 
 The bridge keeps its gates, their asks, the owner's final answers and what it gave sage in one JSON file, `statePath` in the config. One bridge at a time: at start it creates `<statePath>.lock` with its pid (O_EXCL). When that lock belongs to a process that runs, the new bridge stops with "another sage bridge (pid 4242) runs on …"; a lock of a process that is gone is replaced, and a normal exit removes it. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
 
-The file is version 2: each entry has its chief session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 file: its entries have no session, and each open one goes to the newest running session, as a gate of no known session does. Its card stays in the parent channel, and the bridge still edits it there. The next save writes version 2.
+The file is version 2: each entry has its chief session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 file: its entries have no session. Each card stays in the parent channel with its tie posts and reminders, and the bridge still edits it there. The next save writes version 2.
 
 ### Run it
 
@@ -357,7 +357,7 @@ A test sweeps every Unicode code point through `forChief` and proves that no con
 
 ## Chief sessions and their threads
 
-The parent channel (for example `#sage-chief`) is read only for people. It has one line for each chief session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards, tie posts, reminders, tie-break notes and wake notes go to that thread. There is no "New session" button: a session starts at the owner's terminal.
+The parent channel (for example `#sage-chief`) is read only for people. It has one line for each chief session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
 
 | Case | What the bridge does |
 | --- | --- |
@@ -365,8 +365,10 @@ The parent channel (for example `#sage-chief`) is read only for people. It has o
 | A session with no team vote | No line and no thread. |
 | The first team vote of a session | The bridge gives the session the next number of the project, posts its line, starts the thread from the line with the title "Session 14 · Tue 4 Oct" (the weekday and date of the session's start, in the Mac's time zone), and posts the card in the thread. Lines are posted in this order, so the newest is at the bottom. |
 | The line | "**Session 14 · Tue 4 Oct**" and "running · 4 tasks · 2 open questions". The tasks are the session's tasks with a gate; the open questions are the questions of its cards that still wait for an answer. The bridge edits it when a number changes. |
-| A gate that no hook saw | It goes to the newest running session. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). |
-| A session ends (SessionEnd, or its Claude Code process is gone) | The line says "ended" and the time, and the bridge archives and locks the thread. It posts nothing more in a locked thread (the log says so once), and a gate of that session waits. |
+| A gate that no hook saw | It goes to the newest running session. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). A card in the parent channel stays there with all its posts, also when a session starts later. |
+| Two spool files list the same gate id (for example from an older logbook) | The gate goes to the session that started last before sage asked the gate. |
+| Discord refuses the line or the thread (for example without Create Public Threads) | The card goes to the parent channel, and the log says the refusal once. The next card of the session tries again. When Discord made the thread but its answer was lost (code 160004 at the next try), the bridge takes the thread of the line. |
+| A session ends (SessionEnd, a `/clear`, or its Claude Code process is gone) | The line says "ended" and the time at once. The thread stays open while a question of the session waits: the team votes on there, and the reminders and tie posts go there. At the first turn of the loop after the last question is answered, decided or withdrawn, the bridge archives and locks the thread. A later card of the session opens the thread again. |
 | A resume of an ended session | At the next turn of the loop the bridge opens the thread again (unarchives and unlocks it) before it posts or edits anything in it, and the line says "running" again. |
 | A press in a thread of the parent channel | It counts. A press in another channel, or in a thread of another channel, is ignored. |
 
@@ -376,7 +378,7 @@ The parent channel (for example `#sage-chief`) is read only for people. It has o
 - After a Bash command, it reads the fixed line of `sage gate add` ("G12 open · …"), and adds the gate id and the task id of the command to the session.
 - SessionEnd writes the end. A session whose Claude Code process no longer runs also counts as ended.
 
-The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a folder that is not the config's `project`; then it writes nothing and prints one line on stderr. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
+The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a config with no `project`; then it writes nothing and prints one line on stderr. It records an event in the config's `project` folder or in a folder inside it (a subfolder, a worktree in it, also through a link), and ignores an event in any other folder without a line. It ignores a `gate add` whose `--project` names a folder outside the project. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
 
 **What the owner adds.** These steps are for the owner; the bridge changes no settings file.
 
