@@ -40,7 +40,7 @@ ${body}
 
 /** The flow of one question: five lanes, nine numbered messages from top to bottom. */
 function flow() {
-  const lanes = [['The chief', 'at the terminal'], ['The sage', 'logbook'], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'both roles']];
+  const lanes = [['sage', 'at the terminal'], ['The sage', 'logbook'], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'both roles']];
   const x = (i) => 100 + i * 200;
   const top = 30, head = 90, first = 190, step = 78;
   const n = 9, bottom = first + (n - 1) * step + 40;
@@ -55,7 +55,7 @@ function flow() {
     [3, 2, 'sends the press'],
     [2, 2, ['checks the role and the', 'vote rules, edits the card']],
     [2, 1, 'gives the final answer'],
-    [1, 0, 'the chief reads it, goes on'],
+    [1, 0, 'sage reads it, goes on'],
   ];
   msgs.forEach(([from, to, label], k) => {
     const y = first + k * step;
@@ -88,7 +88,7 @@ function states() {
   body += arrow('M360 240 H712') + text(396, 228, 'first press of a holder', { size: 19 });
   body += arrow('M360 400 H712') + text(396, 366, ['30 min end with a clear leader,', 'or a sage-lead ends the vote'], { size: 19 });
   body += arrow('M360 560 H712') + text(396, 548, 'a sage-lead breaks the tie', { size: 19 });
-  body += arrow('M230 670 V742') + text(244, 712, 'the owner answers the chief', { size: 19 });
+  body += arrow('M230 670 V742') + text(244, 712, 'the owner answers sage', { size: 19 });
   body += box(100, 750, 420, 80, 'Answered at the terminal', ['final: sage has it already'], { fill: C.end, stroke: C.endEdge });
   return svg(860, "A question's life", body);
 }
@@ -96,7 +96,7 @@ function states() {
 /** Session threads: the parent channel, one line per session, one thread per line. */
 function threads() {
   let body = '';
-  body += box(30, 120, 280, 140, 'The parent channel', ['for example #sage-chief', 'one line per session']);
+  body += box(30, 120, 280, 140, 'The parent channel', ['for example #sage', 'one line per session']);
   body += box(370, 40, 280, 140, 'Session 14 · Tue 4 Oct', ['running · 4 tasks', '2 open questions']);
   body += box(370, 220, 280, 120, 'Session 15 · Wed 5 Oct', ['ended 18:02']);
   body += box(710, 40, 260, 140, 'Its thread', ['the cards, tie posts,', 'reminders, wake notes']);

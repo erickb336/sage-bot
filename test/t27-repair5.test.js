@@ -128,14 +128,14 @@ test('F-T27-39 to F-T27-42, F-T27-46: the sweep over all of Unicode: safe keeps 
   assert.equal(safe(`${WHOLE.join(' ')} **bold**`), `${WHOLE.join(' ')} \\*\\*bold\\*\\*`);
 });
 
-test('F-T27-35: when the budget drops reasons, the description says how many more the chief has; with every reason shown it says nothing', async () => {
+test('F-T27-35: when the budget drops reasons, the description says how many more sage has; with every reason shown it says nothing', async () => {
   const words = 'The reason text of one holder on one part, 500 characters long, as the form allows at most. ';
   const names = ['Erick', 'Maya', 'Jon', 'Ana', 'Lea'].map((n) => n.padEnd(32, '!'));
   const reasons = names.map((n) => `${n.trim()}: ${words.repeat(6)}`.slice(0, 500));
   const { gate, ask, people, embed } = build(names, reasons, { parts: 4 });
   const shown = embed.fields.length - 4; // every holder gave a reason on every part: 20 in all
   assert.ok(shown >= 1 && shown < 20, `${shown} reasons shown`);
-  assert.match(embed.description, new RegExp(`\\n${20 - shown} more reasons; the chief has them all$`));
+  assert.match(embed.description, new RegExp(`\\n${20 - shown} more reasons; sage has them all$`));
   const few = build(['Maya', 'Jon'], ['short', 'also short']).embed;
   assert.equal(few.fields.length, 3);
   assert.doesNotMatch(few.description, /more reason/);
@@ -143,7 +143,7 @@ test('F-T27-35: when the budget drops reasons, the description says how many mor
   const i = fakeInteraction({ user: people.holders.values().next().value, customId: 'reason:B:0:0', fields: { reason: 'x'.repeat(500) } });
   const out = await handle(i, { gates: new Map([['B', { gate, ask }]]), people, clock: () => T0 + MINUTE });
   assert.equal(out.stored, true);
-  assert.match(i.replies[0].embeds[0].description, /\n\d+ more reasons; the chief has them all$/);
+  assert.match(i.replies[0].embeds[0].description, /\n\d+ more reasons; sage has them all$/);
 });
 
 test('F-T27-36: a tag sequence that is not one of the three flags leaves the black flag; the lead\'s confirm stays in 2000 characters for any team', () => {
@@ -194,10 +194,10 @@ test('F-T27-37: handle returns stored: true only when the event changed the gate
 test('F-T27-35 to F-T27-42: the README states the allow-list, the dropped-reasons line, stored, the URL break and the fallback name, and no claim about models', () => {
   const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const line of ['nothing else reads it', '`safe` keeps only what a person needs', 'at most 3 combining marks on a letter', 'Arabic, Syriac, the Indic scripts, Myanmar or Khmer',
-    'breaks every `://` to `:// `', 'the oldest reasons go first', 'more reasons; the chief has them all', '`{ gate, effects, stored }`', 'With `stored: false` nothing changed',
+    'breaks every `://` to `:// `', 'the oldest reasons go first', 'more reasons; sage has them all', '`{ gate, effects, stored }`', 'With `stored: false` nothing changed',
     'an id of 4 or more digits', 'still stores the ballot and shows the reason form', 'B3 refuses an ask with more than 4 parts']) {
     assert.ok(readme.includes(line), line);
   }
-  for (const gone of ['model could decode', 'newest first to go', 'B3 cleans the text for the chief again', 'every format character (Unicode `Cf`', 'for an id without digits'])
+  for (const gone of ['model could decode', 'newest first to go', 'B3 cleans the text for sage again', 'every format character (Unicode `Cf`', 'for an id without digits'])
     assert.ok(!readme.includes(gone), gone);
 });

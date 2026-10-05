@@ -31,7 +31,7 @@ function entryOf(e) {
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
-    // Version 2 (T29): the chief session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
+    // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
     // T73: a leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
     && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'));
@@ -42,7 +42,7 @@ function entryOf(e) {
   return { ...e, session: e.session ?? null, gate: parseGate(e.gate) };
 }
 
-/** One chief session as the bridge keeps it (T29): its number, the title of its thread, its line in the parent channel and its thread. */
+/** One sage session as the bridge keeps it (T29): its number, the title of its thread, its line in the parent channel and its thread. */
 function sessionOf(s) {
   const ok = s && SESSION_ID.test(s.id) && Number.isSafeInteger(s.n) && s.n > 0 && isText(s.title)
     && (s.line === null || isText(s.line)) && (s.thread === null || isText(s.thread)) && typeof s.closed === 'boolean'
@@ -52,7 +52,7 @@ function sessionOf(s) {
 }
 
 /**
- * The entries and the chief sessions of the gate file, both [] when there is none yet. Throws for a file that is not the bridge's own.
+ * The entries and the sage sessions of the gate file, both [] when there is none yet. Throws for a file that is not the bridge's own.
  * A version 1 file (before T29) has no sessions, and its entries have no session.
  * @returns {{ gate: import('./vote.js').Gate, ask: object, sage: string[], texts: string[][], message: string | null, remindedAt: number,
  *   sent: Record<string, string> }[]}  the owner's final answers from the terminal are in `ask.parts[i].final`
@@ -100,7 +100,7 @@ export const GATE_ID = /^G\d{1,9}$/;
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * The team votes file (G13): the sage gate ids that the chief marked as team votes. The bridge posts only these.
+ * The team votes file (G13): the sage gate ids that sage marked as team votes. The bridge posts only these.
  * It is `votesPath` in the config, or `<statePath>.votes`; scripts/vote.mjs writes it.
  */
 export function votesPathOf({ votesPath, statePath }) {
@@ -110,7 +110,7 @@ export function votesPathOf({ votesPath, statePath }) {
 }
 
 /**
- * The leads-only file (T73): the sage gate ids that the chief marked with `--leads`. Each is a single Yes or No question that only the
+ * The leads-only file (T73): the sage gate ids that sage marked with `--leads`. Each is a single Yes or No question that only the
  * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;

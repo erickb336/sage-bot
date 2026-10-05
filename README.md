@@ -1,6 +1,6 @@
 # sage-bot
 
-**sage-bot lets your team answer the chief's questions in Discord.** When a [sage](https://github.com/erickb336/sage) chief asks a product question, the chief can mark it as a team vote. A small service on the owner's Mac, the bridge, then posts the question as a card with buttons, counts the presses of the team, and gives the final answer back to sage. Nothing that the team types in Discord ever reaches the chief as an instruction: only the chosen option goes back.
+**sage-bot lets your team answer sage's questions in Discord.** When [sage](https://github.com/erickb336/sage) asks a product question, sage can mark it as a team vote. A small service on the owner's Mac, the bridge, then posts the question as a card with buttons, counts the presses of the team, and gives the final answer back to sage. Nothing that the team types in Discord ever reaches sage as an instruction: only the chosen option goes back.
 
 > **Status: built and tested on a fake Discord; the live trial has not run yet.** Every part below runs in the tests and in the demo, with no Discord account. The first trial on a real Discord server is the next step: see [Set up a live trial](#set-up-a-live-trial).
 
@@ -16,12 +16,12 @@ npm ci
 npm run demo
 ```
 
-The demo plays one chief session from start to end, with sample people and a scripted clock. It uses the real sage state tool, the real hook and the real bridge, on a fake Discord. It prints each step, the answers that sage got, and the path of one HTML page. Open the page to see:
+The demo plays one sage session from start to end, with sample people and a scripted clock. It uses the real sage state tool, the real hook and the real bridge, on a fake Discord. It prints each step, the answers that sage got, and the path of one HTML page. Open the page to see:
 
 - the session's line in the parent channel, from "running" to "ended";
 - the session thread, with each card at its final state;
 - the private notes that each person sees, for example "Your press did not count";
-- the answers in sage, and the reasons that the chief can read.
+- the answers in sage, and the reasons that sage can read.
 
 In the demo, Maya answers a single question first, so her answer is final. Sam has no role, so sage-bot ignores his press: he gets no reply, and the press does not count. A batch vote ends in a tie, and Jon, a sage-lead, breaks it. Erick, the owner, answers one question at the terminal, and that answer is final. When the session ends, its thread locks.
 
@@ -31,56 +31,56 @@ All files go into a new scratch folder, so the demo never touches your home fold
 
 ### The flow of one question
 
-![The flow of one question, in 9 numbered steps between five lanes: the chief, the sage logbook, the bridge, the session thread and the team. 1, the chief asks a question in the logbook. 2, the chief marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-apprentice and sage-lead. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, the chief reads it and goes on.](docs/flow.svg)
+![The flow of one question, in 9 numbered steps between five lanes: sage, the sage logbook, the bridge, the session thread and the team. 1, sage asks a question in the logbook. 2, sage marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-apprentice and sage-lead. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, sage reads it and goes on.](docs/flow.svg)
 
-1. The chief asks a question in sage, as usual. Most questions stay at the terminal for the owner.
-2. When a question is for the team, the chief marks it with `node scripts/vote.mjs G42`.
+1. sage asks a question in sage, as usual. Most questions stay at the terminal for the owner.
+2. When a question is for the team, sage marks it with `node scripts/vote.mjs G42`.
 3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
-4. It posts a card in the thread of the chief's session, and pings the sage-apprentice and sage-lead roles.
+4. It posts a card in the thread of sage's session, and pings the sage-apprentice and sage-lead roles.
 5. A member of the team presses an option on the card.
 6. The session thread sends the press to the bridge.
 7. The bridge checks the person's role and applies the vote rules, then edits the card.
 8. When the question is decided, the bridge gives sage the option's letter and text through the sage state tool.
-9. The chief reads the answer in the logbook and goes on with the work.
+9. sage reads the answer in the logbook and goes on with the work.
 
 The bridge only reads the logbook and calls the sage state tool. It never writes a logbook file itself.
 
 ### A question's life
 
-![A question's life. A single question starts as Open; a batch of 2 to 4 starts as Voting. Open goes to Decided at the first press of a holder (a sage-apprentice or a sage-lead). Voting goes to Decided when the 30 minutes end with a clear leader, or when a sage-lead ends the vote. Voting goes to Tied when the 30 minutes end with a tie or no votes, and Tied goes to Decided when a sage-lead breaks the tie. Open goes to Withdrawn when the owner withdraws it at the terminal. From Open, Voting or Tied, the owner can answer the chief, and the question is Answered at the terminal, which is final. Decided: the bridge gives sage the answer. Answered: sage has it already. Withdrawn: sage gets nothing.](docs/states.svg)
+![A question's life. A single question starts as Open; a batch of 2 to 4 starts as Voting. Open goes to Decided at the first press of a holder (a sage-apprentice or a sage-lead). Voting goes to Decided when the 30 minutes end with a clear leader, or when a sage-lead ends the vote. Voting goes to Tied when the 30 minutes end with a tie or no votes, and Tied goes to Decided when a sage-lead breaks the tie. Open goes to Withdrawn when the owner withdraws it at the terminal. From Open, Voting or Tied, the owner can answer sage, and the question is Answered at the terminal, which is final. Decided: the bridge gives sage the answer. Answered: sage has it already. Withdrawn: sage gets nothing.](docs/states.svg)
 
 | State | What it means | What the card shows |
 | --- | --- | --- |
-| Open | A single question waits for its first answer. | The options, the chief's recommendation and the default, one button per option. |
+| Open | A single question waits for its first answer. | The options, sage's recommendation and the default, one button per option. |
 | Voting | A question in a batch vote. The team votes for 30 minutes, and each person can change a vote. | The votes and voters so far, each reason, and the time when the vote closes. |
 | Tied | The 30 minutes ended with a tie or no votes. The question waits for a sage-lead. | "Tied: A, B at 1 vote each", and a tie-break button for each tied option. |
 | Decided | A press, the votes or a sage-lead decided it. | The answer, who gave it, and the time. For a tie-break or an early end, the name of the lead. |
-| Answered at the terminal | The owner answered the chief in the chat, at the terminal or through Remote Control, and the chief recorded it. This answer is final. | "Answered by Erick (terminal)", and the buttons go grey. |
+| Answered at the terminal | The owner answered sage in the chat, at the terminal or through Remote Control, and sage recorded it. This answer is final. | "Answered by Erick (terminal)", and the buttons go grey. |
 | Withdrawn | The owner withdraws it at the terminal. Nothing is decided. | "Withdrawn by Erick at 15:30. Closed: nothing is decided." |
 
 A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share one card, one part for each question. The batch closes and goes to sage only when every part is decided.
 
 ### Session threads
 
-![Session threads. The parent channel, for example #sage-chief, holds one line per chief session. The line of Session 14, Tue 4 Oct, says running, 4 tasks, 2 open questions; its thread holds the cards, tie posts, reminders and wake notes. The line of Session 15, Wed 5 Oct, says ended 18:02; its thread is locked.](docs/threads.svg)
+![Session threads. The parent channel, for example #sage, holds one line per sage session. The line of Session 14, Tue 4 Oct, says running, 4 tasks, 2 open questions; its thread holds the cards, tie posts, reminders and wake notes. The line of Session 15, Wed 5 Oct, says ended 18:02; its thread is locked.](docs/threads.svg)
 
-- Each chief session that has a team vote gets one line in the parent channel and one thread.
+- Each sage session that has a team vote gets one line in the parent channel and one thread.
 - The thread is titled "Session N · weekday day month", for example "Session 14 · Tue 4 Oct".
 - The bridge edits the line when a count changes, and when the session ends.
 - When the session ended and all its questions are settled, the bridge archives and locks the thread. A resume opens it again.
 - When someone deletes a session thread, the bridge posts each open card of it again in the parent channel, with the votes so far. The team votes there, and the reminders and tie posts go there. A settled card is not posted again. (G17)
 - When the session then needs a new line, the old line says "moved to a new line below".
-- A session thread holds the votes and the chief's posts only. To chat with the chief, use a separate channel.
+- A session thread holds the votes and sage's posts only. To chat with sage, use a separate channel.
 
 ### A leads-only question
 
 Some questions are for the sage-leads alone, and only as advice. The first one is the owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads recommend Yes or No; Erick decides at the terminal.
 
-1. The chief asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
+1. sage asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
 2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
 3. Only a sage-lead can press. A sage-apprentice gets the private note "Only a sage-lead can answer this. Erick decides." A member with neither role gets no reply.
 4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
-5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to the chief is final, also after the leads' recommendation (G10).
+5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to sage is final, also after the leads' recommendation (G10).
 
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
 
@@ -90,7 +90,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 
 | Rule | Why | Where |
 | --- | --- | --- |
-| Only the questions that the chief marks with `scripts/vote.mjs` go to Discord. Every other question stays at the terminal. (G13) | Most questions are for the owner alone. The chief chooses which ones the team votes on. | `src/bridge.js` |
+| Only the questions that sage marks with `scripts/vote.mjs` go to Discord. Every other question stays at the terminal. (G13) | Most questions are for the owner alone. sage chooses which ones the team votes on. | `src/bridge.js` |
 | A question about a merge is never posted, also when it is marked as a team vote. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
 | A leads-only question (`vote.mjs --leads`) is only the automatic-merge question, Yes or No, on its own card. Only sage-leads answer it, and sage gets the answer marked as a recommendation: the owner decides at the terminal. sage-bot never switches a mode of sage. (G18) | The leads advise; the owner keeps the decision. | `src/bridge.js`, `src/handle.js`, `src/cards.js` |
 | One card holds the questions that one task asks within 30 seconds: 1 question, or a batch of 2 to 4. (G9) | Questions asked together belong together, so the team votes on them together. | `src/bridge.js` |
@@ -102,11 +102,11 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | The card names the lead who broke a tie or ended a vote early. (G11) | The team sees who decided. | `src/cards.js` |
 | Reminders go out every 2 hours: to sage-apprentice and sage-lead for an open single question, to sage-lead only for a tie. | A question must not wait in silence. | `src/vote.js`, `src/bridge.js` |
 | The owner's answer at the terminal is final. A press never replaces it. (G10) | The owner has the last word. | `src/bridge.js` |
-| Only the owner withdraws a question, and the owner withdraws it at the terminal. | Nobody in Discord can cancel the chief's question. | `src/vote.js`, `src/bridge.js` |
-| One thread per chief session, only for a session that acts as chief and has a team vote, titled "Session N · weekday day month". It locks when the session ended and its questions are settled. (G14, G15) | Each session's questions stay together, and an old thread takes no more presses. | `src/sessions.js`, `src/bridge.js` |
+| Only the owner withdraws a question, and the owner withdraws it at the terminal. | Nobody in Discord can cancel sage's question. | `src/vote.js`, `src/bridge.js` |
+| One thread per sage session, only for a session that runs sage mode and has a team vote, titled "Session N · weekday day month". It locks when the session ended and its questions are settled. (G14, G15) | Each session's questions stay together, and an old thread takes no more presses. | `src/sessions.js`, `src/bridge.js` |
 | When a session thread is deleted while a vote in it is open, each open card is posted again in the parent channel, with its votes. Its reminders and tie posts go there too. (G17) | The team can still vote. | `src/bridge.js` |
-| A session thread holds the votes and the chief's posts only. Chat with the chief is in a separate channel. (G16) | Votes stay readable, and no chat text goes near the chief's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
-| No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
+| A session thread holds the votes and sage's posts only. Chat with sage is in a separate channel. (G16) | Votes stay readable, and no chat text goes near sage's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
+| No AI reads card text. sage gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
 | `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
 | sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
@@ -120,7 +120,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
 - [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Leave the **Message Content** intent off. Invite it to your server with the `bot` and `applications.commands` scopes. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
-  *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach the chief's chat.
+  *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
 - [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
   *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
 - [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
@@ -151,9 +151,9 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
   | The sage-bot app | Allow View Channel, Send Messages, Attach Files and Read Message History. |
 
-  **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
+  **Do not let the Discord plugin watch this parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
-  *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage`, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+  *Why:* a session thread holds the votes and sage's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage`, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3. Use the absolute path of your sage-bot folder.
@@ -168,14 +168,14 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   }
   ```
 
-  *Why:* without the hook, the bridge does not know the chief's sessions, and every card goes to the parent channel.
+  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel.
 - [ ] **7. Deny the Discord plugin's `fetch_messages` tool** in the same settings file. Its name is probably `mcp__plugin_discord_discord__fetch_messages`: confirm the exact name with `/mcp` first.
 
   ```json
   { "permissions": { "deny": ["mcp__plugin_discord_discord__fetch_messages"] } }
   ```
 
-  *Why:* the tie posts hold reasons that are cleaned for people, not for a model. The chief must not read them.
+  *Why:* the tie posts hold reasons that are cleaned for people, not for a model. sage must not read them.
 - [ ] **8. Start the bridge by hand once, then with launchd.** First run it in a terminal and read its log:
 
   <!-- check: skip, needs Discord and the Keychain -->
@@ -210,7 +210,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
   *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
 
-  Then ask the chief for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
+  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
 
   <!-- check: run, prints "team votes: G42" -->
   ```sh
@@ -219,7 +219,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
 
-  Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and the chief gets it in sage.
+  Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and sage gets it in sage.
 
 **What the first live trial checks first:**
 
@@ -231,18 +231,18 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
 | Word | Meaning |
 | --- | --- |
-| **Question** | A sage gate: a question that the chief parks for the owner, with options, a recommendation and a default. |
-| **The chief** | The sage session that frames the work and asks the questions. It changes no files. |
+| **Question** | A sage gate: a question that sage parks for the owner, with options, a recommendation and a default. |
+| **sage** | The Claude Code session in sage mode that frames the work and asks the questions. It changes no files. |
 | **The owner** | The person who runs sage at the terminal. In the demo, Erick. |
 | **The team** | The members of the Discord server with the sage-apprentice or the sage-lead role. |
 | **sage-apprentice** | The role for the people who answer and vote. |
 | **sage-lead** | The role for the people who answer and vote, and also break ties and end votes early. A person has sage-apprentice or sage-lead, not both. |
-| **Team vote** | A question that the chief marked with `scripts/vote.mjs`. Only these and the leads-only questions go to Discord. |
-| **Leads-only question** | A Yes or No question that the chief marked with `scripts/vote.mjs --leads`. Only a sage-lead answers it, as a recommendation to the owner. |
+| **Team vote** | A question that sage marked with `scripts/vote.mjs`. Only these and the leads-only questions go to Discord. |
+| **Leads-only question** | A Yes or No question that sage marked with `scripts/vote.mjs --leads`. Only a sage-lead answers it, as a recommendation to the owner. |
 | **Card** | The Discord message of one question or one batch, with a button for each option. |
 | **Batch** | 2 to 4 questions of one task, asked within 30 seconds, on one card. |
-| **Session thread** | The Discord thread of one chief session. It holds that session's cards. |
-| **Parent channel** | The channel that holds one line per chief session. People only read it. |
+| **Session thread** | The Discord thread of one sage session. It holds that session's cards. |
+| **Parent channel** | The channel that holds one line per sage session. People only read it. |
 | **The bridge** | The service on the owner's Mac: `scripts/bridge.mjs`. |
 | **Holder** | A member with the sage-apprentice or the sage-lead role. Only holders count. |
 
@@ -257,12 +257,12 @@ Run each command in the sage-bot folder.
 | You want to | Do this |
 | --- | --- |
 | Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
-| Ask the sage-leads for a recommendation, as the chief | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
+| Ask the sage-leads for a recommendation, as sage | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
 | Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
-| Answer a question yourself | Answer the chief in the chat as usual; that answer is final. (G10) |
-| Withdraw a single question | Tell the chief to withdraw it. The chief records an answer that names no option, and the card shows the question as withdrawn. |
-| Read the team's reasons, as the chief | `node scripts/reasons.mjs <gate file> <gate id>` |
+| Answer a question yourself | Answer sage in the chat as usual; that answer is final. (G10) |
+| Withdraw a single question | Tell sage to withdraw it. sage records an answer that names no option, and the card shows the question as withdrawn. |
+| Read the team's reasons, as sage | `node scripts/reasons.mjs <gate file> <gate id>` |
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 
@@ -281,19 +281,19 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 
 ## FAQ
 
-**Does a Discord message ever reach the chief?** No. The bridge gives sage only the final answer: the option's letter and sage's own option text. The chief reads the reasons only through `scripts/reasons.mjs`, which keeps only letters, digits, spaces and `. , : -`, and frames each reason as quoted data. Two settings of the owner keep Discord text away from the chief too: the Discord plugin does not watch the parent channel ([step 4](#set-up-a-live-trial)), and its `fetch_messages` tool is denied ([step 7](#set-up-a-live-trial)). Those two are settings, not code.
+**Does a Discord message ever reach sage?** No. The bridge gives sage only the final answer: the option's letter and sage's own option text. sage reads the reasons only through `scripts/reasons.mjs`, which keeps only letters, digits, spaces and `. , : -`, and frames each reason as quoted data. Two settings of the owner keep Discord text away from sage too: the Discord plugin does not watch the parent channel ([step 4](#set-up-a-live-trial)), and its `fetch_messages` tool is denied ([step 7](#set-up-a-live-trial)). Those two are settings, not code.
 
-**Can a teammate start work?** No. A session starts only at the owner's terminal: there is no "New session" button. A press can only answer or vote on a question that the chief marked. Chat with the chief happens in a separate channel, through the Discord plugin and its own settings, not through sage-bot.
+**Can a teammate start work?** No. A session starts only at the owner's terminal: there is no "New session" button. A press can only answer or vote on a question that sage marked. Chat with sage happens in a separate channel, through the Discord plugin and its own settings, not through sage-bot.
 
 **What if the Mac sleeps?** The bridge stops while the Mac sleeps, so a press in that time fails in Discord ("This interaction failed"). The 30-minute clock keeps running. When the Mac wakes, the bridge ends each vote that passed its limit with the votes cast, sends each due reminder once, and posts "The host was asleep from 22:10 to 08:05. Presses in that time did not count. Please press again on any open question." With launchd, the bridge also starts again after a crash or a restart.
 
 **What if two people press at once?** The bridge is one process, and it decides each press in one step before it takes the next one. On a single question, the first press that reaches the bridge is final. The second person gets the private note "Already answered by Maya: A". In a batch, both votes count, and each person's last vote counts.
 
-**How do I take a question back to the terminal?** Before the card is posted, unmark it: `node scripts/vote.mjs --unmark G42`. After the card is posted, unmarking does not take the card back. Then answer the chief in the chat as usual; that answer is final, the card shows "Answered by Erick (terminal)", and its buttons go grey. To cancel a single question, tell the chief to withdraw it: the chief records an answer that names no option, and the card shows the question as withdrawn.
+**How do I take a question back to the terminal?** Before the card is posted, unmark it: `node scripts/vote.mjs --unmark G42`. After the card is posted, unmarking does not take the card back. Then answer sage in the chat as usual; that answer is final, the card shows "Answered by Erick (terminal)", and its buttons go grey. To cancel a single question, tell sage to withdraw it: sage records an answer that names no option, and the card shows the question as withdrawn.
 
-**What if the owner answers at the terminal while the team votes?** The owner's answer wins (G10). The bridge reads the logbook before each press and before each answer that it gives sage, so it never replaces the owner's answer. If the chief records the owner's answer at the same moment that the bridge records a Discord answer, the bridge puts the owner's answer back and logs one line.
+**What if the owner answers at the terminal while the team votes?** The owner's answer wins (G10). The bridge reads the logbook before each press and before each answer that it gives sage, so it never replaces the owner's answer. If sage records the owner's answer at the same moment that the bridge records a Discord answer, the bridge puts the owner's answer back and logs one line.
 
-**Who sees a reason?** People see it on the card, cleaned for a person to read. The chief, a model, sees it only through `scripts/reasons.mjs`, cleaned by a separate allow-list for a model. No AI reads card text.
+**Who sees a reason?** People see it on the card, cleaned for a person to read. sage, a model, sees it only through `scripts/reasons.mjs`, cleaned by a separate allow-list for a model. No AI reads card text.
 
 ## Under the hood
 
@@ -304,7 +304,7 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 | `src/bridge.js`, `src/discord.js` | The bridge's loop, and the only code that connects to Discord. |
 | `src/ask.js` | The `/sage` read commands of #ask-sage, the answer to an @sage-bot mention, and the rate limit. |
 | `src/state.js`, `src/sessions.js`, `src/sage.js` | The gate file and its lock, the session threads, and the calls to the sage state tool. |
-| `src/clean.js` | The allow-lists for the terminal and for the chief. |
+| `src/clean.js` | The allow-lists for the terminal and for sage. |
 | `src/fake-discord.js` | The fake Discord for the tests and the demo. |
 | `scripts/` | The commands: `bridge`, `vote`, `reasons`, `session`, `hook`, `launchd`, `demo` and `preview`. |
 | `design/b2/` | The card design: one page and its screenshots, made by `node scripts/preview.mjs`. |

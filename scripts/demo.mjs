@@ -1,5 +1,5 @@
 // The demo (T51): npm run demo [-- --out <page.html>] [--shot <page.png>]
-// It plays one chief session end to end with the real sage state tool, the real hook (scripts/hook.mjs), the real team votes
+// It plays one sage session end to end with the real sage state tool, the real hook (scripts/hook.mjs), the real team votes
 // command (scripts/vote.mjs) and the real bridge on the fake Discord layer, then writes one HTML page of the parent channel line and
 // the session thread. SAMPLE DATA ONLY: made-up people, Discord ids, tasks and questions, and a scripted clock.
 // No Discord, no bot, no token, no network. Everything goes into one fresh scratch folder; HOME and SAGE_HOME of every child process
@@ -92,7 +92,7 @@ async function press(who, text, customId, { fields, ephemeral, form } = {}) {
 /** The hook, as Claude Code runs it, at the demo's clock: the real scripts/hook.mjs with only Date.now set to the scripted time. */
 const hook = (event, extra = {}) => node([`--import=data:text/javascript,Date.now=()=>${now}`, script('hook.mjs'), '--config', configPath],
   JSON.stringify({ session_id: SESSION, cwd: project, hook_event_name: event, ...extra }));
-/** `sage gate add` as the chief runs it, then the PostToolUse hook with its real output. Returns the gate id. */
+/** `sage gate add` as sage runs it, then the PostToolUse hook with its real output. Returns the gate id. */
 function gateAdd(task, question, options, recommend) {
   const args = ['gate', 'add', task, '--question', question, '--options', options, '--recommend', recommend];
   const said = sage(...args);
@@ -108,23 +108,23 @@ for (const [title, size] of [['Sign-in page copy', 'tiny'], ['CSV export for rep
 }
 step('sage init: a scratch project with 4 sample tasks (T1 to T4)');
 
-// 2. The chief session starts.
+// 2. The sage session starts.
 hook('SessionStart', { source: 'startup' });
-terminal('The chief session starts. The SessionStart hook records it.');
+terminal('The sage session starts. The SessionStart hook records it.');
 step(`SessionStart hook for session ${SESSION}`);
 
-// 3. The chief adds 3 gates: a single question, a batch of 2, and one that stays at the terminal.
+// 3. sage adds 3 gates: a single question, a batch of 2, and one that stays at the terminal.
 await advance(MINUTE);
 const g1 = gateAdd('T1', 'What does the sign-in button say?', 'Sign in|Continue|Log in', 'Sign in');
 const g2 = gateAdd('T2', 'Which columns go in the export?', 'Only the visible columns|All fields, also the hidden ones', 'Only the visible columns');
 const g3 = gateAdd('T2', 'How do dates look in the file?', '2026-10-04 (ISO)|04/10/2026 (the user locale)', '2026-10-04 (ISO)');
 const g4 = gateAdd('T3', 'Which version number do the release notes use?', '1.4.0|2.0.0', '1.4.0');
-terminal(`The chief adds 4 gates with sage gate add: ${g1} (T1), ${g2} and ${g3} (T2, asked together), ${g4} (T3).`);
+terminal(`sage adds 4 gates with sage gate add: ${g1} (T1), ${g2} and ${g3} (T2, asked together), ${g4} (T3).`);
 step(`gate add: ${g1} single (T1), ${g2}+${g3} batch (T2), ${g4} unmarked (T3); PostToolUse hook for each`);
 
-// 4. The chief marks the team votes.
+// 4. sage marks the team votes.
 const marked = node([script('vote.mjs'), '--config', configPath, g1, g2, g3]);
-terminal(`The chief marks ${g1}, ${g2} and ${g3} as team votes (scripts/vote.mjs). ${g4} stays at the terminal.`);
+terminal(`sage marks ${g1}, ${g2} and ${g3} as team votes (scripts/vote.mjs). ${g4} stays at the terminal.`);
 step(`vote.mjs: ${marked}`);
 
 // 5. The bridge on the fake Discord layer.
@@ -163,7 +163,7 @@ await advance(MINUTE);
 const g5 = gateAdd('T4', 'What does the empty reports page show?', 'An example report and a Create button|Only a Create button', 'An example report and a Create button');
 const g6 = gateAdd('T4', 'Does the empty page link to the help article?', 'Yes, under the button|No', 'Yes, under the button');
 node([script('vote.mjs'), '--config', configPath, g5, g6]);
-terminal(`The chief adds ${g5} and ${g6} (T4, asked together) and marks both as team votes.`);
+terminal(`sage adds ${g5} and ${g6} (T4, asked together) and marks both as team votes.`);
 await loop();
 await advance(SETTLE);
 const second = `${g5}+${g6}`;
@@ -188,13 +188,13 @@ await advance(MINUTE);
 sage('gate', 'answer', g4, 'A');
 terminal(`Erick answers ${g4} at the terminal: A. It was never on Discord.`);
 hook('SessionEnd', { reason: 'logout' });
-terminal('The chief session ends. The SessionEnd hook records it.');
+terminal('The sage session ends. The SessionEnd hook records it.');
 await advance(MINUTE);
 await loop();
 const [threadId, thread] = [...fake.threads][0];
 step(`SessionEnd: the line says ended; the thread is ${thread.locked ? 'locked' : 'NOT locked'}`);
 
-// ---- The answers in sage and the reasons for the chief -------------------------------------------------------------------------
+// ---- The answers in sage and the reasons for sage -------------------------------------------------------------------------
 const [head, ...rowsTsv] = readFileSync(join(sage('logbook'), 'gates.tsv'), 'utf8').split('\n').filter(Boolean);
 const cols = head.split('\t');
 const gates = rowsTsv.map((l) => Object.fromEntries(l.split('\t').map((v, i) => [cols[i], v])));
@@ -229,10 +229,10 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
   pre { white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; background: #1e1f22; border-radius: 4px; padding: 8px 10px; margin: 6px 0 12px; }
   @media (max-width: 600px) { section { padding: 12px 16px; } }
 </style></head><body><div class="banner">Sample data. Fake Discord. No bot, no token.</div>
-<section><h2>The sage-bot demo: one chief session</h2><p class="about">npm run demo played this session with the real sage state tool, the real hook,
+<section><h2>The sage-bot demo: one sage session</h2><p class="about">npm run demo played this session with the real sage state tool, the real hook,
 the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: owner and sage-lead;
 Maya: sage-apprentice; Jon: sage-lead; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
-<section id="channel"><p class="chan"># <b>sage-chief</b> · the parent channel. The bridge edits the session's line as the session goes on: first as posted, then each edit.</p>
+<section id="channel"><p class="chan"># <b>sage</b> · the parent channel. The bridge edits the session's line as the session goes on: first as posted, then each edit.</p>
 ${states(lineId).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span><div>${md(s.p.content, s.at)}</div></div>` : message(s.p, s.at))).join('\n')}
 <p class="about">Thread: <b>${esc(thread.name)}</b><span class="tag">${thread.locked ? 'locked' : 'open'}</span><span class="tag">${thread.archived ? 'archived' : 'active'}</span>
 <span class="tag">${fake.in(threadId).length} messages</span></p></section>
@@ -241,7 +241,7 @@ ${shown.join('\n')}
 <div class="term"><b>Thread</b> · ${thread.locked ? 'locked and archived: the session ended and no question is open' : 'still open'}.</div></section>
 <section id="answers"><h2>The answers in sage (gates.tsv)</h2><table><tr><th>id</th><th>task</th><th>question</th><th>answer</th></tr>
 ${gates.map((g) => `<tr><td>${esc(g.id)}</td><td>${esc(g.task)}</td><td>${esc(g.question)}</td><td>${esc(g.answer || '(open)')}</td></tr>`).join('\n')}</table>
-<h2 style="margin-top:14px">The reasons for the chief (scripts/reasons.mjs)</h2>
+<h2 style="margin-top:14px">The reasons for sage (scripts/reasons.mjs)</h2>
 ${reasons.map(([id, text]) => `<p class="about">node scripts/reasons.mjs &lt;gate file&gt; ${esc(id)}</p><pre>${esc(text)}</pre>`).join('\n')}</section>
 </body></html>
 `;

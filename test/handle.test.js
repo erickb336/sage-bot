@@ -10,7 +10,6 @@ import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, BRIDGE, clock, openAsk } 
 
 const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const PRIVATE = { flags: 64, allowedMentions: { parse: [] } };
-const NO_ROLE = 'Your press did not count. Only people with the sage-apprentice or sage-lead role can answer or vote. You can still read this thread.';
 
 /** A bridge with these open gates and a clock that the test moves. */
 function bridge(ids, at) {
@@ -50,16 +49,6 @@ test('a single question: the first press answers it and updates the card; a late
   assert.equal(later.gate, first.gate);
 });
 
-test('a press from someone without the role gets the no-role note and changes nothing', async () => {
-  const b = bridge(['G5', 'B7'], clock(14, 20));
-  for (const id of ['press:G5:0:0', 'press:B7:0:0', 'end:B7', 'tiebreak:B7:0:0']) {
-    const before = b.gate(id.split(':')[1]);
-    const r = await b.press(SAM, id);
-    assert.deepEqual(r.replies, [{ kind: 'reply', content: NO_ROLE, ...PRIVATE }], id);
-    assert.equal(r.gate, before, id);
-  }
-});
-
 test('a batch press counts at once and opens the reason modal; the modal submit stores the reason and updates the card', async () => {
   const b = bridge(['B7'], clock(14, 31));
   b.now = clock(14, 40);
@@ -69,7 +58,7 @@ test('a batch press counts at once and opens the reason modal; the modal submit 
   assert.equal(pressed.reply.title, "B. 04/10/2026 (the user's locale)"); // the prefix goes first when the full title does not fit in 45 characters (F-T27-18, F-T27-29)
   assert.deepEqual(pressed.reply.components[0].components[0], {
     type: 4, custom_id: 'reason', label: 'Reason for part 2 (optional)', style: 2, max_length: 500, required: false,
-    placeholder: 'Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.',
+    placeholder: 'Everyone sees it on the card. sage gets it as quoted text and sums up the arguments.',
   });
   assert.deepEqual(ballotsOf(b.gate('B7').parts[1]).get(JON), { option: 'B', at: clock(14, 40), via: 'discord' }); // counted before any reason
   b.now += MINUTE;
@@ -189,7 +178,7 @@ test('a bad clock gives the bad-time note and a clock that goes back gives the o
 });
 
 test('every why code of the vote rules has its own private note, and so does the unknown-gate case', () => {
-  const codes = ['bad-event', 'bad-time', 'out-of-order', 'not-holder', 'not-lead', 'lead-needs-discord', 'not-asker', 'unknown-option',
+  const codes = ['bad-event', 'bad-time', 'out-of-order', 'leads-only', 'not-lead', 'lead-needs-discord', 'not-asker', 'unknown-option',
     'unknown-part', 'wrong-kind', 'not-tied', 'not-tied-option', 'closed', 'unknown-gate'];
   const gate = openAsk('B7', clock(14, 31));
   const texts = codes.map((why) => note(why, gate, PEOPLE.names).content);

@@ -89,7 +89,7 @@ test('F-T1-58: a late withdraw on a batch with a tied part emits only the withdr
 test('F-T1-59: the README says that reasons are untrusted, cut silently, and that the bridge acts only on closed', () => {
   const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   for (const text of [
-    'B1 stores reasons as typed. They are untrusted text. The bridge must clean and frame them before any reason reaches the chief or a log.',
+    'B1 stores reasons as typed. They are untrusted text. The bridge must clean and frame them before any reason reaches sage or a log.',
     'A longer reason is cut to 500, with no error.',
     "The bridge acts only on the `'closed'` effect",
     '`openedAt`', '`lastAt`', '`[id, ballot]` pairs',

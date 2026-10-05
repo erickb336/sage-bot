@@ -1,8 +1,8 @@
 // The sage bridge (B3): it reads the open gates of a sage logbook, posts them as cards, turns presses into vote events,
 // and gives each final answer back to sage with `sage gate answer`. It also reminds, alerts the role and asks for a new
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
-// src/discord.js, the tests use src/fake-discord.js. Each chief session that has a team vote gets one line in the parent channel and
-// one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that the chief marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
+// src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
+// one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { card, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
@@ -29,7 +29,7 @@ export const SLEPT = LOOP + MINUTE;
 export const SETTLE = 30_000;
 /** The gates of one task whose `at` (sage's time of `gate add`) are at most this far from the first one go on one card (G9, F-T28-29). */
 export const ASKED_TOGETHER = 30_000;
-/** A question about a merge in any form: merges never go to a vote, also when the chief marked one (F-T28-28, a second guard to G13). */
+/** A question about a merge in any form: merges never go to a vote, also when sage marked one (F-T28-28, a second guard to G13). */
 export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
 /**
  * T73, G18 item 8: the only question that may be leads only, word for word, with the options Yes|No. A lead's answer to any other gate
@@ -140,7 +140,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     gates.set(gate.id, { gate, ask });
     meta.set(gate.id, rest);
   }
-  // The chief sessions that have a line and a thread, by session id; `spools` is the spool folder as the last loop read it.
+  // The sage sessions that have a line and a thread, by session id; `spools` is the spool folder as the last loop read it.
   const sessions = new Map(loaded.sessions.map((x) => [x.id, x]));
   const spoolDir = sessionsPathOf({ statePath, sessionsPath: config.sessionsPath });
   let spools = new Map();
@@ -210,7 +210,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const running = (sid) => spools.has(sid) && runs(spools.get(sid), alive);
 
   /**
-   * The place of a new card of a chief session: its thread, made at the session's first card (G14 1) as a line in the parent channel and
+   * The place of a new card of a sage session: its thread, made at the session's first card (G14 1) as a line in the parent channel and
    * a thread started from it. A locked thread opens again, because the new card is a question to settle in it (G15). When Discord refuses
    * the line, the thread or the unlock, the card goes to the parent channel, and the next card of the session tries again (F-T29-2).
    * A thread that is gone was forgotten (`lost`): the next card starts a new thread from the line, or from a new line when the line is
@@ -549,15 +549,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     const tracked = new Set([...meta.values()].flatMap((m) => m.sage));
     const untracked = rows.filter((r) => !tracked.has(r.id));
     const t = clock();
-    // The time a gate was first seen counts also before the chief marks it: a gate marked later posts at the next loop.
+    // The time a gate was first seen counts also before sage marks it: a gate marked later posts at the next loop.
     for (const r of untracked) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
-    // Only the gates that the chief marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
+    // Only the gates that sage marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
     // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
     // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
     const { votes, leads } = teamVotes();
     const fresh = untracked.filter((r) => {
       const why = votes.has(r.id) && leads.has(r.id) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'
-        : leads.has(r.id) ? null : !votes.has(r.id) ? 'the chief did not mark it as a team vote'
+        : leads.has(r.id) ? null : !votes.has(r.id) ? 'sage did not mark it as a team vote'
         : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
       if (why && !r.answer && !kept.has(r.id)) { kept.add(r.id); say(`${r.id} stays at the terminal: ${why}`); }
       return !why;
@@ -646,7 +646,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
 
   return {
     clock,
-    /** The thread of a chief session, or undefined when it has none (scripts/session.mjs reads the same from the gate file). */
+    /** The thread of a sage session, or undefined when it has none (scripts/session.mjs reads the same from the gate file). */
     threadOf: (sid) => sessions.get(sid)?.thread ?? undefined,
     /** The gate of a bridge id and its ask, as `handle` keeps them. */
     entry: (id) => gates.get(id),

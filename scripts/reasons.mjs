@@ -1,5 +1,5 @@
-// The ballot reasons of one bridge gate for the chief: node scripts/reasons.mjs <gate file> <gate id>.
-// The chief reads reasons only here, never from Discord. Each line is quoted data, cleaned for a model reader (src/clean.js).
+// The ballot reasons of one bridge gate for sage: node scripts/reasons.mjs <gate file> <gate id>.
+// sage reads reasons only here, never from Discord. Each line is quoted data, cleaned for a model reader (src/clean.js).
 import { load } from '../src/state.js';
 import { forTerminal, reasonLines } from '../src/clean.js';
 

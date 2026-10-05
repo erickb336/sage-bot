@@ -131,7 +131,7 @@ const KNOBS = { reasons: 0, voters: 1, why: 1, label: 1, question: 1 };
  * single card's description in 4096), then the whole embed within 6000 characters and 25 fields. Both times the knobs of `plan` turn in
  * a fixed order, each down to its floor before the next: the oldest reason fields go (one at a time, and only for the whole), then the
  * voter lists shrink (to "and N more"), then the why, then the option labels, then the question. A cap falls by the overshoot spread over
- * the `n` texts that it cuts. The keys ("A."), the counts and "The chief recommends A" never shrink. At every floor a card of a team of 5
+ * the `n` texts that it cuts. The keys ("A."), the counts and "sage recommends A" never shrink. At every floor a card of a team of 5
  * with 4 parts is far under the limits, so the result always fits: the property test of test/t27-repair4.test.js proves it.
  */
 function budget(build, plan, n) {
@@ -257,7 +257,7 @@ function batch(gate, ask, holders, names) {
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. The chief reminds @${LEAD} every 2 h.`
+      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. sage reminds @${LEAD} every 2 h.`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
@@ -271,7 +271,7 @@ function batch(gate, ask, holders, names) {
         name: cutAtWord(`Part ${n} · ${cutAtWord(p.question, question)}`, LIMIT.name),
         value: [
           ...part.options.map((k) => optionLine(p, k, ` · ${plural(counts.get(k).length, 'vote')}${counts.get(k).length ? ` (${named(counts.get(k))})` : ''}`, cap)),
-          `The chief recommends ${p.recommended}: ${cutAtWord(p.why, why)}`,
+          `sage recommends ${p.recommended}: ${cutAtWord(p.why, why)}`,
           `Voted: ${voted.length ? named(voted) : 'nobody yet'} · Not voted: ${notYet.length ? named(notYet) : 'nobody'}`,
           ...(state ? [state] : []),
         ].join('\n'),
@@ -294,7 +294,7 @@ function batch(gate, ask, holders, names) {
   const build = (plan) => ({
     title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     // The dropped reasons leave one line that never shrinks (F-T27-35).
-    description: plan.reasons < reasons.length ? `${description}\n${plural(reasons.length - plan.reasons, 'more reason')}; the chief has them all` : description,
+    description: plan.reasons < reasons.length ? `${description}\n${plural(reasons.length - plan.reasons, 'more reason')}; sage has them all` : description,
     fields: [...parts.map((field) => field(plan)), ...reasons.slice(reasons.length - plan.reasons).map(({ name, value }) => ({ name, value }))],
     footer,
   });
@@ -311,7 +311,7 @@ export function reasonModal(gate, ask, part, index) {
   const key = gate.parts[part].options[index];
   const input = new TextInputBuilder().setCustomId('reason').setLabel(`Reason for part ${part + 1} (optional)`)
     .setStyle(TextInputStyle.Paragraph).setMaxLength(REASON_MAX).setRequired(false)
-    .setPlaceholder('Everyone sees it on the card. The chief gets it as quoted text and sums up the arguments.');
+    .setPlaceholder('Everyone sees it on the card. sage gets it as quoted text and sums up the arguments.');
   return new ModalBuilder().setCustomId(customId('reason', gate.id, part, index)).setTitle(title(`${key}. ${label(ask.parts[part], key)}`))
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
@@ -345,7 +345,6 @@ const NOTES = {
   'bad-event': () => 'This press is not one I understand. Nothing changed.',
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
-  'not-holder': () => `Your press did not count. Only people with the ${HOLDERS} role can answer or vote. You can still read this thread.`,
   'leads-only': () => `Only a ${LEAD} can answer this. ${OWNER} decides.`,
   'not-lead': () => `Only a ${LEAD} can do this. Your votes on the parts count like everyone's.`,
   'lead-needs-discord': () => `A ${LEAD} action works only here in Discord, not at the terminal.`,

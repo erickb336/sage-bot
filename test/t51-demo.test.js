@@ -1,4 +1,4 @@
-// T51: npm run demo plays one chief session on the fake Discord layer and writes one HTML page. The test runs the demo twice, as the
+// T51: npm run demo plays one sage session on the fake Discord layer and writes one HTML page. The test runs the demo twice, as the
 // owner does, each time into its own scratch folder with a scratch HOME, and reads the pages. SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,6 +28,7 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /Sample data\. Fake Discord\. No bot, no token\./);
   // The line in the parent channel goes from "running" with its counts, as first posted, through each edit to "ended" (F-T51-3).
   const line = page.slice(page.indexOf('<section id="channel">'), page.indexOf('<section id="thread">'));
+  assert.match(line, /^<section id="channel"><p class="chan"># <b>sage<\/b> · the parent channel\./); // the example channel is #sage (T97)
   const states = [...line.matchAll(/(?:· (\d\d:\d\d)<\/div><div>|edited · (\d\d:\d\d)<\/span><div>)<b>Session 1 · Sun 4 Oct<\/b><br>(.+?)<\/div>/g)]
     .map((m) => `${m[1] ?? `edited ${m[2]}`} ${m[3].replace(/<\/?time>/g, '')}`);
   assert.deepEqual(states, [
@@ -60,7 +61,7 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /Answered by Erick \(terminal\) at <time>14:39<\/time>: A\. An example report and a Create button\. Final\./);
   assert.match(page, /Already answered by Erick at the terminal: A\. An example report and a Create button\. Your press did not count\./);
   assert.match(page, /Ended early by Jon \(sage-lead\) at <time>14:42<\/time>/);
-  // The answers in sage's gates.tsv, and the reasons line for the chief.
+  // The answers in sage's gates.tsv, and the reasons line for sage.
   const rows = [...page.matchAll(/<tr><td>(G\d)<\/td><td>T\d<\/td><td>[^<]*<\/td><td>([^<]*)<\/td><\/tr>/g)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(rows, ['G1 A. Sign in', 'G2 A. Only the visible columns', 'G3 B. 04/10/2026 (the user locale)', 'G4 A', 'G5 A', 'G6 A. Yes, under the button']);
   assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
