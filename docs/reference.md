@@ -272,7 +272,7 @@ Discord shows every button of a message to everyone, so a non-lead sees "End vot
 - `ephemeral`: true when the pressed message was private (the lead's confirm); it sets the Ephemeral flag of `message.flags`.
 - `refuse`: an Error; every reply then rejects with it and records nothing, as Discord does for an unknown interaction.
 
-For the read commands it also exports `fakeCommand({ user, roles, bot, channelId, sub, options })` and `fakeMention({ user, bot, channelId, content })`: a `/sage` command and a message that mentions the bot, in the shape that `src/discord.js` gives `src/ask.js`. Each records its replies in `replies`; `fakeCommand` records an attached file as its name and size.
+For the read commands it also exports `fakeCommand({ user, roles, bot, channelId, parentId, sub, options, onDefer })` and `fakeMention({ user, roles, bot, channelId, parentId, content })`: a `/sage` command and a message that mentions the bot, in the shape that `src/discord.js` gives `src/ask.js`. `parentId` is the parent channel of a thread, else null. Each records its replies in `replies`. `fakeCommand` records its `defer` and `edit` calls in order as `{ kind, ...payload }`, an attached file as its name and size, and runs `onDefer` inside the defer, so that a test can change the project there.
 
 ### The preview
 
@@ -303,26 +303,28 @@ Each event gets its time from the bridge's own clock: the wall clock (it runs on
 
 | Command | The private answer |
 | --- | --- |
-| `/sage board [project]` | The count of tasks by state, the tasks left (not merged, concluded or abandoned), "Time left is not estimated yet: the logbook has no estimate.", and each open question with its id, task and text. |
+| `/sage board [project]` | The count of tasks by state, the tasks left (not merged, concluded or abandoned), "Time left is not estimated yet: the project's records have no estimate.", and each open question with its id, task and text. |
 | `/sage task <id> [project]` | The task's id, title, size, state and pull request; the pull request is a link when the project has `repo`. |
 | `/sage gates [project]` | Each open question with its options, and whether it is a team vote (in the team votes file of the bridge's own project) or answered at the terminal. |
-| `/sage files [project]` | Up to 10 files from the project's `files`, sorted by path. |
+| `/sage files [project]` | Up to 10 files from the project's `files`, sorted by path, and at most 8 MB in all (`MAX_BYTES`): Discord's upload limit for a server with no boosts is 10 MB a message. The files that do not fit, in order, are listed under "N more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them." and a smaller file after them still comes. |
 
 The rules, in the order the bridge applies them:
 
 1. A bot gets nothing.
-2. Every ask counts: 10 per person in a rolling hour, in memory (a restart clears the counts). The 11th gets "You asked 10 times in the last hour; that is the limit. Your next ask works at 15:12." with the time as a Discord timestamp.
-3. A member with neither role gets "Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels." The roles come from the interaction's member, never from text.
-4. A command outside #ask-sage gets a pointer to it.
-5. A project that is not in the list gets `I do not know a shared project called "payroll".`, which names no other project.
+2. Every other command is first deferred in private (Discord shows "sage-bot is thinking", only to the person), before any file or logbook work. Each answer below is an edit of that reply. When Discord refuses the defer, the bridge logs it and does nothing more.
+3. Every ask counts: 10 per person in a rolling hour, in memory (a restart clears the counts).
+4. A member with neither role gets "Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels.", also over the limit. The roles come from the interaction's member, never from text or an option.
+5. Over the limit, a member with a role gets "You asked 10 times in the last hour; that is the limit. Your next ask works at 15:12." with the time as a Discord timestamp.
+6. A command outside #ask-sage and its threads gets a pointer to it.
+7. A project that is not in the list gets `I do not know a shared project called "payroll".`, which names no other project.
 
-Each answer comes from the project's `tasks.tsv` and `gates.tsv`, which the bridge finds with `sage logbook` and reads through `pick`: only the id, title, size, state and pull request of a task, and the id, task, question and options of an open gate. It never reads `decisions.tsv`, findings, briefs, reports, a recommendation or a branch. Every logbook text goes through `safe` (the readers are people on Discord), each reply is cut to 2000 characters, and every reply has `allowedMentions: { parse: [] }`.
+Each answer comes from the project's `tasks.tsv` and `gates.tsv`, which the bridge finds with one `sage logbook` per project (kept after the first lookup that works) and reads through `pick`: only the id, title, size, state and pull request of a task, and the id, task, question and options of an open gate. It never reads `decisions.tsv`, findings, briefs, reports, a recommendation or a branch. Every logbook text goes through `safe` (the readers are people on Discord), each reply is cut to 2000 characters, and every reply has `allowedMentions: { parse: [] }`.
 
-A file of `/sage files` is attached only when it is a regular file (not a symlink, not a folder), its real path is inside the project, its name does not start with a dot, its type is .png, .jpg, .svg or .pdf, and it is at most 8 MB.
+A file of `/sage files` is attached only when it is a regular file (not a symlink, not a folder), its real path is inside the project, its name does not start with a dot, its type is .png, .jpg, .svg or .pdf, and it is at most 8 MB. An entry that cannot be checked, such as a dangling symlink, is skipped. The bridge then opens each file with `O_NOFOLLOW` and reads it through that open file only when it is still a regular file with the device and inode of the check, so a file swapped after the check is never sent. The name of an attachment keeps only A-Z, a-z, 0-9, dot, dash and underscore; any other character becomes `_` (the readers are people on Discord).
 
-**A mention.** A message that mentions the bot comes with the GuildMessages intent; the bridge needs no Message Content intent. Each mention in #ask-sage counts like a command and gets one public reply in place, which pings nobody: "Free questions come after the trial. Use /sage board, task, gates or files, or ask a lead." A mention that names a build word (add, build, change, create, delete, deploy, fix, implement, make, merge, refactor, remove, rename, start, update, write) also gets "Builds are for sage-leads: ask a lead." Over the limit, a person gets one note until the hour frees up, then nothing. A mention in another channel gets "I answer in #ask-sage, so everyone can find the answers. Please ask there." once per person per UTC day.
+**A mention.** A message that mentions the bot comes with the GuildMessages intent; the bridge needs no Message Content intent. Each mention in #ask-sage or a thread of it counts like a command and gets one public reply in place, which pings nobody: "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention with a sentence that starts with a build verb (add, build, change, create, delete, deploy, fix, implement, make, merge, refactor, remove, rename, update, write), also after "please" or "can you", also gets "Builds are for sage-leads: ask a lead.", or for a lead "Builds from Discord are not ready yet." So "any update?", "does that make sense?" and "is the merge done?" are no build. Over the limit, a person gets one note until the hour frees up, then nothing; for a member with no role, that note is the role note. A mention in another channel gets "I answer in #ask-sage, so everyone can find the answers. Please ask there." once per person per UTC day.
 
-**The config.** `askChannelId` is a Discord id. `projects` is a list of 1 to 25 entries `{ name, project, sagePath?, files?, repo? }`; without it, the list is the bridge's own `project` with no files. The bridge and `scripts/launchd.mjs` refuse at start a name that is not lower-case letters, digits and dashes (at most 32) or not unique, a `project` or `sagePath` that is not absolute, a `files` entry with `..`, a leading `/` or dot, a `*` in a folder, or another type, and a `repo` that is not `https://github.com/<owner>/<name>`.
+**The config.** `askChannelId` is a Discord id. `projects` is a list of 1 to 25 entries `{ name, project, sagePath?, files?, repo? }`; without it, the list is the bridge's own `project` with no files, named after its folder. When that folder name makes no valid name (for example `_scratch`, or more than 32 characters), the bridge stops with a message that says so: add a `projects` entry with a valid name. The bridge and `scripts/launchd.mjs` refuse at start a name that is not lower-case letters, digits and dashes (at most 32) or not unique, a `project` or `sagePath` that is not absolute, a `files` entry with `..`, a leading `/` or dot, a `*` in a folder, or another type, and a `repo` that is not `https://github.com/<owner>/<name>`.
 
 ### Which questions go to Discord
 

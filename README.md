@@ -98,7 +98,7 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | No AI reads card text. The chief gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
 | `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a private reply. (G18) | The team can read the state of the work, and nobody else can. | `src/ask.js` |
-| An answer shows only the id, title, size, state and pull request of a task, and the text and options of an open question. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists, at most 10, each at most 8 MB. | The logbook also holds security details and the owner's words. | `src/ask.js` |
+| An answer shows only the id, title, size, state and pull request of a task, and the text and options of an open question. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
 | Each person can ask 10 times in a rolling hour; every ask counts. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
 
 ## Set up a live trial
@@ -261,7 +261,7 @@ In #ask-sage, a sage-apprentice or a sage-lead types one of these. Only the pers
 | See the open questions with their options, and which ones are team votes | `/sage gates [project]` |
 | Get the shared images and PDFs of a project | `/sage files [project]` |
 
-Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in #ask-sage gets the answer "Free questions come after the trial. Use /sage board, task, gates or files, or ask a lead." A mention in another channel gets one pointer to #ask-sage per person per day.
+Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in #ask-sage, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention in another channel gets one pointer to #ask-sage per person per day. `/sage` also works in a thread of #ask-sage.
 
 ## FAQ
 
