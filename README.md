@@ -108,7 +108,9 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | A session thread holds the votes and sage's posts only. Chat with sage is in a separate channel. (G16) | Votes stay readable, and no chat text goes near sage's answers. | Discord permissions, see [step 4](#set-up-a-live-trial) |
 | No AI reads card text. sage gets reasons only from `scripts/reasons.mjs`, cleaned by an allow-list. | A reason is untrusted text. It must never become an instruction to a model. | `src/clean.js` |
 | One bridge at a time for a gate file. | Two bridges would post every card twice. | `src/state.js` |
-| `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
+| `/sage board`, `task`, `gates` and `files` work only in the registered channels and their threads, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
+| Only Erick registers a channel or changes its project, at the terminal. A sage-lead may only unregister a channel, with a confirm; a sage-apprentice may not. The home channel of the votes never goes from Discord. Every register and unregister is logged at the terminal. (G24) | Nobody in Discord can point sage-bot at a project. | `src/channels.js`, `scripts/channels.mjs`, `src/ask.js` |
+| The channel registry is a 0600 file, written whole by the holder of the bridge lock only. A symlink, a wrong mode or bad JSON stops the bridge at start. | Nobody else can change which channel reads which project. | `src/channels.js` |
 | sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
 | An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
 | Each sage-apprentice and sage-lead can ask 10 times in a rolling hour; every ask counts. The limit note is public too. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
@@ -123,7 +125,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
 - [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
   *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
-- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
   Then set `projects`, the projects that `/sage` may read. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, `/sage` reads only `project`, with no files. Remove the example's sample entry, or fill it in.
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
@@ -143,13 +145,13 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | sage-lead | Deny the same four permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
-  In #ask-sage:
+  In #ask-sage, and in each channel that you register later:
 
   | Who | Permissions in #ask-sage |
   | --- | --- |
   | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
   | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
-  | The sage-bot app | Allow View Channel, Send Messages, Attach Files and Read Message History. |
+  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
 
   **Do not let the Discord plugin watch this parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
@@ -266,16 +268,39 @@ Run each command in the sage-bot folder.
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 
-In #ask-sage, a sage-apprentice or a sage-lead types one of these. The answer is public: everyone in #ask-sage sees it, and it pings nobody. Leave out `project` for the first project of the config.
+In a registered channel, or a thread of it, a sage-apprentice or a sage-lead types one of these. The answer is public: everyone in the channel sees it, and it pings nobody. Leave out `project` for the project of the channel.
 
-| You want to | Type this in #ask-sage |
+| You want to | Type this in a registered channel |
 | --- | --- |
 | See the tasks by state, the tasks left and the open questions with their options | `/sage board [project]` |
 | See one task: its title, size, state and pull request | `/sage task <id> [project]`, for example `/sage task T7` |
 | See the open questions with their options, sage's recommendation, the default, and which ones are team votes | `/sage gates [project]` |
 | Get the shared images and PDFs of a project | `/sage files [project]` |
+| Stop sage-bot in this channel (sage-leads only; a button confirms it) | `/sage unregister` |
 
-Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in #ask-sage, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention in another channel gets one pointer to #ask-sage per person per day. `/sage` also works in a thread of #ask-sage.
+Time left is not estimated yet: the board shows the count of tasks left. An @sage-bot mention in a registered channel, or in a thread of it, gets the answer "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." In a channel that is not registered, sage-bot ignores `/sage` and mentions, except one pointer to a registered channel per person per day.
+
+### Channels
+
+sage-bot works only in the channels that Erick registers. Each registered channel is for one project: `/sage` there reads that project when you leave out `project`. One channel is the home channel: the votes and cards post there. The list is the channel registry, the file `<statePath>.channels`.
+
+**Your first start makes the registry.** If you used sage-bot before, you need to do nothing: the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. `/sage` now also works in the home channel.
+
+**Register or unregister a channel at the terminal.** Stop the bridge first: the script refuses while the bridge runs, because only one of them may change the registry. To copy a channel id, right-click the channel with Developer Mode on.
+
+<!-- check: run, prints "registered the channel 400000000000000003 for the project your-project" -->
+```sh
+node scripts/channels.mjs register 400000000000000003 your-project   # /sage works in that channel, for your-project
+node scripts/channels.mjs unregister 400000000000000003              # sage-bot ignores that channel again
+node scripts/channels.mjs list                                       # print the registry
+```
+
+- A project that is not in the config's `projects` is refused.
+- `register <id> <project> --home` makes that channel the home channel.
+- The home channel cannot be unregistered: make another channel the home first.
+- Then start the bridge again. At start it checks its permissions in each registered channel and logs each missing one, by name, in `~/Library/Logs/sage-bot.log`.
+
+**A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a button; a lead's press removes the channel, and the terminal log names the lead. A sage-apprentice cannot. Nobody can register a channel from Discord.
 
 sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
 
@@ -302,11 +327,12 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 | `src/vote.js` | The vote rules: pure functions, no clock and no Discord. |
 | `src/cards.js`, `src/handle.js` | The cards, the reason form, the private notes, and the handler of a press. |
 | `src/bridge.js`, `src/discord.js` | The bridge's loop, and the only code that connects to Discord. |
-| `src/ask.js` | The `/sage` read commands of #ask-sage, the answer to an @sage-bot mention, and the rate limit. |
+| `src/ask.js` | The `/sage` read commands of the registered channels, `/sage unregister`, the answer to an @sage-bot mention, and the rate limit. |
+| `src/channels.js` | The channel registry: its safe file, the migration, Erick's changes and the permission check. |
 | `src/state.js`, `src/sessions.js`, `src/sage.js` | The gate file and its lock, the session threads, and the calls to the sage state tool. |
 | `src/clean.js` | The allow-lists for the terminal and for sage. |
 | `src/fake-discord.js` | The fake Discord for the tests and the demo. |
-| `scripts/` | The commands: `bridge`, `vote`, `reasons`, `session`, `hook`, `launchd`, `demo` and `preview`. |
+| `scripts/` | The commands: `bridge`, `channels`, `vote`, `reasons`, `session`, `hook`, `launchd`, `demo` and `preview`. |
 | `design/b2/` | The card design: one page and its screenshots, made by `node scripts/preview.mjs`. |
 | `docs/reference.md` | **The full reference:** the vote rules and their API, the card states, every bridge case, the gate file, the hook and the checks. |
 

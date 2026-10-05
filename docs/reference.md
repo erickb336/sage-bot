@@ -297,9 +297,60 @@ The roles come from the config: `apprenticeRole` and `leadRole`. A config from b
 
 Each event gets its time from the bridge's own clock: the wall clock (it runs on while the Mac sleeps), never earlier than its last value. No time comes from Discord data.
 
-### The read commands of #ask-sage
+### The channel registry
 
-`src/ask.js` answers `/sage` in the #ask-sage channel (`askChannelId`), with no AI (G18, option A). At start the bridge sets the `/sage` command for its guild only, with four subcommands. `project` is a choice of the listed projects; without it, the first project answers.
+The channel registry (T130, `src/channels.js`) lists the Discord channels where sage-bot works. Each entry maps one channel id to one project of the config's `projects`. `/sage` and @sage-bot mentions work in each registered channel and in its threads. Exactly one entry is the home channel: the votes and cards post there, as in the parent channel before T130.
+
+The file is `<statePath>.channels`, beside the gate file and the team votes file. An example:
+
+```json
+{
+  "version": 1,
+  "channels": {
+    "400000000000000002": { "project": "your-project" },
+    "400000000000000001": { "project": "your-project", "home": true }
+  }
+}
+```
+
+**The file is safe like the gate file.** It is written whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700 (`writeWhole`). It is read through `readOwn`: the open refuses a symlink (`O_NOFOLLOW`), and the open file must be a regular file of this user with mode 0600. The bridge stops at start, before it connects to Discord, for a symlink, a wrong mode, bad JSON, an entry that the bridge did not write, a project that is not in `projects`, or not exactly one home channel. The message names the file and the cause, for example "the channel registry …/gates.json.channels is not JSON. Nothing was loaded." The bridge never writes over a bad file.
+
+**One writer at a time.** Only the holder of the bridge lock (`<statePath>.lock`) writes the file: the running bridge (a lead's unregister), or `scripts/channels.mjs` while the bridge is stopped. The script takes the same lock, so it refuses while a bridge runs, and a bridge cannot start while the script works.
+
+**The migration.** When there is no registry file, the bridge makes it at its first start from the config of the time before T130:
+
+- `askChannelId` (the old #ask-sage) goes to the first project of `projects`.
+- `channelId` (the old parent channel) becomes the home channel, for the bridge's own `project`. `/sage` now works there too.
+- When both are the same channel, it is one home entry for the first project.
+
+The bridge logs one line with the entries. After that, the bridge reads only the file: `channelId` and `askChannelId` in the config change nothing. With no file and no `channelId`, the bridge stops and says how to register the home channel.
+
+**Erick registers channels at the terminal.** Only Erick registers a channel or changes its project (G24). The script cannot talk to Discord, because the bridge holds the only connection. So the script changes the file only while the bridge is stopped, and the bridge checks the permissions at its next start.
+
+```text
+node scripts/channels.mjs [--config <config.json>] list
+node scripts/channels.mjs [--config <config.json>] register <channel id> <project> [--home]
+node scripts/channels.mjs [--config <config.json>] unregister <channel id>
+```
+
+- `register` adds a channel, or changes the project of a registered one. With `--home`, the channel becomes the home channel, and the old home stays registered as a normal channel. A project that is not in `projects` is refused, and nothing changes.
+- `unregister` removes a channel. The home channel is refused: make another channel the home first.
+- Each command prints its change, then the registry. A refusal prints the reason on stderr and exits 1.
+
+**The permissions.** At each start, after it connects, the bridge checks its permissions in each registered channel with `permissionsFor`: View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads and Embed Links. It logs one line for each channel that lacks one or more, with their names: "sage-bot lacks these permissions in the registered channel 400000000000000002 (your-project): Manage Threads, Embed Links. Give them to its role in that channel". For a channel that it cannot see, it logs "sage-bot cannot see the registered channel …". The channel stays registered, and the bridge keeps running.
+
+**A sage-lead may only unregister a channel.** `/sage unregister` in a registered channel, or in a thread of it, gives a sage-lead a public confirm with one button, "Unregister this channel".
+
+- A press of a sage-lead removes the channel, saves the file, logs "the sage-lead <id> unregistered the channel <id> (it was for the project <name>)" at the terminal, and replaces the confirm with the result.
+- A sage-apprentice gets "Only a sage-lead can unregister a channel. Ask a lead." for the command, and a reply of its own for a press, so the lead's confirm stays.
+- A member with neither role gets nothing.
+- The home channel cannot be unregistered from Discord. A lead cannot register a channel or change its project.
+
+**A channel that is not registered.** sage-bot ignores `/sage` and mentions there, except one public pointer per person per UTC day, shared by `/sage` and mentions: "I answer /sage in #channel, so please ask there." It names the first channel of the registry. For an ignored `/sage`, the bridge removes its deferred reply, so nothing stays in the channel. The pointer does not count toward the limit.
+
+### The read commands
+
+`src/ask.js` answers `/sage` in each registered channel and its threads, with no AI (G18, option A). At start the bridge sets the `/sage` command for its guild only, with five subcommands: four read commands and `unregister`. `project` is a choice of the listed projects; without it, the project of the channel answers. The option may name any listed project.
 
 | Command | The public answer |
 | --- | --- |
@@ -314,16 +365,16 @@ The rules, in the order the bridge applies them:
 2. Every other command is first deferred in public (Discord shows "sage-bot is thinking" in the channel), before any file or logbook work. Each answer below is an edit of that reply, so everyone in the channel sees it (G20), and it pings nobody. When Discord refuses the defer, the bridge logs it and does nothing more.
 3. Every ask of a role holder counts: 10 per person in a rolling hour, in memory (a restart clears the counts).
 4. Over the limit, a member with a role gets "You asked 10 times in the last hour; that is the limit. Your next ask works at 15:12." with the time as a Discord timestamp.
-5. A command outside #ask-sage and its threads gets a pointer to it, in public in that channel.
+5. A command in a channel that is not registered, or a thread of one, gets one pointer a day (see [The channel registry](#the-channel-registry)).
 6. A project that is not in the list gets `I do not know a shared project called "payroll".`, which names no other project.
 
 Each answer comes from the project's `tasks.tsv` and `gates.tsv`, which the bridge finds with one `sage logbook` per project (kept after the first lookup that works) and reads through `pick`: only the id, title, size, state and pull request of a task, and the id, task, question, options, recommendation and default of an open gate. It never reads `decisions.tsv`, findings, briefs, reports, an answer, a why or a branch. Every logbook text goes through `safe` (the readers are people on Discord), each reply is cut to 2000 characters (Discord's limit), and every reply has `allowedMentions: { parse: [] }`. `/sage gates` and `/sage board` never reach that cut: they show the open questions that fit whole, in logbook order, then one line "N more open question(s): G7, G8." with the escaped ids of the rest. When the ids do not fit either, the line holds only the count: "402 more open question(s)." A question is never cut, and an id is never cut in that line (F-T95-1).
 
 A file of `/sage files` is attached only when it is a regular file (not a symlink, not a folder), its real path is inside the project, its name does not start with a dot, its type is .png, .jpg, .svg or .pdf, and it is at most 8 MB. An entry that cannot be checked, such as a dangling symlink, is skipped. The bridge then opens each file with `O_NOFOLLOW` and reads it through that open file only when it is still a regular file with the device and inode of the check, so a file swapped after the check is never sent. The name of an attachment keeps only A-Z, a-z, 0-9, dot, dash and underscore; any other character becomes `_` (the readers are people on Discord).
 
-**A mention.** A message that mentions the bot comes with the GuildMessages intent; the bridge needs no Message Content intent. Each mention in #ask-sage or a thread of it counts like a command and gets one public reply in place, which pings nobody: "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention with a sentence that starts with a build verb (add, build, change, create, delete, deploy, fix, implement, make, merge, refactor, remove, rename, update, write), also after "please" or "can you", also gets "Builds are for sage-leads: ask a lead.", or for a lead "Builds from Discord are not ready yet." So "any update?", "does that make sense?" and "is the merge done?" are no build. Over the limit, a person gets one public note until the hour frees up, then nothing. A member with neither role gets nothing for a mention, anywhere, and the mention does not count (G20). A mention in another channel gets "I answer in #ask-sage, so everyone can find the answers. Please ask there." once per person per UTC day.
+**A mention.** A message that mentions the bot comes with the GuildMessages intent; the bridge needs no Message Content intent. Each mention in a registered channel or a thread of it counts like a command and gets one public reply in place, which pings nobody: "I do not answer free questions yet. Use /sage board, task, gates or files to read the project's records, or ask a lead." A mention with a sentence that starts with a build verb (add, build, change, create, delete, deploy, fix, implement, make, merge, refactor, remove, rename, update, write), also after "please" or "can you", also gets "Builds are for sage-leads: ask a lead.", or for a lead "Builds from Discord are not ready yet." So "any update?", "does that make sense?" and "is the merge done?" are no build. Over the limit, a person gets one public note until the hour frees up, then nothing. A member with neither role gets nothing for a mention, anywhere, and the mention does not count (G20). A mention in a channel that is not registered gets "I answer in #channel, so everyone can find the answers. Please ask there." once per person per UTC day.
 
-**The config.** `askChannelId` is a Discord id. `projects` is a list of 1 to 25 entries `{ name, project, sagePath?, files?, repo? }`; without it, the list is the bridge's own `project` with no files, named after its folder. When that folder name makes no valid name (for example `_scratch`, or more than 32 characters), the bridge stops with a message that says so: add a `projects` entry with a valid name. The bridge and `scripts/launchd.mjs` refuse at start a name that is not lower-case letters, digits and dashes (at most 32) or not unique, a `project` or `sagePath` that is not absolute, a `files` entry with `..`, a leading `/` or dot, a `*` in a folder, or another type, and a `repo` that is not `https://github.com/<owner>/<name>`.
+**The config.** `channelId` and `askChannelId` are optional Discord ids: the bridge reads them only to make the channel registry at its first start. `projects` is a list of 1 to 25 entries `{ name, project, sagePath?, files?, repo? }`; without it, the list is the bridge's own `project` with no files, named after its folder. When that folder name makes no valid name (for example `_scratch`, or more than 32 characters), the bridge stops with a message that says so: add a `projects` entry with a valid name. The bridge and `scripts/launchd.mjs` refuse at start a name that is not lower-case letters, digits and dashes (at most 32) or not unique, a `project` or `sagePath` that is not absolute, a `files` entry with `..`, a leading `/` or dot, a `*` in a folder, or another type, and a `repo` that is not `https://github.com/<owner>/<name>`.
 
 ### Which questions go to Discord
 
@@ -408,7 +459,7 @@ The steps to set up the bridge are in the README: [Set up a live trial](../READM
 
 1. **The Discord app.** A Discord application with a bot user in your server, with the Server Members intent on (Message Content off), invited with the `bot` and `applications.commands` scopes, and the roles sage-apprentice and sage-lead. Each person has one of them, never both.
 2. **The Keychain item.** Put the bot token in the macOS Keychain as a generic password with the service name `sage-bot`, with Keychain Access (File, New Password Item: name `sage-bot`). Do not type it in a command, because the shell history keeps it. At start the bridge reads it with `/usr/bin/security find-generic-password -s sage-bot -w`. It never writes the token to a file, a log or an error. When the item is missing, the bridge stops with: "no bot token: the macOS Keychain has no generic password with the service "sage-bot". Add it with Keychain Access, then start the bridge again."
-3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the #ask-sage channel, the owner and the two roles; the projects that `/sage` reads; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
+3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the owner and the two roles, and, for the first start, the home channel (`channelId`) and optionally a channel for `/sage` (`askChannelId`), see [The channel registry](#the-channel-registry); the projects that `/sage` reads; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
 4. Start it: `node scripts/bridge.mjs ~/.config/sage-bot/config.json`. It logs to the terminal; every log line goes through an allow-list, so no control character reaches the terminal. Of a Discord error it logs only the code, the status and the message, never its url or body (they can hold an interaction token).
 
 **The launchd plist.** To start the bridge at each login and again after it stops, write its launchd agent:
@@ -420,7 +471,7 @@ node scripts/launchd.mjs ~/.config/sage-bot/config.json --out ~/Library/LaunchAg
 
 With `--out`, the script writes the plist to a temp file in the same folder and renames it over the file, so a refused or failed run leaves the old plist as it was. Without `--out`, it prints the plist on stdout.
 
-The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. Its node path is one that a Node upgrade keeps: a Homebrew link (`/opt/homebrew/bin/node`, then `/usr/local/bin/node`) when it resolves to the running node, else the running formula's link `<prefix>/opt/<formula>/bin/node`. It is never a path under `Cellar/<version>`. A Homebrew node with no link stops the script with "run brew link". An old Homebrew node that still runs after an upgrade, while Homebrew links its formula to a newer one, stops the script with a message that names the current node: run the script again with it. Any other node (for example of nvm) goes in as `process.execPath`, and the script prints a warning: make the plist again after each Node upgrade. The script stops with exit 1 and writes or prints no plist when the config file does not exist, is not JSON, lacks one of `guildId`, `channelId`, `askChannelId`, `ownerId`, `apprenticeRole`, `leadRole`, `project`, `sagePath` and `statePath`, has a `guildId`, `channelId`, `askChannelId`, `ownerId`, `apprenticeRole` or `leadRole` that is not a Discord id (17 to 20 digits, the bridge's own rule), or has `projects` that the bridge refuses (see [The read commands of #ask-sage](#the-read-commands-of-ask-sage)). The script never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
+The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. Its node path is one that a Node upgrade keeps: a Homebrew link (`/opt/homebrew/bin/node`, then `/usr/local/bin/node`) when it resolves to the running node, else the running formula's link `<prefix>/opt/<formula>/bin/node`. It is never a path under `Cellar/<version>`. A Homebrew node with no link stops the script with "run brew link". An old Homebrew node that still runs after an upgrade, while Homebrew links its formula to a newer one, stops the script with a message that names the current node: run the script again with it. Any other node (for example of nvm) goes in as `process.execPath`, and the script prints a warning: make the plist again after each Node upgrade. The script stops with exit 1 and writes or prints no plist when the config file does not exist, is not JSON, lacks one of `guildId`, `ownerId`, `apprenticeRole`, `leadRole`, `project`, `sagePath` and `statePath`, has a `guildId`, `ownerId`, `apprenticeRole` or `leadRole` (or a `channelId` or `askChannelId`, when present) that is not a Discord id (17 to 20 digits, the bridge's own rule), or has `projects` that the bridge refuses (see [The read commands](#the-read-commands)). The script never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
 
 ### The reason contract
 

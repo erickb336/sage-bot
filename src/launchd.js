@@ -3,9 +3,12 @@
 /** The label of the agent, and the name of its plist file in ~/Library/LaunchAgents. */
 export const LABEL = 'com.sage.bot';
 
-/** The fields of the config that the bridge needs, each a non-empty string (see examples/config.example.json). */
-export const CONFIG_FIELDS = ['guildId', 'channelId', 'askChannelId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
-/** The fields of the config that are Discord ids: the bridge refuses each one that does not match its SNOWFLAKE. */
+/**
+ * The fields of the config that the bridge needs, each a non-empty string (see examples/config.example.json). channelId and askChannelId
+ * are optional since T130: the bridge makes the channel registry from them at its first start, when there is no registry yet.
+ */
+export const CONFIG_FIELDS = ['guildId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
+/** The fields of the config that are Discord ids, when present: the bridge refuses each one that does not match its SNOWFLAKE. */
 export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
 
 /** The Homebrew links that `brew upgrade node` keeps, in the order the plist prefers them. */

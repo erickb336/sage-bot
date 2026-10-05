@@ -7,13 +7,19 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
-import { askCommand, attachmentName, BUILDS, createAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
+import { openChannels } from '../src/channels.js';
+import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
 import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
 
 const ASK = '400000000000000009';
-const ELSEWHERE = '400000000000000001';
+const ELSEWHERE = '400000000000000003'; // a channel that is not registered
+/** createAsk on the registry that the config makes at the first start (T130): #ask-sage and the parent channel. */
+const createAsk = (o) => {
+  rmSync(`${o.config.statePath}.channels`, { force: true }); // each ask here is a first start, also for another project list
+  return rawAsk({ ...o, channels: openChannels(o.config, projectsOf(o.config)) });
+};
 const SECRET = 'ZZSECRET';
 const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20
 const ROLES = { [MAYA]: [APPRENTICE], [JON]: [LEADR] };
@@ -173,9 +179,13 @@ test('G20: a member with neither sage role gets nothing for a command or a menti
   assert.deepEqual(await b.mention(BOT, 'hello', ASK, true), []);
 });
 
-test('a command outside #ask-sage gets a public pointer to it and no data', async (t) => {
+test('a command in a channel that is not registered gets one public pointer per person per day, then its reply goes again', async (t) => {
   const b = world(t);
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
+  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ELSEWHERE, sub: 'board' });
+  await b.ask.command(i);
+  assert.deepEqual(i.replies, [{ kind: 'defer' }, { kind: 'remove' }]);
+  assert.deepEqual(await b.mention(MAYA, 'board?', ELSEWHERE), []); // the pointer of the day is shared with mentions
 });
 
 test('a project that is not in the list is refused, and the reply names no other project', async (t) => {
@@ -186,7 +196,7 @@ test('a project that is not in the list is refused, and the reply names no other
 
 test('the 11th ask in a rolling hour is refused in public with the time of the next ask; refused asks count too', async (t) => {
   const b = world(t);
-  await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }); // refused for the channel, still counts
+  await b.cmd(MAYA, 'task', { id: 'T404' }); // a refused ask counts too
   for (let n = 2; n <= 10; n++) { b.now += 60_000; assert.equal((await b.cmd(MAYA, 'task', { id: 'T1' }))[0].content.startsWith('**T1'), true); }
   const next = Math.floor((T0 + HOUR) / 1000);
   assert.deepEqual(await b.cmd(MAYA, 'board'), [{ content: `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${next}:t>.`, ...PUBLIC }]);
@@ -268,12 +278,11 @@ test('the config is checked at load: a traversal, a type or an absolute file ent
   assert.throws(() => projectsOf({ ...base, projects: [{ name: 'a', project: '/p' }, { name: 'a', project: '/q' }] }), { message: 'projects[1].name must be a new name of lower-case letters, digits and dashes (at most 32)' });
   assert.throws(() => projectsOf({ ...base, projects: [{ name: 'a', project: 'p' }] }), { message: 'projects[0].project must be an absolute path' });
   assert.throws(() => projectsOf({ ...base, projects: [{ name: 'a', project: '/p', repo: 'https://evil.example/x' }] }), { message: 'projects[0].repo must be https://github.com/<owner>/<name>' });
-  assert.throws(() => createAsk({ config: { ...base, askChannelId: undefined } }), { message: 'the config needs askChannelId as a Discord id (17 to 20 digits): the id of #ask-sage' });
   assert.deepEqual(projectsOf({ ...base, projects: [{ name: 'site', project: '/p', sagePath: '/o/sage.mjs', files: ['design/b2/shots/*.png'] }] }),
     [{ name: 'site', project: '/p', sagePath: '/o/sage.mjs', files: ['design/b2/shots/*.png'] }]);
 });
 
-test('the /sage command has four subcommands, guild only, with the listed projects as the only choices', () => {
+test('the /sage command has five subcommands (unregister has no options), guild only, with the listed projects as the only choices', () => {
   const json = askCommand([{ name: 'sage-bot' }, { name: 'site' }]);
   assert.equal(json.name, 'sage');
   assert.deepEqual(json.contexts, [0]);
@@ -282,6 +291,7 @@ test('the /sage command has four subcommands, guild only, with the listed projec
     ['task', [['id', true, undefined], ['project', false, ['sage-bot', 'site']]]],
     ['gates', [['project', false, ['sage-bot', 'site']]]],
     ['files', [['project', false, ['sage-bot', 'site']]]],
+    ['unregister', []],
   ]);
 });
 

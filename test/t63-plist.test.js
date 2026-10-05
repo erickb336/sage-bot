@@ -72,5 +72,5 @@ test('a missing config, a non-JSON config and a config without the bridge fields
   const partial = launchd(JSON.stringify({ guildId: '1', channelId: '2', ownerId: '3', apprenticeRole: '4', leadRole: '5', project: '/p', sagePath: '' }));
   assert.equal(partial.status, 1);
   assert.equal(partial.stdout, '');
-  assert.match(partial.stderr, /^sage-bot launchd: the config file .+config\.json has no askChannelId, sagePath, statePath\. No plist printed\.\n$/);
+  assert.match(partial.stderr, /^sage-bot launchd: the config file .+config\.json has no sagePath, statePath\. No plist printed\.\n$/);
 });
