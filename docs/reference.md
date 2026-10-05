@@ -315,6 +315,32 @@ Each command takes `--config <config.json>` first; the default is `~/.config/sag
 - A marked question about a merge is still not posted, and the bridge logs "G5 stays at the terminal: it is about a merge, and a merge never goes to a vote".
 - Unmarking a gate that has a card does not take the card back.
 
+### Leads-only questions
+
+The owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads only recommend Yes or No, and the owner decides at the terminal. This is the only leads-only question. The chief asks it as a normal sage gate with exactly this question and the options `Yes|No`, then marks it leads only:
+
+```text
+Switch the automatic-merge mode on for this session?
+```
+
+<!-- check: skip, it needs a sage logbook that holds the gate; test/t73-leads.test.js runs it -->
+```sh
+node scripts/vote.mjs --leads G6     # mark G6 as leads only
+```
+
+- The leads-only file is `<team votes file>.leads`, in the format of the team votes file, and the bridge refuses a bad one the same way: then it posts nothing and logs why once. A gate is in one of the two lists at most: a mark moves it, and `--unmark` clears it from both.
+- `--leads` takes one gate id. Two or more ids are refused: "a leads-only question is one Yes or No question, never a batch". The bridge also posts a leads-only gate on its own card, never in a batch.
+- `--leads` reads the gate from sage, with `sagePath` and `project` of the config. It refuses, exits 1 and changes nothing when the gate is not in the logbook, when its question is not the text above word for word ("G6 is leads only, and a leads-only question must be the automatic-merge question, word for word: …"), or when its options are not Yes and No. The question is `LEADS_QUESTION` in `src/bridge.js`. So a lead never answers a merge of a pull request or any other decision of the owner.
+- The bridge checks the same again for a file that someone edited by hand: it logs "not posted: G6 is leads only, and a leads-only question …" and the question stays at the terminal. So every text that the bridge writes about the answer comes from Yes and No.
+- A gate id in both files is an error: the bridge posts no card for it and logs "G6 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs". A mark saves the file that loses the gate first and then the file that gains it, so a read between the two saves can find it in both. When the bridge finds a gate in both, it reads the two files again; only a gate that is still in both gets the line and no card. So a mark during a read never gives the line, and the card comes on that loop or the next.
+- The leads-only question names the automatic-merge mode, and it is posted: the merge guard is for team votes, and here the owner decides.
+- The card is titled "Recommend for Erick: Question G6 · …". It pings the sage-lead role only, with "T5 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal." Its rule line says the same, and its 2-hour reminders ping sage-lead only.
+- A press from a sage-apprentice or a member with no role gets the private note "Only a sage-lead can answer this. Erick decides." and does not count.
+- The first lead's press closes the card: "Recommended by Jon (sage-lead) at 15:30: A. Yes. Erick decides at the terminal." The bridge gives sage "A. Yes (sage-leads recommend; the owner decides)" with `sage gate answer`, so the logbook shows the leads' advice and never the owner's decision. It posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." where the card is, and logs one line. For Yes: "G6: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No: "G6: sage-leads recommend No. If you agree, do nothing; the mode stays off."
+- A press after the recommendation gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count." Erick also holds sage-lead, so Erick can press in Discord; that press is a recommendation like any lead's, never Erick's final answer. Erick decides only at the terminal.
+- The leads-only texts name the owner "Erick", also when the owner is not in the server's member list (never "a member" or "member …0001").
+- The owner's answer at the terminal is final (G10), before or after the leads' press, also when it is "A. Yes": only the marked text is the bridge's own, so the bridge never writes over the owner's answer. To switch the mode, the owner types the mode's own message at the terminal. sage-bot never switches a mode, never writes sage's hook state, and no text of sage-bot holds a mode's switch message.
+
 ### How a sage gate becomes a card
 
 The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` finds the logbook, and `sage gate answer <G> <answer>` records an answer. It reads `gates.tsv` and `tasks.tsv`, and never writes a logbook file itself.

@@ -32,7 +32,9 @@ function entryOf(e) {
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
     // Version 2 (T29): the chief session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
-    && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel));
+    && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
+    // T73: a leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
+    && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'));
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
   if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
     throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
@@ -107,13 +109,25 @@ export function votesPathOf({ votesPath, statePath }) {
   return path;
 }
 
-/** The marked gate ids, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list of gate ids. */
-export function loadVotes(path) {
-  const text = readOwn(path, 'team votes file');
+/**
+ * The leads-only file (T73): the sage gate ids that the chief marked with `--leads`. Each is a single Yes or No question that only the
+ * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
+ */
+export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
+/** The ids in the leads-only file, checked like the team votes file. */
+export const loadLeads = (path) => loadVotes(path, 'leads-only file');
+
+/**
+ * The marked gate ids, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list of gate ids.
+ * `what` names the file in the message: the team votes file, or the leads-only file.
+ */
+export function loadVotes(path, what = 'team votes file') {
+  const text = readOwn(path, what);
   if (text === undefined) return new Set();
-  const ids = JSON.parse(text);
+  let ids;
+  try { ids = JSON.parse(text); } catch { ids = null; }
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && GATE_ID.test(id))) {
-    throw new TypeError(`the team votes file ${path} must be a JSON list of sage gate ids (G and digits). Nothing was loaded.`);
+    throw new TypeError(`the ${what} ${path} must be a JSON list of sage gate ids (G and digits). Nothing was loaded.`);
   }
   return new Set(ids);
 }
