@@ -93,14 +93,25 @@ test('F-T27-45: a leading -# is escaped; a first grapheme longer than the cut is
   assert.ok(cutAstral.startsWith('क्\u{1D167}क') && cutAstral.endsWith('…'));
 });
 
-test('F-T27-45: the joiner check is linear: 1 MB of conjuncts in well under a second each, not tens of seconds', () => {
+test('F-T27-45: the joiner check is linear: 4 times the text costs about 4 times the CPU time, not 16 or more', () => {
+  // CPU time of this process, not the wall clock, so that other processes on a busy machine do not count; the least of 5 runs at each size
+  // and a ratio, so that a slow machine does not count either. Linear gives about 4; the joiner check of 33e9130, which read the growing output, gives over 30.
+  const KB = 65_536;
   for (const unit of ['क्\u200d', 'ب\u200d']) {
-    const s = unit.repeat(Math.ceil(1_048_576 / unit.length)).slice(0, 1_048_576);
-    const t = performance.now();
-    const out = safe(s);
-    const ms = performance.now() - t;
-    assert.ok(ms < 5000, `${JSON.stringify(unit)}: ${ms.toFixed(0)} ms`); // 32 to 45 seconds on 33e9130
-    assert.equal(out.length, s.length - (unit === 'ب\u200d' ? 1 : 0)); // a final joiner after a bare letter goes
+    const text = (n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+    const [small, large] = [text(KB), text(4 * KB)];
+    const best = [Infinity, Infinity];
+    for (let run = 0; run < 5; run++) {
+      [small, large].forEach((s, k) => {
+        const t = process.cpuUsage();
+        const out = safe(s);
+        const { user, system } = process.cpuUsage(t);
+        best[k] = Math.min(best[k], (user + system) / 1000);
+        assert.equal(out.length, s.length - (unit === 'ب\u200d' ? 1 : 0)); // a final joiner after a bare letter goes
+      });
+    }
+    const ratio = best[1] / best[0];
+    assert.ok(ratio < 8, `${JSON.stringify(unit)}: ${best.map((ms) => ms.toFixed(1)).join(' ms, ')} ms, ratio ${ratio.toFixed(1)}`);
   }
 });
 
