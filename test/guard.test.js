@@ -102,13 +102,23 @@ test('T133: the other tools: every corpus call to refuse is refused, every call 
 test('T133: the reason names what is refused, and says how to rephrase when a safe form exists', () => {
   const why = (c) => guard(bash(c)).reason;
   assert.equal(why('gh pr merge 12'), 'sage-bot guard: gh pr merge is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git push origin main'), "sage-bot guard: git push: a push to anything but origin t133-guard, the session's own branch is refused in a lead session. sage can do this instead: git push origin t133-guard.");
+  assert.equal(why('git push origin main'), "sage-bot guard: git push to anything but origin t133-guard, the session's own branch is refused in a lead session. sage can do this instead: git push origin t133-guard.");
+  assert.match(why('git push --forc origin t133-guard'), /git push with the option --forc is refused .* instead: git push origin t133-guard\.$/);
   assert.match(why('git push'), /sage can do this instead: git push origin t133-guard\.$/);
   // The usual commit form, a heredoc in $( ), stays refused, and the message says how to give the text instead.
   assert.match(why("git commit -m \"$(cat <<'EOF'\nT133\nEOF\n)\""), /cannot read \(a \$ inside double quotes\) is refused .* sage can do this instead: .*put long or special text in a file in the scratch folder and pass it with git commit -F <file> or gh pr create --body-file <file>\.$/s);
   assert.match(why('HOME={SCRATCH} git status'), /a variable in front of git \(git reads its config from HOME\) is refused .* instead: run git with no variable in front of it\.$/);
   assert.match(why('git checkout x && ls'), /git checkout with another command after it .* instead: run it as a call of its own, then the rest\.$/);
-  assert.match(why('grep -r token {SCRATCH}/proj'), /it holds config\/\.env, .* instead: name a folder or the files without it, or use the Grep tool with a glob such as \*\*\/\*\.js\.$/);
+  assert.match(why('cat {SCRATCH}/proj/config/*'), /it holds \.env, .* instead: name a folder or the files without it, or use the Grep tool with a glob such as \*\*\/\*\.js\.$/);
+  // Each option must be an entry of the command's table by its full spelling; the message lists the entries.
+  assert.equal(why('grep --recur token {SCRATCH}/proj'), 'sage-bot guard: grep with the option --recur is refused in a lead session. sage can do this instead: give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
+  assert.match(why('grep token {SCRATCH}/proj'), /proj as an operand \(a folder: this command takes files only\) is refused .* instead: name the files, or search a folder with the Grep tool\.$/);
+  assert.match(why('rg token'), /rg with no file, .* instead: name existing files, or search a folder with the Grep tool\.$/);
+  assert.match(why('git add -A'), /git add without -- and file names .* instead: git add -- <file> <file>, each file by its full name \(git rm -- <file> for a deleted file\)\.$/);
+  assert.match(why("git add -- 'src/*'"), /git add of src\/\* \(git reads it as a pattern\) is refused .* instead: git add -- <file> <file>/);
+  assert.match(why('cd nowhere && ls'), /cd nowhere \(not an existing folder\) is refused .* instead: cd <a folder in the worktree or the scratch folder> && <command>, or name the full path in the command\.$/);
+  assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
+  assert.match(why('ls | sh'), /a \| into sh is refused .* instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one\.$/);
   assert.match(why('git fetch upstream'), /instead: git fetch origin\.$/);
   assert.match(why('gh pr edit 12 --body-file {WT}/README.md'), /instead: write the body to a file in the scratch folder and pass it with --body-file\.$/);
   assert.match(why('gh pr edit 12 --base main'), /gh pr edit with the option --base .* instead: gh pr edit <number> --title <title> --body-file <file in the scratch folder>\.$/);
@@ -118,7 +128,7 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
 test('T133: a push needs SAGE_BRANCH, and never goes to a protected branch, also when SAGE_BRANCH names one', () => {
   const none = { ...LEAD };
   delete none.SAGE_BRANCH;
-  assert.match(guard(bash('git push origin t133-guard'), none).reason, /a push \(the session has no branch of its own in SAGE_BRANCH\)/);
+  assert.match(guard(bash('git push origin t133-guard'), none).reason, /git push \(the session has no branch of its own in SAGE_BRANCH\)/);
   assert.equal(guard(bash('git push origin main'), { ...LEAD, SAGE_BRANCH: 'main' }).decision, 'deny');
   assert.equal(guard(bash('git push origin main'), { ...LEAD, SAGE_BRANCH: 'Release-1' }).decision, 'deny');
   assert.equal(guard(bash('git push origin x'), { ...LEAD, SAGE_BRANCH: 'x' }).decision, 'allow');
@@ -172,17 +182,43 @@ test('T133: an input over 64 KB is refused before it is parsed, quickly; a large
   assert.equal(guard(`${JSON.stringify(bash('git status'))}${' '.repeat(64 * 1024 - JSON.stringify(bash('git status')).length + 1)}`).decision, 'deny');
 });
 
-test('T133: a folder walk stops after 20000 entries and refuses, quickly', () => {
-  // GUARD_TEST_BIG: a folder of 20001 empty files that the mutation check (scripts/guard-mutations.mjs) makes once.
-  const big = process.env.GUARD_TEST_BIG ?? join(F.SCRATCH, 'big');
-  if (!process.env.GUARD_TEST_BIG) {
-    mkdirSync(big);
-    for (let i = 0; i < 20001; i++) writeFileSync(join(big, `f${i}.txt`), '');
+// GUARD_TEST_WALK: a folder with big/ (20001 empty files) and half/ (10001), that the mutation check makes once for every run.
+const WALK = process.env.GUARD_TEST_WALK ?? join(F.SCRATCH, 'walk');
+if (!process.env.GUARD_TEST_WALK) {
+  for (const [name, n] of [['big', 20001], ['half', 10001]]) {
+    mkdirSync(join(WALK, name), { recursive: true });
+    for (let i = 0; i < n; i++) writeFileSync(join(WALK, name, `f${i}.txt`), '');
   }
+}
+
+test('T133: a folder walk stops after 20000 entries and refuses, quickly', () => {
+  const big = join(WALK, 'big');
   const t = Date.now();
-  assert.match(guard(tool('Grep', { pattern: 'x', path: big }), { ...LEAD, SAGE_REPO: big }).reason, /more than 20000 files to check/);
+  assert.match(guard(tool('Grep', { pattern: 'x', path: big }), { ...LEAD, SAGE_REPO: WALK }).reason, /more than 20000 files to check in one call/);
   assert.ok(Date.now() - t < 2000, `${Date.now() - t} ms`);
   assert.equal(guard(tool('Grep', { pattern: 'x', path: join(F.SCRATCH, 'clean') })).decision, 'allow');
+});
+
+test('T133: all the walks of one call share one budget: a 64 KB call that names a large folder many times is refused in under 3 s', () => {
+  const half = join(WALK, 'half');
+  const env = { ...LEAD, SAGE_SCRATCH: WALK };
+  // One walk of 10001 entries is in the budget; a second walk in the same call is not.
+  assert.equal(guard(bash(`cat ${half}/f1*`), env).decision, 'allow');
+  assert.match(guard(bash(`cat ${half}/f1* ${half}/f2*`), env).reason, /more than 20000 files to check in one call/);
+  assert.equal(guard(tool('Grep', { pattern: 'x', path: half }), env).decision, 'allow');
+  // Just under 64 KB: the same folder named about 1000 times, as a wildcard, as a folder operand and as a copy.
+  const fill = (word, tail = '') => { const b = JSON.stringify(bash(tail)).length; return `${word.repeat(Math.floor((64 * 1024 - b - 10) / word.length))}${tail}`; };
+  for (const command of [`cat ${fill(`${half}/f1* `)}`, `grep x ${fill(`${half} `)}`, `rg x ${fill(`${half} `)}`, `cp -r ${fill(`${half} `, WALK)}`]) {
+    const input = bash(command);
+    assert.ok(JSON.stringify(input).length <= 64 * 1024, `${JSON.stringify(input).length}`);
+    const r = hook(input, env);
+    assert.equal(r.decision, 'deny', command.slice(0, 80));
+    assert.ok(r.ms < 3000, `${r.ms} ms for ${command.slice(0, 40)}`);
+    // In the process, with no start of node: the checks stop at the first refusal, so no later folder is read at all.
+    const t = Date.now();
+    assert.equal(guard(input, env).decision, 'deny');
+    assert.ok(Date.now() - t < 1000, `${Date.now() - t} ms in the process for ${command.slice(0, 40)}`);
+  }
 });
 
 test('T133: a crash of the hook refuses in a lead session (exit code 2)', () => {

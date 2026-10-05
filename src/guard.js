@@ -4,13 +4,15 @@
 //
 // In a lead session it allows only what it understands (an allow-list), and refuses the rest (fail closed):
 // - An input over 64 KB is refused before it is parsed, so the hook always decides well inside its timeout.
-// - Bash: a strict parser takes the command apart into simple commands joined by &&, ||, ; or |. Anything it does not parse
-//   (a $, a backtick, parentheses, braces, a backslash, a newline outside quotes, a heredoc, a non-ASCII character outside
-//   quotes) is refused. Each simple command must be on the allow-list (COMMANDS) and pass its own rule; every argument that
-//   names a file must be inside the session's folders.
+// - Bash: a strict parser takes the command apart into simple commands joined only by && (or a | into a read-only filter).
+//   Anything it does not parse (;, ||, a $, a backtick, parentheses, braces, a backslash, a newline outside quotes, a
+//   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
+//   each of its options must be an entry of that command's option table by its full spelling; the rest is refused. Every
+//   operand that names a file must be inside the session's folders. Bash reads files only, never a folder by recursion.
 // - The file tools: reads inside the worktree, the scratch folder and the repository; writes inside the worktree and the
 //   scratch folder only. Paths are resolved through every symbolic link, as the system would, before the check.
-// - A content search or a copy of a folder is refused when the folder holds a file that can hold secrets.
+// - A search or a copy of a folder is refused when the folder holds a file that can hold secrets. All the folder walks of one
+//   tool call share one budget of entries.
 // - Any other tool that is not in TOOLS is refused.
 //
 // The environment (set by sage-bot, never by the session's model): SAGE_ORIGIN, SAGE_WORKTREE, SAGE_SCRATCH, SAGE_BRANCH,
@@ -31,7 +33,6 @@ const refusal = (why) => {
   const [what, safe] = k < 0 ? [why, null] : [why.slice(0, k), why.slice(k + 1)];
   return `sage-bot guard: ${what} is refused in a lead session. ${safe ? `sage can do this instead: ${safe}.` : ASK}`;
 };
-const REPHRASE = 'one simple command per call, with no $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file> or gh pr create --body-file <file>';
 
 // The hook's own files: no tool may write them.
 const SELF = [fileURLToPath(import.meta.url), fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url))];
@@ -89,24 +90,25 @@ function writeRefusal(path, ctx, strict = false) {
   return `writing ${path} (outside the worktree and the scratch folder${strict ? ', or one of the two folders itself' : ''})`;
 }
 
-// A folder walk stops after this many entries and refuses: the hook must decide quickly.
+// All the folder walks of one tool call share one budget of this many entries; when it runs out, the guard refuses. So the
+// guard decides quickly, also when a call names one large folder many times.
 const WALK_MAX = 20000;
 /**
  * Why a content search, a copy or a move of the folder `path` is refused, or null: the folder holds a file that can hold
  * secrets, or a link that leads out of the session's folders (and, for a copy or a move, a file named HEAD). A worktree's
  * .git file (a pointer to its repository) is not counted. Folders named node_modules below the folder are not walked: npm
  * fills them from the lock file, and a move or a copy of a folder with secrets into them is refused here first.
+ * Each entry counts against ctx.walk, the budget of the whole tool call.
  */
 function folderRefusal(path, ctx, copy = false) {
   const root = physical(path, ctx.cwd);
   const stack = [root];
-  let n = 0;
   while (stack.length) {
     const dir = stack.pop();
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
-      if (++n > WALK_MAX) return how(`a search or a copy of ${path} (more than ${WALK_MAX} files to check)`, 'name a smaller folder');
+      if (--ctx.walk.left < 0) return how(`a search or a copy of ${path} (more than ${WALK_MAX} files to check in one call)`, 'name fewer or smaller folders, one call for each');
       const p = join(dir, e.name);
       if (e.name === '.git' && e.isFile()) continue;
       const bad = SECRET.test(p) || (copy && /^head$/i.test(e.name)) || (e.isSymbolicLink() && readRefusal(p, ctx));
@@ -117,18 +119,17 @@ function folderRefusal(path, ctx, copy = false) {
   return null;
 }
 
-// ---- Bash ---------------------------------------------------------------------------------------------------------------
-
-const OPERATORS = ['&&', '||', ';', '|'];
+// ---- Bash: the parser ---------------------------------------------------------------------------------------------------
 
 /**
- * The command as simple commands: [{ words: [{ text, glob }], redirects: [{ op, target }] }], or a string: why it is refused.
+ * The command as parts: [{ pipe, words: [{ text, glob }], redirects: [{ op, target }] }], or a string: why it is refused.
+ * Only && and | join parts (`pipe`: the part reads the output of the part before it); ;, ||, |& and & are refused.
  * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` says that it has an unquoted *, ? or [.
  */
 export function parse(command) {
   if (typeof command !== 'string' || !command.trim()) return 'an empty command';
   const segments = [];
-  let seg = { words: [], redirects: [] };
+  let seg = { pipe: false, words: [], redirects: [] };
   let word = null;
   let pendingRedirect = null;
   const endWord = () => {
@@ -136,11 +137,11 @@ export function parse(command) {
     if (pendingRedirect) { seg.redirects.push({ op: pendingRedirect, target: word.text }); pendingRedirect = null; } else seg.words.push(word);
     word = null;
   };
-  const endSegment = () => {
+  const endSegment = (pipe) => {
     endWord();
     if (pendingRedirect) throw 'a redirect with no file';
     segments.push(seg);
-    seg = { words: [], redirects: [] };
+    seg = { pipe, words: [], redirects: [] };
   };
   const add = (ch, glob = false) => { word ??= { text: '', glob: false }; word.text += ch; word.glob ||= glob; };
   try {
@@ -168,28 +169,27 @@ export function parse(command) {
         if (j >= command.length) throw 'an open quote';
         i = j + 1;
       } else if (c === ' ' || c === '\t') { endWord(); i++; }
-      else if (OPERATORS.some((op) => rest.startsWith(op))) {
-        const op = OPERATORS.find((o) => rest.startsWith(o));
-        endSegment();
-        i += op.length;
-      } else if (c === '>' || c === '<') {
+      else if (rest.startsWith('&&')) { endSegment(false); i += 2; }
+      else if (c === '|' && !/^\|[|&]/.test(rest)) { endSegment(true); i++; }
+      else if (c === ';' || c === '&' || c === '|') throw `the operator ${rest.match(/^(;+|\|\||\|&|&)/)[0]} (only && joins parts)`;
+      else if (c === '>' || c === '<') {
         const fd = word && /^\d$/.test(word.text) ? word.text : '';
         if (word && !fd) endWord();
         word = null;
-        const m = rest.match(/^(>>|>&[12](?![^\s;&|])|>|<)/);
+        const m = rest.match(/^(>>|>&[12](?![^\s&|])|>|<)/);
         if (!m || /^(<<|<>|<&|>\||<\()/.test(rest)) throw `the redirect ${rest.slice(0, 2)}`;
         if (!m[1].startsWith('>&')) pendingRedirect = m[1];
         i += m[1].length;
-      } else if (/[a-zA-Z0-9_\-./=:,+@%^]/.test(c)) { add(c); i++; }
-      else if (c === '*' || c === '?' || c === '[' || c === ']') { add(c, true); i++; }
+      } else if (/[a-zA-Z0-9_\-./=:,+@%^\]]/.test(c)) { add(c); i++; }
+      else if (c === '*' || c === '?' || c === '[') { add(c, true); i++; }
       else if (c === '~') {
         // At the start of a word: the home folder (~ or ~/x). Inside a word: only a revision (HEAD~1, main~), which the
         // shell never expands; never after = or :, where the shell does expand it.
-        if (word !== null ? !/[A-Za-z0-9_]$/.test(word.text) || !/^~(\d|$|[\s;&|])/.test(rest) : !/^~(\/|$|[\s;&|])/.test(rest)) throw 'a ~ that the shell can expand';
+        if (word !== null ? !/[A-Za-z0-9_]$/.test(word.text) || !/^~(\d|$|[\s&|])/.test(rest) : !/^~(\/|$|[\s&|])/.test(rest)) throw 'a ~ that the shell can expand';
         add(c); i++;
       } else throw c === '\n' || c === '\r' ? 'a newline outside quotes' : `the character ${JSON.stringify(c)} outside quotes`;
     }
-    endSegment();
+    endSegment(false);
   } catch (why) {
     if (typeof why === 'string') return why;
     throw why;
@@ -197,30 +197,129 @@ export function parse(command) {
   return segments;
 }
 
-const flag = (w) => w.startsWith('-');
-const operands = (args) => args.filter((a) => !flag(a));
+// ---- Bash: options and operands -----------------------------------------------------------------------------------------
 
-/** The paths inside one argument: the argument, or the value of a --flag=value or -fVALUE that holds a / or a ~. */
-function pathsIn(arg) {
-  if (!flag(arg)) return [arg];
-  if (arg.includes('=')) return [arg.slice(arg.indexOf('=') + 1)];
-  const at = arg.search(/[/~]/);
-  return at > 0 ? [arg.slice(at)] : [];
-}
+// The kinds of an entry in an option table: a flag; or an option with a value that is text, a path that is read, or a body
+// file (read, and only from the scratch folder); or an array: the values allowed.
+const FLAG = 0, TEXT = 1, READ = 2, BODY = 3;
+// The entry for a number option (head -20, git log -5).
+const NUM = '-<number>';
 
 const expandHome = (p, ctx) => (p === '~' ? ctx.folders.home : p.startsWith('~/') ? ctx.folders.home + p.slice(1) : p);
 
-/** Why the reads of every argument are refused, or null. */
-const readsOf = (args, ctx) => args.flatMap(pathsIn).map((p) => readRefusal(expandHome(p, ctx), ctx)).find(Boolean) ?? null;
-/** Why the writes of every argument are refused, or null. */
-const writesOf = (args, ctx, strict) => args.flatMap(pathsIn).map((p) => writeRefusal(expandHome(p, ctx), ctx, strict)).find(Boolean) ?? null;
-/** Why a content read of every argument is refused, or null: each file is read, and each folder is walked. */
-const contentOf = (args, ctx) => readsOf(args, ctx) ?? args.flatMap(pathsIn).map((p) => folderRefusal(expandHome(p, ctx), ctx)).find(Boolean) ?? null;
+/** Why a body file (gh --body-file, -F) is refused, or null: it must be in the scratch folder. */
+const bodyRefusal = (f, ctx) => (readRefusal(expandHome(f, ctx), ctx) || !within(physical(expandHome(f, ctx), ctx.cwd), ctx.folders.scratch)
+  ? how(`the body file ${f}`, 'write the body to a file in the scratch folder and pass it with --body-file') : null);
 
-const only = (allowed) => (args) => {
-  const bad = args.filter(flag).find((a) => !allowed.some((f) => a === f || a.startsWith(`${f}=`)));
-  return bad ? `the option ${bad}` : null;
+/**
+ * The options and operands of `args` by the option table of the command `name`: { opts: [[option, value]], ops }, or a
+ * string: why it is refused. Each option must be an entry of the table by its full spelling: an abbreviation, an unknown
+ * option, a cluster of short options that is not an entry, and a value given in another form are refused. A long option
+ * with a value takes it as --opt=value or --opt value, a short one as -o value. `--` ends the options when the table has it.
+ * `posix`: the options end at the first operand (node: the rest belongs to the script). `safe`: the rephrase of a refusal.
+ */
+function options(name, args, table, ctx, { posix = false, safe } = {}) {
+  const opts = [];
+  const ops = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--' && Object.hasOwn(table, '--')) { ops.push(...args.slice(i + 1)); break; }
+    if (!a.startsWith('-') || a === '-' || (posix && ops.length)) { ops.push(a); continue; }
+    if (/^-\d+$/.test(a) && Object.hasOwn(table, NUM)) { opts.push([NUM, a]); continue; }
+    const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+    const opt = eq < 0 ? a : a.slice(0, eq);
+    const kind = Object.hasOwn(table, opt) ? table[opt] : undefined;
+    if (kind === undefined || (kind === FLAG && eq >= 0)) {
+      const list = Object.keys(table).join(' ');
+      return how(`${name} with the option ${a}`, safe ?? (list ? `give ${name} only the options ${list}, each one spelled in full and alone` : `give ${name} no option`));
+    }
+    if (kind === FLAG) { opts.push([opt]); continue; }
+    const value = eq < 0 ? args[++i] : a.slice(eq + 1);
+    if (value === undefined) return `${name} ${opt} with no value`;
+    const why = Array.isArray(kind) ? (kind.includes(value) ? null : `${name} ${opt} ${value} (only ${kind.join(', ')})`)
+      : kind === READ ? readRefusal(expandHome(value, ctx), ctx) : kind === BODY ? bodyRefusal(value, ctx) : null;
+    if (why) return why;
+    opts.push([opt, value]);
+  }
+  return { opts, ops };
+}
+
+/** A command's rule: its option table, then `rule(ops, ctx, opts)` for its operands. */
+const cmd = (table, rule = () => null) => (args, ctx, name) => {
+  const r = options(name, args, table, ctx);
+  return typeof r === 'string' ? r : rule(r.ops, ctx, r.opts);
 };
+
+/** What the path names now: 'folder', 'file', 'other' or 'none'. */
+const kindOf = (p, ctx) => {
+  try { const s = statSync(physical(expandHome(p, ctx), ctx.cwd)); return s.isDirectory() ? 'folder' : s.isFile() ? 'file' : 'other'; } catch { return 'none'; }
+};
+/** The first refusal of `check` over `list`, or null; it stops there, so no later path is resolved or walked. */
+const first = (list, check) => { for (const x of list) { const why = check(x); if (why) return why; } return null; };
+/** Why the reads of the paths `ops` are refused, or null. */
+const reads = (ops, ctx) => first(ops, (p) => readRefusal(expandHome(p, ctx), ctx));
+/** Why the writes of the paths `ops` are refused, or null. `strict`: the worktree or the scratch folder itself is refused. */
+const writes = (ops, ctx, strict = false) => first(ops, (p) => writeRefusal(expandHome(p, ctx), ctx, strict));
+/** Why the walks of the folders `ops` are refused, or null (`copy`: a copy or a move). */
+const walks = (ops, ctx, copy = false) => first(ops, (p) => folderRefusal(expandHome(p, ctx), ctx, copy));
+/** Why a content read of the files `ops` is refused, or null: each is a read, and none is a folder (no recursion). */
+const files = (ops, ctx) => {
+  const folder = ops.find((p) => kindOf(p, ctx) === 'folder');
+  return reads(ops, ctx) ?? (folder === undefined ? null : how(`${folder} as an operand (a folder: this command takes files only)`, 'name the files, or search a folder with the Grep tool'));
+};
+/** grep and rg: the first operand is the pattern, unless -e gives it. */
+const searched = (ops, opts) => (opts.some(([o]) => o === '-e') ? ops : ops.slice(1));
+
+const TEST = { '-f': FLAG, '-d': FLAG, '-e': FLAG, '-s': FLAG, '-r': FLAG, '-w': FLAG, '-x': FLAG, '-n': FLAG, '-z': FLAG, '-L': FLAG };
+const none = cmd({});
+const NPM_RUN = new Set(['ci', 'test', 't', 'run', 'run-script', 'ls', 'outdated']);
+
+// The allow-list of commands, each with its option table. A rule gives the reason of a refusal, or null.
+const COMMANDS = {
+  ls: cmd({ '-l': FLAG, '-a': FLAG, '-la': FLAG, '-al': FLAG, '-A': FLAG, '-1': FLAG, '-h': FLAG, '-lh': FLAG, '-lah': FLAG, '-d': FLAG, '-t': FLAG, '-F': FLAG }, reads),
+  cat: cmd({ '-n': FLAG }, files),
+  head: cmd({ '-n': TEXT, '-c': TEXT, [NUM]: FLAG }, files),
+  tail: cmd({ '-n': TEXT, '-c': TEXT, [NUM]: FLAG }, files),
+  wc: cmd({ '-l': FLAG, '-w': FLAG, '-c': FLAG, '-m': FLAG }, files),
+  diff: cmd({ '-u': FLAG, '-q': FLAG }, files),
+  cut: cmd({ '-d': TEXT, '-f': TEXT, '-c': TEXT }, files),
+  jq: cmd({ '-r': FLAG, '-c': FLAG, '-e': FLAG, '-S': FLAG, '-n': FLAG }, (ops, ctx) => files(ops.slice(1), ctx)),
+  // sort: no option that writes a file (-o) or runs a program is in the table.
+  sort: cmd({ '-n': FLAG, '-r': FLAG, '-u': FLAG, '-nr': FLAG, '-rn': FLAG, '-k': TEXT, '-t': TEXT }, files),
+  uniq: cmd({ '-c': FLAG, '-d': FLAG, '-u': FLAG }, (ops, ctx) => (ops.length > 1 ? 'uniq with an output file' : files(ops, ctx))),
+  // grep is never recursive: no option for it is in the table, and a folder is refused as an operand.
+  grep: cmd({ '-n': FLAG, '-i': FLAG, '-in': FLAG, '-l': FLAG, '-c': FLAG, '-v': FLAG, '-w': FLAG, '-o': FLAG, '-h': FLAG, '-H': FLAG, '-E': FLAG, '-F': FLAG, '-q': FLAG, '-s': FLAG, '-x': FLAG, '-e': TEXT, '-A': TEXT, '-B': TEXT, '-C': TEXT, '-m': TEXT, '--': FLAG },
+    (ops, ctx, opts) => files(searched(ops, opts), ctx)),
+  // rg searches a folder (and the current folder, when it names none) by recursion: it takes existing files only.
+  rg: cmd({ '-n': FLAG, '-i': FLAG, '-l': FLAG, '-c': FLAG, '-w': FLAG, '-F': FLAG, '-e': TEXT, '--': FLAG }, (ops, ctx, opts) => {
+    const named = searched(ops, opts);
+    return named.length && named.every((p) => kindOf(p, ctx) === 'file') ? files(named, ctx)
+      : how('rg with no file, or with a path that is not an existing file (rg searches a folder by recursion)', 'name existing files, or search a folder with the Grep tool');
+  }),
+  tr: cmd({ '-d': FLAG, '-s': FLAG }),
+  file: cmd({}, reads), stat: cmd({}, reads), du: cmd({ '-s': FLAG, '-h': FLAG, '-sh': FLAG }, reads), realpath: cmd({}, reads),
+  basename: none, dirname: none, pwd: none, printf: none, true: none, false: none, sleep: none, which: none,
+  echo: cmd({ '-n': FLAG }), date: cmd({ '-u': FLAG }),
+  test: cmd(TEST, reads), '[': cmd(TEST, reads),
+  mkdir: cmd({ '-p': FLAG }, writes), touch: cmd({}, writes), rmdir: cmd({}, writes),
+  cp: cmd({ '-r': FLAG, '-R': FLAG, '-p': FLAG }, (ops, ctx) => writes(ops, ctx) ?? walks(ops, ctx, true)),
+  mv: cmd({}, (ops, ctx) => writes(ops, ctx) ?? walks(ops, ctx, true)),
+  rm: cmd({ '-r': FLAG, '-f': FLAG, '-rf': FLAG, '-fr': FLAG, '-R': FLAG, '-Rf': FLAG, '--': FLAG }, (ops, ctx) => writes(ops, ctx, true)),
+  // find: names and tests only; no option that runs a command, deletes or writes a file is in the table.
+  find: cmd({ '-name': TEXT, '-iname': TEXT, '-type': TEXT, '-path': TEXT, '-maxdepth': TEXT, '-mindepth': TEXT, '-newer': READ, '-not': FLAG, '-print': FLAG, '-o': FLAG, '-a': FLAG, '-empty': FLAG }, reads),
+  git, gh, node,
+  // npm: no option that changes its config, its prefix or its shell is in the table.
+  npm: cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
+    if (!NPM_RUN.has(sub)) return `npm ${sub ?? ''} (only ci, test, run, ls and outdated)`.trim();
+    return /deploy|release|publish/i.test(script ?? '') ? `npm ${sub} ${script} (a deploy)` : null;
+  }),
+};
+// The commands that may read the output of the part before them through a |: read-only filters, never a shell.
+const PIPE = new Set(['head', 'tail', 'wc', 'sort', 'grep']);
+// The commands that may take a wildcard. For all but ls (names only), the wildcard's folder is walked first.
+const GLOBS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'sort', 'cut', 'diff', 'file', 'jq', 'uniq']);
+
+// ---- Bash: git, gh and node ---------------------------------------------------------------------------------------------
 
 /** git: global options only -C <folder in the worktree or scratch>; each subcommand on the allow-list with its own rule. */
 function git(args, ctx) {
@@ -236,124 +335,107 @@ function git(args, ctx) {
   // Object.hasOwn: a plain lookup finds Object.prototype's functions (git hasOwnProperty), which refuse only by a crash.
   const rule = Object.hasOwn(GIT, sub ?? '') ? GIT[sub] : null;
   if (!rule) return `git ${sub ?? ''} (only the listed subcommands; no global option but -C)`.trim();
-  const why = rule(rest, ctx);
-  return why && `git ${sub}: ${why}`;
+  return rule(rest, ctx, `git ${sub}`);
 }
 
-/** The top folder of the git worktree that holds `cwd`: the first folder upward with a .git entry. */
-function topOf(cwd) {
-  for (let d = cwd; ; d = dirname(d)) {
-    try { statSync(join(d, '.git')); return d; } catch { if (d === '/') return cwd; }
+/**
+ * git add: only `git add -- <file> ...`, each an existing file (not a folder) by its literal name. git reads each name as a
+ * pattern (a wildcard, and magic such as :(glob) after a colon), so a name with *, ?, [, ], \ or : is refused.
+ */
+function add(args, ctx) {
+  const safe = 'git add -- <file> <file>, each file by its full name (git rm -- <file> for a deleted file)';
+  if (args[0] !== '--' || args.length < 2) return how('git add without -- and file names (an option, a folder or a pattern)', safe);
+  for (const f of args.slice(1)) {
+    if (/[*?[\]\\:]/.test(f)) return how(`git add of ${f} (git reads it as a pattern)`, safe);
+    const why = writeRefusal(expandHome(f, ctx), ctx);
+    if (why) return `git add: ${why}`;
+    if (kindOf(f, ctx) !== 'file') return how(`git add of ${f} (a folder, or not an existing file)`, safe);
   }
+  return null;
 }
 
-const readOnlyGit = (args, ctx) => (args.some((x) => /^--(output|ext-diff|textconv|no-index)/.test(x)) ? 'an option that writes a file, runs a program or reads outside git' : readsOf(args, ctx));
+const gitRead = (table) => cmd({ ...table, '--': FLAG }, reads);
+const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG });
 const GIT = {
-  status: readOnlyGit, diff: readOnlyGit, log: readOnlyGit, show: readOnlyGit, 'rev-parse': readOnlyGit, 'ls-files': readOnlyGit, blame: readOnlyGit,
-  // git add of a folder (or of everything) reads the files in it into git, where git diff --cached shows them.
-  add: (args, ctx) => writesOf(args, ctx) ?? (args.some((x) => /^(-A|--all|--no-ignore-removal)$/.test(x)) ? folderRefusal(topOf(ctx.cwd), ctx) : null) ?? operands(args).map((p) => folderRefusal(p, ctx)).find(Boolean) ?? null,
-  rm: (args, ctx) => writesOf(args, ctx),
-  mv: (args, ctx) => writesOf(args, ctx) ?? operands(args).map((p) => folderRefusal(p, ctx, true)).find(Boolean) ?? null,
-  restore: (args, ctx) => writesOf(args, ctx),
-  commit: (args, ctx) => only(['-m', '--message', '-a', '--all', '-F', '--file', '-q', '--quiet', '-s', '--signoff', '--allow-empty', '-v'])(args) ?? readsOf(args.filter((x, i) => ['-F', '--file'].includes(args[i - 1])), ctx),
-  fetch: (args) => only(['-q', '--quiet', '--prune', '-p'])(args) ?? (operands(args)[0] === 'origin' && operands(args).slice(1).every((r) => /^[A-Za-z0-9._/-]+$/.test(r)) ? null : how('a fetch from a remote other than origin, or of a refspec', 'git fetch origin')),
-  switch: (args) => only(['-c', '--create'])(args),
-  checkout: (args) => only(['-b'])(args),
-  branch: (args) => only(['-a', '--all', '-r', '--remotes', '-v', '-vv', '--list', '--show-current', '-u', '--set-upstream-to', '--contains'])(args),
-  stash: (args) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? only(['-m', '--message', '-q', '--quiet', '-p', '--patch', '--stat'])(args) : `stash ${args[0]}`),
-  remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'a change of a remote'),
-  worktree: (args, ctx) => {
-    if (args[0] === 'list') return null;
-    if (args[0] !== 'add') return `worktree ${args[0] ?? ''}`.trim();
-    const rest = args.slice(1);
-    return only(['-b'])(rest) ?? writesOf(rest.filter((x, i) => !flag(x) && rest[i - 1] !== '-b'), ctx);
-  },
+  status: gitRead({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
+  diff: gitRead({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG }),
+  log: gitRead({ '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': TEXT, '--pretty': TEXT, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
+  show: gitRead({ '--stat': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--oneline': FLAG, '-s': FLAG, '--format': TEXT, '--pretty': TEXT }),
+  'rev-parse': gitRead({ '--show-toplevel': FLAG, '--abbrev-ref': FLAG, '--short': FLAG, '--verify': FLAG, '--is-inside-work-tree': FLAG }),
+  'ls-files': gitRead({ '-o': FLAG, '--others': FLAG, '--exclude-standard': FLAG, '-m': FLAG, '--modified': FLAG }),
+  blame: gitRead({ '-L': TEXT }),
+  add,
+  rm: cmd({ '--cached': FLAG, '-r': FLAG, '-q': FLAG, '--': FLAG }, writes),
+  mv: cmd({}, (ops, ctx) => writes(ops, ctx) ?? walks(ops, ctx, true)),
+  restore: cmd({ '--staged': FLAG, '-S': FLAG, '--worktree': FLAG, '-W': FLAG, '--': FLAG }, writes),
+  commit: cmd({ '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': READ, '--file': READ, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG },
+    (ops) => (ops.length ? how('git commit with file names (git reads them as patterns)', 'git add -- <file>, then git commit -F <file>') : null)),
+  fetch: cmd({ '-q': FLAG, '--quiet': FLAG, '--prune': FLAG, '-p': FLAG },
+    (ops) => (ops[0] === 'origin' && ops.slice(1).every((r) => /^[A-Za-z0-9._/-]+$/.test(r)) ? null : how('git fetch from a remote other than origin, or of a refspec', 'git fetch origin'))),
+  switch: cmd({ '-c': TEXT, '--create': TEXT }),
+  checkout: cmd({ '-b': TEXT }, writes),
+  branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '-u': TEXT, '--set-upstream-to': TEXT, '--contains': TEXT }),
+  stash: (args, ctx, name) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), ctx, name) : `git stash ${args[0]}`),
+  remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'git remote: a change of a remote'),
+  worktree: (args, ctx, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT }, writes)(args.slice(1), ctx, name) : `git worktree ${args[0] ?? ''}`.trim()),
   push,
 };
 
 /** git push: only `git push [-u] origin <SAGE_BRANCH>` (or HEAD:<SAGE_BRANCH>), the session's own branch by its name. */
-function push(args, ctx) {
+function push(args, ctx, name) {
   const mine = ctx.folders.branch;
-  if (!mine || PROTECTED.test(mine) || !/^[A-Za-z0-9._/-]+$/.test(mine)) return 'a push (the session has no branch of its own in SAGE_BRANCH)';
+  if (!mine || PROTECTED.test(mine) || !/^[A-Za-z0-9._/-]+$/.test(mine)) return 'git push (the session has no branch of its own in SAGE_BRANCH)';
   const safe = `git push origin ${mine}`;
-  const bad = args.filter(flag).find((x) => !['-u', '--set-upstream', '-q', '--quiet', '-v', '--verbose'].includes(x));
-  if (bad) return how(`the option ${bad} (force, delete, tags, mirror or another option)`, safe);
-  const [remote, ref, ...more] = operands(args);
-  if (remote !== 'origin' || more.length || ![mine, `HEAD:${mine}`].includes(ref)) return how(`a push to anything but origin ${mine}, the session's own branch`, safe);
+  const r = options(name, args, { '-u': FLAG, '--set-upstream': FLAG, '-q': FLAG, '--quiet': FLAG, '-v': FLAG, '--verbose': FLAG }, ctx, { safe });
+  if (typeof r === 'string') return r;
+  const [remote, ref, ...more] = r.ops;
+  if (remote !== 'origin' || more.length || ![mine, `HEAD:${mine}`].includes(ref)) return how(`git push to anything but origin ${mine}, the session's own branch`, safe);
   return null;
 }
 
-/** gh: only these read commands, gh pr create and gh pr edit. Never merge, api, secret, auth, release, workflow, alias or extension. */
-const GH = new Set(['pr create', 'pr edit', 'pr view', 'pr list', 'pr diff', 'pr checks', 'pr status', 'issue view', 'issue list', 'run view', 'run list', 'repo view']);
+/** gh: only these commands, each with its option table. Never merge, api, secret, auth, release, workflow, alias or extension. */
+const GH_BODY = { '--title': TEXT, '-t': TEXT, '--body': TEXT, '-b': TEXT, '--body-file': BODY, '-F': BODY };
+const GH = {
+  'pr create': { ...GH_BODY, '--base': TEXT, '-B': TEXT, '--head': TEXT, '-H': TEXT, '--draft': FLAG, '-d': FLAG, '--fill': FLAG },
+  'pr edit': GH_BODY,
+  'pr view': { '--json': TEXT, '--jq': TEXT, '-q': TEXT, '--comments': FLAG, '-c': FLAG },
+  'pr list': { '--state': TEXT, '-s': TEXT, '--limit': TEXT, '-L': TEXT, '--json': TEXT, '--jq': TEXT, '--head': TEXT, '-H': TEXT, '--base': TEXT, '-B': TEXT, '--author': TEXT },
+  'pr diff': { '--name-only': FLAG, '--patch': FLAG },
+  'pr checks': { '--required': FLAG, '--watch': FLAG, '--json': TEXT },
+  'pr status': {},
+  'issue view': { '--json': TEXT, '--comments': FLAG },
+  'issue list': { '--state': TEXT, '--limit': TEXT, '-L': TEXT, '--json': TEXT, '--label': TEXT },
+  'run view': { '--log': FLAG, '--log-failed': FLAG, '--json': TEXT, '--job': TEXT },
+  'run list': { '--limit': TEXT, '-L': TEXT, '--json': TEXT, '--branch': TEXT, '-b': TEXT },
+  'repo view': { '--json': TEXT },
+};
 function gh(args, ctx) {
-  const words = operands(args);
-  const sub = words.slice(0, 2).join(' ');
-  if (!GH.has(sub) || words[0] !== args[0] || words[1] !== args[1]) return `gh ${sub || args.join(' ')}`.trim();
-  if (args.some((x) => /^--(hostname|web)$/.test(x) || x === '-w')) return `gh ${sub} with --hostname or --web`;
-  if (sub === 'pr edit') {
-    const why = only(['--title', '-t', '--body', '-b', '--body-file', '-F'])(args.slice(2));
-    if (why) return how(`gh pr edit with ${why}`, 'gh pr edit <number> --title <title> --body-file <file in the scratch folder>');
-  }
-  const files = args.slice(2).flatMap((x, i, all) => (['-F', '--body-file'].includes(all[i - 1]) ? [x] : /^--body-file=/.test(x) ? [x.slice(12)] : []));
-  const outside = files.find((f) => f !== '-' && (readRefusal(expandHome(f, ctx), ctx) || !within(physical(expandHome(f, ctx), ctx.cwd), ctx.folders.scratch)));
-  return outside ? how(`gh ${sub} with the body file ${outside}`, 'write the body to a file in the scratch folder and pass it with --body-file') : null;
+  const sub = args.slice(0, 2).join(' ');
+  if (!Object.hasOwn(GH, sub)) return `gh ${sub}`.trim();
+  const r = options(`gh ${sub}`, args.slice(2), GH[sub], ctx, sub === 'pr edit' ? { safe: 'gh pr edit <number> --title <title> --body-file <file in the scratch folder>' } : {});
+  return typeof r === 'string' ? r : null;
 }
 
 // The sage state tool's commands that a lead session may run: the reads, and the records of its own work.
 const SAGE_TOOL = new Set(['status', 'logbook', 'merge-check', 'standing', 'task', 'run', 'finding', 'verdict']);
+const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
 
 /** node: a script file in the session's folders (or the sage state tool), never code from an option or from stdin. */
 function node(args, ctx) {
   if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;
-  const opts = [];
-  let i = 0;
-  for (; i < args.length && flag(args[i]); i++) opts.push(args[i]);
-  const bad = opts.find((x) => !['--test', '--check', '--no-warnings', '--test-reporter', '--test-name-pattern', '--experimental-test-coverage'].some((f) => x === f || x.startsWith(`${f}=`)));
-  if (bad) return `node ${bad} (code from an option, a preload or a loader)`;
-  const [script, ...rest] = args.slice(i);
-  if (!script) return opts.includes('--test') ? null : 'node with no script file (code from stdin)';
+  const r = options('node', args, NODE, ctx, { posix: true });
+  if (typeof r === 'string') return r;
+  const test = r.opts.some(([o]) => o === '--test');
+  const [script, ...rest] = r.ops;
+  if (!script) return test ? null : 'node with no script file (code from stdin)';
   if (ctx.folders.tool && physical(expandHome(script, ctx), ctx.cwd) === ctx.folders.tool) {
     return SAGE_TOOL.has(rest[0]) && !(rest[0] === 'standing' && rest[1] === 'add') ? null : `the sage state tool command ${rest.slice(0, 2).join(' ')} (only status, logbook, merge-check, standing, task, run, finding and verdict)`;
   }
-  if (!/\.(m|c)?js$/.test(script) && !opts.includes('--test')) return `node ${script} (not a .js, .mjs or .cjs file)`;
-  return readsOf(opts.includes('--test') ? args.slice(i) : [script], ctx);
+  if (!/\.(m|c)?js$/.test(script) && !test) return `node ${script} (not a .js, .mjs or .cjs file)`;
+  return reads(test ? r.ops : [script], ctx);
 }
 
-const NPM_RUN = new Set(['ci', 'test', 't', 'run', 'run-script', 'ls', 'outdated']);
-const npm = (args) => {
-  const sub = operands(args)[0];
-  if (!NPM_RUN.has(sub)) return `npm ${sub ?? ''} (only ci, test, run, ls and outdated)`.trim();
-  if (/deploy|release|publish/i.test(operands(args)[1] ?? '')) return `npm ${sub} ${operands(args)[1]} (a deploy)`;
-  return args.some((x) => /^--(prefix|userconfig|globalconfig|global|script-shell|node-options)/.test(x) || x === '-g') ? 'an npm option that changes its config or shell' : null;
-};
-
-/** find: no option that runs a command, deletes or writes a file. */
-const find = (args, ctx) => (args.some((x) => /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/.test(x)) ? 'find with -exec, -ok, -delete or -fprint' : readsOf(args.filter((x) => !flag(x) && !/^[!()]$/.test(x)), ctx));
-
-/** grep and rg: a recursive search walks each folder it searches, or the current folder when it names none. */
-const search = (args, ctx, recursive) => {
-  const ops = operands(args);
-  const folders = recursive && ops.slice(1).length === 0 ? [...ops, ctx.cwd] : ops;
-  return readsOf(args, ctx) ?? (recursive ? folders.map((p) => folderRefusal(expandHome(p, ctx), ctx)).find(Boolean) ?? null : null);
-};
-
-// The allow-list of commands. A rule gives the reason of a refusal, or null.
-const content = (args, ctx) => contentOf(args, ctx);
-const writes = (args, ctx) => writesOf(args, ctx);
-const copies = (args, ctx) => writesOf(args, ctx) ?? operands(args).map((p) => folderRefusal(expandHome(p, ctx), ctx, true)).find(Boolean) ?? null;
-const COMMANDS = {
-  ls: (args, ctx) => readsOf(args, ctx), cat: content, head: content, tail: content, wc: content, diff: content, cut: content, jq: content,
-  grep: (args, ctx) => search(args, ctx, args.some((x) => /^(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive|--directories=recurse|-d)$/.test(x))),
-  rg: (args, ctx) => (args.some((x) => /^--pre/.test(x)) ? 'rg --pre (it runs a program)' : search(args, ctx, true)),
-  sort: (args, ctx) => (args.some((x) => /^(-o|--output|--compress-program)/.test(x)) ? 'sort -o or --compress-program' : contentOf(args, ctx)),
-  uniq: (args, ctx) => (operands(args).length > 1 ? 'uniq with an output file' : contentOf(args, ctx)),
-  tr: () => null, file: content, stat: (args, ctx) => readsOf(args, ctx), du: (args, ctx) => readsOf(args, ctx), basename: () => null, dirname: () => null, realpath: (args, ctx) => readsOf(args, ctx),
-  pwd: () => null, echo: () => null, printf: () => null, true: () => null, false: () => null, date: () => null, sleep: () => null,
-  test: (args, ctx) => readsOf(args, ctx), '[': (args, ctx) => readsOf(args, ctx), which: () => null,
-  mkdir: writes, touch: writes, cp: copies, mv: copies, rmdir: writes,
-  rm: (args, ctx) => writesOf(args, ctx, true),
-  find, git, gh, node, npm,
-};
+// ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
 
 // Environment variables that a simple command may set in front of it. HOME and TMPDIR only to a folder of the session, and
 // never in front of git or gh: both read their config (which can run programs) from HOME.
@@ -373,6 +455,23 @@ function changesFiles(texts) {
   return ['checkout', 'switch', 'restore', 'mv', 'worktree'].includes(a[0]) || (a[0] === 'stash' && !['list', 'show'].includes(a[1]));
 }
 
+/**
+ * cd: only into a folder that exists now and that the system resolves (through every link) inside the worktree or the
+ * scratch folder. Then the shell moves exactly where the checks of the later parts look; if the cd fails anyway, && stops.
+ */
+function cd(args, ctx) {
+  const safe = 'cd <a folder in the worktree or the scratch folder> && <command>, or name the full path in the command';
+  if (args.length !== 1) return how('cd with no folder, with options or with more than one folder', safe);
+  const p = expandHome(args[0], ctx);
+  let to;
+  try { to = realpathSync.native(isAbsolute(p) ? p : `${ctx.cwd}/${p}`); } catch { return how(`cd ${args[0]} (not an existing folder)`, safe); }
+  if (kindOf(to, ctx) !== 'folder' || readRefusal(to, ctx) || ![ctx.folders.worktree, ctx.folders.scratch].some((r) => within(to, r))) {
+    return how(`cd ${args[0]} (only into a folder in the worktree or the scratch folder)`, safe);
+  }
+  ctx.cwd = to;
+  return null;
+}
+
 /** Why the simple command is refused, or null. `ctx.cwd` changes after a cd, for the commands that follow it. */
 function simple({ words, redirects }, ctx) {
   for (const r of redirects) {
@@ -386,25 +485,21 @@ function simple({ words, redirects }, ctx) {
     if (ENV_PATH.has(name)) { const why = writeRefusal(value, ctx); if (why) return `${name}=: ${why}`; } else if (!ENV_ANY.has(name)) return `setting ${name} in front of a command`;
   }
   const [cmd, ...args] = texts.slice(i);
-  if (!cmd) return 'a command that only sets variables';
+  if (!cmd) return 'a part with no command';
   if (i > 0 && (cmd === 'git' || cmd === 'gh')) return how(`a variable in front of ${cmd} (${cmd} reads its config from HOME)`, `run ${cmd} with no variable in front of it`);
-  const globs = words.slice(i).filter((w) => w.glob);
-  if (globs.some((w) => /(^|\/)\.[^/]*[*?[]/.test(w.text) || ['rm', 'mv', 'cp', 'mkdir', 'touch', 'rmdir'].includes(cmd))) {
-    return 'a wildcard here (it can reach .. or another file)';
+  // The command's own name is looked up as it is (a wildcard in it names no command); `[` is the test command.
+  const globs = words.slice(i + 1).filter((w) => w.glob);
+  if (globs.length && (!GLOBS.has(cmd) || globs.some((w) => /(^|\/)\.[^/]*[*?[]/.test(w.text)))) {
+    return how(`a wildcard in ${cmd} (it can reach .. or a file that the check did not see)`, 'name each file');
   }
-  if (cmd === 'cd') {
-    const to = expandHome(args[0] ?? '~', ctx);
-    if (args.length > 1 || flag(to)) return 'cd with options';
-    const why = readRefusal(to, ctx);
-    if (why) return `cd: ${why}`;
-    ctx.cwd = physical(to, ctx.cwd);
-    return null;
-  }
+  if (cmd === 'cd') return cd(args, ctx);
   if (!Object.hasOwn(COMMANDS, cmd)) return `the command ${cmd}`;
-  // A wildcard reads every file of its folder: that folder must hold no secret.
-  const globbed = COMMANDS[cmd] === content || ['grep', 'rg', 'sort', 'uniq'].includes(cmd) ? globs.map((w) => folderRefusal(dirname(`${w.text.split(/[*?[]/)[0]}x`), ctx)).find(Boolean) : null;
-  return globbed ?? COMMANDS[cmd](args, ctx);
+  // A wildcard of a content read reads every file of its folder: that folder must hold no secret.
+  const walked = cmd === 'ls' ? null : walks(globs.map((w) => dirname(`${w.text.split(/[*?[]/)[0]}x`)), ctx);
+  return walked ?? COMMANDS[cmd](args, ctx, cmd);
 }
+
+const REPHRASE = 'one command per call, or commands joined only by && (a | only into head, tail, wc, sort or grep), with no ;, ||, $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file> or gh pr create --body-file <file>';
 
 /** Why the Bash command is refused, or null. */
 export function bashRefusal(command, ctx) {
@@ -412,8 +507,10 @@ export function bashRefusal(command, ctx) {
   if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, REPHRASE);
   const local = { ...ctx };
   for (const [k, seg] of parsed.entries()) {
-    if (k < parsed.length - 1 && changesFiles(seg.words.map((w) => w.text))) {
-      return how(`${commandOf(seg.words.map((w) => w.text)).slice(0, 2).join(' ')} with another command after it (it changes files that the later checks saw)`, 'run it as a call of its own, then the rest');
+    const texts = seg.words.map((w) => w.text);
+    if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${commandOf(texts)[0] ?? 'nothing'}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
+    if (k < parsed.length - 1 && changesFiles(texts)) {
+      return how(`${commandOf(texts).slice(0, 2).join(' ')} with another command after it (it changes files that the later checks saw)`, 'run it as a call of its own, then the rest');
     }
     const why = simple(seg, local);
     if (why) return why;
@@ -482,7 +579,7 @@ export function decide(input, env) {
   if (!rule) return refusal(`the tool ${input.tool_name}`);
   const cwd = typeof input.cwd === 'string' && isAbsolute(input.cwd) ? input.cwd : folders.worktree;
   // A path that is not text makes node:path throw, and the hook refuses a throw (exit code 2).
-  const why = rule(input.tool_input, { folders, cwd: physical(cwd, '/') });
+  const why = rule(input.tool_input, { folders, cwd: physical(cwd, '/'), walk: { left: WALK_MAX } });
   return why ? refusal(why) : null;
 }
 
