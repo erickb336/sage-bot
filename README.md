@@ -31,12 +31,12 @@ All files go into a new scratch folder, so the demo never touches your home fold
 
 ### The flow of one question
 
-![The flow of one question, in 9 numbered steps between five lanes: the chief, the sage logbook, the bridge, the session thread and the team. 1, the chief asks a question in the logbook. 2, the chief marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-driver. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, the chief reads it and goes on.](docs/flow.svg)
+![The flow of one question, in 9 numbered steps between five lanes: the chief, the sage logbook, the bridge, the session thread and the team. 1, the chief asks a question in the logbook. 2, the chief marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-apprentice and sage-lead. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, the chief reads it and goes on.](docs/flow.svg)
 
 1. The chief asks a question in sage, as usual. Most questions stay at the terminal for the owner.
 2. When a question is for the team, the chief marks it with `node scripts/vote.mjs G42`.
 3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
-4. It posts a card in the thread of the chief's session, and pings the sage-driver role.
+4. It posts a card in the thread of the chief's session, and pings the sage-apprentice and sage-lead roles.
 5. A member of the team presses an option on the card.
 6. The session thread sends the press to the bridge.
 7. The bridge checks the person's role and applies the vote rules, then edits the card.
@@ -47,7 +47,7 @@ The bridge only reads the logbook and calls the sage state tool. It never writes
 
 ### A question's life
 
-![A question's life. A single question starts as Open; a batch of 2 to 4 starts as Voting. Open goes to Decided at the first press of a sage-driver. Voting goes to Decided when the 30 minutes end with a clear leader, or when a sage-lead ends the vote. Voting goes to Tied when the 30 minutes end with a tie or no votes, and Tied goes to Decided when a sage-lead breaks the tie. Open goes to Withdrawn when the owner withdraws it at the terminal. From Open, Voting or Tied, the owner can answer the chief, and the question is Answered at the terminal, which is final. Decided: the bridge gives sage the answer. Answered: sage has it already. Withdrawn: sage gets nothing.](docs/states.svg)
+![A question's life. A single question starts as Open; a batch of 2 to 4 starts as Voting. Open goes to Decided at the first press of a holder (a sage-apprentice or a sage-lead). Voting goes to Decided when the 30 minutes end with a clear leader, or when a sage-lead ends the vote. Voting goes to Tied when the 30 minutes end with a tie or no votes, and Tied goes to Decided when a sage-lead breaks the tie. Open goes to Withdrawn when the owner withdraws it at the terminal. From Open, Voting or Tied, the owner can answer the chief, and the question is Answered at the terminal, which is final. Decided: the bridge gives sage the answer. Answered: sage has it already. Withdrawn: sage gets nothing.](docs/states.svg)
 
 | State | What it means | What the card shows |
 | --- | --- | --- |
@@ -84,12 +84,12 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | A question about a merge is never posted, also when it is marked. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
 | One card holds the questions that one task asks within 30 seconds: 1 question, or a batch of 2 to 4. (G9) | Questions asked together belong together, so the team votes on them together. | `src/bridge.js` |
 | A task that asks 5 or more questions within 30 seconds keeps them at the terminal. | One card holds at most 4 parts (Discord allows 5 rows of buttons). | `src/bridge.js` |
-| Only members with the sage-driver role answer or vote. The holders are exactly those members. | The Discord admin decides who is on the team, with no vote. | `src/handle.js`, `src/vote.js` |
-| On a single question, the first answer from a sage-driver is final. | One answer is enough, and the work goes on at once. | `src/vote.js` |
+| Only members with the sage-apprentice or the sage-lead role answer or vote. The holders are exactly those members. Each person has one of the two roles; a member with both counts as a sage-lead, and the bridge logs a line with their name. | The Discord admin decides who is on the team, with no vote. | `src/handle.js`, `src/vote.js` |
+| On a single question, the first answer from a holder is final. | One answer is enough, and the work goes on at once. | `src/vote.js` |
 | A batch is a 30-minute team vote. The last ballot of each person counts. | The team can discuss and change their minds. | `src/vote.js` |
 | A tie, or a part with no votes, waits for a sage-lead. A lead acts only in Discord. | A person, not a coin, breaks a tie. | `src/vote.js` |
 | The card names the lead who broke a tie or ended a vote early. (G11) | The team sees who decided. | `src/cards.js` |
-| Reminders go out every 2 hours: to sage-driver for an open single question, to sage-lead for a tie. | A question must not wait in silence. | `src/vote.js`, `src/bridge.js` |
+| Reminders go out every 2 hours: to sage-apprentice and sage-lead for an open single question, to sage-lead only for a tie. | A question must not wait in silence. | `src/vote.js`, `src/bridge.js` |
 | The owner's answer at the terminal is final. A press never replaces it. (G10) | The owner has the last word. | `src/bridge.js` |
 | Only the owner withdraws a question, and the owner withdraws it at the terminal. | Nobody in Discord can cancel the chief's question. | `src/vote.js`, `src/bridge.js` |
 | One thread per chief session, only for a session that acts as chief and has a team vote, titled "Session N · weekday day month". It locks when the session ended and its questions are settled. (G14, G15) | Each session's questions stay together, and an old thread takes no more presses. | `src/sessions.js`, `src/bridge.js` |
@@ -106,9 +106,9 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
 - [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Invite it to your server with the `bot` scope. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
   *Why:* the bridge reads the members' roles to know who may vote. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach the chief's chat.
-- [ ] **2. Make two roles: `sage-driver` and `sage-lead`.** Make sage-driver **mentionable**. Give sage-driver to each person who votes, and sage-lead to the people who break ties. A lead needs sage-driver too.
-  *Why:* a new card pings @sage-driver. If the role is not mentionable, the ping notifies nobody.
-- [ ] **3. Fill in the config.** Copy the example, then put in the 5 Discord ids: the server (`guildId`), the parent channel (`channelId`), the owner (`ownerId`) and the two roles (`driverRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+- [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
+  *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
+- [ ] **3. Fill in the config.** Copy the example, then put in the 5 Discord ids: the server (`guildId`), the parent channel (`channelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
 
@@ -123,7 +123,8 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | Who | Permissions in the parent channel |
   | --- | --- |
   | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads. |
-  | sage-driver | Deny the same four permissions. |
+  | sage-apprentice | Deny the same four permissions. |
+  | sage-lead | Deny the same four permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
   **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
@@ -209,15 +210,16 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 | **Question** | A sage gate: a question that the chief parks for the owner, with options, a recommendation and a default. |
 | **The chief** | The sage session that frames the work and asks the questions. It changes no files. |
 | **The owner** | The person who runs sage at the terminal. In the demo, Erick. |
-| **The team** | The members of the Discord server with the sage-driver role. |
-| **sage-lead** | A role for the people who break ties and end votes early. |
+| **The team** | The members of the Discord server with the sage-apprentice or the sage-lead role. |
+| **sage-apprentice** | The role for the people who answer and vote. |
+| **sage-lead** | The role for the people who answer and vote, and also break ties and end votes early. A person has sage-apprentice or sage-lead, not both. |
 | **Team vote** | A question that the chief marked with `scripts/vote.mjs`. Only these go to Discord. |
 | **Card** | The Discord message of one question or one batch, with a button for each option. |
 | **Batch** | 2 to 4 questions of one task, asked within 30 seconds, on one card. |
 | **Session thread** | The Discord thread of one chief session. It holds that session's cards. |
 | **Parent channel** | The channel that holds one line per chief session. People only read it. |
 | **The bridge** | The service on the owner's Mac: `scripts/bridge.mjs`. |
-| **Holder** | A member with the sage-driver role. Only holders count. |
+| **Holder** | A member with the sage-apprentice or the sage-lead role. Only holders count. |
 
 ## What to do
 
