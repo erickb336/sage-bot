@@ -207,16 +207,20 @@ const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key
 function single(gate, ask, names) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
+  // A leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
+  const owner = who(gate.askedBy, names);
   const build = ({ why, label: cap, question }) => ({
-    title: cut(`Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
+    title: cut(`${ask.leads ? `Recommend for ${owner}: ` : ''}Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     description: [
       `**${cutAtWord(p.question, question)}**`, '',
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      '**Rule:** the first answer is final · reminder every 2 h until answered',
-      `**Who can answer:** every ${HOLDERS}`,
+      ...(ask.leads ? [`**Rule:** the first ${LEAD} answer is the leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+        `**Who can answer:** every ${LEAD}`]
+        : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, names)]
+        : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${lead(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${owner} decides at the terminal.**`]
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
@@ -340,6 +344,7 @@ const NOTES = {
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
   'not-holder': () => `Your press did not count. Only people with the ${HOLDERS} role can answer or vote. You can still read this thread.`,
+  'leads-only': (g, names) => `Only a ${LEAD} can answer this. ${who(g.askedBy, names)} decides.`,
   'not-lead': () => `Only a ${LEAD} can do this. Your votes on the parts count like everyone's.`,
   'lead-needs-discord': () => `A ${LEAD} action works only here in Discord, not at the terminal.`,
   'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,

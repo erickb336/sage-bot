@@ -84,12 +84,13 @@ function decide(interaction, { gates, people, clock }) {
   const event = action === 'end' || action === 'end!' ? { type: 'end', ...base }
     : action === 'tiebreak' ? { type: 'tiebreak', ...base, part, option }
     : { type: 'press', ...base, option, ...(gate.kind === 'batch' && { part }), ...(reason !== undefined && { reason }) };
-  const out = step(gate, event, people.holders, people.leads);
+  // A leads-only question (T73) has the sage-leads as its only holders: anyone else gets the leads-only note.
+  const out = step(gate, event, ask.leads ? people.leads : people.holders, people.leads);
   const refused = out.effects.find((e) => e.type === 'ignored');
   // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a lead, ended, closed, withdrawn,
   // or past the time limit by the clock), and the confirm shows only when the end would count (F-T27-13).
   if (action === 'end' && !refused) return reply(confirmEnd(gate, people), gate);
-  const result = refused ? reply(note(refused.why, out.gate, people.names), out.gate, out.effects)
+  const result = refused ? reply(note(refused.why === 'not-holder' && ask.leads ? 'leads-only' : refused.why, out.gate, people.names), out.gate, out.effects)
     : action === 'end!' ? update({ ...ephemeral(`You ended the vote on ${gate.id} at ${stamp(base.at)}.`), components: [] }, out.gate, out.effects)
     : action === 'press' && gate.kind === 'batch' ? { send: interaction.showModal, payload: reasonModal(out.gate, ask, part, index), gate: out.gate, effects: out.effects } // the vote counts already
     : update(card(out.gate, ask, people), out.gate, out.effects);

@@ -1,0 +1,141 @@
+// T73, the owner's decision G18 item 8: the chief marks a Yes or No question "leads only" with scripts/vote.mjs --leads. Only the
+// sage-leads can answer its card; their answer reaches sage as a recommendation, and the owner decides at the terminal (G10).
+// sage-bot never switches a mode of sage. Through the fake Discord layer and a scratch sage logbook.
+// SAMPLE DATA ONLY: every id, name and question is made up. Nothing connects to Discord or reads the Keychain.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { saveVotes } from '../src/state.js';
+import { MINUTE } from '../src/vote.js';
+import { CHANNEL, JON, MAYA, SAM, setup } from './bridge-setup.js';
+
+const LEAD = '300000000000000002';
+const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
+const QUESTION = ['Switch the automatic-merge mode on for this session?', 'Yes|No'];
+const NOTE = { kind: 'reply', content: 'Only a sage-lead can answer this. Erick decides.', flags: 64, allowedMentions: { parse: [] } };
+
+/**
+ * The phrases that switch sage's modes, built from their words so that this file never holds one: no text of the bridge may hold any.
+ * (The words come from the sage dictionary's rows for the two modes.)
+ */
+const [MODE, PILOT] = [['sage', 'mode'].join(' '), ['auto', 'pilot'].join('')];
+const SWITCHES = [MODE, PILOT, [PILOT, 'on'], [PILOT, 'off'], [MODE, 'off'], [MODE, PILOT]].map((p) => [p].flat().join(' ').toLowerCase());
+const switchesIn = (text) => SWITCHES.filter((p) => text.toLowerCase().includes(p));
+
+/** Runs scripts/vote.mjs with HOME in the scratch folder and the scratch config as the default config file. */
+function vote(b, ...args) {
+  const home = join(b.root, 'home');
+  mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
+  writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify({ statePath: b.statePath }));
+  const r = spawnSync(process.execPath, [VOTE, ...args], { env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
+  return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
+}
+/** A scratch project whose chief asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
+async function asked({ options = QUESTION[1] } = {}) {
+  const b = setup({ markAll: false });
+  b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', options, '--recommend', 'No');
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['G1']));
+  await b.post();
+  return b;
+}
+const cards = (b) => b.discord.posts.filter((p) => p.embeds);
+/** The description of the card as it is now, after its edits. */
+const text = (b) => b.discord.latest(b.discord.in(CHANNEL).find((id) => b.discord.messages.get(id)[0].embeds)).embeds[0].description;
+
+test('T73: vote.mjs --leads marks one gate, --unmark clears it, and a batch is refused with nothing changed', () => {
+  const b = setup({ markAll: false });
+  const leadsFile = `${b.statePath}.votes.leads`;
+  assert.deepEqual(vote(b, 'G2'), { code: 0, out: 'team votes: G2', err: '' });
+  assert.deepEqual(vote(b, '--leads', 'G2'), { code: 0, out: 'team votes: none\nleads only: G2', err: '' }); // a mark moves the gate
+  assert.equal(readFileSync(leadsFile, 'utf8'), '["G2"]');
+  assert.deepEqual(vote(b, '--leads', 'G3', 'G4'), { code: 1, out: '',
+    err: 'sage-bot vote: a leads-only question is one Yes or No question, never a batch: give one gate id to --leads, not 2. Nothing changed.' });
+  assert.deepEqual(vote(b, '--list'), { code: 0, out: 'team votes: none\nleads only: G2', err: '' });
+  assert.deepEqual(vote(b, '--unmark', 'G2'), { code: 0, out: 'team votes: none', err: '' });
+  assert.equal(readFileSync(leadsFile, 'utf8'), '[]');
+});
+
+test('T73: the card of a leads-only question pings sage-lead only and is titled as a recommendation for Erick', async () => {
+  const b = await asked();
+  assert.deepEqual(b.discord.posts.map((p) => [p.content, p.allowedMentions.roles, p.embeds?.[0].title]), [[
+    `<@&${LEAD}> T1 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal.`,
+    [LEAD], 'Recommend for Erick: Question G1 · T1 Ship the export page',
+  ]]);
+  assert.match(text(b), /\*\*Who can answer:\*\* every sage-lead$/);
+  assert.equal(b.lines.filter((l) => l.includes('merge')).length, 0); // a leads-only question about a merge is posted, not kept at the terminal
+  // The 2-hour reminder pings sage-lead only too.
+  b.now += 2 * 60 * MINUTE;
+  await b.bridge.loop();
+  assert.deepEqual(b.discord.posts.at(-1).allowedMentions.roles, [LEAD]);
+});
+
+test('T73: an apprentice press and a press with no role are refused with the leads-only note, and sage gets nothing', async () => {
+  const b = await asked();
+  b.now += MINUTE;
+  assert.deepEqual(await b.press(MAYA, 'press:G1:0:0'), [NOTE]);
+  assert.deepEqual(await b.press(SAM, 'press:G1:0:0'), [NOTE]);
+  await b.bridge.loop();
+  assert.equal(b.answerOf('G1'), '');
+  assert.doesNotMatch(text(b), /Recommended by/);
+});
+
+test('T73: a lead\'s press records the answer in sage, posts the recommendation note and prints one terminal line, with no switch phrase in any text', async () => {
+  const b = await asked();
+  b.now += MINUTE;
+  const replies = await b.press(JON, 'press:G1:0:0');
+  await b.bridge.loop();
+  assert.equal(b.answerOf('G1'), 'A. Yes');
+  assert.deepEqual(b.discord.posts.at(-1), { content: 'Recommendation recorded: Jon recommends Yes. Erick decides at the terminal.', allowedMentions: { parse: [] } });
+  assert.deepEqual(b.lines.filter((l) => l.includes('recommend')), ['G1: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal.']);
+  assert.match(text(b), /\*\*Recommended by Jon \(sage-lead\) at <t:\d+:t>: A\. Yes\. Erick decides at the terminal\.\*\*/);
+  // Every text that the bridge and vote.mjs made: the posts and edits, the replies, the log and the output of the chief's command.
+  const all = JSON.stringify([[...b.discord.messages.values()], replies, b.lines, vote(b, '--list'), vote(b, '--leads', 'G1', 'G2')]);
+  assert.deepEqual(switchesIn(all), []);
+  assert.deepEqual(switchesIn(`Turn ${SWITCHES[2]} now`), [PILOT, SWITCHES[2]]); // the check finds a phrase when one is there
+});
+
+test('T73: a leads-only question whose options are not Yes and No gets no card', async () => {
+  const b = await asked({ options: 'Merge now|Wait' });
+  assert.deepEqual(cards(b), []);
+  assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')), ['not posted: G1 is leads only, and a leads-only question needs the options Yes|No. Answer them at the terminal.']);
+});
+
+test('T73: a bad leads-only file is refused at load: no card, one log line, and vote.mjs stops with the same reason', async () => {
+  const b = setup({ markAll: false });
+  b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
+  const leadsFile = `${b.statePath}.votes.leads`;
+  mkdirSync(join(b.root, 'state'), { recursive: true, mode: 0o700 });
+  writeFileSync(leadsFile, '{"G1":true}', { mode: 0o600 });
+  await b.post();
+  const why = `the leads-only file ${leadsFile} must be a JSON list of sage gate ids (G and digits). Nothing was loaded.`;
+  assert.deepEqual(cards(b), []);
+  assert.deepEqual(b.lines.filter((l) => l.startsWith('no gate')), [`no gate is posted: ${why}`]);
+  assert.deepEqual(vote(b, '--list'), { code: 1, out: '', err: `sage-bot vote: ${why}` });
+  writeFileSync(leadsFile, '["G1"]');
+  chmodSync(leadsFile, 0o644);
+  assert.match(vote(b, '--list').err, /the leads-only file .* must be a regular file of this user with mode 0600/);
+});
+
+test('T73, G10: Erick\'s answer at the terminal wins, before a lead\'s press and after the leads\' recommendation', async () => {
+  const before = await asked();
+  before.sh('gate', 'answer', 'G1', 'B. No');
+  before.now += MINUTE;
+  assert.deepEqual((await before.press(JON, 'press:G1:0:0')).map((r) => r.content), ['Already answered by Erick at the terminal: B. No. Your press did not count.']);
+  await before.bridge.loop();
+  assert.equal(before.answerOf('G1'), 'B. No');
+  assert.equal(before.lines.filter((l) => l.includes('recommend')).length, 0);
+
+  const after = await asked();
+  after.now += MINUTE;
+  await after.press(JON, 'press:G1:0:0');
+  assert.equal(after.answerOf('G1'), 'A. Yes');
+  after.sh('gate', 'answer', 'G1', 'B. No');
+  after.now += MINUTE;
+  await after.bridge.loop();
+  await after.bridge.loop();
+  assert.equal(after.answerOf('G1'), 'B. No');
+  assert.match(text(after), /\*\*Answered by Erick \(terminal\) at <t:\d+:t>: B\. No\. Final\.\*\*/);
+});

@@ -7,7 +7,7 @@ import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp,
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
-import { alive, load, loadVotes, save, votesPathOf } from './state.js';
+import { alive, leadsPathOf, load, loadLeads, loadVotes, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
@@ -54,12 +54,15 @@ export function monotonic(now, floor = 0) {
 /**
  * The ask and the gate of a group of sage gate rows of one task: one row is a single question, 2 to 4 rows a batch.
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
+ * With `leads` (T73) the one row is a leads-only question: its options must be Yes and No, so that every text that the bridge writes
+ * about its answer comes from that allow-list.
  */
-export function frame(rows, title, ownerId, at) {
+export function frame(rows, title, ownerId, at, leads = false) {
   if (rows.length > MAX_PARTS) return { refused: `${rows[0].task} asked ${rows.length} questions together, and a batch holds at most ${MAX_PARTS} parts` };
   const texts = rows.map((r) => r.options.split('|').map((o) => o.trim()).filter(Boolean));
   const bad = rows.find((r, i) => texts[i].length === 0 || texts[i].length > MAX_OPTIONS || new Set(texts[i]).size !== texts[i].length);
   if (bad) return { refused: `${bad.id} needs 1 to ${MAX_OPTIONS} different options` };
+  if (leads && texts[0].map((o) => o.toLowerCase()).sort().join('|') !== 'no|yes') return { refused: `${rows[0].id} is leads only, and a leads-only question needs the options Yes|No` };
   const parts = rows.map((r, i) => {
     const keys = KEYS.slice(0, texts[i].length);
     const match = (said) => keys.find((k, j) => [k, texts[i][j], `${k}. ${texts[i][j]}`].some((t) => t.toLowerCase() === said.trim().toLowerCase()));
@@ -75,7 +78,7 @@ export function frame(rows, title, ownerId, at) {
   const id = rows.map((r) => r.id).join('+');
   const keys = parts.map((p) => Object.keys(p.options));
   const gate = openGate(kind === 'single' ? { id, kind, options: keys[0], askedBy: ownerId, at } : { id, kind, parts: keys, askedBy: ownerId, at });
-  return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts }, texts };
+  return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
 }
 
 /** The option key that an answer typed at the terminal names ("A", the option's text, or "A. text"), or undefined. */
@@ -136,6 +139,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const refused = new Set(); // groups already refused, so that the log says it once
   const kept = new Set(); // sage gate ids already logged as kept at the terminal (not marked, or about a merge), so that the log says it once
   const votesPath = votesPathOf({ statePath, votesPath: config.votesPath });
+  const leadsPath = leadsPathOf({ statePath, votesPath: config.votesPath });
   let votesError = null; // the last refusal of the team votes file, so that the log says it once
   let lastLoop = null;
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
@@ -151,8 +155,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings these roles and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (roles, text) => ({ content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } });
-  /** The roles of the holders: a new card and a single gate's reminder ping both (T70). */
-  const holderRoles = [config.apprenticeRole, config.leadRole];
+  /** The roles of the holders: a new card and a single gate's reminder ping both (T70), or only sage-lead for a leads-only question (T73). */
+  const holderRoles = (ask) => (ask.leads ? [config.leadRole] : [config.apprenticeRole, config.leadRole]);
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
   const post = async (target, payload) => {
@@ -283,10 +287,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   async function postCard(id, ppl, at) {
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
-    const text = (gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
+    const owner = nameOf(config.ownerId, ppl.names);
+    const text = (ask.leads ? `${ask.task} asks the ${LEAD}s for a recommendation to ${owner}. The first ${LEAD} answer is the recommendation; ${owner} decides at the terminal.`
+      : gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
       : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
-    const payload = { ...card(gate, ask, ppl), ...alert(holderRoles, text) };
+    const payload = { ...card(gate, ask, ppl), ...alert(holderRoles(ask), text) };
     let message = await post(at, payload);
     if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
     if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
@@ -474,6 +480,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       await postAbout(id, { content: `${nameOf(by, ppl.names)} (${LEAD}) broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
     }
     await flush();
+    const answered = effects.find((e) => e.type === 'closed' && e.outcome.status === 'answered');
+    if (ask.leads && answered) {
+      // T73: the leads only recommend. sage gets the answer as usual, and the owner decides at the terminal (G10). The bridge never
+      // switches a mode of sage, and its texts name the switch only in words.
+      const owner = nameOf(config.ownerId, ppl.names);
+      const { sage: [sageId], texts: [texts] } = meta.get(id);
+      await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${owner} decides at the terminal.`, allowedMentions: NO_MENTIONS });
+      say(`${sageId}: sage-leads recommend ${texts[KEYS.indexOf(answered.outcome.option)]}. If you agree, switch the mode yourself at the terminal.`);
+    }
   }
 
   /** Applies one event of the bridge's own (a tick or a withdraw) to the gate of `id`. */
@@ -491,16 +506,19 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     for (const id of await readOwner(rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
   }
 
-  /** The gate ids in the team votes file. A refused file counts as empty, so nothing is posted; the log says why once. */
+  /**
+   * The gate ids in the team votes file and in the leads-only file (T73). A refused file counts as both empty, so nothing is posted;
+   * the log says why once.
+   */
   function teamVotes() {
     try {
-      const votes = loadVotes(votesPath);
+      const marks = { votes: loadVotes(votesPath), leads: loadLeads(leadsPath) };
       votesError = null;
-      return votes;
+      return marks;
     } catch (e) {
       if (e.message !== votesError) say(`no gate is posted: ${e.message}`);
       votesError = e.message;
-      return new Set();
+      return { votes: new Set(), leads: new Set() };
     }
   }
 
@@ -514,17 +532,19 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     const t = clock();
     // The time a gate was first seen counts also before the chief marks it: a gate marked later posts at the next loop.
     for (const r of untracked) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
-    // Only the gates that the chief marked as team votes go to Discord (G13); every rule below sees only these.
-    const votes = teamVotes();
+    // Only the gates that the chief marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
+    // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
+    const { votes, leads } = teamVotes();
     const fresh = untracked.filter((r) => {
-      const why = !votes.has(r.id) ? 'the chief did not mark it as a team vote'
+      const why = leads.has(r.id) ? null : !votes.has(r.id) ? 'the chief did not mark it as a team vote'
         : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
       if (why && !r.answer && !kept.has(r.id)) { kept.add(r.id); say(`${r.id} stays at the terminal: ${why}`); }
       return !why;
     });
     const tasks = new Map();
-    for (const r of fresh) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    const groups = [...tasks.values()].flatMap(askedTogether);
+    for (const r of fresh.filter((x) => !leads.has(x.id))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
+    // A leads-only question is always one question on its own card, never part of a batch (T73).
+    const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter((x) => leads.has(x.id)).map((x) => [x])];
     const open = groups.map((g) => g.filter((r) => !r.answer));
     const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
     for (const [n, group] of groups.entries()) {
@@ -533,7 +553,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(r.id))) < SETTLE) continue;
       // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
       // ones count too, so no later card takes the rest.
-      const framed = frame(group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t);
+      const framed = frame(group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, leads.has(group[0].id));
       const key = group.map((r) => r.id).join('+');
       if (framed.refused) {
         if (!refused.has(key)) say(`not posted: ${framed.refused}. Answer them at the terminal.`);
@@ -569,7 +589,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       m.remindedAt = clock();
       persist();
       await postAbout(id, due.to === 'holders'
-        ? alert(holderRoles, `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
+        ? alert(holderRoles(ask), `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
         : alert([config.leadRole], `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
     }
   }

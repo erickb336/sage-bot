@@ -72,6 +72,16 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 - When the session then needs a new line, the old line says "moved to a new line below".
 - A session thread holds the votes and the chief's posts only. To chat with the chief, use a separate channel.
 
+### A leads-only question
+
+Some questions are for the sage-leads alone, and only as advice. The first one is the owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads recommend Yes or No; Erick decides at the terminal.
+
+1. The chief asks the question as a normal sage gate with the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused.
+2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
+3. Only a sage-lead can press. Anyone else gets the private note "Only a sage-lead can answer this. Erick decides."
+4. The first lead's press is the leads' recommendation. The bridge gives it to sage as usual ("A. Yes"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log: "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal."
+5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to the chief is final, also after the leads' recommendation (G10).
+
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
 
 ## Rules held in code
@@ -81,7 +91,8 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | Rule | Why | Where |
 | --- | --- | --- |
 | Only the questions that the chief marks with `scripts/vote.mjs` go to Discord. Every other question stays at the terminal. (G13) | Most questions are for the owner alone. The chief chooses which ones the team votes on. | `src/bridge.js` |
-| A question about a merge is never posted, also when it is marked. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
+| A question about a merge is never posted, also when it is marked as a team vote. Merges never go through a vote. | A merge is the owner's decision. | `src/bridge.js` |
+| A leads-only question (`vote.mjs --leads`) is one Yes or No question on its own card. Only sage-leads answer it, and the answer is a recommendation: the owner decides at the terminal. It may be about a merge. sage-bot never switches a mode of sage. (G18) | The leads advise; the owner keeps the decision. | `src/bridge.js`, `src/handle.js`, `src/cards.js` |
 | One card holds the questions that one task asks within 30 seconds: 1 question, or a batch of 2 to 4. (G9) | Questions asked together belong together, so the team votes on them together. | `src/bridge.js` |
 | A task that asks 5 or more questions within 30 seconds keeps them at the terminal. | One card holds at most 4 parts (Discord allows 5 rows of buttons). | `src/bridge.js` |
 | Only members with the sage-apprentice or the sage-lead role answer or vote. The holders are exactly those members. Each person has one of the two roles; a member with both counts as a sage-lead, and the bridge logs a line with their name. | The Discord admin decides who is on the team, with no vote. | `src/handle.js`, `src/vote.js` |
@@ -213,7 +224,8 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 | **The team** | The members of the Discord server with the sage-apprentice or the sage-lead role. |
 | **sage-apprentice** | The role for the people who answer and vote. |
 | **sage-lead** | The role for the people who answer and vote, and also break ties and end votes early. A person has sage-apprentice or sage-lead, not both. |
-| **Team vote** | A question that the chief marked with `scripts/vote.mjs`. Only these go to Discord. |
+| **Team vote** | A question that the chief marked with `scripts/vote.mjs`. Only these and the leads-only questions go to Discord. |
+| **Leads-only question** | A Yes or No question that the chief marked with `scripts/vote.mjs --leads`. Only a sage-lead answers it, as a recommendation to the owner. |
 | **Card** | The Discord message of one question or one batch, with a button for each option. |
 | **Batch** | 2 to 4 questions of one task, asked within 30 seconds, on one card. |
 | **Session thread** | The Discord thread of one chief session. It holds that session's cards. |
@@ -232,6 +244,7 @@ Run each command in the sage-bot folder.
 | You want to | Do this |
 | --- | --- |
 | Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
+| Ask the sage-leads for a recommendation, as the chief | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
 | Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
 | Answer a question yourself | Answer the chief in the chat as usual; that answer is final. (G10) |
