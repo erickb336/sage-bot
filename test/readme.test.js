@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,7 +64,7 @@ function shellBlocks(text) {
 
 /** A scratch home folder like an owner's after setup step 3: a filled-in config with sample ids. */
 function scratchHome() {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-readme-'));
+  const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-readme-'))); // the real path: a listed link to a folder outside git is refused (F-T132-24)
   const config = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
   Object.assign(config, { project: join(home, 'project'), sagePath: join(home, 'sage.mjs'), statePath: join(home, 'state', 'gates.json') });
   config.projects[0].project = config.project; // the owner fills in the same folder in both places (F-T132-1)
