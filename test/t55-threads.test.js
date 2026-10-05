@@ -14,7 +14,7 @@ import { CHANNEL, APPRENTICE, JON, LEADR, MAYA, setAt, setup } from './bridge-se
 const S1 = 'aaaaaaaa-0000-4000-8000-000000000001';
 const spoolDir = (b) => `${b.statePath}.sessions`;
 const hook = (b, event, extra = {}) => record({ session_id: S1, cwd: b.project, hook_event_name: event, ...extra },
-  { projects: [{ name: 'project', project: b.project }], dir: spoolDir(b), pid: process.pid, now: b.now });
+  { projects: [{ name: 'project', project: b.project, own: true }], dir: spoolDir(b), pid: process.pid, now: b.now });
 /** `sage gate add` at the test's clock, then the PostToolUse hook of S1 with its real output. */
 function gateAdd(b, task, question = `${task} question?`) {
   const out = b.sh('gate', 'add', task, '--question', question, '--options', 'x|y', '--recommend', 'x');
@@ -103,7 +103,7 @@ test('F-T55-1: a --project word of quoted and bare pieces is read as /bin/sh rea
   // Through the hook first: the gate is recorded when the word names the project, also with mixed quotes.
   const post = (command, gate) => record(
     { session_id: S1, cwd: project, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: `${gate} open · Q?\n`, stderr: '' } },
-    { projects: [{ name: 'project', project }], dir: spoolDir(b), pid: process.pid, now: b.now, home });
+    { projects: [{ name: 'project', project, own: true }], dir: spoolDir(b), pid: process.pid, now: b.now, home });
   assert.deepEqual([
     post(`node sage.mjs gate add T1 --project "$HOME"/'x y' --question "Q?"`, 'G1'),
     post(`node sage.mjs gate add T2 --project ~/'x y'`, 'G2'),

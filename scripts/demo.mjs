@@ -6,7 +6,7 @@
 // are in it, so nothing touches the owner's home folder or real logbook.
 process.env.TZ = 'UTC'; // the title of a thread has the host's date
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
@@ -44,7 +44,7 @@ if (outArg) {
 }
 let SAGE;
 try { SAGE = sagePath(); } catch (e) { fail(e.message); }
-const root = mkdtempSync(join(tmpdir(), 'sage-bot-demo-'));
+const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-demo-'))); // the real path, as loadProjects names the project
 const out = outArg ?? join(root, 'demo.html');
 const project = join(root, 'project');
 const statePath = join(root, 'state', 'gates.json');
@@ -53,7 +53,7 @@ mkdirSync(project);
 mkdirSync(join(root, 'home'));
 const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage'), TZ: 'UTC' };
 writeFileSync(configPath, JSON.stringify({ ...CONFIG, project, sagePath: SAGE, statePath }));
-const node = (args, input) => execFileSync(process.execPath, args, { env, input, encoding: 'utf8' }).trim();
+const node = (args, input) => execFileSync(process.execPath, args, { cwd: project, env, input, encoding: 'utf8' }).trim(); // sage runs in the project's folder
 const sage = (...args) => node([SAGE, ...args, '--project', project]);
 const script = (name) => new URL(name, import.meta.url).pathname;
 

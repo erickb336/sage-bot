@@ -79,7 +79,7 @@ test('F-T28-23: a Discord error is logged as its code, status and message only, 
   const statePath = join(dir, 'gates.json');
   const gate = openGate({ id: 'project/G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: 1 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
-  save(statePath, [{ gate, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
+  save(statePath, [{ gate, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   await bridge.interaction(fakeInteraction({ user: MAYA, customId: 'press:project/G1:0:0', refuse: error }));
   assert.ok(lines.includes('Discord refused a reply: code 10062, status 404: Unknown interaction'), lines.join('\n'));
@@ -92,7 +92,7 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   // A batch of 5 parts cannot be a card (5 rows of options and one more for "End vote now"): the reason form's card throws.
   const gate = openGate({ id: 'project/G1+G2+G3+G4+G5', kind: 'batch', parts: Array.from({ length: 5 }, () => ['A', 'B']), askedBy: OWNER, at: 1 });
   const ask = { kind: 'batch', task: 'T1', title: '', parts: Array.from({ length: 5 }, () => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
-  save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {} }]);
+  save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const lines = [];
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [] }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   const i = fakeInteraction({ user: MAYA, customId: 'reason:project/G1+G2+G3+G4+G5:0:0', fields: { reason: 'r' } });
@@ -108,7 +108,7 @@ test('F-T28-21: a long display name is made safe, then cut to 32 characters, in 
   const people = [{ id: OWNER, name: long, roles: [APPRENTICE, LEADR] }];
   const tied = step(openGate({ id: 'project/G1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], []).gate;
   const ask = { kind: 'batch', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
-  save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
+  save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const discord = fakeDiscord(people);
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord, config: CONFIG, statePath, now: () => 2 * 60 * 60_000, log: () => {} });
   await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:project/G1:0:1' }));

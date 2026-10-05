@@ -3,6 +3,7 @@
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
+import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
@@ -119,8 +120,10 @@ export function askedTogether(rows) {
 }
 
 /**
- * The bridge for the sage projects of the config and one Discord channel. `sages` holds the sage tool of each project by its name;
- * `own` is the bridge's own project, whose gates the files of the time before T132 hold.
+ * The bridge for the sage projects of the config and one Discord channel. `sages` holds the sage tool of each project by its name,
+ * and each tool's `folder` is the folder of its project (loadProjects); `own` is the bridge's own project, whose gates the files of the
+ * time before T132 hold. Each entry and mark holds the folder of its project, and only the project with that name and that folder
+ * now serves it (G45 A).
  * @param {{ sages: Map<string, ReturnType<import('./sage.js').sageTool>>, own: string,
  *   discord: { post(target: string, p: object): Promise<string>, edit(target: string, id: string, p: object): Promise<unknown>,
  *     startThread(lineId: string, name: string): Promise<string>, threadFrom(lineId: string): Promise<string>,
@@ -140,8 +143,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   // `gates` is the map that `handle` reads and writes; `meta` holds the rest of each entry, by the same gate id: the key of the gate (T132).
   const gates = new Map();
   const meta = new Map();
-  const loaded = load(statePath, own);
+  /** The folder of each project by its name: the one identity of a project (G45 A). A test's sage tool without one has null. */
+  const folders = new Map([...sages].map(([name, sage]) => [name, sage.folder ?? null]));
+  /** Whether the mark or entry `key`, of `folder`, is of a project of the config with that name and that folder now. */
+  const serves = (key, folder) => folders.has(projectOfKey(key)) && folders.get(projectOfKey(key)) === folder;
+  const loaded = load(statePath, own, folders);
+  // The entries of a project that the config does not serve now (its name left the config, or names another folder): they keep their
+  // place in the gate file, and nothing but `closeGone` and a press on their card reads them (F-T132-8, F-T132-21).
+  const parked = [];
   for (const { gate, ask, ...rest } of loaded.entries) {
+    if (!serves(gate.id, rest.folder)) { parked.push({ gate, ask, ...rest }); continue; }
     gates.set(gate.id, { gate, ask });
     meta.set(gate.id, rest);
   }
@@ -162,32 +173,37 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   let lastLoop = null;
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
-  const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), [...sessions.values()]);
-  // The files of the time before T132 get the keys at once. A card posted before keeps its old buttons, with the mark `oldButtons`,
-  // until an edit of it works: each loop tries (F-T132-5).
-  if (loaded.version < 3) persist();
-  migrateMarks({ statePath, votesPath: config.votesPath }, own);
-  /**
-   * Whether the project of the entry or mark `id` is in the config. The bridge reads no logbook of any other project, so an entry of one
-   * gets no post, tick, reminder or answer, and its questions do not count as open (F-T132-8).
-   */
-  const served = (id) => sages.has(projectOfKey(id));
+  const persist = () => save(statePath, [...[...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), ...parked], [...sessions.values()]);
+  // The files of the time before T132 get the keys, and the files before G45 A the folders, at once. A card posted before T132 keeps its
+  // old buttons, with the mark `oldButtons`, until an edit of it works: each loop tries (F-T132-5).
+  const marksMoved = migrateMarks({ statePath, votesPath: config.votesPath }, own, folders);
+  if (loaded.version < 4) persist();
+  if ((loaded.version < 4 && loaded.entries.length) || marksMoved) {
+    say(`one-time update: each card and mark now holds the folder of its project (${[...folders].map(([n, f]) => `${n}: ${f}`).join(', ')}); a card or mark of a name that is not in projects gets no folder and stays at the terminal`);
+  }
+  /** Whether the project of the mark `key` is in the config by its name. */
+  const listed = (key) => sages.has(projectOfKey(key));
   {
-    // A project that left the config, or a project renamed after its first start (F-T132-9): one line names its cards and its marks.
+    // A project that left the config, renamed after its first start (F-T132-9), or whose name now names another folder (F-T132-21):
+    // one line names its cards and its marks.
     const startMarks = teamVotes();
     const stranded = new Map();
-    const add = (k, what) => {
-      if (served(k)) return;
+    const add = (k, folder, what) => {
+      if (serves(k, folder)) return;
       const p = projectOfKey(k);
-      if (!stranded.has(p)) stranded.set(p, { cards: [], marks: [] });
-      stranded.get(p)[what].push(k.slice(p.length + 1));
+      const at = listed(k) ? `${p}\u0000${folder}` : p;
+      if (!stranded.has(at)) stranded.set(at, { p, folder: listed(k) && folder, cards: [], marks: [] });
+      stranded.get(at)[what].push(k.slice(p.length + 1));
     };
-    for (const id of meta.keys()) add(id, 'cards');
-    for (const k of [...startMarks.votes, ...startMarks.leads]) add(k, 'marks');
-    const parts = [...stranded].flatMap(([p, { cards, marks }]) => [
-      ...(cards.length ? [`the gate file holds cards of project '${p}', which is not in projects: ${cards.join(', ')}`] : []),
-      ...(marks.length ? [`the marks name gates of project '${p}', which is not in projects: ${marks.join(', ')}`] : []),
-    ]);
+    for (const e of parked) add(e.gate.id, e.folder, 'cards');
+    for (const [k, folder] of [...startMarks.votes, ...startMarks.leads]) add(k, folder, 'marks');
+    const parts = [...stranded.values()].flatMap(({ p, folder, cards, marks }) => {
+      const why = folder === false ? 'which is not in projects' : `of the folder ${folder ?? '(none)'}, which projects no longer give that name`;
+      return [
+        ...(cards.length ? [`the gate file holds cards of project '${p}', ${why}: ${cards.join(', ')}`] : []),
+        ...(marks.length ? [`the marks name gates of project '${p}', ${why}: ${marks.join(', ')}`] : []),
+      ];
+    });
     if (parts.length) say(`${parts.join('; ')}; keep a project's name as it was at its first start`);
   }
   const gone = new Set(); // the cards of a project that left the config whose press is already logged once (F-T132-2)
@@ -363,7 +379,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     return lineOf(x, { tasks: tasks.size, open: openOf(x.id) });
   }
   /** The questions of a session that still wait for an answer, on its cards and on the gates that wait for their card. */
-  const openOf = (sid) => [...meta].reduce((n, [id, m]) => n + (m.session === sid && served(id) ? openQuestions(id) : 0), 0);
+  const openOf = (sid) => [...meta].reduce((n, [id, m]) => n + (m.session === sid ? openQuestions(id) : 0), 0);
 
   /**
    * Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). The first edit that works gives a card of the time
@@ -444,8 +460,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   let flushing = Promise.resolve();
   const flush = () => (flushing = flushing.then(sendAnswers).catch((e) => say(`the answers to sage failed: ${e?.message}`)));
   async function sendAnswers() {
-    // Only the entries of a project in the config: the project of an entry may have left the config since its card.
-    for (const [id, m] of [...meta].filter(([x]) => served(x))) {
+    for (const [id, m] of [...meta]) {
       // One gate at a time: an error in the answers of one gate never stops the answers of the other gates (F-T43-7).
       try {
         await sendGate(id, m);
@@ -586,7 +601,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     try {
       const read = () => ({ votes: loadVotes(votesPath), leads: loadLeads(leadsPath) });
       let marks = read();
-      if ([...marks.votes].some((id) => marks.leads.has(id))) marks = read();
+      if ([...marks.votes.keys()].some((id) => marks.leads.has(id))) marks = read();
       votesError = null;
       return marks;
     } catch (e) {
@@ -610,7 +625,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it, or dropped when it is
     // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
-      if (!served(id)) continue;
       try {
         if (!m.message && (waits(id) || !moved(m))) await postCard(id, ppl, m.channel ?? await placeOf(m.session, projectOfKey(id)));
         await postHeld(id);
@@ -632,20 +646,23 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     // Only the gates that sage marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
     // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
     // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
-    const voted = (r) => marks.votes.has(key(r.id));
-    const leadsOnly = (r) => marks.leads.has(key(r.id));
+    // A mark counts only with the folder of this project: a mark of the same name for another folder is another gate (G45 A).
+    const voted = (r) => marks.votes.has(key(r.id)) && serves(key(r.id), marks.votes.get(key(r.id)));
+    const leadsOnly = (r) => marks.leads.has(key(r.id)) && serves(key(r.id), marks.leads.get(key(r.id)));
+    const elsewhere = (r) => [marks.votes, marks.leads].map((x) => x.get(key(r.id))).find((f) => f !== undefined && !serves(key(r.id), f));
     // A card or a mark of the same gate under a project that the config does not list: the project had another name at its first start.
     // That card stays the gate's only card, and the log names it, never "sage did not mark it" (F-T132-9).
     const unlisted = (k) => `${k}, of project '${projectOfKey(k)}', which is not in projects; keep a project's name as it was at its first start`;
-    const cardOf = (r) => [...meta].find(([id, m]) => {
-      const i = m.sage.indexOf(r.id);
-      return !served(id) && i >= 0 && gates.get(id).ask.task === shown(r.task, 40, 'a task') && gates.get(id).ask.parts[i].question === shown(r.question, 1000, r.id);
-    })?.[0];
-    const markOf = (r) => [...marks.votes, ...marks.leads].find((k) => !served(k) && k.endsWith(`/${r.id}`));
+    const cardOf = (r) => parked.find((e) => {
+      const i = e.sage.indexOf(r.id);
+      return !listed(e.gate.id) && i >= 0 && e.ask.task === shown(r.task, 40, 'a task') && e.ask.parts[i].question === shown(r.question, 1000, r.id);
+    })?.gate.id;
+    const markOf = (r) => [...marks.votes.keys(), ...marks.leads.keys()].find((k) => !listed(k) && k.endsWith(`/${r.id}`));
     const fresh = untracked.filter((r) => {
       const why = cardOf(r) ? `its card is ${unlisted(cardOf(r))}`
         : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'
         : leadsOnly(r) ? null : !voted(r) && markOf(r) ? `it has no mark of ${project}; the mark is ${unlisted(markOf(r))}`
+        : !voted(r) && elsewhere(r) !== undefined ? `its mark is of the folder ${elsewhere(r) ?? '(none)'}, not of ${project}'s folder now. Mark it again with scripts/vote.mjs`
         : !voted(r) ? 'sage did not mark it as a team vote'
         : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
       if (why && !r.answer && !kept.has(key(r.id))) { kept.add(key(r.id)); say(`${key(r.id)} stays at the terminal: ${why}`); }
@@ -672,7 +689,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       }
       const { gate, ask, texts } = framed;
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project) });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
   }
@@ -680,7 +697,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /** The timers: the tick at gate.endsAt (also after a sleep) and the reminders every 2 hours. */
   async function timers(ppl) {
     for (const id of gates.keys()) {
-      if (!served(id)) continue;
       const { gate } = gates.get(id);
       if (gate.phase === 'voting' && clock() >= gate.endsAt) await apply(id, { type: 'tick', at: clock() }, ppl);
       const { gate: g, ask } = gates.get(id);
@@ -696,32 +712,34 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * Closes each open card of a project that left the config, once in total: its buttons go, and a note says that ${OWNER} answers it at
-   * the terminal (F-T132-8). The mark `shut` in the gate file keeps it closed across restarts (F-T132-16). A card that Discord can never
-   * edit (a locked thread, a message or channel that is gone) counts as closed, and the log says so once. Any other refused edit is tried
-   * again at the next loop. When the project is in the config again, `redraw` gives the card its buttons back (F-T132-15).
+   * Closes each open card of a project that the config does not serve now (its name left the config, or names another folder), once in
+   * total: its buttons go, and a note says that ${OWNER} answers it at the terminal (F-T132-8, F-T132-21). The mark `shut` in the gate
+   * file keeps it closed across restarts (F-T132-16). A card that Discord can never edit (a locked thread, a message or channel that is
+   * gone) counts as closed, and the log says so once. Any other refused edit is tried again at the next loop. When the project is in the
+   * config again with the same folder, `redraw` gives the card its buttons back (F-T132-15).
    */
   async function closeGone(ppl) {
-    for (const [id, m] of meta) {
-      if (served(id) || m.shut || !m.message || !waits(id)) continue;
-      const { gate, ask } = gates.get(id);
-      const payload = { ...card(gate, ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
+    for (const e of parked) {
+      const id = e.gate.id;
+      if (e.shut || !e.message || settled(e.gate, e.ask)) continue;
+      const payload = { ...card(e.gate, e.ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
       let why = null;
-      try { await discord.edit(m.channel ?? config.channelId, m.message, payload); } catch (e) {
-        if (!NO_EDIT.has(e?.code)) { say(`Discord refused the edit of ${id}: ${apiError(e)}`); continue; }
-        why = e;
+      try { await discord.edit(e.channel ?? config.channelId, e.message, payload); } catch (x) {
+        if (!NO_EDIT.has(x?.code)) { say(`Discord refused the edit of ${id}: ${apiError(x)}`); continue; }
+        why = x;
       }
-      m.shut = true;
-      if (!why) delete m.oldButtons;
+      e.shut = true;
+      if (!why) delete e.oldButtons;
       persist();
-      say(why ? `${id}: its project is no longer in the config, and Discord cannot edit its card (${apiError(why)}), so the bridge leaves it; ${OWNER} answers it at the terminal`
-        : `${id}: its project is no longer in the config, so the bridge closed its card; ${OWNER} answers it at the terminal`);
+      const lost = listed(id) ? `its project's name now names another folder than ${e.folder ?? '(none)'}` : 'its project is no longer in the config';
+      say(why ? `${id}: ${lost}, and Discord cannot edit its card (${apiError(why)}), so the bridge leaves it; ${OWNER} answers it at the terminal`
+        : `${id}: ${lost}, so the bridge closed its card; ${OWNER} answers it at the terminal`);
     }
   }
 
   /** Reads the spool folder. */
   function readSessions() {
-    const read = readSpools(spoolDir, own);
+    const read = readSpools(spoolDir, { name: own, project: folders.get(own) });
     spools = read.spools;
     read.refused.forEach(sayOnce);
   }
@@ -764,18 +782,18 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
       // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
       // after reconcile: their thread is open again now.
-      for (const [id, m] of meta) if ((m.oldButtons || m.shut) && served(id)) await redraw(id, ppl);
+      for (const [id, m] of meta) if (m.oldButtons || m.shut) await redraw(id, ppl);
       // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
       // place that has an open question.
       if (lastLoop !== null && wall - lastLoop > SLEPT) {
         const places = new Set();
-        for (const [id, m] of meta) if (m.message && waits(id) && served(id)) places.add(m.channel ?? config.channelId);
+        for (const [id, m] of meta) if (m.message && waits(id)) places.add(m.channel ?? config.channelId);
         for (const at of places) await post(at, { content: `The host was asleep from ${stamp(lastLoop)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
       }
       lastLoop = wall;
       // A card counts only the votes of the holders: when a role changed, each open card shows the count that the tick will use.
       const holders = [...ppl.holders].sort().join();
-      if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id) && served(id)) await redraw(id, ppl);
+      if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) await redraw(id, ppl);
       lastHolders = holders;
       await timers(ppl);
       await sync(ppl);
@@ -798,9 +816,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
           i = Object.create(i, { customId: { value: customId(pressed.action, pressed.gateId, pressed.part, pressed.index) } });
         }
         const project = projectOfKey(pressed?.gateId);
-        // A card of a project that left the config: sage of that project never gets an answer from the bridge (F-T132-2).
-        if (pressed && gates.has(pressed.gateId) && !sages.has(project)) {
-          if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: its project is no longer in the config, so its card takes no press; ${OWNER} answers it at the terminal`); }
+        // A card of a project that the config does not serve now: sage never gets an answer from it (F-T132-2). When its key is also the
+        // key of a served card (the name now names another folder), only a press on the served card's own message counts there; the
+        // lead's private confirm is not a card (F-T132-21).
+        const twin = pressed && parked.some((e) => e.gate.id === pressed.gateId);
+        const confirm = i.message?.flags?.has(MessageFlags.Ephemeral) === true;
+        if (twin && (!gates.has(pressed.gateId) || (!confirm && i.message?.id !== meta.get(pressed.gateId).message))) {
+          if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: ${listed(pressed.gateId) ? "its project's name now names another folder" : 'its project is no longer in the config'}, so its card takes no press; ${OWNER} answers it at the terminal`); }
           await i.reply(ephemeral(`This question's project is no longer served; ${OWNER} answers it at the terminal.`));
           return;
         }

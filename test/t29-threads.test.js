@@ -22,7 +22,7 @@ const spoolDir = (b) => `${b.statePath}.sessions`;
 
 /** One hook event, recorded in-process as scripts/hook.mjs records it, with this test process as the Claude Code process. */
 function hook(b, id, event, extra = {}, pid = process.pid) {
-  return record({ session_id: id, cwd: b.project, hook_event_name: event, ...extra }, { projects: [{ name: 'project', project: b.project }], dir: spoolDir(b), pid, now: b.now });
+  return record({ session_id: id, cwd: b.project, hook_event_name: event, ...extra }, { projects: [{ name: 'project', project: b.project, own: true }], dir: spoolDir(b), pid, now: b.now });
 }
 /** sage's time of `gate add` for the test's clock: the wall clock to the second, as sage writes it. */
 const sageAt = (t) => new Date(t).toISOString().slice(0, 19) + 'Z';
@@ -291,7 +291,7 @@ test('a resume (the same session id) opens the old thread again; a /clear (a new
   await b.bridge.loop();
   assert.equal(b.discord.threads.get(first).locked, true);
 });
-test('a version 1 gate file loads: its card stays in the parent channel with its reminders, no session takes it, and the file becomes version 3 with the key of the own project', async () => {
+test('a version 1 gate file loads: its card stays in the parent channel with its reminders, no session takes it, and the file becomes version 4 with the key and the folder of the own project', async () => {
   const b = setup();
   const gate = openGate({ id: 'G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: T0 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
@@ -307,7 +307,7 @@ test('a version 1 gate file loads: its card stays in the parent channel with its
   await b.press(MAYA, 'press:project/G1:0:1');
   assert.match(b.discord.latest(card).embeds[0].description, /Answered by Maya/);
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
-  assert.deepEqual([saved.version, saved.entries[0].session, saved.sessions, saved.entries[0].gate.id], [3, null, [], 'project/G1']);
+  assert.deepEqual([saved.version, saved.entries[0].session, saved.sessions, saved.entries[0].gate.id], [4, null, [], 'project/G1']);
   assert.equal(load(b.statePath).entries[0].session, null);
 });
 test('the wake note after a sleep goes to each thread with an open question, not to the parent channel', async () => {
@@ -540,9 +540,9 @@ test('T29 with T39: a session thread gets the tie post after a lead ends the vot
   await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:project/G1+G2', ephemeral: true }));
   const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
   assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> project/G1\\+G2 is tied after its vote`));
-  // The file on disk is version 3: the entry has its session and the lead who ended the vote.
+  // The file on disk is version 4: the entry has its session and the lead who ended the vote.
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
-  assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [3, S1, JON]);
+  assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [4, S1, JON]);
   // A restart: a new bridge loads the file, keeps the thread of S1, and the tie-break goes to the thread.
   b.bridge = b.make();
   assert.equal(b.bridge.threadOf(S1), thread);
@@ -583,7 +583,7 @@ test('F-T29-11: the hook records only a run of the sage state tool with gate add
   mkdirSync(join(b.project, '~', 'project'), { recursive: true });
   const post = (command, stdout = 'G4 open · Q?\n', cwd = b.project) => record(
     { session_id: S1, cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout, stderr: '' } },
-    { projects: [{ name: 'project', project: b.project }], dir: spoolDir(b), pid: process.pid, now: b.now, home });
+    { projects: [{ name: 'project', project: b.project, own: true }], dir: spoolDir(b), pid: process.pid, now: b.now, home });
   const results = [
     post('cat notes.txt', 'G9 open · a line of a file\n'),
     post('echo "G9 open · x" # gate add T9'),

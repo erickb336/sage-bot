@@ -17,7 +17,7 @@ function vote(b, args, config = { project: b.project, sagePath: SAGE, statePath:
   const home = join(b.root, 'home');
   mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
   writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify(config));
-  const r = spawnSync(process.execPath, [VOTE, ...args], { env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [VOTE, ...args], { cwd: b.project, env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' }); // sage runs it in the project's folder
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
 
@@ -91,26 +91,28 @@ test('project/G13: the bridge refuses a team votes file with mode 0644 or of ano
   assert.deepEqual(titles(b), ['Question project/G1 · T1 ']);
 });
 
-test('G13: the team votes file round-trips, is 0600, and a file that is not a list of gate ids is refused', () => {
+test('G13, G45 A: the team votes file round-trips with folders, is 0600, and a file that is not an object of gate keys and folders is refused', () => {
   const b = setup({ markAll: false });
   const path = `${b.statePath}.votes`;
-  saveVotes(path, new Set(['project/G10', 'beta/G2', 'project/G2', 'project/G9']));
-  assert.deepEqual([...loadVotes(path)], ['beta/G2', 'project/G2', 'project/G9', 'project/G10']);
-  assert.equal(readFileSync(path, 'utf8'), '["beta/G2","project/G2","project/G9","project/G10"]');
-  // T132: a file of the time before T132 holds bare gate ids. A read refuses them; migrateMarks writes them once as keys of the own
-  // project, under the lock of vote.mjs, also in the leads-only file, and leaves a file with keys only as it is (F-T132-1).
-  writeFileSync(path, '["G2","G9"]', { mode: 0o600 });
+  saveVotes(path, new Map([['project/G10', '/p'], ['beta/G2', '/b'], ['project/G2', '/p'], ['project/G9', null]]));
+  assert.deepEqual([...loadVotes(path)], [['beta/G2', '/b'], ['project/G2', '/p'], ['project/G9', null], ['project/G10', '/p']]);
+  assert.equal(readFileSync(path, 'utf8'), '{"beta/G2":"/b","project/G2":"/p","project/G9":null,"project/G10":"/p"}');
+  // A list is the file before G45 A: bare gate ids (before T132) and keys. A read refuses it; migrateMarks writes it once as an object,
+  // under the lock of vote.mjs, also the leads-only file: a bare id is of the own project, and each key takes the folder that its name
+  // names now, or null for a name that is not listed (F-T132-1, F-T132-21).
+  writeFileSync(path, '["G2","beta/G9","gone/G3"]', { mode: 0o600 });
   writeFileSync(`${path}.leads`, '["G4"]', { mode: 0o600 });
-  assert.throws(() => loadVotes(path), /must be a JSON list of sage gate keys/);
-  migrateMarks({ statePath: b.statePath }, 'project');
-  assert.deepEqual([readFileSync(path, 'utf8'), readFileSync(`${path}.leads`, 'utf8')], ['["project/G2","project/G9"]', '["project/G4"]']);
-  assert.deepEqual([...loadVotes(path)], ['project/G2', 'project/G9']);
-  migrateMarks({ statePath: b.statePath }, 'beta'); // nothing bare is left, so another own project changes nothing
-  assert.equal(readFileSync(path, 'utf8'), '["project/G2","project/G9"]');
+  assert.throws(() => loadVotes(path), /must be a JSON object of sage gate keys/);
+  const folders = new Map([['project', '/p'], ['beta', '/b']]);
+  assert.equal(migrateMarks({ statePath: b.statePath }, 'project', folders), true);
+  assert.deepEqual([readFileSync(path, 'utf8'), readFileSync(`${path}.leads`, 'utf8')], ['{"beta/G9":"/b","gone/G3":null,"project/G2":"/p"}', '{"project/G4":"/p"}']);
+  // Once only: a second run, also with other folders, changes nothing.
+  assert.equal(migrateMarks({ statePath: b.statePath }, 'beta', new Map([['beta', '/x']])), false);
+  assert.equal(readFileSync(path, 'utf8'), '{"beta/G9":"/b","gone/G3":null,"project/G2":"/p"}');
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  for (const bad of ['{"G1":true}', '["G1","T1"]', '[1]', '["G1 "]', '["Project/G1"]', '["project/G1/G2"]', '["/G1"]', '["project/T1"]', '["G1"]']) {
+  for (const bad of ['{"G1":"/p"}', '{"project/G1":true}', '{"project/G1":1}', '[1]', '{"Project/G1":"/p"}', '{"project/G1/G2":"/p"}', '{"/G1":"/p"}', '{"project/T1":"/p"}', '["project/G1"]', 'null']) {
     writeFileSync(path, bad);
-    assert.throws(() => loadVotes(path), /must be a JSON list of sage gate keys/, bad);
+    assert.throws(() => loadVotes(path), /must be a JSON object of sage gate keys/, bad);
   }
 });
 
@@ -124,14 +126,14 @@ test('G13: scripts/vote.mjs marks, lists and unmarks gates, and refuses an id th
     assert.equal(r.code, 1, bad.join(' '));
     assert.match(r.err, /^sage-bot vote: not a sage gate id \(G and digits\): .+\. Nothing changed\.$/);
   }
-  assert.deepEqual([...loadVotes(`${b.statePath}.votes`)], ['project/G1']);
+  assert.deepEqual([...loadVotes(`${b.statePath}.votes`).keys()], ['project/G1']);
   assert.match(vote(b, []).err, /^sage-bot vote: usage:/);
   // `votesPath` in the config wins over `<statePath>.votes`; --config names another config file.
   const other = join(b.root, 'other.votes');
   const config = join(b.root, 'config.json');
   writeFileSync(config, JSON.stringify({ project: b.project, sagePath: SAGE, statePath: b.statePath, votesPath: other }));
   assert.equal(vote(b, ['--config', config, 'G7']).out, 'team votes: project/G7');
-  assert.deepEqual([...loadVotes(other)], ['project/G7']);
+  assert.deepEqual([...loadVotes(other).keys()], ['project/G7']);
 });
 
 test('end to end, G13: two gates are added, sage marks one with scripts/vote.mjs; only that one is posted and answered', async () => {

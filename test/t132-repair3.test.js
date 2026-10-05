@@ -31,7 +31,7 @@ function two() {
   b.shBeta('task', 'add', '--title', 'Beta colours', '--size', 'small');
   b.shBeta('gate', 'add', 'T1', '--question', 'Which colour?', '--options', 'Red|Blue', '--recommend', 'Red');
   writeFileSync(`${b.statePath}.votes`, '["beta/G1","project/G1"]', { mode: 0o600 });
-  b.projects = [{ name: 'project', project: b.project, sagePath: SAGE }, { name: 'beta', project: b.beta, sagePath: SAGE }];
+  b.projects = [{ name: 'project', project: b.project, sagePath: SAGE, own: true }, { name: 'beta', project: b.beta, sagePath: SAGE }];
   b.both = () => createBridge({ sages: new Map([['project', b.sage], ['beta', b.betaSage]]), own: 'project', discord: b.discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => b.lines.push(l) });
   b.ownOnly = () => createBridge({ sages: new Map([['project', b.sage]]), own: 'project', discord: b.discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => b.lines.push(l) });
   b.answerOfBeta = (id) => b.betaSage.gates().then((rows) => rows.find((r) => r.id === id).answer);
@@ -47,18 +47,25 @@ const run = (script, config, cwd, ...args) => {
   return [r.status, r.stdout.trim(), r.stderr.trim()];
 };
 
-test('F-T132-13: without --project, vote.mjs and reasons.mjs take the listed project whose folder holds the cwd, else the own project', () => {
+test('F-T132-13, F-T132-22: without --project, vote.mjs and reasons.mjs take the listed project whose folder holds the cwd, and refuse in any other folder', () => {
   const b = two();
   const config = join(b.root, 'config.json');
   writeFileSync(config, JSON.stringify({ project: b.project, sagePath: SAGE, statePath: b.statePath, projects: b.projects }));
   mkdirSync(join(b.beta, 'src'));
   assert.deepEqual(run('vote.mjs', config, b.beta, 'G3'), [0, 'team votes: beta/G1 beta/G3 project/G1', '']);
   assert.deepEqual(run('vote.mjs', config, join(b.beta, 'src'), 'G4'), [0, 'team votes: beta/G1 beta/G3 beta/G4 project/G1', '']);
-  assert.deepEqual(run('vote.mjs', config, b.root, 'G5'), [0, 'team votes: beta/G1 beta/G3 beta/G4 project/G1 project/G5', '']); // in no listed folder
+  // In no listed folder: one line that asks for --project, and the votes file does not change (G45 A, F-T132-22).
+  const votes = readFileSync(`${b.statePath}.votes`, 'utf8');
+  const refused = `no listed project's folder holds ${b.root}. Name the project with --project <name> (project, beta). Nothing changed.`;
+  assert.deepEqual(run('vote.mjs', config, b.root, 'G5'), [1, '', `sage-bot vote: ${refused}`]);
+  assert.equal(readFileSync(`${b.statePath}.votes`, 'utf8'), votes);
+  // --project works from anywhere.
+  assert.deepEqual(run('vote.mjs', config, b.root, '--project', 'project', 'G5')[1], 'team votes: beta/G1 beta/G3 beta/G4 project/G1 project/G5');
   assert.deepEqual(run('vote.mjs', config, b.beta, '--project', 'project', 'G6')[1], 'team votes: beta/G1 beta/G3 beta/G4 project/G1 project/G5 project/G6');
   const usage = 'usage: node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>';
   assert.deepEqual(run('reasons.mjs', config, b.beta, 'G9'), [1, '', `sage-bot reasons: no bridge gate beta/G9. ${usage}`]);
-  assert.deepEqual(run('reasons.mjs', config, b.root, 'G9'), [1, '', `sage-bot reasons: no bridge gate project/G9. ${usage}`]);
+  assert.deepEqual(run('reasons.mjs', config, b.root, 'G9'), [1, '', `sage-bot reasons: ${refused}`]);
+  assert.deepEqual(run('reasons.mjs', config, b.root, '--project', 'project', 'G9'), [1, '', `sage-bot reasons: no bridge gate project/G9. ${usage}`]);
 });
 
 test('F-T132-14: a listed folder that does not exist stops the bridge before the lock, and vote.mjs and reasons.mjs refuse it, with one line', () => {

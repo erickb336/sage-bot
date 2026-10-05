@@ -93,17 +93,20 @@ One bridge posts the cards of every project in the config's `projects` (T132). E
 | The card title | `Question sage-bot/G1 · T5 …` |
 | The ping above the card | `@sage-apprentice @sage-lead sage-bot T5 needs one product answer.` |
 | The session thread | `Session 3 · sage-bot · Tue 4 Oct`, in the home channel, as for one project |
-| The team votes list | `team votes: sage-bot/G1` |
+| The team votes list | `team votes: sage-bot/G1` (the file also holds the folder of each mark) |
 
-- sage marks a question with `node scripts/vote.mjs G1` in the project's folder, or names the project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook); the bridge's own `project` only when no listed folder holds it.
+- sage marks a question with `node scripts/vote.mjs G1` in the project's folder, or names the project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook). In a folder that no listed project holds, `vote.mjs` and `reasons.mjs` stop with one line that asks for `--project`, and nothing changes. With one project, run them in its folder, or give `--project`.
 - A press records the answer in the logbook of the card's project only. A press on G1 of one project never changes G1 of another project.
 - Erick's answer at the terminal is final in every project (G10).
-- A project that is not in the config's `projects` gets no cards. `vote.mjs` and `reasons.mjs` refuse it.
+- A project that is not in the config's `projects` gets no cards. `vote.mjs` and `reasons.mjs` refuse its name, and refuse to guess a project from a folder outside every listed folder.
+- Each card and each mark holds the folder of its project, not only its name. If you point a name at another folder (or swap two names), the old cards close once with the note below, and a press on them records nothing. An answer in the new folder never shows on an old card, and an old mark does not count for the new folder: mark the question again.
 - The bridge's own `project` must be one of `projects`. A trailing slash or a symlink is the same folder. If no listed project has that folder, the bridge, the hook, `vote.mjs` and `reasons.mjs` stop with one line: add the project to `projects`, with a name.
 - Each listed folder must exist, and each one is the folder of one project only. The bridge reads each path once, at the start, as the real path of its folder in the letter case of the disk, and names the project by that path everywhere. The bridge (at the start, before its lock and the Keychain), the hook, `vote.mjs`, `reasons.mjs`, `launchd.mjs` and `channels.mjs` stop with one line that names the project and its path when:
   - a listed folder does not exist: "the folder of project beta (/Users/you/beta) does not exist. Fix its path in projects, or take the project out. Nothing changed."
   - a listed path differs from its folder on disk only in letter case (`/Users/you/BETA` for the folder `beta`). Write it as the disk spells it.
   - two names are for one folder, also through a symlink or a trailing slash. Keep one of them.
+  - a listed path goes through a symlink to a folder that is not in git: the sage state tool keeps the logbook of such a folder by the path as written. Write the real path.
+  - the config's `project` or a listed path is not an absolute path, for example `~/beta`: "the config: project must be an absolute path".
 - A card of a project that you take out of `projects` takes no more presses. At its next start, the bridge closes each open card of that project once, also across later restarts: the buttons go, and the card says "This question's project is no longer served; Erick answers it at the terminal." The card gets no reminders, and its thread can lock. A press on an old copy of the card gets the same note. The body of a closed card has no rule, reminder or who-can-answer line: it says "**Closed:** this question's project is no longer served; Erick answers it at the terminal." When you put the project back in `projects`, its closed cards get their normal body and their buttons back without the note, and then the reminders again.
 - Keep each project's name as it was at its first start. The bridge knows a project only by its name, so a new name is a new project: the cards of the old name stop, and a question that sage marks again under the new name is not posted while its old card exists. To find the name, look at a card title or a thread title (`Question sage-bot/G1`, `Session 3 · sage-bot · Tue 4 Oct`), or at the keys in the team votes list. At each start, the bridge logs one line that names every card and mark of a project that is not in `projects`, for example "the gate file holds cards of project 'project', which is not in projects: G1, G2; keep a project's name as it was at its first start". If you see that line after a rename, put the old name back.
 - With one project, you also see its name: in the card title, in the ping and in the thread title, as in the table above.
@@ -240,11 +243,11 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
   *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
 
-  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
+  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder. Name the project with `--project`: the sage-bot folder is not the folder of a listed project.
 
   <!-- check: run, prints "team votes: your-project/G42" -->
   ```sh
-  node scripts/vote.mjs G42
+  node scripts/vote.mjs --project your-project G42
   ```
 
   While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
@@ -285,7 +288,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 Run each command in the sage-bot folder.
 
 - `vote.mjs`, `reasons.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
-- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of a project in `projects`. Without it, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook); the bridge's own `project` only when no listed folder holds it.
+- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of a project in `projects`. Without it, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook). In any other folder they stop with one line that asks for `--project`, and nothing changes.
 - `bridge.mjs` and `launchd.mjs` take the path of the config file as their only argument.
 
 | You want to | Do this |

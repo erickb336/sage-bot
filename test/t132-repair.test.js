@@ -35,7 +35,7 @@ function two() {
   b.shBeta('task', 'add', '--title', 'Beta colours', '--size', 'small');
   b.shBeta('gate', 'add', 'T1', '--question', 'Which colour?', '--options', 'Red|Blue', '--recommend', 'Red');
   // The own project is listed second: a fall back to the first project would take beta's logbook.
-  b.projects = [{ name: 'beta', project: b.beta, sagePath: SAGE }, { name: 'project', project: b.project, sagePath: SAGE }];
+  b.projects = [{ name: 'beta', project: b.beta, sagePath: SAGE }, { name: 'project', project: b.project, sagePath: SAGE, own: true }];
   b.with = (sages, own) => createBridge({ sages: new Map(sages), own, discord: b.discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => b.lines.push(l) });
   b.answerOfBeta = (id) => b.betaSage.gates().then((rows) => rows.find((r) => r.id === id).answer);
   return b;
@@ -57,6 +57,7 @@ const saved = (b) => JSON.parse(readFileSync(b.statePath, 'utf8'));
 
 test('F-T132-1: the own project is found by its real folder: a trailing slash and a symlink name it, a folder that is not listed is refused', () => {
   const b = two();
+  execFileSync('git', ['init', '-q', b.project]); // a link names a folder in git only (F-T132-24)
   const link = join(b.root, 'link');
   symlinkSync(b.project, link);
   const own = (project, projects = b.projects) => pickProject(loadProjects({ project, projects })).name;
@@ -65,7 +66,7 @@ test('F-T132-1: the own project is found by its real folder: a trailing slash an
   assert.equal(own(b.project, [b.projects[0], { ...b.projects[1], project: `${link}/` }]), 'project');
   const elsewhere = join(b.root, 'elsewhere');
   assert.throws(() => own(elsewhere), { message: REFUSED(elsewhere) });
-  assert.throws(() => own(undefined), { message: REFUSED('missing') });
+  assert.throws(() => own(undefined), { message: 'the config: project must be an absolute path' }); // F-T132-25
 });
 
 test('F-T132-1: a config whose project is not listed: the bridge, vote.mjs, reasons.mjs and the hook each refuse with one line and change nothing', () => {
@@ -96,7 +97,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   const own = pickProject(loadProjects(config)).name;
   assert.equal(own, 'project');
   b.bridge = b.with([['beta', b.betaSage], ['project', b.sage]], own);
-  assert.deepEqual([saved(b).entries[0].gate.id, readFileSync(`${b.statePath}.votes`, 'utf8')], ['project/G1', '["project/G1"]']);
+  assert.deepEqual([saved(b).entries[0].gate.id, readFileSync(`${b.statePath}.votes`, 'utf8')], ['project/G1', JSON.stringify({ 'project/G1': b.project })]);
   b.now += 60_000;
   await b.press(MAYA, 'press:G1:0:1'); // the old button, before the first loop
   await b.bridge.loop();
@@ -105,7 +106,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   // vote.mjs with the same config marks the own project's gate.
   const file = join(b.root, 'config.json');
   writeFileSync(file, JSON.stringify(config));
-  const vote = spawnSync(process.execPath, [SCRIPT('vote.mjs'), '--config', file, 'G2'], { env: { PATH: process.env.PATH, HOME: join(b.root, 'home') }, encoding: 'utf8' });
+  const vote = spawnSync(process.execPath, [SCRIPT('vote.mjs'), '--config', file, 'G2'], { cwd: b.project, env: { PATH: process.env.PATH, HOME: join(b.root, 'home') }, encoding: 'utf8' });
   assert.deepEqual([vote.status, vote.stdout.trim()], [0, 'team votes: project/G1 project/G2']);
 });
 
@@ -135,7 +136,7 @@ test('F-T132-5: a stop and a failed edit before the redraw keep the mark; the ol
   const old = await oldCard(b);
   b.bridge = b.make();
   assert.equal(saved(b).entries[0].oldButtons, true);
-  b.bridge = b.make(); // a stop before the first loop: the file is version 3 now, and the mark is still in it
+  b.bridge = b.make(); // a stop before the first loop: the file is version 4 now, and the mark is still in it
   const edit = b.discord.edit;
   b.discord.edit = async () => { throw Object.assign(new Error('Service Unavailable'), { status: 503 }); };
   await b.bridge.loop();
@@ -243,7 +244,7 @@ test('F-T132-9: a renamed own project logs its cards and marks at the start, no 
   assert.deepEqual(b.lines.slice(lines), ["the gate file holds cards of project 'project', which is not in projects: G1, G2; the marks name gates of project 'project', which is not in projects: G1, G2, G3; keep a project's name as it was at its first start"]);
   await b.post();
   // sage marks the gates again, now under alpha.
-  writeFileSync(`${b.statePath}.votes`, JSON.stringify(['alpha/G1', 'alpha/G2', 'alpha/G3', 'project/G1', 'project/G2', 'project/G3']), { mode: 0o600 });
+  writeFileSync(`${b.statePath}.votes`, JSON.stringify(Object.fromEntries(['alpha/G1', 'alpha/G2', 'alpha/G3', 'project/G1', 'project/G2', 'project/G3'].map((k) => [k, b.project]))), { mode: 0o600 });
   b.now += 60_000;
   await b.post();
   assert.deepEqual(cards(), ['Question project/G1 · T1 Task 1', 'Question project/G2 · T2 Task 2', 'Question alpha/G3 · T3 Task 3']); // G3 had no card

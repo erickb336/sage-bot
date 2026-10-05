@@ -340,7 +340,7 @@ test('T131: the lead-text cleaner keeps newlines and printable characters, maps 
 test('T131 dry run: no code in src/ can start a claude process; only the three known tools run as child processes', () => {
   const src = join(ROOT, 'src');
   const users = readdirSync(src).filter((f) => /child_process/.test(readFileSync(join(src, f), 'utf8'))).sort();
-  assert.deepEqual(users, ['discord.js', 'sage.js', 'state.js']); // the Keychain tool, the sage state tool (node), /bin/ps
+  assert.deepEqual(users, ['discord.js', 'projects.js', 'sage.js', 'state.js']); // the Keychain tool, git (a folder in git, as the state tool asks), the sage state tool (node), /bin/ps
   for (const f of readdirSync(src)) assert.ok(!/['"`]claude['"`]|\/claude\b|spawn\(/.test(readFileSync(join(src, f), 'utf8')), `${f} names a claude process or a spawn`);
   assert.match(readFileSync(join(src, 'sage.js'), 'utf8'), /run\(process\.execPath, \[sagePath,/); // the sage state tool runs as node <sage.mjs>
 });

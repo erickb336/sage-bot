@@ -37,7 +37,7 @@ function twoProjects() {
   b.sh('gate', 'add', 'T1', '--question', 'Which file type?', '--options', 'CSV|JSON', '--recommend', 'CSV');
   b.shBeta('task', 'add', '--title', 'Beta colours', '--size', 'small');
   b.shBeta('gate', 'add', 'T1', '--question', 'Which colour?', '--options', 'Red|Blue', '--recommend', 'Red');
-  saveVotes(`${b.statePath}.votes`, new Set(['project/G1', 'beta/G1']));
+  saveVotes(`${b.statePath}.votes`, new Map([['project/G1', b.project], ['beta/G1', b.beta]]));
   b.answerOfBeta = (id) => b.betaSage.gates().then((rows) => rows.find((r) => r.id === id).answer);
   return b;
 }
@@ -101,7 +101,7 @@ test('T132: a button id without a project, or with a project that the config doe
 
 test('T132: a session in another project gets its thread in the home channel, titled with its project', async () => {
   const b = twoProjects();
-  const projects = [{ name: 'project', project: b.project }, { name: 'beta', project: b.beta }];
+  const projects = [{ name: 'project', project: b.project, own: true }, { name: 'beta', project: b.beta }];
   record({ session_id: S1, cwd: b.beta, hook_event_name: 'SessionStart' }, { projects, dir: `${b.statePath}.sessions`, pid: process.pid, now: b.now });
   await b.post();
   const [thread] = [...b.discord.threads.values()];
@@ -128,7 +128,7 @@ test('T132 migration: a gate file, a team votes file and a spool file of the tim
 
   b.bridge = b.make();
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
-  assert.deepEqual([saved.version, saved.entries.map((e) => e.gate.id)], [3, ['project/G1']]); // migrated at the start
+  assert.deepEqual([saved.version, saved.entries.map((e) => e.gate.id)], [4, ['project/G1']]); // migrated at the start (version 4: with the folder, G45 A)
   await b.post();
   // The open card gets its buttons with the key; a press on an old button is refused, a press on the new one counts.
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
@@ -139,7 +139,7 @@ test('T132 migration: a gate file, a team votes file and a spool file of the tim
   const [[threadId, thread]] = [...b.discord.threads];
   assert.equal(thread.name, 'Session 1 · project · Sun 4 Oct');
   assert.deepEqual(b.discord.in(threadId).map((id) => b.discord.messages.get(id)[0].embeds?.[0].title), ['Question project/G2 · T1 Alpha export']);
-  assert.deepEqual([...loadVotes(`${b.statePath}.votes`)], ['project/G1', 'project/G2']);
+  assert.deepEqual([...loadVotes(`${b.statePath}.votes`).keys()], ['project/G1', 'project/G2']);
 });
 
 test('T132: the hook records a session in every listed project, the deepest one for nested folders, and ignores every other folder', () => {
@@ -148,7 +148,7 @@ test('T132: the hook records a session in every listed project, the deepest one 
   const inner = join(outer, 'inner');
   const elsewhere = join(b.root, 'elsewhere');
   for (const dir of [join(inner, 'src'), elsewhere]) mkdirSync(dir, { recursive: true });
-  const projects = [{ name: 'project', project: b.project }, { name: 'outer', project: outer }, { name: 'inner', project: inner }];
+  const projects = [{ name: 'project', project: b.project, own: true }, { name: 'outer', project: outer }, { name: 'inner', project: inner }];
   const dir = `${b.statePath}.sessions`;
   const ids = ['dddddddd-0000-4000-8000-000000000001', 'dddddddd-0000-4000-8000-000000000002', 'dddddddd-0000-4000-8000-000000000003', 'dddddddd-0000-4000-8000-000000000004'];
   const start = (id, cwd) => record({ session_id: id, cwd, hook_event_name: 'SessionStart' }, { projects, dir, pid: process.pid, now: b.now });
@@ -177,9 +177,9 @@ test('T132: vote.mjs marks the gates of the project that --project names, the ow
   const config = join(b.root, 'vote-config.json');
   mkdirSync(join(b.root, 'beta')); // a listed folder that does not exist is refused (F-T132-14)
   writeFileSync(config, JSON.stringify({ project: b.project, sagePath: SAGE, statePath: b.statePath,
-    projects: [{ name: 'project', project: b.project }, { name: 'beta', project: join(b.root, 'beta') }] }));
+    projects: [{ name: 'project', project: b.project, own: true }, { name: 'beta', project: join(b.root, 'beta') }] }));
   const vote = (...args) => {
-    const r = spawnSync(process.execPath, [VOTE, '--config', config, ...args], { env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [VOTE, '--config', config, ...args], { cwd: b.project, env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
   };
   assert.deepEqual(vote('--project', 'beta', 'G1', 'G2'), { code: 0, out: 'team votes: beta/G1 beta/G2', err: '' });
@@ -187,5 +187,5 @@ test('T132: vote.mjs marks the gates of the project that --project names, the ow
   assert.deepEqual(vote('--project', 'beta', '--unmark', 'G1'), { code: 0, out: 'team votes: beta/G2 project/G1', err: '' });
   assert.deepEqual(vote('--project', 'nope', 'G1'), { code: 1, out: '', err: 'sage-bot vote: the project "nope" is not in the config\'s projects (project, beta). Nothing changed.' });
   assert.deepEqual(vote('--project', 'nope', '--list'), { code: 1, out: '', err: 'sage-bot vote: the project "nope" is not in the config\'s projects (project, beta). Nothing changed.' });
-  assert.equal(readFileSync(`${b.statePath}.votes`, 'utf8'), '["beta/G2","project/G1"]');
+  assert.equal(readFileSync(`${b.statePath}.votes`, 'utf8'), JSON.stringify({ 'beta/G2': join(b.root, 'beta'), 'project/G1': b.project })); // each mark with its folder (G45 A)
 });

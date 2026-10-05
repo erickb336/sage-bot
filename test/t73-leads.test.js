@@ -36,7 +36,7 @@ function voteWith(b, sage, ...args) {
   mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
   writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify({ statePath: b.statePath, ...sage, project: b.project }));
   const env = { PATH: process.env.PATH, HOME: home, SAGE_HOME: join(home, 'sage') };
-  const r = spawnSync(process.execPath, [VOTE, ...args], { env, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [VOTE, ...args], { cwd: b.project, env, encoding: 'utf8' }); // sage runs it in the project's folder
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
 /** A scratch project where sage asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
@@ -44,7 +44,7 @@ async function asked({ question = QUESTION[0], options = QUESTION[1], members } 
   const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', question, '--options', options, '--recommend', 'No');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1']));
+  saveVotes(`${b.statePath}.votes.leads`, new Map([['project/G1', b.project]]));
   await b.post();
   return b;
 }
@@ -60,12 +60,12 @@ test('T73: vote.mjs --leads marks one gate, --unmark clears it, and a batch is r
   const leadsFile = `${b.statePath}.votes.leads`;
   assert.deepEqual(vote(b, 'G2'), { code: 0, out: 'team votes: project/G2', err: '' });
   assert.deepEqual(vote(b, '--leads', 'G2'), { code: 0, out: 'team votes: none\nleads only: project/G2', err: '' }); // a mark moves the gate
-  assert.equal(readFileSync(leadsFile, 'utf8'), '["project/G2"]');
+  assert.equal(readFileSync(leadsFile, 'utf8'), JSON.stringify({ 'project/G2': b.project }));
   assert.deepEqual(vote(b, '--leads', 'G3', 'G4'), { code: 1, out: '',
     err: 'sage-bot vote: a leads-only question is one Yes or No question, never a batch: give one gate id to --leads, not 2. Nothing changed.' });
   assert.deepEqual(vote(b, '--list'), { code: 0, out: 'team votes: none\nleads only: project/G2', err: '' });
   assert.deepEqual(vote(b, '--unmark', 'G2'), { code: 0, out: 'team votes: none', err: '' });
-  assert.equal(readFileSync(leadsFile, 'utf8'), '[]');
+  assert.equal(readFileSync(leadsFile, 'utf8'), '{}');
 });
 
 test('T73: the card of a leads-only question pings sage-lead only and is titled as a recommendation for Erick', async () => {
@@ -122,7 +122,7 @@ test('T73: a bad leads-only file is refused at load: no card, one log line, and 
   mkdirSync(join(b.root, 'state'), { recursive: true, mode: 0o700 });
   writeFileSync(leadsFile, '{"G1":true}', { mode: 0o600 });
   await b.post();
-  const why = `the leads-only file ${leadsFile} must be a JSON list of sage gate keys (a project name, a slash, G and digits). Nothing was loaded.`;
+  const why = `the leads-only file ${leadsFile} must be a JSON object of sage gate keys (a project name, a slash, G and digits) and their folders. Nothing was loaded.`;
   assert.deepEqual(cards(b), []);
   assert.deepEqual(b.lines.filter((l) => l.startsWith('no gate')), [`no gate is posted: ${why}`]);
   assert.deepEqual(vote(b, '--list'), { code: 1, out: '', err: `sage-bot vote: ${why}` });
@@ -187,8 +187,8 @@ test('F-T73-2: a gate in both the team votes file and the leads-only file gets n
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
-  saveVotes(`${b.statePath}.votes`, new Set(['project/G1']));
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1']));
+  saveVotes(`${b.statePath}.votes`, new Map([['project/G1', b.project]]));
+  saveVotes(`${b.statePath}.votes.leads`, new Map([['project/G1', b.project]]));
   await b.post();
   await b.bridge.loop();
   assert.deepEqual(cards(b), []);
@@ -218,7 +218,7 @@ test('F-T73-11: a team vote and the leads-only question of one task, asked toget
   b.sh('gate', 'add', 'T1', '--question', 'Ship it?', '--options', 'Yes|No', '--recommend', 'No');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G1');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G2']));
+  saveVotes(`${b.statePath}.votes.leads`, new Map([['project/G2', b.project]]));
   await b.post();
   assert.deepEqual(cards(b).map((p) => [p.embeds[0].title, p.allowedMentions.roles]), [
     ['Question project/G1 · T1 Ship the export page', [APPRENTICE, LEAD]],
@@ -257,7 +257,7 @@ test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both"
   // A gate that stays in both files after the second read gets no card and one line.
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G2');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1', 'project/G2']));
+  saveVotes(`${b.statePath}.votes.leads`, new Map([['project/G1', b.project], ['project/G2', b.project]]));
   await b.post();
   await b.bridge.loop();
   assert.equal(cards(b).length, 1);

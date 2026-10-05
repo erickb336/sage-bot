@@ -185,8 +185,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     const parent = await parentId;
     return channels.has(parent) ? parent : null;
   }
-  const teamVotes = () => { // the keys of the team votes of every project (T132)
-    try { return loadVotes(votesPathOf(config), pickProject(projects).name); } catch { return new Set(); }
+  const teamVotes = () => { // the team votes of every project (T132): gate key → the folder of its project (G45 A)
+    try { return loadVotes(votesPathOf(config)); } catch { return new Map(); }
   };
 
   /** The content (and files) of the answer to one /sage command in the registered channel `at` (or a thread of it). */
@@ -315,7 +315,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
     const votes = teamVotes();
-    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(`${p.name}/${g.id}`) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
+    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.get(`${p.name}/${g.id}`) === p.project ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
   }
   /** One open question in full (G20): its text and its options. */
   const question = (g, how) => [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`];

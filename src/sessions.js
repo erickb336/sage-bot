@@ -3,7 +3,7 @@
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { projectAt } from './projects.js';
+import { pickProject, projectAt } from './projects.js';
 import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
@@ -57,12 +57,14 @@ export function sessionsPathOf({ sessionsPath, statePath }) {
 const isTime = (x) => Number.isSafeInteger(x) && x >= 0;
 /**
  * One spool file, checked: { id, project, cwd, startedAt, pid, endedAt?, gates, tasks }. Throws for anything that the hook did not write.
- * `project` is the name of the session's project in the config (T132); the gates and tasks are of that project. A spool file of the
- * time before T132 has no project: it is of `own`, the bridge's own project.
+ * `project` is the name of the session's project in the config (T132), and `cwd` the folder of that project (loadProjects) when the
+ * session started; the gates and tasks are of that project. A spool file of the time before T132 has no project: it is of `own`, the
+ * bridge's own project (loadProjects), and its folder (F-T132-23).
+ * @param {object} s @param {{ name: string, project: string | null }} own
  * @returns {{ id: string, project: string, cwd: string, startedAt: number, pid: number, endedAt?: number, gates: string[], tasks: string[] }}
  */
 export function parseSpool(s, own) {
-  if (s && s.project === undefined) s = { ...s, project: own };
+  if (s && s.project === undefined && own) s = { ...s, project: own.name, cwd: own.project };
   const ok = s && SESSION_ID.test(s.id) && PROJECT_NAME.test(s.project ?? '') && typeof s.cwd === 'string' && isTime(s.startedAt) && Number.isSafeInteger(s.pid) && s.pid > 0
     && (s.endedAt === undefined || isTime(s.endedAt))
     && Array.isArray(s.gates) && s.gates.every((g) => GATE_ID.test(g)) && Array.isArray(s.tasks) && s.tasks.every((t) => TASK_ID.test(t));
@@ -72,7 +74,7 @@ export function parseSpool(s, own) {
 
 const spoolPath = (dir, id) => join(dir, `${id}.json`);
 
-/** Every spool file of the folder, by session id, and one line for each file that was refused. The folder may not exist yet. */
+/** Every spool file of the folder, by session id, and one line for each file that was refused. The folder may not exist yet. `own` is the bridge's own project, { name, project }: a spool file of the time before T132 is of it. */
 export function readSpools(dir, own) {
   const spools = new Map();
   const refused = [];
@@ -98,10 +100,11 @@ export const runs = (s, alive) => s.endedAt === undefined && alive(s.pid);
  * started before sage asked it (its `at`, to the second), the one that started last; else the newest running session of the project;
  * else null. A spool can list a gate id of an older logbook (F-T29-3).
  * @param {{ id: string, at: string }[]} rows @param {Map<string, ReturnType<typeof parseSpool>>} spools @param {(pid: number) => boolean} alive
- * @param {string} project
+ * @param {string} project @param {string | null} folder  the project's folder (loadProjects)
  */
-export function sessionOf(rows, spools, alive, project) {
-  const all = [...spools.values()].filter((s) => s.project === project).sort((a, b) => b.startedAt - a.startedAt);
+export function sessionOf(rows, spools, alive, project, folder) {
+  // Only the sessions of this name and this folder: the name may have named another folder when an older session started (G45 A).
+  const all = [...spools.values()].filter((s) => s.project === project && s.cwd === folder).sort((a, b) => b.startedAt - a.startedAt);
   const startedBy = (s, at) => Math.floor(s.startedAt / 1000) * 1000 <= Date.parse(at);
   const known = all.find((s) => rows.some((r) => s.gates.includes(r.id) && startedBy(s, r.at)));
   return (known ?? all.find((s) => runs(s, alive)))?.id ?? null;
@@ -144,6 +147,7 @@ function locked(file, work) {
 
 /**
  * Records one Claude Code hook event in the spool (scripts/hook.mjs). Throws for input that it refuses; then it writes nothing.
+ * A spool file that is there but cannot be read or checked is refused (a throw), and nothing is written over it (F-T132-23).
  * A session keeps the project it started in (G43 A): its first event takes the listed project whose folder holds its cwd (T132), and once
  * its spool exists, each later event is of the spool's project, whatever its cwd. A first event in a folder outside every listed project,
  * and a `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
@@ -188,16 +192,15 @@ export function record(input, { projects, dir, pid, now, home }) {
   }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return locked(file, () => {
-    let old;
-    try {
-      const raw = JSON.parse(readOwn(file, 'spool file') ?? 'null');
-      old = parseSpool(raw, projectAt(String(raw?.cwd), projects)?.name); // a spool file of the time before T132: of the project of its cwd
-    } catch { old = undefined; }
+    // A spool file of the time before T132 is of the own project, as the bridge reads it. A spool file that cannot be read or placed is
+    // never written over: its gates and tasks would be lost (F-T132-23).
+    const text = readOwn(file, 'spool file');
+    const old = text === undefined ? undefined : parseSpool(JSON.parse(text), pickProject(projects));
     if (event === 'SessionEnd' && !old) return 'no session';
     if (!old && !here) return 'outside the projects';
-    const name = old?.project ?? here.name;
-    if (named !== undefined && projectAt(resolve(input.cwd, named), projects)?.name !== name) return 'another project';
-    const s = old ?? { id, project: name, cwd: here.project, startedAt: now, pid, gates: [], tasks: [] };
+    const folder = old?.cwd ?? here.project;
+    if (named !== undefined && projectAt(resolve(input.cwd, named), projects)?.project !== folder) return 'another project';
+    const s = old ?? { id, project: here.name, cwd: folder, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;
     if (gate && !s.gates.includes(gate)) s.gates.push(gate);

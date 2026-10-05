@@ -41,7 +41,9 @@ function entryOf(e) {
     // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).
     && (e.oldButtons === undefined || e.oldButtons === true)
     // T132: a card that the bridge closed while its project was out of the config, until an edit gives it its buttons back (F-T132-16).
-    && (e.shut === undefined || e.shut === true);
+    && (e.shut === undefined || e.shut === true)
+    // Version 4 (G45 A): the folder of the entry's project (loadProjects), or null when no listed project had its name at the update.
+    && (e.folder === null || isText(e.folder));
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
   if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
     throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
@@ -61,21 +63,24 @@ function sessionOf(s) {
 /**
  * The entries and the sage sessions of the gate file, both [] when there is none yet, and the file's version. Throws for a file that is
  * not the bridge's own. A version 1 file (before T29) has no sessions, and its entries have no session. The entries of a version 1 or 2
- * file (before T132) are of one project: `own`, the bridge's own project, goes in front of their gate ids. Without `own` (a script that
- * reads only the sessions or shows the ids) they keep the ids as written.
- * @returns {{ gate: import('./vote.js').Gate, ask: object, sage: string[], texts: string[][], message: string | null, remindedAt: number,
- *   sent: Record<string, string> }[]}  the owner's final answers from the terminal are in `ask.parts[i].final`
+ * file (before T132) are of one project: `own`, the bridge's own project, goes in front of their gate ids. The entries of a file before
+ * version 4 (G45 A) get the folder that `folders` (project name → folder, from loadProjects) gives their name now, or null for a name
+ * that it does not have: such an entry is never served again. Without `own` (a script that reads only the sessions or shows the ids)
+ * the entries stay as written.
+ * @param {string} path @param {string} [own] @param {Map<string, string | null>} [folders]
+ * @returns {{ version: number, entries: { gate: import('./vote.js').Gate, ask: object, sage: string[], texts: string[][], message: string | null,
+ *   remindedAt: number, sent: Record<string, string>, folder: string | null }[], sessions: object[] }}  the owner's final answers from the terminal are in `ask.parts[i].final`
  */
-export function load(path, own) {
+export function load(path, own, folders = new Map()) {
   const text = readOwn(path, 'gate file');
   if (text === undefined) return { version: VERSION, entries: [], sessions: [] };
   const data = JSON.parse(text);
   const sessions = data?.version === 1 ? [] : data?.sessions;
-  if (![1, 2, VERSION].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1, 2 or 3`);
-  const old = data.version < VERSION;
-  if (old && own === undefined) return { version: data.version, entries: data.entries, sessions: sessions.map(sessionOf) };
+  if (![1, 2, 3, VERSION].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1, 2, 3 or 4`);
+  if (data.version < VERSION && own === undefined) return { version: data.version, entries: data.entries, sessions: sessions.map(sessionOf) };
   // An old entry with a card gets the mark `oldButtons`: its buttons name the bare gate id until the bridge edits the card (F-T132-5).
-  const entries = old ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) }, ...(e?.message && { oldButtons: true }) })) : data.entries;
+  const keyed = data.version < 3 ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) }, ...(e?.message && { oldButtons: true }) })) : data.entries;
+  const entries = data.version < VERSION ? keyed.map((e) => ({ ...e, folder: folders.get(projectOfKey(e?.gate?.id)) ?? null })) : keyed;
   return { version: data.version, entries: entries.map(entryOf), sessions: sessions.map(sessionOf) };
 }
 
@@ -104,8 +109,8 @@ export function readOwn(path, what) {
   } finally { closeSync(fd); }
 }
 
-/** The version of the gate file that the bridge writes: 3 since T132 (gate ids with their project). */
-const VERSION = 3;
+/** The version of the gate file that the bridge writes: 3 since T132 (gate ids with their project), 4 since G45 A (each entry with its folder). */
+const VERSION = 4;
 /** Replaces the gate file whole. */
 export const save = (path, entries, sessions = []) => writeWhole(path, JSON.stringify({ version: VERSION, entries, sessions }));
 
@@ -129,8 +134,8 @@ const GATE_KEY = /^[a-z0-9][a-z0-9-]{0,31}\/G\d{1,9}$/;
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * The team votes file (G13): the keys of the sage gates that sage marked as team votes. The bridge posts only these.
- * It is `votesPath` in the config, or `<statePath>.votes`; scripts/vote.mjs writes it.
+ * The team votes file (G13): the keys of the sage gates that sage marked as team votes, each with the folder of its project
+ * (G45 A). The bridge posts only these. It is `votesPath` in the config, or `<statePath>.votes`; scripts/vote.mjs writes it.
  */
 export function votesPathOf({ votesPath, statePath }) {
   const path = votesPath ?? (typeof statePath === 'string' ? `${statePath}.votes` : undefined);
@@ -139,45 +144,53 @@ export function votesPathOf({ votesPath, statePath }) {
 }
 
 /**
- * The leads-only file (T73): the sage gate ids that sage marked with `--leads`. Each is a single Yes or No question that only the
+ * The leads-only file (T73): the sage gates that sage marked with `--leads`. Each is a single Yes or No question that only the
  * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
-/** The keys in the leads-only file, checked like the team votes file. */
+/** The marks in the leads-only file, checked like the team votes file. */
 export const loadLeads = (path) => loadVotes(path, 'leads-only file');
 
 /**
- * The marked gate keys, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list
- * of gate keys: a bare gate id (the file before T132) too, because only `migrateMarks` gives it its project (F-T132-1).
- * `what` names the file in the message: the team votes file, or the leads-only file.
+ * The marks, as a Map of gate key → the folder of its project (null: no listed project had the name at the update); an empty Map
+ * when there is no file. A mark counts only for the project that has that name and that folder now (G45 A). Throws for a file that is
+ * not this user's 0600 file, or not a JSON object of gate keys and folders: a list (the file before G45 A) too, because only
+ * `migrateMarks` gives its marks their folder (F-T132-1, F-T132-21). `what` names the file in the message.
  */
 export function loadVotes(path, what = 'team votes file') {
   const text = readOwn(path, what);
-  if (text === undefined) return new Set();
-  let ids;
-  try { ids = JSON.parse(text); } catch { ids = null; }
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && GATE_KEY.test(id))) {
-    throw new TypeError(`the ${what} ${path} must be a JSON list of sage gate keys (a project name, a slash, G and digits). Nothing was loaded.`);
+  if (text === undefined) return new Map();
+  let marks;
+  try { marks = JSON.parse(text); } catch { marks = null; }
+  if (!isMarks(marks)) {
+    throw new TypeError(`the ${what} ${path} must be a JSON object of sage gate keys (a project name, a slash, G and digits) and their folders. Nothing was loaded.`);
   }
-  return new Set(ids);
+  return new Map(Object.entries(marks));
 }
+const isMarks = (x) => !!x && typeof x === 'object' && !Array.isArray(x) && Object.entries(x).every(([k, f]) => GATE_KEY.test(k) && (f === null || isText(f)));
 
 /**
- * Rewrites the bare gate ids of the team votes file and the leads-only file of the time before T132 as keys of `own`, the bridge's own
- * project, once, under the lock of scripts/vote.mjs: no later read gives a bare id a project again (F-T132-1). A file with no bare id,
- * or that is not a list of gate ids and keys, stays as it is; `loadVotes` says what is wrong with it.
+ * Gives the marks of the time before G45 A their folder, once, under the lock of scripts/vote.mjs: a list becomes an object of key →
+ * folder (G45 A). A bare gate id (the list before T132) is a gate of `own`, the bridge's own project (F-T132-1). Each key takes the
+ * folder that `folders` (project name → folder, from loadProjects) gives its name now, or null for a name that it does not have. A file
+ * that is not such a list stays as it is; `loadVotes` says what is wrong with it. Returns true when it changed a file.
+ * @param {Map<string, string | null>} folders
  */
-export function migrateMarks(config, own) {
+export function migrateMarks(config, own, folders) {
   const path = votesPathOf(config);
+  let changed = false;
   withLock(path, () => {
     for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'leads-only file']]) {
       const text = readOwn(file, what);
       let ids;
       try { ids = JSON.parse(text ?? 'null'); } catch { ids = null; }
-      if (!Array.isArray(ids) || !ids.every((id) => GATE_KEY.test(id) || GATE_ID.test(id)) || !ids.some((id) => GATE_ID.test(id))) continue;
-      saveVotes(file, new Set(ids.map((id) => (GATE_ID.test(id) ? keyOf(own, id) : id))));
+      if (!Array.isArray(ids) || !ids.every((id) => GATE_KEY.test(id) || GATE_ID.test(id))) continue;
+      const keys = ids.map((id) => (GATE_ID.test(id) ? keyOf(own, id) : id));
+      saveVotes(file, new Map(keys.map((k) => [k, folders.get(projectOfKey(k)) ?? null])));
+      changed = true;
     }
   });
+  return changed;
 }
 
 /**
@@ -204,12 +217,12 @@ export function withLock(path, work) {
   }
 }
 
-/** Replaces the team votes file whole, sorted by project and then by number. */
-export const saveVotes = (path, keys) => writeWhole(path, JSON.stringify([...keys].sort((a, b) => {
+/** Replaces the team votes file whole, from a Map of gate key → folder, sorted by project and then by number. */
+export const saveVotes = (path, marks) => writeWhole(path, JSON.stringify(Object.fromEntries([...marks].sort(([a], [b]) => {
   const [pa, ia] = a.split('/G');
   const [pb, ib] = b.split('/G');
   return pa < pb ? -1 : pa > pb ? 1 : ia - ib;
-})));
+}))));
 
 /** Replaces a file whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700. */
 export function writeWhole(path, text) {

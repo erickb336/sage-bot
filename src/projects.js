@@ -1,6 +1,7 @@
 // The projects of the config (T132). loadProjects checks them and resolves each one once, when the config loads, to one identity: the
 // real path of its folder, in the letter case of the disk. The bridge, the hook, /sage, vote.mjs, reasons.mjs, launchd.mjs and
 // channels.mjs name a project only through loadProjects, pickProject and projectAt, so they all name a folder the same way (G43 A).
+import { execFileSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { forTerminal } from './clean.js';
@@ -21,10 +22,11 @@ const REPO = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
  * @returns {{ name: string, project: string, sagePath: string, files: string[], repo?: string }[]}
  */
 export function projectsOf(config) {
+  // The config's own project first, before anything reads a path: a `~` is not a folder (F-T132-25).
+  if (typeof config.project !== 'string' || !isAbsolute(config.project)) throw new TypeError('the config: project must be an absolute path');
   const fallback = config.projects === undefined;
   if (fallback) {
     // No projects: the bridge's own project, named after its folder. A folder name that makes no valid name says what to add (F-T71Q-5).
-    if (typeof config.project !== 'string' || !isAbsolute(config.project)) throw new TypeError('the config: project must be an absolute path');
     const folder = basename(config.project);
     const name = folder.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
     if (!NAME.test(name)) {
@@ -56,6 +58,11 @@ export function projectsOf(config) {
   });
 }
 
+/** Whether a folder is in a git repository, as the sage state tool asks git (its projectRoot). */
+function inGit(path) {
+  try { execFileSync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
 /** The real path of a folder as the disk spells it, its letter case too, or undefined when there is none. */
 const onDisk = (path) => { try { return realpathSync.native(path); } catch { return undefined; } };
 
@@ -65,6 +72,7 @@ const onDisk = (path) => { try { return realpathSync.native(path); } catch { ret
  * started." for the own project) for a config that the bridge cannot serve, so every caller stops before it reads or writes anything:
  * - a listed folder that does not exist (F-T132-14);
  * - a listed path that differs from its folder on disk only in letter case (F-T132-18);
+ * - a listed path through a link to a folder that is not in git (F-T132-24);
  * - two names for one folder, also by a symlink;
  * - a config `project` that no listed project has (F-T132-1).
  * @returns {{ name: string, project: string, sagePath: string, files: string[], repo?: string, own?: true }[]}
@@ -80,6 +88,10 @@ export function loadProjects(config) {
     }
     const twin = seen.get(real);
     if (twin) throw new Error(`projects ${twin.name} (${twin.project}) and ${p.name} (${p.project}) are the same folder (${real}). Keep one of them. Nothing changed.`);
+    // The state tool names a folder outside git by its path as written, not by its real path (F-T132-24): the bridge would read another logbook.
+    if (resolve(p.project) !== real && !inGit(p.project)) {
+      throw new Error(`the path of project ${p.name} (${p.project}) is a link to ${real}, and the folder is not in git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.`);
+    }
     seen.set(real, p);
     return { ...p, project: real };
   });
@@ -109,4 +121,16 @@ export function projectAt(path, projects) {
   const at = onDisk(path) ?? resolve(path);
   const holds = (p) => { const rel = relative(p.project, at); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }; // '..cache' is inside (F-T29-11)
   return projects.filter(holds).sort((a, b) => b.project.length - a.project.length)[0];
+}
+
+/**
+ * The project of a script run (scripts/vote.mjs, scripts/reasons.mjs): the one `name` names, or else the listed project whose folder
+ * holds `cwd`. Throws one line when there is neither: a run outside every listed folder must name its project (G45 A, F-T132-22).
+ * @param {ReturnType<typeof loadProjects>} projects
+ */
+export function projectHere(projects, name, cwd) {
+  if (name !== undefined) return pickProject(projects, name);
+  const here = projectAt(cwd, projects);
+  if (!here) throw new Error(`no listed project's folder holds ${cwd}. Name the project with --project <name> (${projects.map((x) => x.name).join(', ')}). Nothing changed.`);
+  return here;
 }
