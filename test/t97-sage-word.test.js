@@ -1,27 +1,55 @@
 // T97: one word for the session that runs the work. People read "sage", never "chief" (the owner's request).
-// The check reads every text file that a person reads or that sends text to a person: the README, the docs and diagrams, the
-// examples, the design pages, and src/, scripts/ and test/ (string literals, logs and the tests that assert them).
+// The check reads every text file of the repository (tracked, or new and not ignored): any form of the word, also "chiefs",
+// "forChief" or "chief_of_staff", fails it. Only binary files (with a NUL byte) and this check, which names the word, are left out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PLACES = ['README.md', 'docs', 'examples', 'design/b2', 'design/t69', 'src', 'scripts', 'test'];
-const TEXT = /\.(md|mjs|js|json|html|svg|txt)$/;
-/** The only files that may hold the word: this check, which names it to find it. */
-const ALLOWED = new Set(['test/t97-sage-word.test.js']);
-const WORD = /\bchief\b/i;
+const SELF = 'test/t97-sage-word.test.js';
+const WORD = /chief/i;
 
-/** Each line of a text file under `places` that holds the word as a word, as "path:line: text". */
-function chiefLines(root, places = PLACES) {
-  const files = places.map((p) => join(root, p)).filter(existsSync).flatMap((at) => (statSync(at).isFile() ? [at]
-    : readdirSync(at, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name))));
-  return files.map((f) => relative(root, f)).filter((f) => TEXT.test(f) && !ALLOWED.has(f)).flatMap((f) =>
-    readFileSync(join(root, f), 'utf8').split('\n').flatMap((line, i) => (WORD.test(line) ? [`${f}:${i + 1}: ${line.trim().slice(0, 120)}`] : [])));
+/** Each line of a text file of the repository at `root` that holds the word, as "path:line: text". */
+function chiefLines(root) {
+  const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' })
+    .split('\0').filter((f) => f && f !== SELF);
+  return [...new Set(files)].flatMap((f) => {
+    const bytes = readFileSync(join(root, f));
+    if (bytes.includes(0)) return [];
+    return bytes.toString('utf8').split('\n').flatMap((line, i) => (WORD.test(line) ? [`${f}:${i + 1}: ${line.trim().slice(0, 120)}`] : []));
+  });
 }
 
-test('T97: no person-read text says "chief"; sage-bot says "sage" for the session that runs the work', () => {
+test('T97: no text of the repository says "chief"; sage-bot says "sage" for the session that runs the work', () => {
   assert.deepEqual(chiefLines(ROOT), []);
+});
+
+test('T97: the check finds every form of the word in every text file, and skips only binary files and itself', () => {
+  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t97-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const files = {
+    'a.md': 'Ask the chiefs.\n',
+    'b.js': 'const forChief = 1;\n',
+    'c.mjs': 'const chief_of_staff = 2;\n',
+    'package.json': '{ "description": "The Chief bridge" }\n',
+    'd.css': '.card { content: "chief"; }\n',
+    'e.png': Buffer.from('\x89PNG\0chief'),
+    [SELF]: 'const WORD = /chief/i;\n',
+    'clean.md': 'sage asks; sage-bot posts.\n',
+  };
+  for (const [f, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, f)), { recursive: true });
+    writeFileSync(join(root, f), body);
+  }
+  assert.deepEqual(chiefLines(root).sort(), [
+    'a.md:1: Ask the chiefs.',
+    'b.js:1: const forChief = 1;',
+    'c.mjs:1: const chief_of_staff = 2;',
+    'd.css:1: .card { content: "chief"; }',
+    'package.json:1: { "description": "The Chief bridge" }',
+  ]);
 });
