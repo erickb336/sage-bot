@@ -4,13 +4,13 @@ process.env.TZ = 'UTC'; // the title of a thread has the host's date: 2026-10-04
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { accepts } from '../src/discord.js';
 import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
-import { CHANNEL, DRIVER, MAYA, OWNER, setup, T0 } from './bridge-setup.js';
+import { CHANNEL, DRIVER, JON, LEADR, MAYA, OWNER, setAt, setup, T0 } from './bridge-setup.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;
 const SESSION = new URL('../scripts/session.mjs', import.meta.url).pathname;
@@ -23,11 +23,15 @@ const spoolDir = (b) => `${b.statePath}.sessions`;
 function hook(b, id, event, extra = {}, pid = process.pid) {
   return record({ session_id: id, cwd: b.project, hook_event_name: event, ...extra }, { project: b.project, dir: spoolDir(b), pid, now: b.now });
 }
-/** `sage gate add` in the scratch logbook, then the PostToolUse hook of session `id` with its real output. Returns the gate id. */
+/** sage's time of `gate add` for the test's clock: the wall clock to the second, as sage writes it. */
+const sageAt = (t) => new Date(t).toISOString().slice(0, 19) + 'Z';
+/** `sage gate add` in the scratch logbook at the test's clock, then the PostToolUse hook of session `id` with its real output. Returns the gate id. */
 function gateAdd(b, id, task, question = `${task} question?`) {
   const out = b.sh('gate', 'add', task, '--question', question, '--options', 'x|y', '--recommend', 'x');
+  const gate = out.split(' ')[0];
+  setAt(b, { [gate]: sageAt(b.now) });
   if (id) hook(b, id, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: `node sage.mjs gate add ${task} --question "${question}"` }, tool_response: { stdout: `${out}\n`, stderr: '' } });
-  return out.split(' ')[0];
+  return gate;
 }
 const threadNames = (b) => [...b.discord.threads.values()].map((t) => t.name);
 /** The cards posted in one place, by title. */
@@ -76,8 +80,7 @@ test('hook.mjs: bad input is refused with one line on stderr, writes nothing, an
     ['not json', /nothing recorded: Unexpected token/],
     [{ ...ok, session_id: '../../etc/passwd' }, /nothing recorded: the session_id is not a UUID$/],
     [{ ...ok, session_id: S1.toUpperCase() }, /the session_id is not a UUID$/],
-    [{ ...ok, cwd: join(b.root, 'other') }, /nothing recorded: the cwd is not the configured project$/],
-    [{ ...ok, cwd: 7 }, /the cwd is not the configured project$/],
+    [{ ...ok, cwd: 7 }, /nothing recorded: the cwd is not a path$/],
     [{ ...ok, hook_event_name: 'Stop' }, /nothing recorded: not a hook event of the sage bridge$/],
     [{ ...ok, hook_event_name: 'SessionEnd' }, /^$/], // the end of a session that has no spool: nothing to record
   ];
@@ -86,9 +89,8 @@ test('hook.mjs: bad input is refused with one line on stderr, writes nothing, an
     assert.deepEqual([r.code, r.out], [0, ''], JSON.stringify(input));
     assert.match(r.err, err, JSON.stringify(input));
   }
-  // No config file, or a config without a project: still exit 0.
-  assert.deepEqual(runHook(b, ok, { statePath: b.statePath }).code, 0);
-  assert.match(runHook(b, ok, { statePath: b.statePath }).err, /the cwd is not the configured project/);
+  // A config without a project: still exit 0.
+  assert.deepEqual(runHook(b, ok, { statePath: b.statePath }), { code: 0, out: '', err: 'sage-bot hook: nothing recorded: the config has no project' });
   assert.equal(existsSync(spoolDir(b)), false);
   // A spool file that is not the hook's is refused by the bridge's reader, by name.
   mkdirSync(spoolDir(b), { recursive: true, mode: 0o700 });
@@ -195,48 +197,79 @@ test('the line is edited in place: tasks and open questions, then "ended" when t
   assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[0]).length, edits); // no edit when nothing changed
 });
 
-test('a session whose Claude Code process is gone counts as ended, without a SessionEnd: the time the bridge saw it', async () => {
+test('G15: a session that ends with an open batch keeps its thread open: the line says ended at once, presses count, reminders go to the thread; the thread locks at the first loop after the vote settles', async () => {
   const b = setup();
   hook(b, S1, 'SessionStart', {}, DEAD);
   hook(b, S2, 'SessionStart');
-  gateAdd(b, S2, 'T1');
+  gateAdd(b, S2, 'T1', 'A?');
+  gateAdd(b, S2, 'T1', 'B?');
   await b.post();
-  // S2 runs; now its spool says the dead process: the next loop ends it.
+  const thread = b.bridge.threadOf(S2);
+  assert.deepEqual(cardsIn(b, thread), ['Batch vote G1+G2 · T1 ']);
+  // S2's Claude Code process is gone (no SessionEnd): the next loop shows it as ended, and the thread stays open.
   hook(b, S2, 'SessionStart', {}, DEAD);
   await b.bridge.loop();
-  assert.equal(lineOf(b, 'Session 1 · Sun 4 Oct'), `**Session 1 · Sun 4 Oct**\nended <t:${b.now / 1000}:f> · 1 task · 1 open question`);
-  assert.equal(b.discord.threads.get(b.bridge.threadOf(S2)).locked, true);
-  // A reminder of an ended session's gate is not posted in its locked thread; the log says why once.
-  b.now += 5 * HOUR;
+  assert.equal(lineOf(b, 'Session 1 · Sun 4 Oct'), `**Session 1 · Sun 4 Oct**\nended <t:${b.now / 1000}:f> · 1 task · 2 open questions`);
+  assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [false, false]);
+  // The team votes on in the thread: the presses count, the vote ends in a tie on part 1, the tie post goes to the thread.
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1+G2:0:0');
+  await b.press(JON, 'press:G1+G2:0:1');
+  await b.press(MAYA, 'press:G1+G2:1:0');
+  b.now += 30 * MINUTE;
   await b.bridge.loop();
+  const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
+  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> G1\\+G2 is tied after its vote`));
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), / · 1 open question$/);
+  // The reminder to the leads 2 hours later goes to the thread too; the thread is still open.
+  b.now += 2 * HOUR;
   await b.bridge.loop();
-  assert.deepEqual(b.lines.filter((l) => l.includes('has ended')), ['Session 1 · Sun 4 Oct has ended: its thread is locked, so the bridge posts nothing in it']);
-  assert.equal(b.discord.posts.filter((p) => p.content?.includes('reminder')).length, 0);
+  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> reminder: part 1 of G1\\+G2 still tied`));
+  assert.equal(b.discord.threads.get(thread).locked, false);
+  // A lead breaks the tie: the last question settles, and the next loop archives and locks the thread.
+  await b.press(JON, 'tiebreak:G1+G2:0:1');
+  assert.equal(b.discord.threads.get(thread).locked, false);
+  await b.bridge.loop();
+  assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [true, true]);
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nended <t:\d+:f> · 1 task · no open questions$/);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. x']);
 });
 
-test('a resume (the same session id) opens the old thread again before it posts; a /clear (a new session id) gets a new thread', async () => {
+test('G15: a session that ends with no open question locks its thread at once; a withdrawn question counts as settled', async () => {
+  const b = setup();
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.post();
+  const thread = b.bridge.threadOf(S1);
+  b.sh('gate', 'answer', 'G1', 'dropped: not needed any more'); // the owner withdraws it at the terminal
+  await b.bridge.loop();
+  assert.equal(b.discord.threads.get(thread).locked, false); // the session runs
+  hook(b, S1, 'SessionEnd', { reason: 'clear' });
+  await b.bridge.loop();
+  assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [true, true]);
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nended <t:\d+:f> · 1 task · no open questions$/);
+});
+test('a resume (the same session id) opens the old thread again; a /clear (a new session id) gets a new thread; a late card of an ended session opens its thread', async () => {
   const b = setup();
   hook(b, S1, 'SessionStart', { source: 'startup' });
   gateAdd(b, S1, 'T1');
   await b.post();
   const first = b.bridge.threadOf(S1);
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1:0:0');
   hook(b, S1, 'SessionEnd', { reason: 'prompt_input_exit' });
   await b.bridge.loop();
   assert.equal(b.discord.threads.get(first).locked, true);
-  // A gate of the ended session waits: nothing is posted in its locked thread, and the log says why once.
-  gateAdd(b, S1, 'T2');
-  await b.post();
-  await b.bridge.loop();
-  assert.deepEqual(cardsIn(b, first), ['Question G1 · T1 ']);
-  assert.deepEqual(b.lines.filter((l) => l.includes('has ended')), ['Session 1 · Sun 4 Oct has ended: its thread is locked, so the bridge posts nothing in it']);
-  // Resume: the hook takes away the end; in one loop the bridge unlocks the same thread, then posts the waiting card there.
+  // Resume: the hook takes away the end; the next loop unlocks the same thread, and a new card goes there.
   b.now += HOUR;
   hook(b, S1, 'SessionStart', { source: 'resume' });
   await b.bridge.loop();
   assert.deepEqual(b.discord.threads.get(first), { from: b.discord.in(CHANNEL)[0], name: 'Session 1 · Sun 4 Oct', archived: false, locked: false });
+  gateAdd(b, S1, 'T2');
+  await b.post();
   assert.deepEqual(cardsIn(b, first), ['Question G1 · T1 ', 'Question G2 · T2 ']);
-  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nrunning · 2 tasks · 2 open questions$/);
-  // /clear: Claude Code ends S1 and starts S2. S1's thread is locked; S2's first team vote makes Session 2.
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nrunning · 2 tasks · 1 open question$/);
+  // /clear: Claude Code ends S1 and starts S2. S1's thread stays open for G2; S2's first team vote makes Session 2.
   hook(b, S1, 'SessionEnd', { reason: 'clear' });
   b.now += MINUTE;
   hook(b, S2, 'SessionStart', { source: 'clear' });
@@ -244,11 +277,20 @@ test('a resume (the same session id) opens the old thread again before it posts;
   await b.post();
   assert.deepEqual(threadNames(b), ['Session 1 · Sun 4 Oct', 'Session 2 · Sun 4 Oct']);
   assert.deepEqual(cardsIn(b, b.bridge.threadOf(S2)), ['Question G3 · T3 ']);
-  assert.equal(b.discord.threads.get(first).locked, true);
+  assert.equal(b.discord.threads.get(first).locked, false);
   assert.equal(b.discord.in(CHANNEL).length, 2); // the lines of sessions 1 and 2, the newest at the bottom
+  await b.press(MAYA, 'press:G2:0:0');
+  await b.bridge.loop();
+  assert.equal(b.discord.threads.get(first).locked, true);
+  // A gate that S1 asked just before its end gets its card after the lock: the thread opens again for it, and locks when it settles.
+  gateAdd(b, S1, 'T4');
+  await b.post();
+  assert.deepEqual([cardsIn(b, first).at(-1), b.discord.threads.get(first).locked], ['Question G4 · T4 ', false]);
+  await b.press(MAYA, 'press:G4:0:1');
+  await b.bridge.loop();
+  assert.equal(b.discord.threads.get(first).locked, true);
 });
-
-test('a version 1 gate file loads: its open gate goes to the newest running session, its card is still edited in the parent channel, and the file becomes version 2', async () => {
+test('a version 1 gate file loads: its card stays in the parent channel with its reminders, no session takes it, and the file becomes version 2', async () => {
   const b = setup();
   const gate = openGate({ id: 'G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: T0 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
@@ -259,15 +301,14 @@ test('a version 1 gate file loads: its open gate goes to the newest running sess
   b.bridge = b.make();
   b.now += 2 * HOUR;
   await b.bridge.loop();
-  const thread = b.bridge.threadOf(S1);
-  assert.deepEqual(b.discord.in(thread).map((id) => b.discord.latest(id).content), [`<@&${DRIVER}> reminder: G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
+  assert.equal(b.bridge.threadOf(S1), undefined);
+  assert.deepEqual(b.discord.in(CHANNEL).map((id) => b.discord.latest(id).content).slice(1), [`<@&${DRIVER}> reminder: G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
   await b.press(MAYA, 'press:G1:0:1');
   assert.match(b.discord.latest(card).embeds[0].description, /Answered by Maya/);
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
-  assert.deepEqual([saved.version, saved.entries[0].session, saved.sessions.map((s) => [s.id, s.n, s.thread])], [2, S1, [[S1, 1, thread]]]);
-  assert.equal(load(b.statePath).entries[0].session, S1);
+  assert.deepEqual([saved.version, saved.entries[0].session, saved.sessions], [2, null, []]);
+  assert.equal(load(b.statePath).entries[0].session, null);
 });
-
 test('the wake note after a sleep goes to each thread with an open question, not to the parent channel', async () => {
   const b = setup();
   hook(b, S1, 'SessionStart');
@@ -319,4 +360,158 @@ test('end to end: SessionStart, gate add and its PostToolUse, the chief marks th
   await b.bridge.loop();
   assert.match(lineOf(b, b.discord.threads.get(thread).name), /\nended <t:\d+:f> · 1 task · no open questions$/);
   assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [true, true]);
+});
+
+test('F-T29-2: a thread that Discord made but whose reply was lost: the card goes to the parent channel, and the next card takes the thread (code 160004)', async () => {
+  const b = setup();
+  const start = b.discord.startThread;
+  let lost = 1;
+  b.discord.startThread = async (...args) => {
+    const id = await start(...args);
+    if (lost-- > 0) throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
+    return id;
+  };
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.post();
+  assert.deepEqual([cardsIn(b, CHANNEL), b.bridge.threadOf(S1)], [['Question G1 · T1 '], undefined]);
+  // Every later try of startThread gets 160004 from Discord; the bridge takes the thread of the line instead.
+  gateAdd(b, S1, 'T2');
+  await b.post();
+  const thread = threadOf(b, 'Session 1 · Sun 4 Oct');
+  assert.deepEqual([b.bridge.threadOf(S1), cardsIn(b, thread), threadNames(b)], [thread, ['Question G2 · T2 '], ['Session 1 · Sun 4 Oct']]);
+  // The press on the card in the parent channel counts, and the line counts both cards.
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1:0:1');
+  assert.equal(b.answerOf('G1'), 'B. y');
+  await b.bridge.loop();
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nrunning · 2 tasks · 1 open question$/);
+});
+
+test('F-T29-2: without the permission to make threads, the cards go to the parent channel, the refusal is logged once, and a later card makes the thread', async () => {
+  const b = setup();
+  const start = b.discord.startThread;
+  b.discord.startThread = async () => { throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.post();
+  gateAdd(b, S1, 'T2');
+  await b.post();
+  for (let i = 0; i < 4; i++) { b.now += LOOP_GAP; await b.bridge.loop(); }
+  assert.deepEqual([cardsIn(b, CHANNEL), threadNames(b)], [['Question G1 · T1 ', 'Question G2 · T2 '], []]);
+  assert.deepEqual(b.lines.filter((l) => l.includes('refused the thread')), ['Discord refused the thread of Session 1 · Sun 4 Oct, so its cards go to the parent channel until a later card makes it: code 50013, status 403: Missing Permissions']);
+  // The owner gives the permission: the next card makes the thread; the reminders of the first cards stay with them in the parent channel.
+  b.discord.startThread = start;
+  gateAdd(b, S1, 'T3');
+  await b.post();
+  assert.deepEqual(cardsIn(b, b.bridge.threadOf(S1)), ['Question G3 · T3 ']);
+  b.now += 2 * HOUR;
+  await b.bridge.loop();
+  const reminders = (at) => b.discord.in(at).map((id) => b.discord.latest(id).content).filter((c) => c?.includes('reminder')).length;
+  assert.deepEqual([reminders(CHANNEL), reminders(b.bridge.threadOf(S1))], [2, 1]);
+});
+const LOOP_GAP = 15_000;
+
+test('F-T29-3: the hook ignores a gate add for another project; a gate id in two spools goes to the session that started last before sage asked it', async () => {
+  const b = setup();
+  const other = join(b.root, 'other');
+  mkdirSync(other);
+  const post = (id, command, stdout) => hook(b, id, 'PostToolUse', { tool_name: 'Bash', tool_input: { command }, tool_response: { stdout, stderr: '' } });
+  hook(b, S1, 'SessionStart');
+  assert.equal(post(S1, `node sage.mjs gate add T9 --question "Q?" --project "${other}"`, 'G1 open · Q?\n'), 'another project');
+  assert.equal(post(S1, `node sage.mjs gate add T9 --project=${other}/ --question "Q?"`, 'G1 open · Q?\n'), 'another project');
+  assert.equal(post(S1, `cd ${b.project} && node sage.mjs gate add T9 --project ../other`, 'G1 open · Q?\n'), 'another project');
+  assert.deepEqual(spool(b, S1).gates, []);
+  // --project naming this project, or a worktree folder in it, counts.
+  mkdirSync(join(b.project, '.claude', 'worktrees', 'x'), { recursive: true });
+  assert.equal(post(S1, `node sage.mjs gate add T8 --project '${b.project}/.claude/worktrees/x'`, 'G5 open · Q?\n'), `PostToolUse ${S1}`);
+  assert.deepEqual(spool(b, S1).gates, ['G5']);
+  // S1 also lists G1 from an older logbook. S2 starts an hour later and asks G1 of this logbook; S3 starts after it and lists it too.
+  post(S1, 'node sage.mjs gate add T9', 'G1 open · old\n');
+  b.now += HOUR;
+  hook(b, S2, 'SessionStart');
+  b.now += MINUTE;
+  gateAdd(b, S2, 'T1');
+  b.now += MINUTE;
+  hook(b, S3, 'SessionStart');
+  post(S3, 'node sage.mjs gate add T1', 'G1 open · T1 question?\n');
+  await b.post();
+  assert.deepEqual([threadNames(b), cardsIn(b, b.bridge.threadOf(S2))], [['Session 1 · Sun 4 Oct'], ['Question G1 · T1 ']]);
+});
+
+test('F-T29-4: a card in the parent channel keeps its tie post, tie-break note and reminders there; no session takes it, and a session ends without it', async () => {
+  const b = setup();
+  gateAdd(b, null, 'T7', 'A?');
+  gateAdd(b, null, 'T7', 'B?');
+  await b.post(); // no session yet: the batch goes to the parent channel
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.post();
+  const thread = b.bridge.threadOf(S1);
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1+G2:0:0');
+  await b.press(JON, 'press:G1+G2:0:1');
+  await b.press(MAYA, 'press:G1+G2:1:0');
+  b.now += 30 * MINUTE;
+  await b.bridge.loop();
+  b.now += 2 * HOUR;
+  await b.bridge.loop();
+  await b.press(JON, 'tiebreak:G1+G2:0:1');
+  // The first text of each message, without the wake notes (the test's clock jumps): the card, S1's line, the tie, the reminder, the note.
+  const contents = (at) => b.discord.in(at).map((id) => b.discord.messages.get(id)[0].content).filter((c) => !c.startsWith('The host'));
+  assert.deepEqual(contents(CHANNEL).map((c) => c.split(' ').slice(1, 3).join(' ')), ['T7 has', '1 ·', 'G1+G2 is', 'reminder: part', '(sage-lead) broke']);
+  assert.equal(contents(thread).filter((c) => c.includes('G1+G2')).length, 0);
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), / · 1 task · 1 open question$/);
+});
+
+test('F-T29-6 and F-T29-4: a press that posts while the loop waits for a session\'s line makes no second line or thread', async () => {
+  const b = setup();
+  gateAdd(b, null, 'T7', 'A?');
+  gateAdd(b, null, 'T7', 'B?');
+  await b.post();
+  b.now += MINUTE;
+  await b.press(MAYA, 'press:G1+G2:0:0');
+  await b.press(JON, 'press:G1+G2:0:1');
+  await b.press(MAYA, 'press:G1+G2:1:0');
+  b.now += 30 * MINUTE;
+  await b.bridge.loop(); // the batch is tied
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.bridge.loop();
+  b.now += 30_000;
+  // The next loop posts S1's line; Discord is slow to answer, and a lead breaks the tie meanwhile.
+  const post = b.discord.post;
+  let release;
+  let started;
+  const waiting = new Promise((r) => { started = r; });
+  b.discord.post = async (at, p) => {
+    if (p.content?.startsWith('**Session') && !release) { started(); await new Promise((r) => { release = r; }); }
+    return post(at, p);
+  };
+  const loop = b.bridge.loop();
+  await waiting;
+  await b.press(JON, 'tiebreak:G1+G2:0:1');
+  release();
+  await loop;
+  await b.bridge.loop();
+  assert.deepEqual([b.discord.in(CHANNEL).filter((id) => b.discord.latest(id).content?.startsWith('**Session')).length, threadNames(b)], [1, ['Session 1 · Sun 4 Oct']]);
+  assert.ok(b.discord.in(CHANNEL).some((id) => b.discord.latest(id).content === 'Jon (sage-lead) broke the tie on part 1 of G1+G2: B.'));
+  assert.deepEqual(cardsIn(b, b.bridge.threadOf(S1)), ['Question G3 · T1 ']);
+});
+
+test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to the project; an event outside the project is ignored with no stderr', async () => {
+  const b = setup();
+  const sub = join(b.project, '.claude', 'worktrees', 't9', 'src');
+  mkdirSync(sub, { recursive: true });
+  symlinkSync(b.project, join(b.root, 'link'));
+  mkdirSync(join(b.root, 'other'));
+  const event = (cwd, name, extra = {}) => runHook(b, { session_id: S1, cwd, hook_event_name: name, ...extra });
+  assert.deepEqual(event(join(b.root, 'link'), 'SessionStart'), { code: 0, out: '', err: '' });
+  const out = b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
+  assert.deepEqual(event(sub, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T1' }, tool_response: { stdout: `${out}\n` } }), { code: 0, out: '', err: '' });
+  assert.deepEqual(event(join(b.root, 'other'), 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T2' }, tool_response: { stdout: 'G2 open · Q?\n' } }), { code: 0, out: '', err: '' });
+  assert.deepEqual(event(join(b.root, 'project-2'), 'SessionEnd'), { code: 0, out: '', err: '' }); // a sibling folder whose name starts the same
+  assert.deepEqual([spool(b, S1).gates, spool(b, S1).endedAt], [['G1'], undefined]);
+  assert.deepEqual(event(sub, 'SessionEnd'), { code: 0, out: '', err: '' });
+  assert.equal(typeof spool(b, S1).endedAt, 'number');
 });

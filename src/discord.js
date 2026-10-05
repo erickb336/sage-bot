@@ -66,6 +66,8 @@ export async function start(config) {
       edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
       // A thread from the session's line in the parent channel. Discord archives a quiet thread after a week; a post opens it again.
       startThread: async (lineId, name) => (await (await channel.messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
+      // The thread that a message started has the message's id, so a fetch of that id finds it (code 160004, F-T29-2).
+      threadFrom: async (lineId) => (await place(lineId)).id,
       setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
     },
   });

@@ -30,7 +30,7 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
 }
 
 /**
- * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, setLocked, members }`
+ * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, setLocked, members }`
  * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
  * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
@@ -75,6 +75,11 @@ export function fakeDiscord(members) {
       const id = String(next++);
       threads.set(id, { from, name, archived: false, locked: false });
       return id;
+    },
+    async threadFrom(from) {
+      const found = [...threads].find(([, t]) => t.from === from);
+      if (!found) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
+      return found[0];
     },
     async setLocked(id, locked) {
       if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
