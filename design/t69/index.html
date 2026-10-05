@@ -11,7 +11,7 @@
   --accent: #6b4fd8; --accent-soft: #efeafd; --ok: #1f7a4d; --ok-soft: #e6f4ec; --warn: #9a5b00; --warn-soft: #fdf1dc;
   --stop: #b3261e; --stop-soft: #fbe9e7; --code-bg: #f3f1ec; --app-side: #ecebe6;
   --appr: #0f766e; --appr-soft: #e2f3f1; --lead: #9a3412; --lead-soft: #fdeee5; --none: #6b6960; --none-soft: #eeede8;
-  --owner: #2f6fd6; --owner-soft: #eaf1fc; --bot: #3f3d56;
+  --owner: #2559b8; --owner-soft: #eaf1fc; --bot: #3f3d56;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -19,7 +19,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -app
 a { color: var(--accent); }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
 button { font: inherit; cursor: pointer; color: inherit; }
-.sample { background: repeating-linear-gradient(135deg, #fff4d6 0 12px, #ffecbf 12px 24px); color: #6b4200; text-align: center; font-weight: 700; font-size: .82rem; letter-spacing: .04em; padding: 5px 16px; border-bottom: 1px solid #f0d58a; }
+.sample { background: #fff1cc; color: #6b4200; text-align: center; font-weight: 700; font-size: .82rem; letter-spacing: .04em; padding: 5px 16px; border-bottom: 1px solid #f0d58a; }
 .sample span { font-weight: 500; letter-spacing: 0; }
 .doc { max-width: 1180px; margin: 0 auto; padding: 22px 16px 10px; }
 .doc.tail { padding-bottom: 80px; }
@@ -29,14 +29,14 @@ h1 { font-size: 1.6rem; margin: 0 0 4px; line-height: 1.25; }
 .lead { background: var(--accent-soft); border-radius: 8px; padding: 12px 16px; }
 .lead p { margin: 4px 0; }
 .sub { color: var(--muted); margin-top: 0; font-size: .9rem; }
-.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 8px 12px; }
 table { border-collapse: collapse; width: 100%; font-size: .86rem; }
 th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
 th { font-size: .74rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
 td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q { color: var(--warn); font-weight: 700; }
 
 /* Role badges */
-.rb { display: inline-block; font-size: .66rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; vertical-align: 1px; letter-spacing: .02em; white-space: nowrap; }
+.rb { display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; vertical-align: 1px; letter-spacing: .02em; white-space: nowrap; }
 .rb.appr { background: var(--appr-soft); color: var(--appr); } .rb.lead { background: var(--lead-soft); color: var(--lead); }
 .rb.none { background: var(--none-soft); color: var(--none); } .rb.owner { background: var(--owner-soft); color: var(--owner); }
 .rb.apptag { background: #4752c4; color: #fff; }
@@ -72,7 +72,7 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .app { display: grid; grid-template-columns: 190px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); min-height: 520px; }
 .srv { background: var(--app-side); padding: 12px 10px; font-size: .84rem; }
 .srv .ws { font-weight: 700; margin-bottom: 8px; }
-.srv .h { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; }
+.srv .h { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; }
 .srv .ch { padding: 3px 6px; border-radius: 5px; }
 .srv .ch.on { background: var(--accent); color: #fff; font-weight: 600; }
 .srv .ch.sub { padding-left: 18px; font-size: .8rem; }
@@ -88,27 +88,23 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .composer b { color: var(--text); font-weight: 500; }
 .av { width: 34px; height: 34px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: .82rem; flex: none; }
 .av.sm { width: 18px; height: 18px; font-size: .6rem; }
-.av.maya { background: #c2410c; } .av.ana { background: #0f766e; } .av.jon { background: #7c3aed; } .av.sam { background: #8a877d; } .av.erick { background: var(--owner); } .av.bot { background: var(--bot); font-size: .66rem; }
+.av.maya { background: #c2410c; } .av.ana { background: #0f766e; } .av.jon { background: #7c3aed; } .av.sam { background: #8a877d; } .av.erick { background: var(--owner); } .av.bot { background: var(--bot); font-size: .72rem; }
 .msg { display: flex; gap: 10px; padding: 6px 8px; border-radius: 8px; }
 .msg .body { min-width: 0; flex: 1; }
 .msg .meta { font-size: .78rem; color: var(--muted); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .msg .meta b { font-size: .92rem; color: var(--text); }
 .msg p { margin: 2px 0; }
 .msg ul { margin: 2px 0; padding-left: 18px; }
-/* impeccable-disable-next-line side-tab -- designer: copies Discord's native mention styling (gold bar on a message that mentions you) */
-.msg.hl { background: #fff8e1; box-shadow: inset 3px 0 0 #e0a800; }
+.msg.hl { background: #fff4d0; }
 .msg.eph { background: var(--accent-soft); }
 .ephnote { font-size: .74rem; color: var(--accent); font-weight: 600; margin-top: 3px; }
-.vis { display: inline-block; font-size: .66rem; font-weight: 700; border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
+.vis { display: inline-block; font-size: .72rem; font-weight: 700; border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
 .vis.pub { background: var(--none-soft); color: var(--none); } .vis.me { background: var(--accent-soft); color: var(--accent); }
 .mention { background: #e8eafd; color: #3c45a5; border-radius: 3px; padding: 0 3px; font-weight: 600; }
 .reply { font-size: .76rem; color: var(--muted); margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply::before { content: "\21B1 "; }
 .typing { color: var(--muted); font-size: .85rem; font-style: italic; padding: 4px 8px 4px 52px; }
-.dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); margin-right: 3px; animation: blink 1.2s infinite; }
-.dots span:nth-child(2) { animation-delay: .2s; } .dots span:nth-child(3) { animation-delay: .4s; }
-@keyframes blink { 0%, 80%, 100% { opacity: .2; } 40% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .dots span { animation: none; opacity: .6; } }
+.dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); margin-right: 3px; opacity: .6; }
 .react { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0 7px; font-size: .78rem; margin-top: 3px; }
 .divider { text-align: center; font-size: .75rem; color: var(--muted); margin: 8px 0; display: flex; align-items: center; gap: 10px; }
 .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
@@ -129,7 +125,7 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.stop { background: var(--stop-soft); color: var(--stop); } .pill.grey { background: var(--none-soft); color: var(--none); }
 .cols { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .col { flex: 1 1 96px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font-size: .8rem; }
-.col .ch { font-size: .68rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.col .ch { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
 .db { border: 0; border-radius: 4px; padding: 4px 12px; font-size: .84rem; font-weight: 600; background: #4e5058; color: #fff; }
 .db.pri { background: #4752c4; } .db.ok { background: #248046; } .db.stop { background: #b3261e; } .db.sec { background: #e3e5e8; color: #2e3035; }
@@ -159,7 +155,7 @@ td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q 
 .opt { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px; font-size: .86rem; }
 .opt.rec { border: 2px solid var(--accent); }
 .opt h4 { margin: 0 0 6px; font-size: .95rem; }
-.rec-tag { font-size: .66rem; font-weight: 700; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
+.rec-tag { font-size: .72rem; font-weight: 700; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
 .mini { border: 1px solid var(--line); border-radius: 8px; background: var(--app-side); padding: 6px 8px; font-size: .78rem; margin-bottom: 8px; }
 .mini div { padding: 1px 4px; border-radius: 4px; }
 .mini .on { background: var(--accent); color: #fff; }
@@ -294,7 +290,7 @@ const typing = () => `<div class="typing"><span class="dots"><span></span><span>
 const btn = (label, cls = '', go = '', extra = '') => `<button class="db ${cls}"${go ? ` data-go="${go}"` : ''}${extra}>${label}</button>`;
 function app(channel, topic, stream, o = {}) {
   const on = c => c === channel ? ' on' : '';
-  return `<div class="app modalwrap"><div class="srv"><div class="ws">Acme team <span class="rb none" style="font-size:.6rem">sample</span></div>
+  return `<div class="app modalwrap"><div class="srv"><div class="ws">Acme team <span class="rb none">sample</span></div>
     <div class="h">Text channels</div><div class="ch">#general</div><div class="ch${on('#ask-sage')}">#ask-sage</div>
     <div class="ch${on('#sage-chief')}">#sage-chief</div><div class="ch sub${on('Session 14')}">Session 14 · Mon 5 Oct</div><div class="ch">#erick-chief</div>
     <div class="h">Members</div>
@@ -437,18 +433,19 @@ M.push({ g: 'No role', t: '6 No role', title: 'A person with no role mentions th
 // 7. Lead starts a session
 const req7 = 'start a new session where we add this feature: export the board as a CSV file from Discord, with the same columns as the board card';
 const q7 = msg('jon', '15:10', `<p>${BOT} ${req7}</p>`);
+const EDITED = 'A "Download CSV" button on the board card. Same columns as the card, plus the date of the last change.';
 const frame = (o = {}) => `<div class="embed${o.cls ? ' ' + o.cls : ''}"><div class="et">${o.title || 'New session: please confirm'}</div><dl>
   <dt>Project</dt><dd>sage-bot</dd><dt>Task</dt><dd>${o.task || 'Export the board as a CSV file'}</dd>
   <dt>What changes</dt><dd>${o.what || 'A "Download CSV" button on the board card. Same columns as the card: task, title, step, open questions, pull request.'}</dd>
   <dt>Not in scope</dt><dd>Exports of other projects; a schedule.</dd><dt>Size</dt><dd>small (sage's guess)</dd><dt>Asked by</dt><dd>Jon, sage-lead</dd></dl>
   ${o.foot || ''}</div>`;
 const confirmBtns = (p) => `<div class="btns">${btn('Start session', 'ok' + (p === 'ok' ? ' pressed' : ''), 'next')}${btn('Edit', 'sec' + (p === 'edit' ? ' pressed' : ''), 'edit')}${btn('Cancel', 'sec')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Only Jon can press these. The card expires in 30 minutes.</p>`;
-const restate = (p) => msg('bot', '15:10', `<p>${at('jon')} I read your request as this task. Is it right?</p>${frame()}${confirmBtns(p)}`, { reply: 'Jon: @sage-bot start a new session where we add…' });
+const restate = (p) => msg('bot', '15:10', `<p>${at('jon')} I read your request as this task. Is it right?</p>${frame(p === 'ok' ? { what: EDITED } : {})}${confirmBtns(p)}`, { reply: 'Jon: @sage-bot start a new session where we add…' });
 const editModal = `<div class="modalbg"><div class="modal" role="dialog" aria-label="Edit the task (sample)"><h4>Edit the task</h4>
-  <label>What changes</label><textarea rows="3" readonly>A "Download CSV" button on the board card. Same columns as the card, plus the date of the last change.</textarea>
+  <label>What changes</label><textarea rows="3" readonly>${EDITED}</textarea>
   <label>Not in scope</label><textarea rows="2" readonly>Exports of other projects; a schedule.</textarea>
   <div class="mb">${btn('Cancel', 'sec')}${btn('Save', 'pri', 'next')}</div></div></div>`;
-const approvalCard = (st) => msg('bot', '15:12', `<p>${at('erick')} Jon wants to start a session. It runs on your Mac.</p>${frame({ title: 'Owner approval: new session', what: 'A "Download CSV" button on the board card. Same columns as the card, plus the date of the last change.', cls: st === 'ok' ? 'ok' : st === 'no' ? 'stop' : 'warn',
+const approvalCard = (st) => msg('bot', '15:12', `<p>${at('erick')} Jon wants to start a session. It runs on your Mac.</p>${frame({ title: 'Owner approval: new session', what: EDITED, cls: st === 'ok' ? 'ok' : st === 'no' ? 'stop' : 'warn',
   foot: st === 'ok' ? '<p><span class="pill ok">approved by Erick at 15:20</span></p>' : st === 'no' ? '<p><span class="pill stop">declined by Erick at 15:20</span> "Wait until T66 merges."</p>' : `<div class="btns">${btn('Approve', 'ok pressed', 'next')}${btn('Decline', 'stop')}</div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">Only Erick can press these. Erick may also answer at the terminal. Open for 24 hours.</p>` })}`, { hl: true });
 const started = (t) => msg('bot', t, `<div class="embed ok"><div class="et">Session 15 started</div><p>${tk('T70')} Export the board as a CSV file · design step running.</p><div class="btns">${btn('Session 15 thread', 'link')}</div><div class="efoot">Started for Jon${t === '15:20' ? ', approved by Erick' : ''} · sample data</div></div>`);
 M.push({ g: 'Lead', t: '7 Start a session', title: 'A lead starts a new session', steps: [
@@ -457,9 +454,9 @@ M.push({ g: 'Lead', t: '7 Start a session', title: 'A lead starts a new session'
   S('Slash form', () => `<div class="varhead">Same request, slash-command form (D13)</div>` + app('#ask-sage', ASK, slash('jon', '15:10', '/sage request', `<p>I read your request as this task. Is it right?</p>${frame()}${confirmBtns()}`), { composer: '<b>/sage request</b> project: sage-bot · request: export the board as a CSV file…' }),
     `<h3>The slash-command form</h3><p>Jon types <code>/sage request</code> with two fields: project and request. The confirm comes back in private, so the channel does not fill with drafts.</p><p>Only leads see <code>/sage request</code> in the command list: Discord can hide a command from members without the role.</p><p>After Jon confirms, the owner's approval card (variant A) is public as in the mention form.</p>`, { v: 1 }),
   S('Edit (correction)', () => app('#ask-sage', ASK, q7 + restate('edit'), { modal: editModal }),
-    `<h3>Correction: Jon edits the task</h3><p>A form with the two fields that most often need a fix. Save updates the card in place. Jon then confirms.</p>`),
+    `<h3>Correction: Jon edits the task</h3><p>A form with the two fields that most often need a fix. Here Jon adds the date of the last change. Save updates the card in place. Jon then confirms.</p>`),
   S('A1 · owner approves', () => `<div class="varhead">Variant A · the owner approves · recommended</div>` + app('#ask-sage', ASK, q7 + restate('ok') + msg('bot', '15:12', `<p>Sent to Erick for approval. I post here when he answers.</p>`) + approvalCard()),
-    `<h3>Variant A: Erick approves on a card</h3><p>The card pings Erick in #ask-sage. He presses Approve on his phone, or answers at the terminal.</p><p>Why I recommend A: the session runs on Erick's Mac and spends his money; the approval costs him one tap; and Erick, not a model, reads the lead's text before it reaches the chief.</p><div class="box dec"><b>Decision D4</b>Variant A or B.</div>`, { v: 1 }),
+    `<h3>Variant A: Erick approves on a card</h3><p>The approval card always repeats the text that Jon confirmed, word for word.</p><p>The card pings Erick in #ask-sage. He presses Approve on his phone, or answers at the terminal.</p><p>Why I recommend A: the session runs on Erick's Mac and spends his money; the approval costs him one tap; and Erick, not a model, reads the lead's text before it reaches the chief.</p><div class="box dec"><b>Decision D4</b>Variant A or B.</div>`, { v: 1 }),
   S('A2 · started', () => `<div class="varhead">Variant A · approved</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('ok') + started('15:20')),
     `<h3>Variant A: the session starts</h3><p>The card turns green and names who approved. The start note links to the new session thread under #sage-chief.</p>`, { v: 1 }),
   S('A3 · declined', () => `<div class="varhead">Variant A · declined</div>` + app('#ask-sage', ASK, q7 + restate('ok') + approvalCard('no') + msg('bot', '15:20', `<p>${at('jon')} Erick declined the session: "Wait until T66 merges." Nothing started.</p>`)),
