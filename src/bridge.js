@@ -228,21 +228,22 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     try { return await discord.threadFrom(x.line); } catch (e) { if (GONE.has(e?.code)) return null; throw e; }
   }
 
+  /** Whether the card of `id` moved to the parent channel (G17) and waits for its new post. */
+  const moved = (m) => m.channel && !m.message;
   /**
-   * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is first posted. A card that moved to
-   * the parent channel (G17) and waits for its new post has its place there, so the message goes there. When this post finds the thread
-   * gone, the card moves, and the message goes to the parent channel too.
+   * Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is first posted. A card that moved (G17)
+   * holds the message in its entry, also when this post finds the thread gone: sync posts it after the new card, also after a restart (T65).
    */
   const postAbout = async (id, payload) => {
     const m = meta.get(id);
-    if (!m.channel && !m.message) return null;
-    const at = m.channel ?? config.channelId;
-    return (await post(at, payload)) ?? (m.channel !== at ? post(m.channel, payload) : null);
+    if (m.message && (await post(m.channel ?? config.channelId, payload))) return;
+    if (moved(m)) { m.held = [...(m.held ?? []), payload]; persist(); }
   };
 
   /**
    * Posts the card of `id` with the role alert at `at`, and keeps its place. A card with a place and no message lost its thread (G17),
-   * and its alert says so. When the session's thread is gone, the card goes to the parent channel in this loop (F-T29-9). Returns the message id or null.
+   * and its alert says so; its 2-hour reminders count from this post (T65). When the session's thread is gone, the card goes to the
+   * parent channel in this loop (F-T29-9). Returns the message id or null.
    */
   async function postCard(id, ppl, at) {
     const m = meta.get(id);
@@ -253,7 +254,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     const payload = { ...card(gate, ask, ppl), ...alert(config.driverRole, text) };
     let message = await post(at, payload);
     if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
-    if (message) { Object.assign(m, { message, channel: at }); persist(); }
+    if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
     return message;
   }
 
@@ -510,11 +511,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       meta.set(gate.id, { sage, texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
-    // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17). An
-    // error on one card never stops the posts of the others (F-T55-3).
+    // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17) and still
+    // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it (T65). An error on one card
+    // never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
-      if (m.message) continue;
-      try { await postCard(id, ppl, m.channel ?? await placeOf(m.session)); } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
+      if (moved(m) && !waits(id)) continue;
+      try {
+        if (!m.message) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
+        while (m.message && m.held?.length && (await post(m.channel, m.held[0]))) { m.held.shift(); persist(); }
+      } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
     }
   }
 

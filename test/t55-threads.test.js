@@ -42,18 +42,18 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   assert.match(batchBefore[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/);
   b.discord.deleteThread(thread);
 
-  // The vote ends: the edit of the batch card finds the thread gone, the open cards move, and the tie post goes with them: the tie post
-  // at once, then the cards, in the same loop (F-T55-3).
+  // The vote ends: the edit of the batch card finds the thread gone, the open cards move, and the tie post goes with them, in the
+  // same loop: the cards first, then the tie post below the card that it is about (F-T55-3, T65).
   b.now += 30 * MINUTE;
   await b.bridge.loop();
   const [line, ...rest] = shown(b, CHANNEL);
   assert.match(line, /^\*\*Session 1 · Sun 4 Oct\*\*/);
-  assert.match(rest[0], new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
-  assert.deepEqual(rest.slice(1), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  assert.deepEqual(rest.slice(0, 2), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  assert.match(rest[2], new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
   const moved = cardIn(b, CHANNEL, 'Batch vote G2+G3 · T2 ');
   assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/); // the vote cast in the thread
   assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: no votes\.\*\*/);
-  assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[2])[0].content,
+  assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[1])[0].content,
     `<@&${DRIVER}> T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
   assert.deepEqual(b.lines.filter((l) => /\(G17\)$/.test(l)), [
     'G1: its card moves to the parent channel, because the thread of Session 1 · Sun 4 Oct is gone (G17)',
@@ -183,7 +183,32 @@ for (const hangAt of [1, 2]) {
   });
 }
 
-test('F-T55-3: a card that waits for its new post: its tie post goes to the parent channel at once, and its reminders after the card is posted', async () => {
+
+// T65: a moved card that is settled before its new post stays quiet; a moved card's reminders and tie post come after its new post.
+const pings = (b) => shown(b, CHANNEL).filter((t) => t?.startsWith(`<@&${DRIVER}>`) || t?.startsWith(`<@&${LEADR}>`));
+
+test('F-T65-1: moved cards that are settled before their new post (one at the terminal, one by its vote) are not posted and ping nobody, also after a restart', async () => {
+  const b = await movedSetup();
+  await b.press(MAYA, 'press:G2+G3:1:0'); // the edit of the batch card finds the thread gone: G1 and G2+G3 move
+  assert.equal(b.bridge.threadOf(S1), undefined);
+  // The bridge stops before the new posts. The owner answers G1 at the terminal, and the vote of G2+G3 ends while it is stopped.
+  b.sh('gate', 'answer', 'G1', 'y');
+  b.now += 40 * MINUTE;
+  b.bridge = b.make();
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.deepEqual(cards(b), []);
+  assert.deepEqual(pings(b), []);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2'), b.answerOf('G3')], ['y', 'A. x', 'A. x']);
+  b.now += 3 * HOUR; // never later either
+  await b.bridge.loop();
+  b.bridge = b.make();
+  await b.bridge.loop();
+  assert.deepEqual(cards(b), []);
+  assert.deepEqual(pings(b), []);
+});
+
+test('T65: Discord refuses the new posts of moved cards for 3 hours: the tie post waits for its card and comes after it; the reminders count from the new post, not before', async () => {
   const b = await movedSetup();
   const real = b.discord.post;
   b.discord.post = (target, payload) => (target === CHANNEL && payload.embeds
@@ -191,13 +216,39 @@ test('F-T55-3: a card that waits for its new post: its tie post goes to the pare
   b.now += 30 * MINUTE;
   await b.bridge.loop(); // the vote of G2+G3 ends tied on part 2; the edit finds the thread gone; Discord refuses the card posts
   assert.deepEqual(cards(b), []);
-  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${LEADR}> G2\\+G3 is tied after its vote`));
+  assert.deepEqual(pings(b), []); // the tie post waits for the card that it is about
   b.discord.post = real;
-  b.now += 2 * HOUR;
-  await b.bridge.loop(); // the cards first; the reminders wait for them
-  assert.deepEqual(cards(b), ['Question G1 · T1 ', 'Batch vote G2+G3 · T2 ']);
+  b.now += 3 * HOUR; // past the 2-hour reminder of both gates
+  await b.bridge.loop();
+  assert.deepEqual(shown(b, CHANNEL).slice(1).map((t) => t.split('.')[0]), [
+    'Question G1 · T1 ', 'Batch vote G2+G3 · T2 ', `<@&${LEADR}> G2+G3 is tied after its vote`]);
+  b.now += MINUTE;
+  await b.bridge.loop();
+  assert.equal(pings(b).length, 1); // no reminder right after the new post: only the tie post
+  b.now += HOUR; // past the next 2-hour mark of each gate
   await b.bridge.loop();
   const all = shown(b, CHANNEL);
   assert.equal(all.filter((t) => t.startsWith(`<@&${DRIVER}> reminder: G1 waits`)).length, 1);
   assert.equal(all.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of G2+G3 still tied`)).length, 1);
+});
+
+test('T65: the bridge stops before the new post of a moved card whose vote ended tied: after the restart the card comes first, then its tie post, once', async () => {
+  const b = await movedSetup();
+  const real = b.discord.post;
+  let stopped;
+  const stop = new Promise((r) => { stopped = r; });
+  b.discord.post = (target, payload) => {
+    if (target === CHANNEL && payload.embeds) { stopped(); return new Promise(() => {}); } // a post that never returns
+    return real(target, payload);
+  };
+  b.now += 30 * MINUTE;
+  b.bridge.loop(); // the vote of G2+G3 ends tied, its edit finds the thread gone, and the move starts; this bridge never ends
+  await stop;
+  b.discord.post = real;
+  b.bridge = b.make();
+  b.now += MINUTE;
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.deepEqual(shown(b, CHANNEL).slice(1).map((t) => t.split('.')[0]), [
+    'Question G1 · T1 ', 'Batch vote G2+G3 · T2 ', `<@&${LEADR}> G2+G3 is tied after its vote`]);
 });
