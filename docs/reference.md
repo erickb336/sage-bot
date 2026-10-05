@@ -479,11 +479,13 @@ node scripts/session.mjs thread aaaaaaaa-0000-4000-8000-000000000052
 
 `scripts/guard.mjs` is a Claude Code PreToolUse hook for a sage session that sage-bot starts for a sage-lead (T133, step 5 of the T72 plan). Its rules are in `src/guard.js`. It is built and tested, and not installed anywhere yet.
 
-**How step 6 installs it.** sage-bot starts each lead session as `claude -p` in dontAsk mode, with the Claude Code sandbox, and with a settings file of its own (`--settings`) that holds this hook for every tool:
+**How step 6 installs it.** sage-bot starts each lead session as `claude -p` in dontAsk mode, with the Claude Code sandbox, and with a settings file of its own (`--settings`) that holds this hook for every tool, with an explicit timeout in seconds:
 
 ```json
-{ "hooks": { "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "node /path/to/sage-bot/scripts/guard.mjs" } ] } ] } }
+{ "hooks": { "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "node /path/to/sage-bot/scripts/guard.mjs", "timeout": 30 } ] } ] } }
 ```
+
+The guard decides in well under a second: it refuses an input over 64 KB before it parses it, its parser is linear, and a folder walk stops after 20,000 entries. The timeout of 30 seconds leaves room for a slow start of `node`. A hook that runs past its timeout does not block the tool call, so the timeout must stay far above the guard's time.
 
 It sets these variables in the environment of the `claude` process. The hook inherits them, and the session's model cannot change them.
 
@@ -491,41 +493,68 @@ It sets these variables in the environment of the `claude` process. The hook inh
 | --- | --- |
 | `SAGE_ORIGIN` | `lead`. With any other value, or with none, the hook allows everything and prints nothing: the owner's sessions are unaffected. |
 | `SAGE_WORKTREE` | The session's worktree, an existing folder. Reads and writes are allowed in it. |
-| `SAGE_SCRATCH` | The session's scratch folder, an existing folder. Reads and writes are allowed in it. |
+| `SAGE_SCRATCH` | The session's scratch folder, an existing folder. Reads and writes are allowed in it. sage agents of the session put their worktrees here; the repository stays read-only. |
+| `SAGE_BRANCH` | The session's own branch. `git push origin <it>` is the only upload allowed. With no value, every upload is refused. A protected name (`main`, `release…`) or a name with a character other than letters, digits, `.`, `_`, `/` and `-` is refused too. |
 | `SAGE_REPO` | Optional: the repository. Reads only. |
-| `SAGE_TOOL` | Optional: the sage state tool, `sage.mjs`. `node <it> …` is allowed, except its `config` command. |
+| `SAGE_TOOL` | Optional: the sage state tool, `sage.mjs`. Allowed: `status`, `logbook`, `merge-check`, `standing` (not `standing add`), `task`, `run`, `finding` and `verdict`. Refused: `gate` (also `gate answer`), `standing add`, `config` and every other command. |
 
 The sage-bot config, its token, the lead log and the kill-switch flag must stay outside the worktree and the scratch folder. Then no tool of the session can read or write them.
 
-**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action and ends with "Erick must approve this at the terminal." A malformed stdin, a tool call with no input, a missing worktree or scratch folder, or a crash refuses too (a crash exits with code 2).
+**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action. When a safe form of the same action exists, it ends with "sage can do this instead: …" and that form. Otherwise it ends with "Erick must approve this at the terminal." A malformed stdin, a tool call with no input, a field of the wrong type, a missing worktree or scratch folder, or a crash refuses too (a crash exits with code 2).
+
+**How to rephrase.** These are the safe forms that the refusals give:
+
+| Refused | Safe form |
+| --- | --- |
+| A command that the guard cannot read: `$`, a backtick, a heredoc, `(`, `{`, `\`, a newline. For example `git commit -m "$(cat <<'EOF' …)"`. | Write the text to a file in the scratch folder, then `git commit -F <file>`, `gh pr create --body-file <file>` or `gh pr edit <number> --body-file <file>`. One simple command per call. |
+| `git push`, `git push -u origin HEAD`, a push to any other branch, a tag or another remote | `git push origin <SAGE_BRANCH>` (or `-u`, or `HEAD:<SAGE_BRANCH>`) |
+| `git fetch`, `git fetch upstream`, a refspec | `git fetch origin`, or `git fetch origin <branch>` |
+| `HOME=… git …`, `TMPDIR=… gh …` | The same command with no variable in front of it |
+| `git checkout x && …` (also `switch`, `restore`, `stash`, `worktree`, `git mv`, `cp`, `mv` with a part after them) | The command as a call of its own, then the rest |
+| A content search or a copy of a folder that holds a secret file (`grep -r`, `rg`, the Grep tool, `cat dir/*`, `git add -A`, `cp -r`) | A folder or files without the secret, or the Grep tool with a glob such as `**/*.js` or a type such as `js` |
+| A body file outside the scratch folder; `gh pr edit` with another option than the title or the body | The body in a file in the scratch folder |
+| An input over 64 KB | The text in a file in the scratch folder, written in parts of less than 64 KB |
 
 **Bash.** The hook reads the command with a strict parser, then checks each simple command.
 
-- It refuses a command that it cannot read: a `$` (variables, `$(…)`), a backtick, parentheses, braces, a backslash, a `#`, a lone `&`, a heredoc, `<(…)`, `|&`, a newline outside quotes, or any non-ASCII character outside quotes (look-alike letters).
-- Quotes are joined as the shell joins them, so `g"i"t` is `git`. The parts joined by `&&`, `||`, `;` and `|` are checked one by one, and a `cd` changes the folder of the parts after it.
-- Each command must be on the allow-list: `git`, `gh`, `node`, `npm`, `cd`, `find`, `rm`, `cp`, `mv`, `mkdir`, `touch` and read-only tools such as `ls`, `cat`, `grep` and `diff`. Everything else is refused: a shell (`sh -c`, `eval`, `source`), `xargs`, `env`, `sudo`, `security`, `launchctl`, `claude`, `npx`, `curl`, `ssh`, Python, `sed`, `awk`, deploy tools, and a command given by a path (`/usr/bin/security`, `./deploy.sh`).
-- In front of a command, only `HOME` and `TMPDIR` (to a folder of the session), `NODE_ENV`, `CI`, `NO_COLOR` and `FORCE_COLOR` may be set.
-- Each argument that can name a file is checked as a read or a write (see the file rules below). Redirects are writes; `/dev/null` is allowed. `rm` may not remove the worktree or the scratch folder itself. A wildcard is refused for a write command and in a name that starts with a dot (`.*` can reach `..`).
+- It refuses a command that it cannot read: a `$` (variables, `$(…)`), a backtick, parentheses, braces, a backslash, a `#`, a lone `&`, a heredoc, `<(…)`, `|&`, a newline outside quotes, a control character, or any non-ASCII character outside quotes (look-alike letters). A `~` is allowed at the start of a word (`~`, `~/x`) and after a revision (`HEAD~1`, `main~`), where the shell never expands it.
+- Quotes are joined as the shell joins them, so `g"i"t` is `git`. The parts joined by `&&`, `||`, `;` and `|` are checked one by one, and a `cd` changes the folder of the parts after it. A part that changes files in a way that can change what the later checks saw (`git checkout`, `switch`, `restore`, `stash`, `worktree`, `mv`, and `cp`, `mv`) must be the last part.
+- Each command must be on the allow-list: `git`, `gh`, `node`, `npm`, `cd`, `find`, `rm`, `cp`, `mv`, `mkdir`, `touch` and read-only tools such as `ls`, `cat`, `grep`, `rg` and `diff`. Everything else is refused: a shell (`sh -c`, `eval`, `source`), `xargs`, `env`, `sudo`, `security`, `launchctl`, `claude`, `npx`, `curl`, `ssh`, Python, `sed`, `awk`, deploy tools, and a command given by a path (`/usr/bin/security`, `./deploy.sh`).
+- In front of a command, only `HOME` and `TMPDIR` (to a folder of the session), `NODE_ENV`, `CI`, `NO_COLOR` and `FORCE_COLOR` may be set; in front of `git` and `gh`, nothing: both read their config from `HOME`, and a config can run programs or send uploads elsewhere.
+- Each argument that can name a file is checked as a read or a write (see the file rules below). Redirects are writes; `/dev/null` is allowed. `rm` may not remove the worktree or the scratch folder itself. A wildcard is refused for a write command and in a name that starts with a dot (`.*` can reach `..`). A wildcard of a content read (`cat dir/*`) walks its folder, as a recursive search does.
 
 | Command | Allowed | Refused |
 | --- | --- | --- |
-| `git` | `status`, `diff`, `log`, `show`, `add`, `commit`, `restore`, `fetch`, `switch`, `checkout -b`, `branch` (list or create), `stash` (not `drop` or `clear`), `remote -v`, `worktree add` and `list`; `-C <folder>` inside the worktree or the scratch folder | `merge`, `pull`, `rebase`, `config`, `tag`, `credential`, every global option but `-C` (`-c`, `--git-dir`, `--exec-path`), `--output`, `--ext-diff` |
-| `git push` | `git push [-u] origin <branch>` or `<src>:<branch>`, one branch | a protected branch (`main`, `master`, `trunk`, `develop`, `production`, `gh-pages`, `release…`), `HEAD`, a tag or a `refs/` target, a `+` refspec, `:branch`, any option but `-u`, `-q` or `-v` (so no `--force`, `--delete`, `--tags`, `--mirror`, `--no-verify`), a remote other than `origin` |
-| `gh` | `pr create`, `view`, `list`, `diff`, `checks`, `status`; `issue view` and `list`; `run view` and `list`; `repo view` | everything else: `pr merge`, `pr close`, `api` (also the merge API), `secret`, `auth`, `release`, `workflow`, `alias`, `extension`, `repo delete`; `--hostname`, `--web` |
-| `node` | a `.js`, `.mjs` or `.cjs` file in the session's folders; `--test`, `--check` | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script (code from stdin) |
-| `npm` | `ci`, `test`, `run <script>`, `ls`, `outdated` | `publish`, `exec`, `install`, a script whose name has `deploy`, `release` or `publish`; `--prefix`, `--script-shell`, `-g` |
+| `git` | `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`, `add`, `rm`, `mv`, `restore`, `commit`, `fetch origin`, `switch`, `checkout -b`, `branch` (list or create), `stash` (`list`, `push`, `pop`, `apply`, `show`), `remote -v`, `worktree add` and `list`; `-C <folder>` inside the worktree or the scratch folder | `merge`, `pull`, `rebase`, `config`, `tag`, `credential`, `cat-file`, every global option but `-C` (`-c`, `--git-dir`, `--exec-path`), `--output`, `--ext-diff`, `--textconv`, `--no-index`, `stash -u` and `--include-untracked`, `commit --no-verify`, a revision path to a secret (`git show HEAD:.env`) |
+| `git push` | `git push [-u] origin <SAGE_BRANCH>` or `HEAD:<SAGE_BRANCH>` | everything else: another branch (also `staging` and `prod`), a tag, `HEAD`, `refs/…`, a `+` refspec, `:branch`, a remote other than `origin`, any option but `-u`, `-q` or `-v` (so no `--force`, `--delete`, `--tags`, `--mirror`, `--no-verify`), and the plain `git push` (its target comes from config that the hook cannot see) |
+| `gh` | `pr create`, `view`, `list`, `diff`, `checks`, `status`; `pr edit` with `--title` and `--body` or `--body-file`; `issue view` and `list`; `run view` and `list`; `repo view`. A body file must be in the scratch folder. | everything else: `pr merge`, `pr close`, `api` (also the merge API), `secret`, `auth`, `release`, `workflow`, `alias`, `extension`, `repo delete`; an option before the command (`--repo`); `--hostname`, `--web` |
+| `node` | `node --version`; a `.js`, `.mjs` or `.cjs` file in the session's folders; `--test`, `--check`; the sage state tool's allowed commands | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script (code from stdin) |
+| `npm` | `ci`, `test`, `run <script>`, `ls`, `outdated` | `publish`, `exec`, `install`, a script whose name has `deploy`, `release` or `publish`; `--prefix`, `--userconfig`, `--script-shell`, `--node-options`, `-g` |
 | `find` | names and tests | `-exec`, `-execdir`, `-ok`, `-delete`, `-fprint` |
+| `grep -r`, `rg` | a folder that holds no secret file | a folder that holds one; `rg --pre` |
 
 **The file tools.** Read, Glob and Grep read inside the worktree, the scratch folder and the repository. Write, Edit, MultiEdit and NotebookEdit write inside the worktree and the scratch folder only. A path is resolved as the system resolves it: each part through its symbolic links, and `..` against the real parent. So a link in the worktree that points outside is outside.
 
-- Refused also inside these folders: a file that can hold secrets (`.env` and `.env.*`, `.envrc`, `.netrc`, `.git-credentials`, `id_*`, `*.pem`, `*.key`, `credentials*`, and the folders `.ssh`, `.aws`, `.gnupg`, `.config/gh`, `.config/sage-bot`). Case does not matter.
-- Never written: `.claude/settings*.json`, `.mcp.json`, a `.git` folder, a `sage-hooks` folder (sage keeps its mode and autopilot state in `$TMPDIR/sage-hooks`), and the hook's own two files.
-- A Glob pattern that starts with `/` or `~`, or has `..` or `.*`, is refused.
-- WebFetch is allowed for `http` and `https` only. WebSearch, TodoWrite, Task and Agent are allowed. Every other tool is refused, also each MCP tool.
+- Refused also inside these folders, for reads and writes: a file that can hold secrets (`.env` and `.env.*`, `.envrc`, `.netrc`, `.git-credentials`, `.gitconfig`, `id_*`, `*.pem`, `*.key`, `credentials*`, and the folders `.git`, `.ssh`, `.aws`, `.gnupg`, `.config/gh`, `.config/git`, `.config/sage-bot`). Case does not matter. The name can also follow a revision's colon (`HEAD:.env`). `.env.example`, `.env.sample` and `.env.template` are not secrets.
+- Never written: `.claude/settings*.json`, `.mcp.json`, a `sage-hooks` folder (sage keeps its mode and autopilot state in `$TMPDIR/sage-hooks`), a file named `HEAD` (git takes a folder with `HEAD`, `objects` and `refs` for a repository, and that repository's config can run programs), and the hook's own two files.
+- A content search walks its folder first: Grep with no narrowing glob or type, `grep -r`, `rg`, `diff` of a folder, `cat dir/*`, `git add -A` or of a folder. The walk refuses when the folder holds a secret file or a link out of the session's folders. A copy or a move of a folder (`cp -r`, `mv`, `git mv`) walks it too, and also refuses a file named `HEAD`. A worktree's `.git` file (a pointer to its repository) is not counted, and folders named `node_modules` below the folder are not walked: npm fills them from the lock file, and a move of a secret into them is refused first. The walk stops after 20,000 entries and refuses: name a smaller folder.
+- A Grep glob narrows the search when it ends with an extension and names no secret file (`**/*.js`, `*.{js,mjs}`; not `*`, `*.pem` or `**/*.env`). The types `js`, `ts`, `json`, `md`, `css`, `html`, `py`, `go`, `rust`, `java`, `sh`, `yaml` and `toml` narrow it too.
+- A Glob pattern that starts with `/` or `~`, or has `..` or `.*`, or names a secret file, is refused.
+- WebFetch is allowed for `http` and `https` to a public host. It refuses this Mac and the local network: `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa`, a name with no dot, the IPv4 ranges `0`, `10`, `127`, `169.254`, `172.16–31`, `192.168` and `100.64–127`, and the IPv6 addresses `::`, `::1`, `fc00::/7`, `fe80::/10` and `::ffff:…`.
+- WebSearch, TodoWrite, Task, Agent, ToolSearch, Skill, ExitPlanMode, BashOutput, TaskOutput, KillShell, KillBash and TaskStop are allowed. A skill only loads instructions; each tool that it then uses comes through this hook. Every other tool is refused, also `Monitor` and each MCP tool.
 
-**What a hook cannot stop.** A lead can write a script in the worktree, or change `package.json`, and then run it with `node` or `npm test`. That code runs with the session's rights, and the hook sees only the command. The Claude Code sandbox of step 6 and GitHub's branch protection on `main` must hold this case.
+**What a hook cannot stop.** The hook sees only the text of one tool call. These cases need the Claude Code sandbox of step 6, GitHub's branch protection on `main`, and the rules on the GitHub side:
 
-**The tests.** `test/guard.test.js` feeds the hook each command of `test/guard-corpus.json` as hook JSON on stdin: the dangerous commands (merges, force-pushes, secrets, deploys, and their disguises: quotes, variables, `sh -c`, `xargs`, `find -exec`, `git -c alias`, absolute paths, look-alike letters, newlines) must be refused in a lead session, the normal developer commands must be allowed, and all of them must be allowed when `SAGE_ORIGIN` is not `lead`. Nothing runs: the commands are only text.
+- Code that the session writes and then runs: a script run with `node`, a test run with `npm test`, a changed `package.json` script, and the install scripts of `npm ci`. That code runs with the session's rights, and it can read any file the user can read.
+- A secret that is committed to git: `git log -p`, `git show <commit>` and `git diff` show it, because the hook cannot see what a commit holds. Anyone with access to the repository can read it too.
+- Files that git writes from a commit (for example a `HEAD` file in a branch that someone else pushed), and git's own config in the repository, which the session cannot write but someone else can.
+- A host name that resolves to a local address (DNS rebinding): the hook checks the name in the URL, not the address that the name gets.
+- A change on disk between the check and the run by another process, also a background command of the same session.
+- A hook that runs past its timeout: Claude Code then runs the tool call. The input limit and the walk limit keep the guard far below the timeout.
+
+**The tests.** `test/guard.test.js` gives each case of `test/guard-corpus.json` to the guard: the dangerous Bash commands and tool calls (merges, uploads, secrets by path, by revision and by search, git config by `HOME`, a `HEAD` file, deploys, local URLs, and their disguises: quotes, variables, `sh -c`, `xargs`, `find -exec`, `git -c alias`, absolute paths, look-alike letters, newlines) must be refused in a lead session, the normal developer commands and tool calls must be allowed, and all of them must be allowed when `SAGE_ORIGIN` is not `lead`. Other tests feed the real hook JSON on stdin: its answers, a crash, the 64 KB limit with its time, and the walk limit with its time. Nothing runs: the commands are only text.
+
+**The mutation check.** `npm run check:guard-mutations` removes each rule of `src/guard.js` in turn (151 rules) and runs the guard tests against each copy. Each removal must make a test fail. It prints each rule that survives, and exits with 1 when one does. It takes about 35 seconds and starts many test processes at once, so it is not part of `npm run check`; run it after each change of a rule.
 
 ## Run the checks
 

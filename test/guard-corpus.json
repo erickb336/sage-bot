@@ -1,5 +1,5 @@
 {
-  "about": "The corpus of the guard hook (T133). Bash commands of a lead session. {WT} is the session's worktree, {SCRATCH} its scratch folder, {HOME} the home folder, {REPO} the repository. SAMPLE DATA ONLY: test/guard.test.js feeds each one to scripts/guard.mjs as hook JSON; nothing runs.",
+  "about": "The corpus of the guard hook (T133). 'refuse' and 'allow' are Bash commands of a lead session; 'tools' are calls of the other tools as [tool, input]. {WT} is the session's worktree, {SCRATCH} its scratch folder, {HOME} the home folder, {REPO} the repository, {TOOL} the sage state tool, {TMPDIR} the temporary folder. The session's own branch (SAGE_BRANCH) is t133-guard. {SCRATCH}/proj holds a sample .env, {SCRATCH}/clean holds none (only a .git pointer file and node_modules), {SCRATCH}/bare holds a file named HEAD, {SCRATCH}/links holds links to the home folder. SAMPLE DATA ONLY: test/guard.test.js gives each one to the guard; nothing runs.",
   "refuse": [
     "gh pr merge 12",
     "gh pr merge 12 --squash --delete-branch",
@@ -170,12 +170,180 @@
     "scp x host:",
     "git push origin feature 2>&1 | tee ~/.config/sage-bot/lead.log",
     "cat {WT}/keys/id_ed25519",
-    "cat {WT}/link-to-ssh/id_ed25519",
-    "echo x > {WT}/link-to-home/evil",
+    "cat {SCRATCH}/links/link-to-ssh/id_ed25519",
+    "echo x > {SCRATCH}/links/link-to-home/evil",
     "rg --pre sh x",
     "sort -o ~/x y",
     "git diff --output=~/x",
-    "git -C {REPO} commit -m x"
+    "git -C {REPO} commit -m x",
+    "grep -r token {SCRATCH}/proj",
+    "grep -rn token {SCRATCH}/proj/config",
+    "grep -R token {SCRATCH}/proj",
+    "grep --recursive token {SCRATCH}/proj",
+    "rg token {SCRATCH}/proj",
+    "rg --hidden token {SCRATCH}/proj",
+    "cd {SCRATCH}/proj && rg token",
+    "cd {SCRATCH}/proj && grep -r token",
+    "cat {SCRATCH}/proj/config/*",
+    "head {SCRATCH}/proj/config/*",
+    "diff {SCRATCH}/proj/config {SCRATCH}/clean/src",
+    "sort {SCRATCH}/proj/config/*",
+    "grep -r x {SCRATCH}/clean/node_modules",
+    "grep -R x {SCRATCH}/links",
+    "cat {REPO}/.git/config",
+    "grep -r url {REPO}",
+    "cat {WT}/.git",
+    "cat .git",
+    "cd {SCRATCH}/proj && git add -A",
+    "git -C {SCRATCH}/proj add config",
+    "git -C {SCRATCH}/proj add .",
+    "cp -r {SCRATCH}/proj/config {SCRATCH}/copy",
+    "mv {SCRATCH}/proj/config {SCRATCH}/clean/node_modules/x",
+    "git -C {SCRATCH}/proj mv config node_modules/x",
+    "cp -R {SCRATCH}/links {SCRATCH}/copy",
+    "git stash push -u",
+    "git stash --include-untracked",
+    "git diff --no-index {SCRATCH}/proj/config/.env x",
+    "git show HEAD:.env",
+    "git show :0:.env",
+    "git show HEAD:id_rsa",
+    "git show HEAD:config/.env",
+    "git show main:.ENV.local",
+    "git log -p -- .env",
+    "git diff HEAD -- config/.env",
+    "git cat-file -p HEAD:.env",
+    "git show HEAD:.git-credentials",
+    "HOME={SCRATCH} git status",
+    "TMPDIR={SCRATCH} gh pr list",
+    "HOME={WT} gh pr view 1",
+    "NODE_ENV=x git status",
+    "HOME={SCRATCH} git push origin t133-guard",
+    "echo x > {WT}/.gitconfig",
+    "echo x > {SCRATCH}/.gitconfig",
+    "mkdir -p {SCRATCH}/.config/git",
+    "echo x > {SCRATCH}/.config/git/config",
+    "echo x > {SCRATCH}/.config/gh/hosts.yml",
+    "cp x {SCRATCH}/.gitconfig",
+    "touch {SCRATCH}/evil/HEAD",
+    "echo 'ref: refs/heads/x' > {WT}/sub/HEAD",
+    "cp x {WT}/sub/HEAD",
+    "git mv x HEAD",
+    "mkdir {WT}/sub/head",
+    "cp -r {SCRATCH}/bare {SCRATCH}/bare2",
+    "mv {SCRATCH}/bare {WT}/sub",
+    "git push origin v1.0",
+    "git push origin staging",
+    "git push origin prod",
+    "git push origin claude/other",
+    "git push --set-upstream origin claude/t133",
+    "git push origin t133-guard:staging",
+    "git push origin v1.0:t133-guard",
+    "git push origin refs/heads/t133-guard",
+    "git push -u origin HEAD",
+    "git push origin t133-guard t133-guard",
+    "git push origin t133-guard --force",
+    "git fetch upstream",
+    "git fetch https://example.com/r.git",
+    "git fetch",
+    "git fetch origin main:main",
+    "git fetch origin +main",
+    "git fetch --upload-pack=sh origin",
+    "git checkout x && cat y",
+    "git switch x; ls",
+    "git restore . && cat a",
+    "git stash pop && cat a",
+    "git stash && ls",
+    "git checkout x | cat",
+    "cp -r a b && cat b/c",
+    "mv a b && ls",
+    "git -C {WT} switch x && ls",
+    "git worktree add {SCRATCH}/w -b w && ls {SCRATCH}/w",
+    "ls ~root",
+    "echo a=~/x",
+    "echo x~root",
+    "ls --dir=~",
+    "gh pr edit 12 --body-file {WT}/README.md",
+    "gh pr edit 12 --base main",
+    "gh pr edit 12 --add-reviewer x",
+    "gh pr create --title x --body-file {REPO}/README.md",
+    "gh pr create --title x --body-file={HOME}/x.md",
+    "gh pr create --title x -F {SCRATCH}/.env",
+    "gh pr create --title x --body-file {HOME}/notes.md",
+    "node --version x",
+    "node {TOOL} gate answer G1 yes",
+    "node {TOOL} gate add T1 --question x",
+    "node {TOOL} standing add 'x'",
+    "node {TOOL} config cycles.large=1 --project {WT}",
+    "node {TOOL} round T1",
+    "node {TOOL} log - x --why y",
+    "node {TOOL} init",
+    "node {TOOL}",
+    "echo \"$(gh pr merge 12)\"",
+    "echo \"`gh pr merge 12`\"",
+    "echo \"\\\" '\" ; gh pr merge 12 ; echo \\'",
+    "echo \"!x\"",
+    "echo '\u001b]0;x\u0007'",
+    "echo \"\u001b[2J\"",
+    "gh pr view 12 --web",
+    "gh pr view -w 12",
+    "gh pr list --hostname evil.example.com",
+    "git add {HOME}/x",
+    "git rm {REPO}/README.md",
+    "git add .env",
+    "git restore {HOME}/x",
+    "git mv README.md {HOME}/x",
+    "git commit --no-verify -m x",
+    "git commit -F {HOME}/msg.txt",
+    "git commit --template={HOME}/t -m x",
+    "git switch --force main",
+    "git checkout -f main",
+    "git branch -m x",
+    "git stash drop",
+    "git remote set-url origin https://example.com/r.git",
+    "git worktree remove {WT}",
+    "git worktree prune",
+    "git worktree add {HOME}/x",
+    "git worktree add --force x",
+    "git diff --ext-diff",
+    "git log -p --textconv",
+    "git show --output=x HEAD",
+    "npm ci --prefix {HOME}",
+    "npm test --script-shell=/bin/sh",
+    "npm ci -g",
+    "npm run check --node-options=--require=./x.js",
+    "npm ci --userconfig {SCRATCH}/x",
+    "npm install x",
+    "sort -o .claude/settings.json README.md",
+    "sort --compress-program=sh README.md",
+    "uniq README.md .mcp.json",
+    "rg --pre=sh x src",
+    "find . -ok rm ;",
+    "node --import ./x.mjs scripts/x.mjs",
+    "node {SCRATCH}/x.txt",
+    "git -C",
+    "git --exec-path=/tmp status",
+    "FOO=1 ls",
+    "X=1",
+    "echo x >",
+    "HOME={HOME} npm ci",
+    "ls {SCRATCH}/.*/home",
+    "cp {SCRATCH}/bare/* {WT}/sub",
+    "cd {HOME} && ls",
+    "cd - && ls",
+    "gh --repo=evil/r pr create --title x --body y",
+    "grep --file=.env x README.md",
+    "grep -f{HOME}/notes.txt x README.md",
+    "cat ~/notes.txt",
+    "ls ~",
+    "cat {SCRATCH}/links/*",
+    "git -C {HOME}/x status",
+    "ls --dir=~1",
+    "git push upstream t133-guard",
+    "git hasOwnProperty",
+    "git constructor",
+    "git propertyIsEnumerable x",
+    "echo x |& cat",
+    "ls ;; ls"
   ],
   "allow": [
     "git status",
@@ -191,7 +359,6 @@
     "git push origin t133-guard",
     "git push -u origin t133-guard",
     "git push origin HEAD:t133-guard",
-    "git push --set-upstream origin claude/t133",
     "git fetch origin",
     "git switch -c t133-repair",
     "git checkout -b t133-repair2",
@@ -236,6 +403,775 @@
     "echo done",
     "pwd",
     "cat {REPO}/README.md",
-    "diff src/guard.js {REPO}/README.md"
-  ]
+    "diff src/guard.js {REPO}/README.md",
+    "git fetch origin main",
+    "git fetch --prune origin",
+    "git diff HEAD~1",
+    "git log --oneline HEAD~3..HEAD",
+    "git show main~",
+    "git diff HEAD~1 -- src",
+    "git show HEAD:src/guard.js",
+    "git show HEAD:.env.example",
+    "grep -r guard {SCRATCH}/clean",
+    "rg guard {SCRATCH}/clean",
+    "grep -rn guard src",
+    "cat {SCRATCH}/clean/src/*",
+    "git add src",
+    "cp -r {SCRATCH}/clean/src {SCRATCH}/copy",
+    "ls && git checkout -b x",
+    "git stash list && ls",
+    "git status && git switch -c t133-x",
+    "node --version",
+    "node -v",
+    "gh pr edit 12 --body-file {SCRATCH}/body.md",
+    "gh pr edit 12 --title 'T133: guard'",
+    "gh pr create --title x -F {SCRATCH}/body.md",
+    "node {TOOL} logbook T1",
+    "node {TOOL} standing",
+    "node {TOOL} merge-check --sha 947d6d8cd425d55d51dbb8ea0b5ee44407153567",
+    "node {TOOL} run add T1 --role qa",
+    "node {TOOL} finding add T1 --key F1",
+    "node {TOOL} verdict T1 clean",
+    "cat .env.example",
+    "git stash push -m wip",
+    "[ -f README.md ]",
+    "test -d src",
+    "echo done >&2"
+  ],
+  "tools": {
+    "refuse": [
+      [
+        "Read",
+        {
+          "file_path": "{HOME}/.ssh/id_ed25519"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/../../home/x"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.env"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/config/.Env.production"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{REPO}/.git/config"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.git"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{SCRATCH}/proj/config/.env"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{SCRATCH}/links/link-to-ssh/id_ed25519"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{SCRATCH}/links/link-to-home/notes.txt"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": 42
+        }
+      ],
+      [
+        "Write",
+        {}
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "x",
+          "path": 42
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{REPO}/README.md",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{HOME}/.claude/settings.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.claude/settings.local.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.mcp.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/sage-hooks/x.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{TMPDIR}/sage-hooks/x.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{HOME}/.config/sage-bot/lead.log",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/links/link-to-home/new.txt",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/links/link-to-home/../x.txt",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/.gitconfig",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.config/git/config",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/.config/gh/hosts.yml",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/sub/HEAD",
+          "content": "ref: refs/heads/x"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": "{SCRATCH}/evil/head",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": "/etc/hosts",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      ],
+      [
+        "NotebookEdit",
+        {
+          "notebook_path": "{HOME}/n.ipynb"
+        }
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "/Users/*/.ssh/*"
+        }
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "../../**"
+        }
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "**/*",
+          "path": "{HOME}"
+        }
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "**/.env",
+          "path": "{SCRATCH}/clean"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "x",
+          "path": "/"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "glob": "*"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "glob": "*.{js,pem}"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "glob": "**/*.env"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "type": "all"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "x",
+          "path": "{SCRATCH}/clean",
+          "glob": "**/.env"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "x",
+          "path": "{SCRATCH}/links"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "url",
+          "path": "{REPO}"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "file:///etc/passwd",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "not a url",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://localhost:3000/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://app.localhost/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://127.0.0.1:8080/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://10.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://192.168.1.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://172.16.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://172.31.255.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://169.254.169.254/latest/meta-data/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://printer.local/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://router/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://0x7f.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://2130706433/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://0.0.0.0/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://100.64.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[fe80::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[fd00::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[::ffff:127.0.0.1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[::]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://db.internal/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://localhost./",
+          "prompt": "x"
+        }
+      ],
+      [
+        "mcp__plugin_discord_discord__reply",
+        {
+          "text": "x"
+        }
+      ],
+      [
+        "Monitor",
+        {
+          "command": "gh pr merge 12"
+        }
+      ],
+      [
+        "UnknownTool",
+        {}
+      ],
+      [
+        "Bash",
+        {
+          "command": 42
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "x",
+          "path": "{TMPDIR}"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "x",
+          "path": "{HOME}",
+          "glob": "*.js"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "ftp://example.com/x",
+          "prompt": "x"
+        }
+      ]
+    ],
+    "allow": [
+      [
+        "Read",
+        {
+          "file_path": "{WT}/README.md"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{SCRATCH}/x.md"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{REPO}/README.md"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "README.md"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.env.example"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/config/.env.sample"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{SCRATCH}/proj/config/.env.template"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.github/workflows/ci.yml"
+        }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.gitignore"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/src/new.js",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/r1/a.txt",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/src/head/x.js",
+          "content": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/src/headers.js",
+          "content": "x"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": "{WT}/README.md",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      ],
+      [
+        "MultiEdit",
+        {
+          "file_path": "{WT}/README.md",
+          "edits": []
+        }
+      ],
+      [
+        "Glob",
+        {
+          "pattern": "src/**/*.js"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "guard",
+          "path": "{WT}"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "guard"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "guard",
+          "path": "{SCRATCH}/clean"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "glob": "**/*.js"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "glob": "*.{js,mjs}"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{SCRATCH}/proj",
+          "type": "js"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://nodejs.org/api/fs.html",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://8.8.8.8/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://172.32.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2606:4700:4700::1111]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "TodoWrite",
+        {
+          "todos": []
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x"
+        }
+      ],
+      [
+        "Task",
+        {
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebSearch",
+        {
+          "query": "x"
+        }
+      ],
+      [
+        "ToolSearch",
+        {
+          "query": "x"
+        }
+      ],
+      [
+        "Skill",
+        {
+          "skill": "sage:report"
+        }
+      ],
+      [
+        "BashOutput",
+        {
+          "bash_id": "b1"
+        }
+      ],
+      [
+        "TaskOutput",
+        {
+          "task_id": "b1"
+        }
+      ],
+      [
+        "KillShell",
+        {
+          "shell_id": "b1"
+        }
+      ],
+      [
+        "KillBash",
+        {
+          "shell_id": "b1"
+        }
+      ],
+      [
+        "TaskStop",
+        {
+          "task_id": "b1"
+        }
+      ],
+      [
+        "ExitPlanMode",
+        {
+          "plan": "x"
+        }
+      ]
+    ]
+  }
 }
