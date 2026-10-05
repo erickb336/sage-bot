@@ -3,6 +3,30 @@
 /** The label of the agent, and the name of its plist file in ~/Library/LaunchAgents. */
 export const LABEL = 'com.sage.bot';
 
+/** The fields of the config that the bridge needs, each a non-empty string (see examples/config.example.json). */
+export const CONFIG_FIELDS = ['guildId', 'channelId', 'ownerId', 'driverRole', 'leadRole', 'project', 'sagePath', 'statePath'];
+
+/** The Homebrew links that `brew upgrade node` keeps, in the order the plist prefers them. */
+const BREW_LINKS = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
+const CELLAR = /^(.*)\/Cellar\/([^/]+)\/[^/]+\/(.*)$/; // <prefix>/Cellar/<formula>/<version>/<rest>
+
+/**
+ * The node path for the plist that still works after a Node upgrade: a Homebrew link to the running node, else the
+ * running formula's opt link, else execPath with a warning. It never gives a path under Cellar/<version>: a Cellar node
+ * with no link throws. realpath is fs.realpathSync, or a fake in tests.
+ * @returns {{ node: string, warning?: string }}
+ */
+export function stableNode(execPath, realpath) {
+  const real = (p) => { try { return realpath(p); } catch { return null; } };
+  const target = real(execPath) ?? execPath;
+  const cellar = CELLAR.exec(target);
+  const opt = cellar && `${cellar[1]}/opt/${cellar[2]}/${cellar[3]}`;
+  const node = [...BREW_LINKS, opt].find((p) => p && real(p) === target);
+  if (node) return { node };
+  if (cellar) throw new Error(`no stable link to ${target}: run "brew link ${cellar[2]}", then print the plist again`);
+  return { node: execPath, warning: `the plist runs ${execPath}: make the plist again after each Node upgrade` };
+}
+
 const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**
