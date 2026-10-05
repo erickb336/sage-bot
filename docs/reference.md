@@ -315,7 +315,7 @@ The file is `<statePath>.channels`, beside the gate file and the team votes file
 
 **The file is safe like the gate file.** It is written whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700 (`writeWhole`). It is read through `readOwn`: the open refuses a symlink (`O_NOFOLLOW`), and the open file must be a regular file of this user with mode 0600. The bridge stops at start, before it connects to Discord, for a symlink, a wrong mode, bad JSON, an entry that the bridge did not write, a project that is not in `projects`, or not exactly one home channel. The message names the file and the cause, for example "the channel registry …/gates.json.channels is not JSON. Nothing was loaded." The bridge never writes over a bad file.
 
-**One writer at a time.** Only the holder of the bridge lock (`<statePath>.lock`) writes the file: the running bridge (a lead's unregister), or `scripts/channels.mjs` while the bridge is stopped. The script takes the same lock, so it refuses while a bridge runs, and a bridge cannot start while the script works.
+**One writer at a time.** Only the holder of the bridge lock (`<statePath>.lock`) writes the file: the running bridge (a lead's unregister), or `scripts/channels.mjs` while the bridge is stopped. `register` and `unregister` take the same lock, so they refuse while a bridge runs, and a bridge cannot start while the script works. `list` only reads the file (through `readOwn`), so it takes no lock and works while the bridge runs.
 
 **The migration.** When there is no registry file, the bridge makes it at its first start from the config of the time before T130:
 
@@ -323,7 +323,9 @@ The file is `<statePath>.channels`, beside the gate file and the team votes file
 - `channelId` (the old parent channel) becomes the home channel, for the bridge's own `project`. `/sage` now works there too.
 - When both are the same channel, it is one home entry for the first project.
 
-The bridge logs one line with the entries. After that, the bridge reads only the file: `channelId` and `askChannelId` in the config change nothing. With no file and no `channelId`, the bridge stops and says how to register the home channel.
+The bridge logs one line with the entries. After that, the bridge reads only the file: `channelId` and `askChannelId` in the config change nothing. With no file and no `channelId` (a new install), the bridge stops and gives the command that makes the first registry: `node scripts/channels.mjs --config <config.json> register <channel id> <project> --home`.
+
+**A project removed from the config.** When a channel of the registry has a project that is not in `projects`, the bridge stops at start. The message names each such channel and its project, and the repair: `register <channel id> <project>` for a listed project, or `unregister <channel id>`. The script still lists and unregisters such a channel; `list` marks it "not in the config".
 
 **Erick registers channels at the terminal.** Only Erick registers a channel or changes its project (G24). The script cannot talk to Discord, because the bridge holds the only connection. So the script changes the file only while the bridge is stopped, and the bridge checks the permissions at its next start.
 
@@ -333,15 +335,20 @@ node scripts/channels.mjs [--config <config.json>] register <channel id> <projec
 node scripts/channels.mjs [--config <config.json>] unregister <channel id>
 ```
 
-- `register` adds a channel, or changes the project of a registered one. With `--home`, the channel becomes the home channel, and the old home stays registered as a normal channel. A project that is not in `projects` is refused, and nothing changes.
+- `--config` defaults to `~/.config/sage-bot/config.json`.
+- `register` adds a channel, or changes the project of a registered one; the home channel stays the home. With `--home`, the channel becomes the home channel, and the old home stays registered as a normal channel. A project that is not in `projects` is refused, and nothing changes.
+- With no registry and no `channelId`, only `register <channel id> <project> --home` works: it makes the first registry.
+- The home channel cannot move while a card of the gate file waits (its gate is not settled): the bridge takes presses only in the home channel and its threads, so those buttons would stop working. The refusal names the cards.
 - `unregister` removes a channel. The home channel is refused: make another channel the home first.
-- Each command prints its change, then the registry. A refusal prints the reason on stderr and exits 1.
+- Each command prints its change, then the registry. A refusal prints the reason on stderr and exits 1. A wrong verb prints the usage line.
 
 **The permissions.** At each start, after it connects, the bridge checks its permissions in each registered channel with `permissionsFor`: View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads and Embed Links. It logs one line for each channel that lacks one or more, with their names: "sage-bot lacks these permissions in the registered channel 400000000000000002 (your-project): Manage Threads, Embed Links. Give them to its role in that channel". For a channel that it cannot see, it logs "sage-bot cannot see the registered channel …". The channel stays registered, and the bridge keeps running.
 
-**A sage-lead may only unregister a channel.** `/sage unregister` in a registered channel, or in a thread of it, gives a sage-lead a public confirm with one button, "Unregister this channel".
+**A sage-lead may only unregister a channel.** `/sage unregister` in a registered channel, or in a thread of it, gives a sage-lead a public confirm with two buttons, "Unregister this channel" and "Cancel".
 
-- A press of a sage-lead removes the channel, saves the file, logs "the sage-lead <id> unregistered the channel <id> (it was for the project <name>)" at the terminal, and replaces the confirm with the result.
+- A press of a sage-lead removes the channel, saves the file, logs "the sage-lead <name> (<id>) unregistered the channel <id> (it was for the project <name>)" at the terminal, and replaces the confirm with the result. When the save fails, the channel stays registered and the reply says so.
+- A lead's Cancel replaces the confirm with "Cancelled. Nothing changed." The confirm works for 10 minutes after Discord made it; a later press changes nothing and says to type `/sage unregister` again.
+- A press whose button id does not end in a Discord id (or Cancel) gets nothing.
 - A sage-apprentice gets "Only a sage-lead can unregister a channel. Ask a lead." for the command, and a reply of its own for a press, so the lead's confirm stays.
 - A member with neither role gets nothing.
 - The home channel cannot be unregistered from Discord. A lead cannot register a channel or change its project.
