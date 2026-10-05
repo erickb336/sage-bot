@@ -30,6 +30,8 @@ export function sageTool({ sagePath, project, env = process.env }) {
     gates: () => table('gates'),
     /** Every task row: { id, title, ... }. */
     tasks: () => table('tasks'),
+    /** Every decision row, in the order sage wrote them: { at, task, decision, why }. */
+    decisions: () => table('decisions'),
     /** Records the answer of one gate. */
     answer: (id, text) => sage('gate', 'answer', id, text),
   };
