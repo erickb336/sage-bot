@@ -24,9 +24,12 @@ const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content
   && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && Array.isArray(p.allowedMentions.roles)
     && p.allowedMentions.roles.length === 1 && /^\d{17,20}$/.test(p.allowedMentions.roles[0])));
 
-/** One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make. */
+/**
+ * One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make.
+ * Its gate id is its key (T132): the project name, a slash and the sage gate ids of the entry, so `G1` of two projects are two entries.
+ */
 function entryOf(e) {
-  const ok = e && Array.isArray(e.sage) && e.sage.every(isText) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
+  const ok = e && Array.isArray(e.sage) && e.sage.every((id) => GATE_ID.test(id)) && e.gate?.id === keyOf(projectOfKey(e.gate?.id), e.sage.join('+')) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
     && e.ask.parts.every((p) => p && isFinal(p.final, p))
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
@@ -52,18 +55,23 @@ function sessionOf(s) {
 }
 
 /**
- * The entries and the sage sessions of the gate file, both [] when there is none yet. Throws for a file that is not the bridge's own.
- * A version 1 file (before T29) has no sessions, and its entries have no session.
+ * The entries and the sage sessions of the gate file, both [] when there is none yet, and the file's version. Throws for a file that is
+ * not the bridge's own. A version 1 file (before T29) has no sessions, and its entries have no session. The entries of a version 1 or 2
+ * file (before T132) are of one project: `own`, the bridge's own project, goes in front of their gate ids. Without `own` (a script that
+ * reads only the sessions or shows the ids) they keep the ids as written.
  * @returns {{ gate: import('./vote.js').Gate, ask: object, sage: string[], texts: string[][], message: string | null, remindedAt: number,
  *   sent: Record<string, string> }[]}  the owner's final answers from the terminal are in `ask.parts[i].final`
  */
-export function load(path) {
+export function load(path, own) {
   const text = readOwn(path, 'gate file');
-  if (text === undefined) return { entries: [], sessions: [] };
+  if (text === undefined) return { version: VERSION, entries: [], sessions: [] };
   const data = JSON.parse(text);
   const sessions = data?.version === 1 ? [] : data?.sessions;
-  if (![1, 2].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1 or 2`);
-  return { entries: data.entries.map(entryOf), sessions: sessions.map(sessionOf) };
+  if (![1, 2, VERSION].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1, 2 or 3`);
+  const old = data.version < VERSION;
+  if (old && own === undefined) return { version: data.version, entries: data.entries, sessions: sessions.map(sessionOf) };
+  const entries = old ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) } })) : data.entries;
+  return { version: data.version, entries: entries.map(entryOf), sessions: sessions.map(sessionOf) };
 }
 
 /**
@@ -91,16 +99,32 @@ export function readOwn(path, what) {
   } finally { closeSync(fd); }
 }
 
+/** The version of the gate file that the bridge writes: 3 since T132 (gate ids with their project). */
+const VERSION = 3;
 /** Replaces the gate file whole. */
-export const save = (path, entries, sessions = []) => writeWhole(path, JSON.stringify({ version: 2, entries, sessions }));
+export const save = (path, entries, sessions = []) => writeWhole(path, JSON.stringify({ version: VERSION, entries, sessions }));
 
-/** A sage gate id, as sage writes it: G and digits. Only these go in the team votes file. */
+/** A sage gate id, as sage writes it: G and digits. */
 export const GATE_ID = /^G\d{1,9}$/;
+/** The name of a project of the config: lower-case letters, digits and dashes, at most 32 (src/ask.js projectsOf). */
+export const PROJECT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/**
+ * The key of a gate of one project (T132): `<project name>/<gate id>`, for example `sage-bot/G1`. sage's gate ids start at G1 in each
+ * logbook, so every file, card button and map of the bridge names a gate by its key, never by its id alone.
+ */
+export const keyOf = (project, id) => `${project}/${id}`;
+/** The project name of a key, or undefined for anything that is not a key. */
+export const projectOfKey = (key) => {
+  const name = /^([^/]*)\//.exec(String(key))?.[1];
+  return PROJECT_NAME.test(name ?? '') ? name : undefined;
+};
+/** The key of one sage gate, as the team votes file and the leads-only file hold it. */
+const GATE_KEY = /^[a-z0-9][a-z0-9-]{0,31}\/G\d{1,9}$/;
 /** A Claude Code session id: a UUID, in lower case as Claude Code writes it. */
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * The team votes file (G13): the sage gate ids that sage marked as team votes. The bridge posts only these.
+ * The team votes file (G13): the keys of the sage gates that sage marked as team votes. The bridge posts only these.
  * It is `votesPath` in the config, or `<statePath>.votes`; scripts/vote.mjs writes it.
  */
 export function votesPathOf({ votesPath, statePath }) {
@@ -114,26 +138,31 @@ export function votesPathOf({ votesPath, statePath }) {
  * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
-/** The ids in the leads-only file, checked like the team votes file. */
-export const loadLeads = (path) => loadVotes(path, 'leads-only file');
+/** The keys in the leads-only file, checked like the team votes file. */
+export const loadLeads = (path, own) => loadVotes(path, own, 'leads-only file');
 
 /**
- * The marked gate ids, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list of gate ids.
+ * The marked gate keys, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list
+ * of gate keys. A bare gate id (the file before T132) is a gate of `own`, the bridge's own project; the next save writes its key.
  * `what` names the file in the message: the team votes file, or the leads-only file.
  */
-export function loadVotes(path, what = 'team votes file') {
+export function loadVotes(path, own, what = 'team votes file') {
   const text = readOwn(path, what);
   if (text === undefined) return new Set();
   let ids;
   try { ids = JSON.parse(text); } catch { ids = null; }
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && GATE_ID.test(id))) {
-    throw new TypeError(`the ${what} ${path} must be a JSON list of sage gate ids (G and digits). Nothing was loaded.`);
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && (GATE_KEY.test(id) || (GATE_ID.test(id) && PROJECT_NAME.test(own ?? ''))))) {
+    throw new TypeError(`the ${what} ${path} must be a JSON list of sage gate keys (a project name, a slash, G and digits). Nothing was loaded.`);
   }
-  return new Set(ids);
+  return new Set(ids.map((id) => (GATE_ID.test(id) ? keyOf(own, id) : id)));
 }
 
-/** Replaces the team votes file whole, sorted by number. */
-export const saveVotes = (path, ids) => writeWhole(path, JSON.stringify([...ids].sort((a, b) => a.slice(1) - b.slice(1))));
+/** Replaces the team votes file whole, sorted by project and then by number. */
+export const saveVotes = (path, keys) => writeWhole(path, JSON.stringify([...keys].sort((a, b) => {
+  const [pa, ia] = a.split('/G');
+  const [pb, ib] = b.split('/G');
+  return pa < pb ? -1 : pa > pb ? 1 : ia - ib;
+})));
 
 /** Replaces a file whole: a new 0600 file beside it, synced, then renamed over it, in a folder of mode 0700. */
 export function writeWhole(path, text) {

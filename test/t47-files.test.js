@@ -20,7 +20,7 @@ test('F-T47-1: a link at the gate file or the team votes file is refused, and a 
   symlinkSync(join(dir, 'real.json'), join(dir, 'gates.json'));
   symlinkSync(join(dir, 'real.json'), join(dir, 'gates.json.votes'));
   assert.throws(() => load(join(dir, 'gates.json')), { message: REFUSED('gate file', join(dir, 'gates.json')) });
-  assert.throws(() => loadVotes(join(dir, 'gates.json.votes')), { message: REFUSED('team votes file', join(dir, 'gates.json.votes')) });
+  assert.throws(() => loadVotes(join(dir, 'gates.json.votes'), 'project'), { message: REFUSED('team votes file', join(dir, 'gates.json.votes')) });
   // A link or a 0644 file that comes in between the check and the read, 1,000s of times.
   const path = join(dir, 'gates.json.votes');
   rmSync(path);
@@ -59,9 +59,9 @@ test('F-T47-1: a folder that group or other users may write is refused without t
     own(path, '["G7"]');
     chmodSync(dir, mode);
     try {
-      if (ok) assert.deepEqual([...loadVotes(path)], ['G7'], `mode ${mode.toString(8)}`);
+      if (ok) assert.deepEqual([...loadVotes(path, 'project')], ['project/G7'], `mode ${mode.toString(8)}`);
       else {
-        assert.throws(() => loadVotes(path), {
+        assert.throws(() => loadVotes(path, 'project'), {
           message: `the team votes file ${path} is in a folder that other users may write. Make the folder 0700. Nothing was loaded.`,
         }, `mode ${mode.toString(8)}`);
       }
@@ -74,7 +74,7 @@ function votesSetup(name) {
   const dir = scratch(name);
   const votes = join(dir, 'state', 'gates.json.votes');
   const config = join(dir, 'config.json');
-  writeFileSync(config, JSON.stringify({ votesPath: votes }));
+  writeFileSync(config, JSON.stringify({ votesPath: votes, project: dir, sagePath: '/sample/sage.mjs', projects: [{ name: 'project', project: dir }] }));
   const run = (...args) => spawn(process.execPath, [VOTE, '--config', config, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
   const runSync = (...args) => spawnSync(process.execPath, [VOTE, '--config', config, ...args], { encoding: 'utf8' });
   return { votes, run, runSync };
@@ -96,7 +96,7 @@ test('F-T47-1: 20 vote.mjs runs at once (10 marks, 10 unmarks of other ids) end 
     const results = await Promise.all(runs.map(exited));
     assert.deepEqual(results.filter((r) => r.code !== 0), [], `round ${round}`);
     const list = JSON.parse(readFileSync(v.votes, 'utf8'));
-    if (JSON.stringify(list) !== JSON.stringify(ids(11, 20))) lost.push(`round ${round}: ${list.join(' ')}`);
+    if (JSON.stringify(list) !== JSON.stringify(ids(11, 20).map((id) => `project/${id}`))) lost.push(`round ${round}: ${list.join(' ')}`);
     assert.equal(existsSync(`${v.votes}.lock`), false);
   }
   assert.deepEqual(lost, []);
@@ -115,6 +115,6 @@ test('F-T47-1: a vote lock of a live run blocks a change for 2 s; a stale lock (
   const dead = spawnSync(process.execPath, ['-e', '']).pid;
   own(`${v.votes}.lock`, String(dead));
   const r = v.runSync('G5');
-  assert.equal(r.stdout, 'team votes: G5\n');
+  assert.equal(r.stdout, 'team votes: project/G5\n');
   assert.equal(existsSync(`${v.votes}.lock`), false);
 });

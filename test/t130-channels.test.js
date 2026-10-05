@@ -82,7 +82,7 @@ test('T130 migration: an old config with channelId and askChannelId makes the re
   assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'task', { id: 'T1' }))[1].content, '**T1 · Pick a name**\ntiny · framed · no pull request');
   // The cards: the bridge on the home channel of the registry posts the session line and its thread there.
   b.sh('gate', 'add', 'T1', '--question', 'Which name?', '--options', 'Ada|Bo', '--recommend', 'Ada');
-  b.bridge = createBridge({ sage: b.sage, discord: b.discord, config: withHome(CONFIG, channels), statePath: b.statePath, now: () => b.now, log: () => {} });
+  b.bridge = createBridge({ sages: new Map([['project', b.sage]]), own: 'project', discord: b.discord, config: withHome(CONFIG, channels), statePath: b.statePath, now: () => b.now, log: () => {} });
   await b.post();
   assert.equal(b.discord.in(CHANNEL).length > 0, true);
   assert.equal(b.discord.in(ASK).length, 0);
@@ -272,10 +272,10 @@ test('F-T130-8: the home cannot move while a card waits in the old home; it can 
   const b = world(t);
   b.sh('task', 'add', '--title', 'Pick a name', '--size', 'tiny');
   b.sh('gate', 'add', 'T1', '--question', 'Which name?', '--options', 'Ada|Bo', '--recommend', 'Ada');
-  await b.post(); // the card of G1 waits in CHANNEL, the home
+  await b.post(); // the card of project/G1 waits in CHANNEL, the home
   assert.equal(b.discord.in(CHANNEL).length > 0, true);
   let r = script(b, 'register', OTHER, 'project', '--home');
-  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: the home channel cannot move while 1 card(s) wait in the old home channel ${CHANNEL} or its threads (G1): their buttons would stop working. Wait until they are settled, or answer them at the terminal, then run this again. Nothing was changed.\n`]);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: the home channel cannot move while 1 card(s) wait in the old home channel ${CHANNEL} or its threads (project/G1): their buttons would stop working. Wait until they are settled, or answer them at the terminal, then run this again. Nothing was changed.\n`]);
   assert.deepEqual(file(b).channels, { [ASK]: { project: 'project' }, [CHANNEL]: { project: 'project', home: true } });
   r = script(b, 'register', CHANNEL, 'project', '--home'); // not a move
   assert.equal(r.status, 0, r.err);

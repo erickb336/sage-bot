@@ -3,7 +3,7 @@
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { GATE_ID, readOwn, SESSION_ID, writeWhole } from './state.js';
+import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
 /** A sage task id, as sage writes it: T and digits. */
@@ -63,11 +63,14 @@ export function sessionsPathOf({ sessionsPath, statePath }) {
 
 const isTime = (x) => Number.isSafeInteger(x) && x >= 0;
 /**
- * One spool file, checked: { id, cwd, startedAt, pid, endedAt?, gates, tasks }. Throws for anything that the hook did not write.
- * @returns {{ id: string, cwd: string, startedAt: number, pid: number, endedAt?: number, gates: string[], tasks: string[] }}
+ * One spool file, checked: { id, project, cwd, startedAt, pid, endedAt?, gates, tasks }. Throws for anything that the hook did not write.
+ * `project` is the name of the session's project in the config (T132); the gates and tasks are of that project. A spool file of the
+ * time before T132 has no project: it is of `own`, the bridge's own project.
+ * @returns {{ id: string, project: string, cwd: string, startedAt: number, pid: number, endedAt?: number, gates: string[], tasks: string[] }}
  */
-export function parseSpool(s) {
-  const ok = s && SESSION_ID.test(s.id) && typeof s.cwd === 'string' && isTime(s.startedAt) && Number.isSafeInteger(s.pid) && s.pid > 0
+export function parseSpool(s, own) {
+  if (s && s.project === undefined) s = { ...s, project: own };
+  const ok = s && SESSION_ID.test(s.id) && PROJECT_NAME.test(s.project ?? '') && typeof s.cwd === 'string' && isTime(s.startedAt) && Number.isSafeInteger(s.pid) && s.pid > 0
     && (s.endedAt === undefined || isTime(s.endedAt))
     && Array.isArray(s.gates) && s.gates.every((g) => GATE_ID.test(g)) && Array.isArray(s.tasks) && s.tasks.every((t) => TASK_ID.test(t));
   if (!ok) throw new TypeError('not a spool file of the sage-bot hook');
@@ -77,14 +80,14 @@ export function parseSpool(s) {
 const spoolPath = (dir, id) => join(dir, `${id}.json`);
 
 /** Every spool file of the folder, by session id, and one line for each file that was refused. The folder may not exist yet. */
-export function readSpools(dir) {
+export function readSpools(dir, own) {
   const spools = new Map();
   const refused = [];
   let names = [];
   try { names = readdirSync(dir); } catch (e) { if (e.code !== 'ENOENT') refused.push(`the session spool ${dir}: ${e.message}`); }
   for (const name of names.filter((n) => /\.json$/.test(n)).sort()) {
     try {
-      const s = parseSpool(JSON.parse(readOwn(join(dir, name), 'spool file')));
+      const s = parseSpool(JSON.parse(readOwn(join(dir, name), 'spool file')), own);
       if (name !== `${s.id}.json`) throw new TypeError('its name is not its session id');
       spools.set(s.id, s);
     } catch (e) {
@@ -98,27 +101,32 @@ export function readSpools(dir) {
 export const runs = (s, alive) => s.endedAt === undefined && alive(s.pid);
 
 /**
- * The session of a group of sage gate rows: of the spools that list one of the gates and started before sage asked it (its `at`, to the
- * second), the one that started last; else the newest running session; else null. A spool can list a gate id of an older logbook (F-T29-3).
+ * The session of a group of sage gate rows of `project`: of the sessions of that project, the spools that list one of the gates and
+ * started before sage asked it (its `at`, to the second), the one that started last; else the newest running session of the project;
+ * else null. A spool can list a gate id of an older logbook (F-T29-3).
  * @param {{ id: string, at: string }[]} rows @param {Map<string, ReturnType<typeof parseSpool>>} spools @param {(pid: number) => boolean} alive
+ * @param {string} project
  */
-export function sessionOf(rows, spools, alive) {
-  const all = [...spools.values()].sort((a, b) => b.startedAt - a.startedAt);
+export function sessionOf(rows, spools, alive, project) {
+  const all = [...spools.values()].filter((s) => s.project === project).sort((a, b) => b.startedAt - a.startedAt);
   const startedBy = (s, at) => Math.floor(s.startedAt / 1000) * 1000 <= Date.parse(at);
   const known = all.find((s) => rows.some((r) => s.gates.includes(r.id) && startedBy(s, r.at)));
   return (known ?? all.find((s) => runs(s, alive)))?.id ?? null;
 }
 
-/** The title of a session's thread: the bridge's number of the session, then the weekday and the date of its start, in the host's time zone. */
-export function titleOf(n, at) {
+/**
+ * The title of a session's thread: the bridge's number of the session, its project, then the weekday and the date of its start, in the
+ * host's time zone.
+ */
+export function titleOf(n, project, at) {
   const d = new Date(at);
   const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
   const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  return `Session ${n} · ${day} ${date}`;
+  return `Session ${n} · ${project} · ${day} ${date}`;
 }
 
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-/** The line of a session in the parent channel: "**Session 14 · Tue 4 Oct**" and "running · 4 tasks · 2 open questions", or "ended <time> · …". */
+/** The line of a session in the parent channel: "**Session 14 · sage-bot · Tue 4 Oct**" and "running · 4 tasks · 2 open questions", or "ended <time> · …". */
 export function lineOf({ title, endedAt }, { tasks, open }) {
   const state = endedAt === undefined ? 'running' : `ended ${stamp(endedAt, 'f')}`;
   return `**${title}**\n${state} · ${count(tasks, 'task', 'tasks')} · ${open ? count(open, 'open question', 'open questions') : 'no open questions'}`;
@@ -142,22 +150,32 @@ function locked(file, work) {
 }
 
 /**
+ * The listed project of a folder: the project whose folder holds it, the deepest one when project folders are inside each other.
+ * @param {{ name: string, project: string }[]} projects
+ */
+export const projectAt = (path, projects) => projects.filter((p) => inside(path, p.project))
+  .sort((a, b) => real(b.project).length - real(a.project).length)[0];
+
+/**
  * Records one Claude Code hook event in the spool (scripts/hook.mjs). Throws for input that it refuses; then it writes nothing.
- * An event in a folder outside the project, and a `gate add` with `--project` outside it, are not refused: they are not this project's.
+ * The session is of the listed project whose folder holds its cwd (T132). An event in a folder outside every listed project, and a
+ * `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
  * - SessionStart: { id, cwd, startedAt, pid }; a resume or a compaction keeps the gates and tasks and takes away the end.
  * - PostToolUse on Bash: for a command that runs the sage state tool with `gate add`, the gate id of its output line and its task.
  *   A `--project` whose folder only the shell knows (a variable other than HOME, a command) is ignored (F-T29-11).
  * - SessionEnd: the end.
  * @param {object} input  the hook's JSON from Claude Code
- * @param {{ project: string, dir: string, pid: number, now: number, home: string }} o  `home` is the hook's HOME, for `~` and `$HOME`
+ * @param {{ projects: { name: string, project: string }[], dir: string, pid: number, now: number, home: string }} o  the config's projects
+ *   (src/ask.js projectsOf); `home` is the hook's HOME, for `~` and `$HOME`
  * @returns {string} what it did, for the tests
  */
-export function record(input, { project, dir, pid, now, home }) {
+export function record(input, { projects, dir, pid, now, home }) {
   const id = input?.session_id;
   if (typeof id !== 'string' || !SESSION_ID.test(id)) throw new TypeError('the session_id is not a UUID');
-  if (typeof project !== 'string') throw new TypeError('the config has no project');
   if (typeof input.cwd !== 'string') throw new TypeError('the cwd is not a path');
-  if (!inside(input.cwd, project)) return 'outside the project';
+  const at = projectAt(input.cwd, projects);
+  if (!at) return 'outside the projects';
+  const { name, project } = at;
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new TypeError('the pid is not a whole number');
   const event = input.hook_event_name;
   let gate;
@@ -173,7 +191,7 @@ export function record(input, { project, dir, pid, now, home }) {
     if (word) {
       const named = projectOf(word[1], home);
       if (named === undefined) return 'a project that only the shell knows';
-      if (!inside(resolve(input.cwd, named), project)) return 'another project';
+      if (projectAt(resolve(input.cwd, named), projects)?.name !== name) return 'another project';
     }
   } else if (event !== 'SessionStart' && event !== 'SessionEnd') {
     throw new TypeError('not a hook event of the sage bridge');
@@ -183,9 +201,13 @@ export function record(input, { project, dir, pid, now, home }) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return locked(file, () => {
     let old;
-    try { old = parseSpool(JSON.parse(readOwn(file, 'spool file') ?? 'null')); } catch { old = undefined; }
+    try {
+      const raw = JSON.parse(readOwn(file, 'spool file') ?? 'null');
+      old = parseSpool(raw, projectAt(String(raw?.cwd), projects)?.name); // a spool file of the time before T132: of the project of its cwd
+    } catch { old = undefined; }
     if (event === 'SessionEnd' && !old) return 'no session';
-    const s = old ?? { id, cwd: resolve(project), startedAt: now, pid, gates: [], tasks: [] };
+    if (old && old.project !== name) return 'another project'; // a session keeps the project of its first event
+    const s = old ?? { id, project: name, cwd: resolve(project), startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;
     if (gate && !s.gates.includes(gate)) s.gates.push(gate);

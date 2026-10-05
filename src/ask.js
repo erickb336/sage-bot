@@ -9,7 +9,7 @@ import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
 import { forTerminal } from './clean.js';
-import { sageTool } from './sage.js';
+import { pickProject, sageTool } from './sage.js';
 import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 
@@ -215,9 +215,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     const parent = await parentId;
     return channels.has(parent) ? parent : null;
   }
-  const teamVotes = (p) => {
-    if (p.project !== config.project) return new Set();
-    try { return loadVotes(votesPathOf(config)); } catch { return new Set(); }
+  const teamVotes = () => { // the keys of the team votes of every project (T132)
+    try { return loadVotes(votesPathOf(config), pickProject(config, projects).name); } catch { return new Set(); }
   };
 
   /** The content (and files) of the answer to one /sage command in the registered channel `at` (or a thread of it). */
@@ -265,8 +264,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
-    const votes = teamVotes(p);
-    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(g.id) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
+    const votes = teamVotes();
+    return fitted([`**Open questions · ${p.name}** (${open.length})`], open, (g) => [...question(g, votes.has(`${p.name}/${g.id}`) ? 'team vote' : 'answered at the terminal'), ...advice(g)]);
   }
   /** One open question in full (G20): its text and its options. */
   const question = (g, how) => [`- ${shown(g.id, 12)} (${shown(g.task, 12)})${how ? `, ${how}` : ''}: ${shown(g.question, 300)}`, `  ${options(g.options)}`];

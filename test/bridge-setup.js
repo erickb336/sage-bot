@@ -24,6 +24,10 @@ export const MEMBERS = [
 ];
 export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
+/** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
+export const NAME = 'project';
+/** The key of a gate of the scratch project, as the bridge names it (T132). */
+export const key = (id) => `${NAME}/${id}`;
 
 /**
  * A scratch project with a sage logbook, and a bridge on it with the fake Discord layer and a clock that the test moves.
@@ -46,10 +50,10 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const discord = fakeDiscord(members);
   const lines = [];
   const b = { root, project, sh, discord, lines, now: T0, statePath };
-  /** Marks sage gates as team votes, as scripts/vote.mjs does. */
-  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Set([...loadVotes(`${statePath}.votes`), ...ids]));
+  /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys. */
+  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Set([...loadVotes(`${statePath}.votes`, NAME), ...ids.map((id) => `${NAME}/${id}`)]));
   b.sage = sageTool({ sagePath: SAGE, project, env });
-  b.make = () => createBridge({ sage: b.sage, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
+  b.make = () => createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
   b.bridge = b.make();
   b.gates = () => readFileSync(join(sh('logbook'), 'gates.tsv'), 'utf8');
   b.answerOf = (id) => b.gates().split('\n').find((l) => l.startsWith(`${id}\t`)).split('\t')[6];

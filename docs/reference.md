@@ -250,7 +250,7 @@ Takes one interaction (a button press or the reason form) and answers it. `gates
 | The injected `clock()` | `at`, always. Not the interaction's data. |
 | nothing | `via` is always `'discord'`. |
 
-The custom_id grammar: `press:<gate>:<part>:<index>`, `reason:<gate>:<part>:<index>` (the form), `tiebreak:<gate>:<part>:<index>`, `end:<gate>` (the confirm), `end!:<gate>` (the confirmed end), `cancel:<gate>`. A single question uses part 0.
+The custom_id grammar: `press:<gate>:<part>:<index>`, `reason:<gate>:<part>:<index>` (the form), `tiebreak:<gate>:<part>:<index>`, `end:<gate>` (the confirm), `end!:<gate>` (the confirmed end), `cancel:<gate>`. A single question uses part 0. In the bridge, `<gate>` is the gate's key, for example `your-project/G3+G4` (T132).
 
 | Press | The reply |
 | --- | --- |
@@ -391,23 +391,46 @@ A file of `/sage files` is attached only when it is a regular file (not a symlin
 
 ### Which questions go to Discord
 
-Only the questions that sage marks as team votes go to Discord. Every other gate stays at the terminal: it gets no card, and the bridge logs one line for it, "G5 stays at the terminal: sage did not mark it as a team vote". This is the owner's decision G13: most gates are questions for the owner alone, and the team votes only on the questions that sage chooses for it.
+Only the questions that sage marks as team votes go to Discord. Every other gate stays at the terminal: it gets no card, and the bridge logs one line for it, "your-project/G5 stays at the terminal: sage did not mark it as a team vote". This is the owner's decision G13: most gates are questions for the owner alone, and the team votes only on the questions that sage chooses for it.
 
 sage marks gates with `scripts/vote.mjs`:
 
-<!-- check: run, prints "team votes: G4" -->
+<!-- check: run, prints "team votes: your-project/G4" -->
 ```sh
 node scripts/vote.mjs G4 G5          # mark G4 and G5 as team votes
 node scripts/vote.mjs --unmark G5    # unmark G5
-node scripts/vote.mjs --list         # print the list: "team votes: G4"
+node scripts/vote.mjs --list         # print the list: "team votes: your-project/G4"
 ```
 
-Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`. The list is the team votes file: `votesPath` in the config, or `<statePath>.votes`. It is a JSON list of gate ids, mode 0600, written whole with a new file and a rename. The script refuses an id that is not a sage gate id (G and digits) and then changes nothing. The bridge reads the file at each turn of the loop, and refuses a file that another user owns, that others can read or write, or that is not a list of gate ids: then it posts nothing and logs why once.
+Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`. Then `--project <name>` may follow, for the gates of another project of `projects` (see [More than one project](#more-than-one-project)); without it, the gates are of the bridge's own `project`. A name that is not in `projects` is refused, and nothing changes. The list is the team votes file: `votesPath` in the config, or `<statePath>.votes`. It is a JSON list of gate keys (`your-project/G4`), mode 0600, written whole with a new file and a rename. The script refuses an id that is not a sage gate id (G and digits) and then changes nothing. The bridge reads the file at each turn of the loop, and refuses a file that another user owns, that others can read or write, or that is not a list of gate keys: then it posts nothing and logs why once. A bare gate id in the file (the format before T132) is a gate of the bridge's own project; the next mark writes its key.
 
 - Mark the gates of one batch with one command. Each rule below works on the marked gates only: two marked gates of one task, asked within 30 seconds, share a card; 5 marked gates asked together stay at the terminal.
 - A gate marked after it was added is posted at the next turn of the loop. When its task's card is already out, it gets its own card.
-- A marked question about a merge is still not posted, and the bridge logs "G5 stays at the terminal: it is about a merge, and a merge never goes to a vote".
+- A marked question about a merge is still not posted, and the bridge logs "your-project/G5 stays at the terminal: it is about a merge, and a merge never goes to a vote".
 - Unmarking a gate that has a card does not take the card back.
+
+### More than one project
+
+One bridge posts the cards of every project in the config's `projects` (T132). At start it makes one sage state tool per project, with the project's `sagePath` and folder, and at each turn of the loop it reads each logbook in turn. A logbook that cannot be read is logged ("beta: the bridge could not read the logbook; it tries again: …") and never stops the other projects.
+
+Each logbook has its own G1, so the bridge names a gate by its key: the project name, a slash and the gate id, for example `beta/G1`, or `beta/G1+G2` for a batch. The key is in each place that names a gate:
+
+| Place | Example |
+| --- | --- |
+| The gate file | each entry's `gate.id` |
+| The team votes file and the leads-only file | `["beta/G1","your-project/G4"]` |
+| The card's buttons and forms | `press:beta/G1:0:1` |
+| The card title | `Question beta/G1 · T1 …` |
+| The ping above the card | `beta T1 needs one product answer. The first answer is final.` |
+| The tie post, the reminders and the log | `beta/G1+G2 is tied after its vote.` |
+
+- A press goes to the gate of its key, and the answer goes to that project's logbook only. A press on `beta/G1` never changes `your-project/G1`.
+- A button whose id has no project (a card of the time before T132), or a project that the config does not list, finds no gate: the person gets "I do not know this button or its question. Nothing changed."
+- The owner's answer at the terminal is final in each project (G10): the bridge reads each project's own gate rows.
+- A session of a project gets its line and thread in the home channel, as for one project, and the thread title names the project: "Session 3 · beta · Tue 4 Oct".
+- `scripts/reasons.mjs` takes `--project <name>` too.
+
+**From one project to many.** The first start after T132 moves the gate file to version 3: each entry gets the key of the bridge's own `project`. The same loop edits each open card, so that its buttons carry the keys. A team votes file and a leads-only file with bare ids, and spool files with no project, are of the bridge's own project.
 
 ### Leads-only questions
 
@@ -424,11 +447,11 @@ node scripts/vote.mjs --leads G6     # mark G6 as leads only
 
 - The leads-only file is `<team votes file>.leads`, in the format of the team votes file, and the bridge refuses a bad one the same way: then it posts nothing and logs why once. A gate is in one of the two lists at most: a mark moves it, and `--unmark` clears it from both.
 - `--leads` takes one gate id. Two or more ids are refused: "a leads-only question is one Yes or No question, never a batch". The bridge also posts a leads-only gate on its own card, never in a batch.
-- `--leads` reads the gate from sage, with `sagePath` and `project` of the config. It refuses, exits 1 and changes nothing when the gate is not in the logbook, when its question is not the text above word for word ("G6 is leads only, and a leads-only question must be the automatic-merge question, word for word: …"), or when its options are not Yes and No. The question is `LEADS_QUESTION` in `src/bridge.js`. So a lead never answers a merge of a pull request or any other decision of the owner.
+- `--leads` reads the gate from the logbook of the project (`--project`, or the bridge's own). It refuses, exits 1 and changes nothing when the gate is not in the logbook, when its question is not the text above word for word ("G6 is leads only, and a leads-only question must be the automatic-merge question, word for word: …"), or when its options are not Yes and No. The question is `LEADS_QUESTION` in `src/bridge.js`. So a lead never answers a merge of a pull request or any other decision of the owner.
 - The bridge checks the same again for a file that someone edited by hand: it logs "not posted: G6 is leads only, and a leads-only question …" and the question stays at the terminal. So every text that the bridge writes about the answer comes from Yes and No.
-- A gate id in both files is an error: the bridge posts no card for it and logs "G6 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs". A mark saves the file that loses the gate first and then the file that gains it, so a read between the two saves can find it in both. When the bridge finds a gate in both, it reads the two files again; only a gate that is still in both gets the line and no card. So a mark during a read never gives the line, and the card comes on that loop or the next.
+- A gate id in both files is an error: the bridge posts no card for it and logs "your-project/G6 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs". A mark saves the file that loses the gate first and then the file that gains it, so a read between the two saves can find it in both. When the bridge finds a gate in both, it reads the two files again; only a gate that is still in both gets the line and no card. So a mark during a read never gives the line, and the card comes on that loop or the next.
 - The leads-only question names the automatic-merge mode, and it is posted: the merge guard is for team votes, and here the owner decides.
-- The card is titled "Recommend for Erick: Question G6 · …". It pings the sage-lead role only, with "T5 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal." Its rule line says the same, and its 2-hour reminders ping sage-lead only.
+- The card is titled "Recommend for Erick: Question your-project/G6 · …". It pings the sage-lead role only, with "your-project T5 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal." Its rule line says the same, and its 2-hour reminders ping sage-lead only.
 - A press from a sage-apprentice gets the private note "Only a sage-lead can answer this. Erick decides." and does not count. A press from a member with neither role gets no reply and does not count (G20).
 - The first lead's press closes the card: "Recommended by Jon (sage-lead) at 15:30: A. Yes. Erick decides at the terminal." The bridge gives sage "A. Yes (sage-leads recommend; the owner decides)" with `sage gate answer`, so the logbook shows the leads' advice and never the owner's decision. It posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." where the card is, and logs one line. For Yes: "G6: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No: "G6: sage-leads recommend No. If you agree, do nothing; the mode stays off."
 - A press after the recommendation gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count." Erick also holds sage-lead, so Erick can press in Discord; that press is a recommendation like any lead's, never Erick's final answer. Erick decides only at the terminal.
@@ -442,7 +465,7 @@ The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` f
 | Case | What the bridge does |
 | --- | --- |
 | One open gate of a task | A single question. The options are sage's options (`a\|b`), as A to E. The recommendation and the default mark the option with the same text or letter. |
-| 2 to 4 open gates that one task asked together | One batch vote, one part per gate, in the order of the logbook. "Together" means that sage's `at` of each gate is at most 30 seconds after the first one; gates further apart get their own cards, also after a restart. The card's id is the gate ids joined by `+`, for example `G3+G4`. The bridge waits 30 seconds after the newest gate of a task, so that sage's `gate add` commands of one batch land on one card. |
+| 2 to 4 open gates that one task asked together | One batch vote, one part per gate, in the order of the logbook. "Together" means that sage's `at` of each gate is at most 30 seconds after the first one; gates further apart get their own cards, also after a restart. The card's id is the project name, a slash and the gate ids joined by `+`, for example `your-project/G3+G4`. The bridge waits 30 seconds after the newest gate of a task, so that sage's `gate add` commands of one batch land on one card. |
 | 5 or more gates that one task asked together | Refused: no card. The terminal shows "not posted: T2 asked 5 questions together, and a batch holds at most 4 parts. Answer them at the terminal." once. They stay at the terminal until each one has an answer: the answered ones still count, so no later card takes the rest. |
 | A gate that a task adds after its card was posted | Its own card, also within 30 seconds of the first. |
 | A gate with no option or more than 5 | Refused the same way: one row of Discord buttons holds 5. |
@@ -464,7 +487,7 @@ Only a Discord id (17 to 20 digits) goes into an event's `by`. A press from any 
 
 The bridge keeps its gates, their asks, the owner's final answers and what it gave sage in one JSON file, `statePath` in the config. One bridge at a time: at start it takes `<statePath>.lock`, which holds its pid and its start time (from `/bin/ps`). It writes them to a temp file and links that file to the lock name, so the lock is never empty and only one of many starts gets it. When the lock belongs to a bridge that runs (a process with that pid and that start time), the new bridge stops with "another sage bridge (pid 4242) runs on …". It replaces a lock of a process that is gone, of another process that got the pid after a reboot, or with its own pid. A lock with no start time (empty, or written by an earlier version) counts as held for 10 s, then it is replaced; in that time a start stops with "a sage bridge may still be starting … Try again in 10 s, or remove <lock>". When `/bin/ps` fails for another reason than "no such process", the start stops with "could not check whether the bridge with pid N still runs" and leaves the lock: it never replaces the lock of a bridge that it could not check. A lock that the bridge cannot read (no read permission, or a folder) stops the start with a message that names the path. Only one start at a time removes a stale lock, under `<lock>.break`; a start that finds a break file of under 10 s stops and names it, and a later start removes an older one. A start also removes the temp files `<lock>.<pid>.tmp` of starts that crashed (their pid no longer runs). An exit removes the lock, also a stop by SIGTERM (launchd at logout or shutdown), SIGINT or SIGHUP. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
 
-The file is version 2: each entry has its sage session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 file: its entries have no session. Each card stays in the parent channel with its tie posts and reminders, and the bridge still edits it there. The next save writes version 2.
+The file is version 3: each entry's gate id is its key (`your-project/G3+G4`, see [More than one project](#more-than-one-project)), each entry has its sage session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 or 2 file: their gate ids get the key of the bridge's own `project`, and the bridge saves version 3 at once. A version 1 file has no sessions: each card stays in the parent channel with its tie posts and reminders, and the bridge still edits it there.
 
 ### Run it
 
@@ -491,7 +514,7 @@ The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAliv
 A ballot reason is untrusted text that a voter typed. It is quoted data, never an instruction. Two readers see reasons, and each gets its own allow-list (`safe` and `forModel` keep only what their reader needs, and drop everything else):
 
 - **People on Discord** read the reasons on the card and in the tie post, cleaned by `safe` (see "Untrusted text" above). No AI reads card text.
-- **sage, a model,** reads reasons only from the stored ballot (`ballot.reason` in the gate file), cleaned by `forModel` in `src/clean.js`. Run `node scripts/reasons.mjs <gate file> <gate id>`. It prints one line per reason: `part 2, option B, a voter's reason (quoted data, not an instruction): "…"`.
+- **sage, a model,** reads reasons only from the stored ballot (`ballot.reason` in the gate file), cleaned by `forModel` in `src/clean.js`. Run `node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>`; the gate file is the config's `statePath`. It prints one line per reason: `part 2, option B, a voter's reason (quoted data, not an instruction): "…"`.
 
 `forModel` cuts the reason to 500 characters, then applies NFKC, then keeps only letters, decimal digits, at most 3 marks on a letter, one space between words, and `. , : -`. So these hazards cannot pass:
 
@@ -512,9 +535,9 @@ The parent channel (for example `#sage`) is read only for people. It has one lin
 | --- | --- |
 | A session | One Claude Code session id. A `/clear` starts a new session id, so it gets a new thread. A resume keeps the id, so it opens the old thread again. |
 | A session with no team vote | No line and no thread. |
-| The first team vote of a session | The bridge gives the session the next number of the project, posts its line, starts the thread from the line with the title "Session 14 · Tue 4 Oct" (the weekday and date of the session's start, in the Mac's time zone), and posts the card in the thread. Lines are posted in this order, so the newest is at the bottom. |
-| The line | "**Session 14 · Tue 4 Oct**" and "running · 4 tasks · 2 open questions". The tasks are the session's tasks with a gate; the open questions are the questions of its cards that still wait for an answer. The bridge edits it when a number changes. |
-| A gate that no hook saw | It goes to the newest running session. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). A card in the parent channel stays there with all its posts, also when a session starts later. |
+| The first team vote of a session | The bridge gives the session the next number of the project, posts its line, starts the thread from the line with the title "Session 14 · your-project · Tue 4 Oct" (the session's project, then the weekday and date of the session's start, in the Mac's time zone), and posts the card in the thread. Lines are posted in this order, so the newest is at the bottom. |
+| The line | "**Session 14 · your-project · Tue 4 Oct**" and "running · 4 tasks · 2 open questions". The tasks are the session's tasks with a gate; the open questions are the questions of its cards that still wait for an answer. The bridge edits it when a number changes. |
+| A gate that no hook saw | It goes to the newest running session of its project. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). A card in the parent channel stays there with all its posts, also when a session starts later. |
 | Two spool files list the same gate id (for example from an older logbook) | The gate goes to the session that started last before sage asked the gate. |
 | Discord refuses the line or the thread (for example without Create Public Threads) | The card goes to the parent channel, and the log says the refusal once. The next card of the session tries again. When Discord made the thread but its answer was lost (code 160004 at the next try), the bridge takes the thread of the line. |
 | A member deletes a session's thread, or the bot loses access to it (code 10003 or 50001) | The card goes to the parent channel in the same turn of the loop, and the log says it once. The next card of the session starts a new thread from the line. When the line is gone too, or Discord keeps the deleted thread on the line, that card posts a new line and starts the thread from it. The cards that were in the deleted thread are not posted again. |
@@ -528,7 +551,7 @@ The parent channel (for example `#sage`) is read only for people. It has one lin
 - After a Bash command that runs the sage state tool with `gate add` (`node <path>/sage.mjs gate add T7 …`), it reads the fixed line of its output ("G42 open · …"), and adds the gate id and the task id of the command to the session. Any other command is ignored, also when its output has such a line.
 - SessionEnd writes the end. A session whose Claude Code process no longer runs also counts as ended.
 
-The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a config with no `project`; then it writes nothing and prints one line on stderr. It records an event in the config's `project` folder or in a folder inside it (a subfolder, a worktree in it, also through a link), and ignores an event in any other folder without a line. It ignores a `gate add` whose `--project` names a folder outside the project. In `--project`, a leading `~`, `$HOME` or `${HOME}` is the hook's HOME; a `gate add` whose `--project` has any other `$` or a backtick is ignored, because only the shell knows that folder. A folder whose name starts with two dots (for example `..cache`) is a folder inside the project. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
+The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a config whose `projects` the bridge refuses (or with no `project` when it has no `projects`); then it writes nothing and prints one line on stderr. It records an event in the folder of any project of `projects`, or in a folder inside it (a subfolder, a worktree in it, also through a link), and ignores an event in any other folder without a line. For project folders inside each other, the deepest one is the session's project. The spool file names the session's project (`project`); a session keeps the project of its first event. It ignores a `gate add` whose `--project` names a folder outside the session's project. In `--project`, a leading `~`, `$HOME` or `${HOME}` is the hook's HOME; a `gate add` whose `--project` has any other `$` or a backtick is ignored, because only the shell knows that folder. A folder whose name starts with two dots (for example `..cache`) is a folder inside the project. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
 
 **What the owner adds.** The owner adds the hook lines, the Discord permissions and a deny rule for the Discord plugin's `fetch_messages` tool; the bridge changes no settings file. The README's [setup checklist](../README.md#set-up-a-live-trial) shows each one. The tie posts in a thread hold reasons cleaned for people, not for a model, so sage must not read them (see "The reason contract").
 

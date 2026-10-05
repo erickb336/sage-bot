@@ -39,3 +39,14 @@ export function sageTool({ sagePath, project, env = process.env }) {
     answer: (id, text) => sage('gate', 'answer', id, text),
   };
 }
+
+/**
+ * The project of the config named `name`, or the bridge's own project (the one whose folder is `project`, else the first) when `name` is
+ * undefined (T132). Throws for a name that the config does not list.
+ * @param {{ project?: string }} config @param {{ name: string, project: string, sagePath: string }[]} projects  src/ask.js projectsOf
+ */
+export function pickProject(config, projects, name) {
+  const p = name === undefined ? projects.find((x) => x.project === config.project) ?? projects[0] : projects.find((x) => x.name === name);
+  if (!p) throw new Error(`the project "${name}" is not in the config's projects (${projects.map((x) => x.name).join(', ')}). Nothing changed.`);
+  return p;
+}

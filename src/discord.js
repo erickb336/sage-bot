@@ -6,7 +6,7 @@ import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'di
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
 import { askCommand, createAsk, projectsOf, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
-import { sageTool } from './sage.js';
+import { pickProject, sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
 
@@ -97,7 +97,7 @@ export function prepare(file, log) {
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
-  return { config, channels, ask: createAsk({ config, channels, log }) };
+  return { config, channels, projects, ask: createAsk({ config, channels, log }) };
 }
 
 /**
@@ -119,7 +119,7 @@ export async function enter(client, { config, channels, ask, log }) {
  */
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const { config, channels, ask } = prepare(file, log);
+  const { config, channels, projects, ask } = prepare(file, log);
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
@@ -131,7 +131,8 @@ export async function start(file) {
   const channel = await client.channels.fetch(config.channelId);
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({
-    sage: sageTool(config),
+    sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
+    own: pickProject(config, projects).name,
     config,
     statePath: config.statePath,
     log,

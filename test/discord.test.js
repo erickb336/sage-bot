@@ -77,11 +77,11 @@ test('F-T28-23: a Discord error is logged as its code, status and message only, 
   const lines = [];
   const dir = scratch();
   const statePath = join(dir, 'gates.json');
-  const gate = openGate({ id: 'G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: 1 });
+  const gate = openGate({ id: 'project/G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: 1 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
-  const bridge = createBridge({ sage: { gates: async () => [], answer: async () => '' }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
-  await bridge.interaction(fakeInteraction({ user: MAYA, customId: 'press:G1:0:0', refuse: error }));
+  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  await bridge.interaction(fakeInteraction({ user: MAYA, customId: 'press:project/G1:0:0', refuse: error }));
   assert.ok(lines.includes('Discord refused a reply: code 10062, status 404: Unknown interaction'), lines.join('\n'));
   assert.equal(lines.join('\n').includes('sample-token'), false);
 });
@@ -90,15 +90,15 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   const dir = scratch();
   const statePath = join(dir, 'gates.json');
   // A batch of 5 parts cannot be a card (5 rows of options and one more for "End vote now"): the reason form's card throws.
-  const gate = openGate({ id: 'B1', kind: 'batch', parts: Array.from({ length: 5 }, () => ['A', 'B']), askedBy: OWNER, at: 1 });
+  const gate = openGate({ id: 'project/G1+G2+G3+G4+G5', kind: 'batch', parts: Array.from({ length: 5 }, () => ['A', 'B']), askedBy: OWNER, at: 1 });
   const ask = { kind: 'batch', task: 'T1', title: '', parts: Array.from({ length: 5 }, () => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
   save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {} }]);
   const lines = [];
-  const bridge = createBridge({ sage: { gates: async () => [] }, discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
-  const i = fakeInteraction({ user: MAYA, customId: 'reason:B1:0:0', fields: { reason: 'r' } });
+  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [] }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  const i = fakeInteraction({ user: MAYA, customId: 'reason:project/G1+G2+G3+G4+G5:0:0', fields: { reason: 'r' } });
   await bridge.interaction(i);
   assert.deepEqual(i.replies, [{ kind: 'reply', content: 'The bridge could not handle this press. Nothing changed. Please tell the owner.', flags: 64, allowedMentions: { parse: [] } }]);
-  assert.deepEqual(bridge.entry('B1').gate, gate);
+  assert.deepEqual(bridge.entry('project/G1+G2+G3+G4+G5').gate, gate);
   assert.deepEqual(lines, ['the bridge could not handle a press: card: Discord allows 5 rows of buttons on one message']);
 });
 
@@ -106,18 +106,18 @@ test('F-T28-21: a long display name is made safe, then cut to 32 characters, in 
   const statePath = join(scratch(), 'gates.json');
   const long = `*${'Jonathan'.repeat(40)}`;
   const people = [{ id: OWNER, name: long, roles: [APPRENTICE, LEADR] }];
-  const tied = step(openGate({ id: 'B1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], []).gate;
+  const tied = step(openGate({ id: 'project/G1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], []).gate;
   const ask = { kind: 'batch', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {} }]);
   const discord = fakeDiscord(people);
-  const bridge = createBridge({ sage: { gates: async () => [], answer: async () => '' }, discord, config: CONFIG, statePath, now: () => 2 * 60 * 60_000, log: () => {} });
-  await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:B1:0:1' }));
-  assert.equal(discord.posts[0].content, `\\*${'Jonathan'.repeat(4).slice(0, 29)}… (sage-lead) broke the tie on part 1 of B1: B.`);
+  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord, config: CONFIG, statePath, now: () => 2 * 60 * 60_000, log: () => {} });
+  await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:project/G1:0:1' }));
+  assert.equal(discord.posts[0].content, `\\*${'Jonathan'.repeat(4).slice(0, 29)}… (sage-lead) broke the tie on part 1 of project/G1: B.`);
 });
 
 test('F-T28-24: the texts of a sage gate are cut before safe: a 100,000-character question and label stay short on the card', () => {
   const row = { id: 'G1', task: 'T1', question: `**${'q'.repeat(100_000)}`, options: `${'<@1>'.repeat(50_000)}|b`, recommendation: 'b', default: '', answer: '' };
-  const { ask } = frame([row], 'x'.repeat(100_000), OWNER, 1);
+  const { ask } = frame('project', [row], 'x'.repeat(100_000), OWNER, 1);
   assert.ok(ask.parts[0].question.length <= 1002, `${ask.parts[0].question.length}`);
   assert.ok(ask.parts[0].question.startsWith('\\*\\*qqq'));
   assert.ok(ask.parts[0].options.A.length <= 1000 && ask.parts[0].options.A.startsWith('\\<@1\\>'));

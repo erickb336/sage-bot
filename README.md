@@ -65,7 +65,7 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 ![Session threads. The parent channel, for example #sage, holds one line per sage session. The line of Session 14, Tue 4 Oct, says running, 4 tasks, 2 open questions; its thread holds the cards, tie posts, reminders and wake notes. The line of Session 15, Wed 5 Oct, says ended 18:02; its thread is locked.](docs/threads.svg)
 
 - Each sage session that has a team vote gets one line in the parent channel and one thread.
-- The thread is titled "Session N · weekday day month", for example "Session 14 · Tue 4 Oct".
+- The thread is titled "Session N · project · weekday day month", for example "Session 14 · sage-bot · Tue 4 Oct". The project is the session's project in `projects`.
 - The bridge edits the line when a count changes, and when the session ends.
 - When the session ended and all its questions are settled, the bridge archives and locks the thread. A resume opens it again.
 - When someone deletes a session thread, the bridge posts each open card of it again in the parent channel, with the votes so far. The team votes there, and the reminders and tie posts go there. A settled card is not posted again. (G17)
@@ -77,12 +77,29 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 Some questions are for the sage-leads alone, and only as advice. The first one is the owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads recommend Yes or No; Erick decides at the terminal.
 
 1. sage asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
-2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
+2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question your-project/G42 · …", and pings the sage-lead role only.
 3. Only a sage-lead can press. A sage-apprentice gets the private note "Only a sage-lead can answer this. Erick decides." A member with neither role gets no reply.
-4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
+4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "your-project/G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "your-project/G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
 5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to sage is final, also after the leads' recommendation (G10).
 
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
+
+### More than one project
+
+One bridge posts the cards of every project in the config's `projects` (T132). Each project keeps its own sage logbook, and each logbook has its own G1. So the bridge names each question by its project and its id, for example `sage-bot/G1`.
+
+| Where | What you see for G1 of the project `sage-bot` |
+| --- | --- |
+| The card title | `Question sage-bot/G1 · T5 …` |
+| The ping above the card | `@sage-apprentice @sage-lead sage-bot T5 needs one product answer.` |
+| The session thread | `Session 3 · sage-bot · Tue 4 Oct`, in the home channel, as for one project |
+| The team votes list | `team votes: sage-bot/G1` |
+
+- sage marks a question of another project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the bridge's own `project`.
+- A press records the answer in the logbook of the card's project only. A press on G1 of one project never changes G1 of another project.
+- Erick's answer at the terminal is final in every project (G10).
+- A project that is not in the config's `projects` gets no cards. `vote.mjs` and `reasons.mjs` refuse it.
+- For one project, nothing else changes. At its first start after the update, the bridge moves its gate file to the new names, and the buttons of the open cards get the new names too. A team votes list with bare ids, such as `["G42"]`, still works: those ids are of the bridge's own project.
 
 ## Rules held in code
 
@@ -158,7 +175,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage`, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
-- [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3. Use the absolute path of your sage-bot folder.
+- [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
 
   ```json
   {
@@ -170,7 +187,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   }
   ```
 
-  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel.
+  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel. The hook records a session in any project of `projects` and ignores every other folder.
 - [ ] **7. Deny the Discord plugin's `fetch_messages` tool** in the same settings file. Its name is probably `mcp__plugin_discord_discord__fetch_messages`: confirm the exact name with `/mcp` first.
 
   ```json
@@ -214,7 +231,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
 
-  <!-- check: run, prints "team votes: G42" -->
+  <!-- check: run, prints "team votes: your-project/G42" -->
   ```sh
   node scripts/vote.mjs G42
   ```
@@ -252,19 +269,20 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
 Run each command in the sage-bot folder.
 
-- `vote.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
+- `vote.mjs`, `reasons.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
+- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of another project in `projects`. Without it, the question is of the bridge's own `project`.
 - `bridge.mjs` and `launchd.mjs` take the path of the config file as their only argument.
-- `reasons.mjs` takes the gate file (the `statePath` of the config) and a gate id.
 
 | You want to | Do this |
 | --- | --- |
 | Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
+| Send a question of another project to the team | `node scripts/vote.mjs --project <name> G42` |
 | Ask the sage-leads for a recommendation, as sage | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
 | Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
 | Answer a question yourself | Answer sage in the chat as usual; that answer is final. (G10) |
 | Withdraw a single question | Tell sage to withdraw it. sage records an answer that names no option, and the card shows the question as withdrawn. |
-| Read the team's reasons, as sage | `node scripts/reasons.mjs <gate file> <gate id>` |
+| Read the team's reasons, as sage | `node scripts/reasons.mjs G42`, or `node scripts/reasons.mjs --project <name> G42` |
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 

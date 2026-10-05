@@ -1,4 +1,4 @@
-// The sage bridge (B3): it reads the open gates of a sage logbook, posts them as cards, turns presses into vote events,
+// The sage bridge (B3): it reads the open gates of the sage logbook of each project of the config (T132), posts them as cards, turns presses into vote events,
 // and gives each final answer back to sage with `sage gate answer`. It also reminds, alerts the role and asks for a new
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
@@ -7,7 +7,7 @@ import { card, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled,
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
-import { alive, leadsPathOf, load, loadLeads, loadVotes, save, votesPathOf } from './state.js';
+import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, projectOfKey, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
@@ -65,12 +65,13 @@ export function monotonic(now, floor = 0) {
 }
 
 /**
- * The ask and the gate of a group of sage gate rows of one task: one row is a single question, 2 to 4 rows a batch.
+ * The ask and the gate of a group of sage gate rows of one task of `project`: one row is a single question, 2 to 4 rows a batch. The
+ * gate id is the key of the group (T132): the project name, a slash and the sage gate ids, for example `sage-bot/G1+G2`.
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
  * With `leads` (T73) the one row is a leads-only question: it must be LEADS_QUESTION with the options Yes and No, so that a lead
  * never answers another question and every text that the bridge writes about the answer comes from that allow-list.
  */
-export function frame(rows, title, ownerId, at, leads = false) {
+export function frame(project, rows, title, ownerId, at, leads = false) {
   if (rows.length > MAX_PARTS) return { refused: `${rows[0].task} asked ${rows.length} questions together, and a batch holds at most ${MAX_PARTS} parts` };
   const texts = rows.map((r) => r.options.split('|').map((o) => o.trim()).filter(Boolean));
   const bad = rows.find((r, i) => texts[i].length === 0 || texts[i].length > MAX_OPTIONS || new Set(texts[i]).size !== texts[i].length);
@@ -88,7 +89,7 @@ export function frame(rows, title, ownerId, at, leads = false) {
     };
   });
   const kind = rows.length === 1 ? 'single' : 'batch';
-  const id = rows.map((r) => r.id).join('+');
+  const id = keyOf(project, rows.map((r) => r.id).join('+'));
   const keys = parts.map((p) => Object.keys(p.options));
   const gate = openGate(kind === 'single' ? { id, kind, options: keys[0], askedBy: ownerId, at } : { id, kind, parts: keys, askedBy: ownerId, at });
   return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
@@ -116,8 +117,9 @@ export function askedTogether(rows) {
 }
 
 /**
- * The bridge for one sage project and one Discord channel.
- * @param {{ sage: ReturnType<import('./sage.js').sageTool>,
+ * The bridge for the sage projects of the config and one Discord channel. `sages` holds the sage tool of each project by its name;
+ * `own` is the bridge's own project, whose gates the files of the time before T132 hold.
+ * @param {{ sages: Map<string, ReturnType<import('./sage.js').sageTool>>, own: string,
  *   discord: { post(target: string, p: object): Promise<string>, edit(target: string, id: string, p: object): Promise<unknown>,
  *     startThread(lineId: string, name: string): Promise<string>, threadFrom(lineId: string): Promise<string>,
  *     setLocked(thread: string, locked: boolean): Promise<unknown>,
@@ -126,16 +128,17 @@ export function askedTogether(rows) {
  *   statePath: string, now?: () => number, log?: (line: string) => void }} o
  *   A `target` is the parent channel or a thread, by its Discord id.
  */
-export function createBridge({ sage, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
+export function createBridge({ sages, own, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
   refuseOldRoles(config);
   for (const key of ['channelId', 'ownerId', 'apprenticeRole', 'leadRole']) {
     if (!SNOWFLAKE.test(config[key] ?? '')) throw new TypeError(`the config needs ${key} as a Discord id (17 to 20 digits)`);
   }
+  if (!sages.has(own)) throw new TypeError(`the bridge's own project ${own} has no sage tool`);
   const say = (line) => log(forTerminal(line)); // every line for the terminal goes through the allow-list (F-T28-22)
-  // `gates` is the map that `handle` reads and writes; `meta` holds the rest of each entry, by the same gate id.
+  // `gates` is the map that `handle` reads and writes; `meta` holds the rest of each entry, by the same gate id: the key of the gate (T132).
   const gates = new Map();
   const meta = new Map();
-  const loaded = load(statePath);
+  const loaded = load(statePath, own);
   for (const { gate, ask, ...rest } of loaded.entries) {
     gates.set(gate.id, { gate, ask });
     meta.set(gate.id, rest);
@@ -158,6 +161,13 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
   const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), [...sessions.values()]);
+  // A gate file of the time before T132 gets the keys at once. Its open cards carry buttons with the old ids: the first loop redraws them.
+  let restyle = loaded.version < 3 && gates.size > 0;
+  if (loaded.version < 3) persist();
+  /** The sage tool of the project of the entry `id`. */
+  const sageOf = (id) => sages.get(projectOfKey(id));
+  /** The entries of `project`, as [id, meta]. */
+  const entriesOf = (project) => [...meta].filter(([id]) => projectOfKey(id) === project);
   const people = async () => { // Sets of ids (F-T28-7)
     const members = [...await discord.members()];
     const both = members.filter((m) => !m.bot && m.roles.includes(config.apprenticeRole) && m.roles.includes(config.leadRole));
@@ -217,12 +227,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
    * gone too or Discord keeps the dead thread on it (F-T29-9).
    * Only sync calls this, and only the loop runs sync, so two calls never make two lines or threads for one session (F-T29-6).
    */
-  async function placeOf(sid) {
+  async function placeOf(sid, project) {
     if (!sid) return config.channelId;
     let x = sessions.get(sid);
     if (!x) {
       const n = Math.max(0, ...[...sessions.values()].map((y) => y.n)) + 1;
-      x = { id: sid, n, title: titleOf(n, spools.get(sid)?.startedAt ?? clock()), line: null, thread: null, closed: false };
+      x = { id: sid, n, title: titleOf(n, project, spools.get(sid)?.startedAt ?? clock()), line: null, thread: null, closed: false };
       sessions.set(sid, x);
       persist();
     }
@@ -300,9 +310,10 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   async function postCard(id, ppl, at) {
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
-    const text = (ask.leads ? `${ask.task} asks the ${LEAD}s for a recommendation to ${OWNER}. The first ${LEAD} answer is the recommendation; ${OWNER} decides at the terminal.`
-      : gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
-      : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
+    const task = `${projectOfKey(id)} ${ask.task}`; // the project name, so that a ping says which project asks (T132)
+    const text = (ask.leads ? `${task} asks the ${LEAD}s for a recommendation to ${OWNER}. The first ${LEAD} answer is the recommendation; ${OWNER} decides at the terminal.`
+      : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
+      : `${task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
     const payload = { ...card(gate, ask, ppl), ...alert(holderRoles(ask), text) };
     let message = await post(at, payload);
@@ -363,12 +374,13 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   /**
    * Reads the answers in sage that the bridge did not write: they are the owner's, typed at the terminal, and final whatever the
    * owner's roles (G10). Each one closes its part on the card, so no press and no answer of the bridge replaces it. An answer that
-   * names no option on an open single gate is a withdraw instead: those gate ids come back, for the caller to apply.
+   * names no option on an open single gate is a withdraw instead: those gate ids come back, for the caller to apply. `rows` are the
+   * gate rows of `project`, and only its entries read them (T132).
    */
-  async function readOwner(rows) {
+  async function readOwner(project, rows) {
     const byId = new Map(rows.map((r) => [r.id, r]));
     const withdraws = [];
-    for (const [id, m] of meta) {
+    for (const [id, m] of entriesOf(project)) {
       const own = new Map(answersOf(id)); // what the bridge gives sage; the same text in sage is the bridge's (a crash before its save)
       for (const [i, sageId] of m.sage.entries()) {
         const { gate, ask } = gates.get(id);
@@ -382,7 +394,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };
         gates.set(id, { gate, ask: { ...ask, parts: ask.parts.with(i, { ...ask.parts[i], final }) } });
         persist();
-        say(`${sageId} was answered at the terminal: the card shows it as final`);
+        say(`${keyOf(project, sageId)} was answered at the terminal: the card shows it as final`);
         await redraw(id, await people());
       }
     }
@@ -394,7 +406,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   let flushing = Promise.resolve();
   const flush = () => (flushing = flushing.then(sendAnswers).catch((e) => say(`the answers to sage failed: ${e?.message}`)));
   async function sendAnswers() {
-    for (const [id, m] of meta) {
+    // Only the entries of a project in the config: the project of an entry may have left the config since its card.
+    for (const [id, m] of [...meta].filter(([x]) => sages.has(projectOfKey(x)))) {
       // One gate at a time: an error in the answers of one gate never stops the answers of the other gates (F-T43-7).
       try {
         await sendGate(id, m);
@@ -405,13 +418,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   }
 
   async function sendGate(id, m) {
+    const sage = sageOf(id);
+    const project = projectOfKey(id);
     for (const sageId of Object.keys(m.restore ?? {})) await keepOwner(id, sageId); // a check that a failure or a stop left open
     for (const [sageId, text] of answersOf(id)) {
       if (m.sent[sageId] === text || m.restore?.[sageId]) continue;
       // The decisions before the gate rows: an answer that the read of the rows misses is after `mark` in the trail (F-T43-1).
       const mark = (await sage.decisions()).length;
       // The row again, just before the answer: an answer that the owner typed meanwhile is final, and the bridge skips it (G10).
-      await readOwner(await sage.gates());
+      await readOwner(project, await sage.gates());
       if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text) continue;
       // Saved before the write, so that the check of the trail survives a failed write back and a stop of the bridge (F-T43-5).
       (m.restore ??= {})[sageId] = { mark, wrote: text, from: 0 };
@@ -419,12 +434,12 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       try {
         await sage.answer(sageId, text);
       } catch (e) {
-        say(`sage did not record the answer of ${sageId}; the bridge tries again: ${e.message}`);
+        say(`sage did not record the answer of ${keyOf(project, sageId)}; the bridge tries again: ${e.message}`);
         continue;
       }
       m.sent[sageId] = text;
       persist();
-      say(`sage gate ${sageId} answered: ${text}`);
+      say(`sage gate ${keyOf(project, sageId)} answered: ${text}`);
       await keepOwner(id, sageId);
     }
   }
@@ -440,6 +455,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
    */
   async function keepOwner(id, sageId) {
     const m = meta.get(id);
+    const sage = sageOf(id);
+    const project = projectOfKey(id);
     /** Ends the check without a write: the logbook no longer has what the marker counts on (F-T43-7, F-T43-8). */
     const stop = (why) => {
       delete m.restore[sageId];
@@ -476,7 +493,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       }
       say(`${sageId}: the owner answered at the terminal just before the bridge; the bridge wrote the owner's answer back: ${m.restore[sageId].wrote}`);
     }
-    await readOwner(await sage.gates());
+    await readOwner(project, await sage.gates());
   }
 
   /** After the gate of `id` changed: save it, edit the card, and post what the effects call for. `by` is who caused it. */
@@ -503,7 +520,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       const { sage: [sageId], texts: [texts] } = meta.get(id);
       const advice = texts[KEYS.indexOf(answered.outcome.option)];
       await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${OWNER} decides at the terminal.`, allowedMentions: NO_MENTIONS });
-      say(`${sageId}: sage-leads recommend ${advice}. ${/^yes$/i.test(advice) ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
+      say(`${keyOf(projectOfKey(id), sageId)}: sage-leads recommend ${advice}. ${/^yes$/i.test(advice) ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
     }
   }
 
@@ -517,19 +534,19 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     await after(id, out.effects, ppl, event.by);
   }
 
-  /** Takes in the owner's answers at the terminal from the gate rows: the final answers, and the withdraws. */
-  async function takeOwner(rows, ppl) {
-    for (const id of await readOwner(rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
+  /** Takes in the owner's answers at the terminal from the gate rows of `project`: the final answers, and the withdraws. */
+  async function takeOwner(project, rows, ppl) {
+    for (const id of await readOwner(project, rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
   }
 
   /**
-   * The gate ids in the team votes file and in the leads-only file (T73). A refused file counts as both empty, so nothing is posted;
+   * The gate keys in the team votes file and in the leads-only file (T73). A refused file counts as both empty, so nothing is posted;
    * the log says why once. A mark that moves a gate saves the two files one after the other, so a read across the move can find the
    * gate in both: then it reads both files again, and only a gate still in both is an error (F-T73-12).
    */
   function teamVotes() {
     try {
-      const read = () => ({ votes: loadVotes(votesPath), leads: loadLeads(leadsPath) });
+      const read = () => ({ votes: loadVotes(votesPath, own), leads: loadLeads(leadsPath, own) });
       let marks = read();
       if ([...marks.votes].some((id) => marks.leads.has(id))) marks = read();
       votesError = null;
@@ -541,60 +558,73 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     }
   }
 
-  /** Reads the logbook: takes in the owner's answers at the terminal, then posts the new open gates. */
+  /**
+   * Reads the logbook of each project: takes in the owner's answers at the terminal, then posts the new open gates. A logbook that
+   * cannot be read never stops the other projects (T132).
+   */
   async function sync(ppl) {
-    const rows = await sage.gates();
-    await takeOwner(rows, ppl);
-    // New gates, by task and then by the time sage asked them (G9). A question added after its task's card has its own card (G10 c).
-    const tracked = new Set([...meta.values()].flatMap((m) => m.sage));
-    const untracked = rows.filter((r) => !tracked.has(r.id));
-    const t = clock();
-    // The time a gate was first seen counts also before sage marks it: a gate marked later posts at the next loop.
-    for (const r of untracked) if (!r.answer && !firstSeen.has(r.id)) firstSeen.set(r.id, t);
-    // Only the gates that sage marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
-    // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
-    // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
-    const { votes, leads } = teamVotes();
-    const fresh = untracked.filter((r) => {
-      const why = votes.has(r.id) && leads.has(r.id) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'
-        : leads.has(r.id) ? null : !votes.has(r.id) ? 'sage did not mark it as a team vote'
-        : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
-      if (why && !r.answer && !kept.has(r.id)) { kept.add(r.id); say(`${r.id} stays at the terminal: ${why}`); }
-      return !why;
-    });
-    const tasks = new Map();
-    for (const r of fresh.filter((x) => !leads.has(x.id))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    // A leads-only question is always one question on its own card, never part of a batch (T73).
-    const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter((x) => leads.has(x.id)).map((x) => [x])];
-    const open = groups.map((g) => g.filter((r) => !r.answer));
-    const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
-    for (const [n, group] of groups.entries()) {
-      const rowsOpen = open[n];
-      // A group waits SETTLE after its newest gate, so that a batch comes whole.
-      if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(r.id))) < SETTLE) continue;
-      // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
-      // ones count too, so no later card takes the rest.
-      const framed = frame(group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, leads.has(group[0].id));
-      const key = group.map((r) => r.id).join('+');
-      if (framed.refused) {
-        if (!refused.has(key)) say(`not posted: ${framed.refused}. Answer them at the terminal.`);
-        refused.add(key);
-        continue;
-      }
-      const { gate, ask, texts } = framed;
-      const sage = rowsOpen.map((r) => r.id);
-      gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage, texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive) });
-      persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
+    // The marks are read once for every project: a gate counts by its key, so G1 of one project never takes the mark of another.
+    const marks = teamVotes();
+    for (const [project, sage] of sages) {
+      try { await syncProject(project, sage, marks, ppl); } catch (e) { say(`${project}: the bridge could not read the logbook; it tries again: ${e?.message}`); }
     }
     // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17) and still
     // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it, or dropped when it is
     // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
       try {
-        if (!m.message && (waits(id) || !moved(m))) await postCard(id, ppl, m.channel ?? await placeOf(m.session));
+        if (!m.message && (waits(id) || !moved(m))) await postCard(id, ppl, m.channel ?? await placeOf(m.session, projectOfKey(id)));
         await postHeld(id);
       } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
+    }
+  }
+
+  /** Reads the logbook of one project and makes the entries of its new open gates (T132: the keys of `project`). */
+  async function syncProject(project, sage, marks, ppl) {
+    const rows = await sage.gates();
+    await takeOwner(project, rows, ppl);
+    const key = (id) => keyOf(project, id);
+    // New gates, by task and then by the time sage asked them (G9). A question added after its task's card has its own card (G10 c).
+    const tracked = new Set(entriesOf(project).flatMap(([, m]) => m.sage));
+    const untracked = rows.filter((r) => !tracked.has(r.id));
+    const t = clock();
+    // The time a gate was first seen counts also before sage marks it: a gate marked later posts at the next loop.
+    for (const r of untracked) if (!r.answer && !firstSeen.has(key(r.id))) firstSeen.set(key(r.id), t);
+    // Only the gates that sage marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
+    // A leads-only question may be about a merge: the leads only recommend, and the owner decides at the terminal (G18).
+    // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
+    const voted = (r) => marks.votes.has(key(r.id));
+    const leadsOnly = (r) => marks.leads.has(key(r.id));
+    const fresh = untracked.filter((r) => {
+      const why = voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'
+        : leadsOnly(r) ? null : !voted(r) ? 'sage did not mark it as a team vote'
+        : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
+      if (why && !r.answer && !kept.has(key(r.id))) { kept.add(key(r.id)); say(`${key(r.id)} stays at the terminal: ${why}`); }
+      return !why;
+    });
+    const tasks = new Map();
+    for (const r of fresh.filter((x) => !leadsOnly(x))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
+    // A leads-only question is always one question on its own card, never part of a batch (T73).
+    const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter(leadsOnly).map((x) => [x])];
+    const open = groups.map((g) => g.filter((r) => !r.answer));
+    const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
+    for (const [n, group] of groups.entries()) {
+      const rowsOpen = open[n];
+      // A group waits SETTLE after its newest gate, so that a batch comes whole.
+      if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(key(r.id)))) < SETTLE) continue;
+      // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
+      // ones count too, so no later card takes the rest.
+      const framed = frame(project, group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, leadsOnly(group[0]));
+      const groupKey = key(group.map((r) => r.id).join('+'));
+      if (framed.refused) {
+        if (!refused.has(groupKey)) say(`not posted: ${project}: ${framed.refused}. Answer them at the terminal.`);
+        refused.add(groupKey);
+        continue;
+      }
+      const { gate, ask, texts } = framed;
+      gates.set(gate.id, { gate, ask });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project) });
+      persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
   }
 
@@ -617,7 +647,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
 
   /** Reads the spool folder. */
   function readSessions() {
-    const read = readSpools(spoolDir);
+    const read = readSpools(spoolDir, own);
     spools = read.spools;
     read.refused.forEach(sayOnce);
   }
@@ -656,6 +686,10 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       const ppl = await people();
       const wall = now();
       readSessions();
+      if (restyle) { // the first loop after the move to keys: each open card gets its buttons with the keys
+        restyle = false;
+        for (const id of gates.keys()) if (waits(id)) await redraw(id, ppl);
+      }
       await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
       // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
       // place that has an open question.
@@ -681,9 +715,11 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
         if (!ppl.holders.has(by)) return;
-        // The owner's answers at the terminal come first: a press never counts on a part that has one (G10).
-        await takeOwner(await sage.gates(), ppl);
+        // The owner's answers at the terminal come first: a press never counts on a part that has one (G10). Only the logbook of the
+        // project in the key of the press: a key of a project that the config does not list finds no gate (T132).
         const pressed = parseCustomId(i.customId);
+        const project = projectOfKey(pressed?.gateId);
+        if (sages.has(project)) await takeOwner(project, await sages.get(project).gates(), ppl);
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;
         if (final || (target && target.gate.phase !== 'closed' && !waits(pressed.gateId))) {
