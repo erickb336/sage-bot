@@ -2,7 +2,7 @@
 
 sage-bot is the sage bridge. It is a Discord app that runs on the owner's Mac. It will post sage's gates as cards with buttons, check the voters' roles, record answers and votes, and give the final answers back to sage's logbook with `sage gate answer`.
 
-This version has the vote rules (task B1), the Discord layer: the cards, the reason form and the private notes (task B2), and the bridge service (task B3): it reads sage's open gates, posts the cards, turns presses into vote events and gives each final answer back to sage. The tests run it against a fake Discord layer and a scratch logbook; no test connects to Discord. One thread per chief session (T29) and the threads (B5) come later.
+This version has the vote rules (task B1), the Discord layer: the cards, the reason form and the private notes (task B2), and the bridge service (task B3): it reads sage's open gates, posts the cards, turns presses into vote events and gives each final answer back to sage. The tests run it against a fake Discord layer and a scratch logbook; no test connects to Discord. It also keeps one Discord thread per chief session and one line per session in the parent channel (task T29).
 
 ## The vote rules
 
@@ -318,6 +318,8 @@ Only a Discord id (17 to 20 digits) goes into an event's `by`. A press from any 
 
 The bridge keeps its gates, their asks, the owner's final answers and what it gave sage in one JSON file, `statePath` in the config. One bridge at a time: at start it creates `<statePath>.lock` with its pid (O_EXCL). When that lock belongs to a process that runs, the new bridge stops with "another sage bridge (pid 4242) runs on …"; a lock of a process that is gone is replaced, and a normal exit removes it. Only the bridge writes it: its folder is mode 0700 and the file 0600, and each save writes a new file and renames it over the old one, so a crash never leaves half a file. At start the bridge refuses a file that another user owns or that others can read or write, and it loads each gate with `parseGate` on the output of `JSON.parse`. It loads gates from this path only, never from Discord or a shared folder.
 
+The file is version 2: each entry has its chief session (`session`, or null when none is known) and the channel or thread of its card (`channel`), and the file has the sessions that have a line (their number, thread title, line and thread ids, and whether the thread is locked). The bridge also loads a version 1 file: its entries have no session, and each open one goes to the newest running session, as a gate of no known session does. Its card stays in the parent channel, and the bridge still edits it there. The next save writes version 2.
+
 ### Run it
 
 You need Node 22 or later, `npm ci` once, and:
@@ -352,6 +354,48 @@ A ballot reason is untrusted text that a voter typed. It is quoted data, never a
 A test sweeps every Unicode code point through `forChief` and proves that no control, format, bidi, tag, private-use or unassigned character stays.
 
 **The chief session must not read the bridge's Discord messages** (the cards, the tie posts, the threads): they hold reasons cleaned for people, not for a model. The chief gets the answers from the logbook and the reasons from `scripts/reasons.mjs`.
+
+## Chief sessions and their threads
+
+The parent channel (for example `#sage-chief`) is read only for people. It has one line for each chief session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards, tie posts, reminders, tie-break notes and wake notes go to that thread. There is no "New session" button: a session starts at the owner's terminal.
+
+| Case | What the bridge does |
+| --- | --- |
+| A session | One Claude Code session id. A `/clear` starts a new session id, so it gets a new thread. A resume keeps the id, so it opens the old thread again. |
+| A session with no team vote | No line and no thread. |
+| The first team vote of a session | The bridge gives the session the next number of the project, posts its line, starts the thread from the line with the title "Session 14 · Tue 4 Oct" (the weekday and date of the session's start, in the Mac's time zone), and posts the card in the thread. Lines are posted in this order, so the newest is at the bottom. |
+| The line | "**Session 14 · Tue 4 Oct**" and "running · 4 tasks · 2 open questions". The tasks are the session's tasks with a gate; the open questions are the questions of its cards that still wait for an answer. The bridge edits it when a number changes. |
+| A gate that no hook saw | It goes to the newest running session. With no running session it goes to the parent channel, as before T29 (for example before the owner adds the hooks). |
+| A session ends (SessionEnd, or its Claude Code process is gone) | The line says "ended" and the time, and the bridge archives and locks the thread. It posts nothing more in a locked thread (the log says so once), and a gate of that session waits. |
+| A resume of an ended session | At the next turn of the loop the bridge opens the thread again (unarchives and unlocks it) before it posts or edits anything in it, and the line says "running" again. |
+| A press in a thread of the parent channel | It counts. A press in another channel, or in a thread of another channel, is ignored. |
+
+**The hook.** `scripts/hook.mjs` records the sessions. Claude Code runs it at SessionStart, at SessionEnd and after each Bash command (PostToolUse). It reads the hook's JSON on stdin and writes one spool file per session in the spool folder: `sessionsPath` in the config, or `<statePath>.sessions`. The folder is mode 0700, each file 0600, and each write is a new file renamed over the old one.
+
+- SessionStart writes the session id, the folder, the start time and the pid of the Claude Code process. A resume takes away the end.
+- After a Bash command, it reads the fixed line of `sage gate add` ("G12 open · …"), and adds the gate id and the task id of the command to the session.
+- SessionEnd writes the end. A session whose Claude Code process no longer runs also counts as ended.
+
+The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, and a folder that is not the config's `project`; then it writes nothing and prints one line on stderr. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
+
+**What the owner adds.** These steps are for the owner; the bridge changes no settings file.
+
+1. The hook lines, in the project's `.claude/settings.local.json` (use the absolute path of this folder):
+
+   ```json
+   {
+     "hooks": {
+       "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+       "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+       "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }]
+     }
+   }
+   ```
+
+2. The Discord permissions. The bridge's app: View Channel, Send Messages, Create Public Threads, Send Messages in Threads and Manage Threads in the parent channel. The parent channel: @everyone without Send Messages; the sage-driver role with Send Messages in Threads.
+3. A deny rule for the Discord plugin's `fetch_messages` tool in the chief's project, for example `"permissions": { "deny": ["mcp__plugin_discord_discord__fetch_messages"] }` (check the tool's name with `/mcp`). The tie posts in a thread hold reasons cleaned for people, not for a model, so the chief must not read them (see "The reason contract").
+
+**The thread of a session.** `node scripts/session.mjs [--config <config.json>] thread <session id>` prints the thread id of a session, from the gate file. A session with no thread yet, or an id that is not a UUID, gives one line on stderr and exit code 1.
 
 ## Run the checks
 
