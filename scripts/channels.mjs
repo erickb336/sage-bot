@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { projectsOf } from '../src/ask.js';
+import { loadProjects } from '../src/projects.js';
 import { settled } from '../src/cards.js';
 import { change, channelsPathOf, FIRST, homeOf, loadChannels, migrate, NEEDED, saveChannels, staleOf } from '../src/channels.js';
 import { forTerminal } from '../src/clean.js';
@@ -34,7 +34,7 @@ try {
     throw new Error(`cannot read the config ${path} (${e.code ?? e.message}). Give the bridge's config with --config <config.json>.`);
   }
   const config = JSON.parse(text);
-  const projects = projectsOf(config);
+  const projects = loadProjects(config);
   const names = projects.map((p) => p.name);
   const file = channelsPathOf(config);
   const print = (channels) => {

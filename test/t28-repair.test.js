@@ -26,14 +26,14 @@ test('acceptance, F-T28-26, G10 a: the owner (no roles) answers G1 at the termin
   b.sh('gate', 'answer', 'G1', 'Session ended screen');
   b.now += MINUTE;
   // The press comes before the next loop: the bridge reads the logbook first, so the press does not count.
-  const replies = await b.press(MAYA, 'press:G1:0:0');
+  const replies = await b.press(MAYA, 'press:project/G1:0:0');
   assert.deepEqual(replies.map((r) => r.content), ['Already answered by Erick at the terminal: B. Session ended screen. Your press did not count.']);
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), 'Session ended screen');
   assert.deepEqual(decisionsOf(b, 'What does the user see?'), ['What does the user see? → Session ended screen']);
   assert.match(lastCard(b).embeds[0].description, /\*\*Answered by Erick \(terminal\) at <t:\d+:t>: B\. Session ended screen\. Final\.\*\*$/);
   assert.equal(lastCard(b).components[0].components.every((c) => c.disabled), true);
-  assert.equal(b.lines.some((l) => l.startsWith('sage gate G1 answered')), false);
+  assert.equal(b.lines.some((l) => l.startsWith('sage gate project/G1 answered')), false);
 });
 
 test('G10 a: the owner\'s answer after a loop closes the card; a later press of a lead changes nothing in sage', async () => {
@@ -44,7 +44,7 @@ test('G10 a: the owner\'s answer after a loop closes the card; a later press of 
   b.now += MINUTE;
   await b.bridge.loop();
   assert.match(lastCard(b).embeds[0].description, /Answered by Erick \(terminal\) at <t:\d+:t>: A\. x\. Final\./);
-  assert.equal((await b.press(JON, 'press:G1:0:1'))[0].content, 'Already answered by Erick at the terminal: A. x. Your press did not count.');
+  assert.equal((await b.press(JON, 'press:project/G1:0:1'))[0].content, 'Already answered by Erick at the terminal: A. x. Your press did not count.');
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), 'A');
   assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → A']);
@@ -55,8 +55,8 @@ test('G10 a: before each `sage gate answer` the bridge reads the row again: an o
   b.sh('gate', 'add', 'T7', '--question', 'Which columns?', '--options', 'Visible|All', '--recommend', 'Visible');
   b.sh('gate', 'add', 'T7', '--question', 'Which format?', '--options', 'ISO|Locale', '--recommend', 'ISO');
   await b.post();
-  await b.press(MAYA, 'press:G1+G2:0:1');
-  await b.press(MAYA, 'press:G1+G2:1:0');
+  await b.press(MAYA, 'press:project/G1+G2:0:1');
+  await b.press(MAYA, 'press:project/G1+G2:1:0');
   // The owner answers G1 just before the limit; the next loop sends the tick first, then reads the logbook.
   b.now += 29 * MINUTE;
   b.sh('gate', 'answer', 'G1', 'Visible');
@@ -65,7 +65,7 @@ test('G10 a: before each `sage gate answer` the bridge reads the row again: an o
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Visible', 'A. ISO']);
   assert.deepEqual(decisionsOf(b, 'Which columns?'), ['Which columns? → Visible']);
   assert.deepEqual(decisionsOf(b, 'Which format?'), ['Which format? → A. ISO']);
-  assert.equal(b.bridge.entry('G1+G2').ask.parts[0].final.text, 'A. Visible');
+  assert.equal(b.bridge.entry('project/G1+G2').ask.parts[0].final.text, 'A. Visible');
 });
 
 test('F-T28-27, G10 a: in a batch the owner\'s terminal answer closes its part, is no ballot, and the other part keeps voting', async () => {
@@ -76,16 +76,16 @@ test('F-T28-27, G10 a: in a batch the owner\'s terminal answer closes its part, 
   b.sh('gate', 'answer', 'G1', 'y');
   b.now += MINUTE;
   await b.bridge.loop();
-  const { gate } = b.bridge.entry('G1+G2');
+  const { gate } = b.bridge.entry('project/G1+G2');
   assert.deepEqual(gate.parts[0].ballots, []);
   const part1 = lastCard(b).embeds[0].fields[0].value;
   assert.match(part1, /\*\*Answered by Erick \(terminal\) at <t:\d+:t>: B\. y\. Final\.\*\*$/);
   assert.deepEqual(lastCard(b).components[0].components.map((c) => [c.disabled, c.style]), [[true, 1], [true, 3]]);
   // Two holders press on part 1: neither counts, so the vote cannot replace the owner's answer.
-  for (const who of [MAYA, JON]) assert.match((await b.press(who, 'press:G1+G2:0:0'))[0].content, /^Already answered by Erick at the terminal: B\. y\./);
-  assert.deepEqual(b.bridge.entry('G1+G2').gate.parts[0].ballots, []);
+  for (const who of [MAYA, JON]) assert.match((await b.press(who, 'press:project/G1+G2:0:0'))[0].content, /^Already answered by Erick at the terminal: B\. y\./);
+  assert.deepEqual(b.bridge.entry('project/G1+G2').gate.parts[0].ballots, []);
   // Part 2 keeps voting: the press opens the reason form, and the tick decides it.
-  assert.equal((await b.press(MAYA, 'press:G1+G2:1:1'))[0].kind, 'modal');
+  assert.equal((await b.press(MAYA, 'press:project/G1+G2:1:1'))[0].kind, 'modal');
   b.now += 30 * MINUTE;
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'B. q']);
@@ -115,13 +115,13 @@ test('the bridge\'s own answer in sage, without its save (a crash in between), s
   const b = setup();
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
-  await b.press(MAYA, 'press:G1:0:1');
+  await b.press(MAYA, 'press:project/G1:0:1');
   assert.equal(b.answerOf('G1'), 'B. y');
   const data = load(b.statePath).entries.map(({ sent, ...e }) => ({ ...e, sent: {} }));
   save(b.statePath, data);
   b.bridge = b.make();
   await b.bridge.loop();
-  assert.equal(b.bridge.entry('G1').ask.parts[0].final, undefined);
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final, undefined);
   assert.match(lastCard(b).embeds[0].description, /Answered by Maya at/);
   assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → B. y']);
 });
@@ -146,10 +146,10 @@ test('F-T28-31: when a voter loses the role, the next loop redraws the open card
   b.sh('gate', 'add', 'T7', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T7', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
   await b.post();
-  await b.press(MAYA, 'press:G1+G2:0:1');
-  await b.press(JON, 'press:G1+G2:0:1');
-  await b.press(OWNER, 'press:G1+G2:0:0');
-  await b.press(MAYA, 'press:G1+G2:1:0');
+  await b.press(MAYA, 'press:project/G1+G2:0:1');
+  await b.press(JON, 'press:project/G1+G2:0:1');
+  await b.press(OWNER, 'press:project/G1+G2:0:0');
+  await b.press(MAYA, 'press:project/G1+G2:1:0');
   assert.match(lastCard(b).embeds[0].fields[0].value, /Ahead: B/);
   members.find((m) => m.id === MAYA).roles = [];
   members.find((m) => m.id === JON).roles = [];
@@ -160,7 +160,7 @@ test('F-T28-31: when a voter loses the role, the next loop redraws the open card
   assert.match(part1, /Ahead: A/);
   b.now += 30 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual(b.bridge.entry('G1+G2').gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'votes' });
+  assert.deepEqual(b.bridge.entry('project/G1+G2').gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'votes' });
   // A loop with the same holders edits nothing.
   const edits = b.discord.messages.get([...b.discord.messages.keys()][0]).length;
   b.now += 15_000;
@@ -174,7 +174,7 @@ test('F-T28-29, G9: only gates asked within 30 s of each other share a card, als
   setAt(b, { G1: '2026-10-04T13:00:00Z', G2: '2026-10-04T13:00:20Z', G3: '2026-10-04T13:40:00Z' });
   b.bridge = b.make(); // as after a restart: every gate is open at once
   await b.post();
-  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Batch vote G1+G2 · T4 ', 'Question G3 · T4 ']);
+  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Batch vote project/G1+G2 · T4 ', 'Question project/G3 · T4 ']);
   const rows = (at) => at.map((t, i) => ({ id: `G${i + 1}`, at: t }));
   assert.deepEqual(askedTogether(rows(['2026-10-04T13:00:31Z', '2026-10-04T13:00:00Z', '2026-10-04T13:00:30Z'])).map((g) => g.map((r) => r.id)), [['G2', 'G3'], ['G1']]);
 });
@@ -194,7 +194,7 @@ test('G10 b: a task refused for 5 questions stays at the terminal until each is 
   b.sh('gate', 'add', 'T2', '--question', 'Q6?', '--options', 'x|y', '--recommend', 'x');
   setAt(b, { G6: '2026-10-04T13:05:00Z' });
   await b.post();
-  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Question G6 · T2 ']);
+  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Question project/G6 · T2 ']);
 });
 
 test('G10 c: a question that a task adds after its card was posted gets its own card', async () => {
@@ -206,8 +206,8 @@ test('G10 c: a question that a task adds after its card was posted gets its own 
   b.sh('gate', 'add', 'T5', '--question', 'C?', '--options', 'r|s', '--recommend', 'r');
   setAt(b, { G3: '2026-10-04T13:00:10Z' }); // within 30 s of G1, but its task's card is already out
   await b.post();
-  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Batch vote G1+G2 · T5 ', 'Question G3 · T5 ']);
-  assert.equal(b.bridge.entry('G1+G2').gate.parts.length, 2);
+  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title), ['Batch vote project/G1+G2 · T5 ', 'Question project/G3 · T5 ']);
+  assert.equal(b.bridge.entry('project/G1+G2').gate.parts.length, 2);
 });
 
 test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the leads once; the next reminder keeps the 2-hour steps from the end of the vote', async () => {
@@ -225,7 +225,7 @@ test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the lea
   assert.equal(pings(b, LEADR).length, 1);
   b.now = opened + 30 * MINUTE + 4 * HOUR;
   await b.bridge.loop();
-  assert.deepEqual(pings(b, LEADR).slice(1).map((p) => p.replace(/<t:\d+:t>/, 'T')), [`<@&${LEADR}> reminder: part 1, part 2 of G1+G2 still tied since T. T6 waits.`]);
+  assert.deepEqual(pings(b, LEADR).slice(1).map((p) => p.replace(/<t:\d+:t>/, 'T')), [`<@&${LEADR}> reminder: part 1, part 2 of project/G1+G2 still tied since T. T6 waits.`]);
   assert.equal(pings(b, APPRENTICE, LEADR).length, 1); // only the card's own alert
 });
 

@@ -34,7 +34,7 @@ All files go into a new scratch folder, so the demo never touches your home fold
 ![The flow of one question, in 9 numbered steps between five lanes: sage, the logbook, the bridge, the session thread and the team. 1, sage asks a question in the logbook. 2, sage marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-apprentice and sage-lead. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, sage reads it and goes on.](docs/flow.svg)
 
 1. sage asks a question in the logbook, as usual. Most questions stay at the terminal for the owner.
-2. When a question is for the team, sage marks it with `node scripts/vote.mjs G42`.
+2. When a question is for the team, sage marks it with `node scripts/vote.mjs G42`, in its project's folder. The script takes the project of that folder.
 3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
 4. It posts a card in the thread of sage's session, and pings the sage-apprentice and sage-lead roles.
 5. A member of the team presses an option on the card.
@@ -65,7 +65,7 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 ![Session threads. The parent channel, for example #sage, holds one line per sage session. The line of Session 14, Tue 4 Oct, says running, 4 tasks, 2 open questions; its thread holds the cards, tie posts, reminders and wake notes. The line of Session 15, Wed 5 Oct, says ended 18:02; its thread is locked.](docs/threads.svg)
 
 - Each sage session that has a team vote gets one line in the parent channel and one thread.
-- The thread is titled "Session N · weekday day month", for example "Session 14 · Tue 4 Oct".
+- The thread is titled "Session N · project · weekday day month", for example "Session 14 · sage-bot · Tue 4 Oct". The project is the session's project in `projects`.
 - The bridge edits the line when a count changes, and when the session ends.
 - When the session ended and all its questions are settled, the bridge archives and locks the thread. A resume opens it again.
 - When someone deletes a session thread, the bridge posts each open card of it again in the parent channel, with the votes so far. The team votes there, and the reminders and tie posts go there. A settled card is not posted again. (G17)
@@ -77,12 +77,40 @@ A **batch** is 2 to 4 questions that one task asks within 30 seconds. They share
 Some questions are for the sage-leads alone, and only as advice. The first one is the owner's decision G18 (item 8): sage may ask whether to switch on its automatic-merge mode for a session. The sage-leads recommend Yes or No; Erick decides at the terminal.
 
 1. sage asks the question as a normal sage gate, with exactly the question "Switch the automatic-merge mode on for this session?" and the options `Yes|No`, and marks it with `node scripts/vote.mjs --leads G42`. One gate only: a batch is refused. Any other question is refused, so the leads never answer a merge of a pull request or another decision of Erick.
-2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question G42 · …", and pings the sage-lead role only.
+2. The bridge posts the card in the session thread (or the parent channel), titled "Recommend for Erick: Question your-project/G42 · …", and pings the sage-lead role only.
 3. Only a sage-lead can press. A sage-apprentice gets the private note "Only a sage-lead can answer this. Erick decides." A member with neither role gets no reply.
-4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
+4. The first lead's press is the leads' recommendation. The bridge gives it to sage marked as advice ("A. Yes (sage-leads recommend; the owner decides)"), posts "Recommendation recorded: Jon recommends Yes. Erick decides at the terminal." below the card, and prints one line in the bridge's log. For Yes it is "your-project/G42: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal." For No it is "your-project/G42: sage-leads recommend No. If you agree, do nothing; the mode stays off." A later press, also Erick's own press in Discord, gets the private note "Already recommended by Jon (sage-lead): A. Yes. A recommendation only; Erick decides at the terminal. Your press did not count."
 5. Erick decides. To switch the mode, Erick types the mode's own message at the terminal; sage-bot never switches it, never writes sage's hook state, and never prints that message. Erick's own answer to sage is final, also after the leads' recommendation (G10).
 
 The hook `scripts/hook.mjs` tells the bridge which session asked which question. Claude Code runs it at the start and end of each session, and after each Bash command.
+
+### More than one project
+
+One bridge posts the cards of every project in the config's `projects` (T132). Each project keeps its own sage logbook, and each logbook has its own G1. So the bridge names each question by its project and its id, for example `sage-bot/G1`.
+
+| Where | What you see for G1 of the project `sage-bot` |
+| --- | --- |
+| The card title | `Question sage-bot/G1 · T5 …` |
+| The ping above the card | `@sage-apprentice @sage-lead sage-bot T5 needs one product answer.` |
+| The session thread | `Session 3 · sage-bot · Tue 4 Oct`, in the home channel, as for one project |
+| The team votes list | `team votes: sage-bot/G1` (the file also holds the folder of each mark) |
+
+- sage marks a question with `node scripts/vote.mjs G1` in the project's folder, or names the project with `--project <name>`: `node scripts/vote.mjs --project sage-bot G1`. Without `--project`, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook). In a folder that no listed project holds, `vote.mjs` and `reasons.mjs` stop with one line that asks for `--project`, and nothing changes. With one project, run them in its folder, or give `--project`.
+- A press records the answer in the logbook of the card's project only. A press on G1 of one project never changes G1 of another project.
+- Erick's answer at the terminal is final in every project (G10).
+- A project that is not in the config's `projects` gets no cards. `vote.mjs` and `reasons.mjs` refuse its name, and refuse to guess a project from a folder outside every listed folder.
+- Each card and each mark holds the folder of its project, not only its name. If you point a name at another folder (or swap two names), the old cards close once with the note below, and a press on them records nothing. An answer in the new folder never shows on an old card, and an old mark does not count for the new folder: mark the question again.
+- The bridge's own `project` must be one of `projects`. A trailing slash or a symlink is the same folder. If no listed project has that folder, the bridge, the hook, `vote.mjs` and `reasons.mjs` stop with one line: add the project to `projects`, with a name.
+- Each listed folder must exist, and each one is the folder of one project only. The bridge reads each path once, at the start, as the real path of its folder in the letter case of the disk, and names the project by that path everywhere. The bridge (at the start, before its lock and the Keychain), the hook, `vote.mjs`, `reasons.mjs`, `launchd.mjs` and `channels.mjs` stop with one line that names the project and its path when:
+  - a listed folder does not exist: "the folder of project beta (/Users/you/beta) does not exist. Fix its path in projects, or take the project out. Nothing changed."
+  - a listed path differs from its folder on disk only in letter case (`/Users/you/BETA` for the folder `beta`). Write it as the disk spells it.
+  - two names are for one folder, also through a symlink or a trailing slash. Keep one of them.
+  - a listed path goes through a symlink to a folder that is not in git: the sage state tool keeps the logbook of such a folder by the path as written. Write the real path.
+  - the config's `project` or a listed path is not an absolute path, for example `~/beta`: "the config: project must be an absolute path".
+- A card of a project that you take out of `projects` takes no more presses. At its next start, the bridge closes each open card of that project once, also across later restarts: the buttons go, and the card says "This question's project is no longer served; Erick answers it at the terminal." The card gets no reminders, and its thread can lock. A press on an old copy of the card gets the same note. The body of a closed card has no rule, reminder or who-can-answer line: it says "**Closed:** this question's project is no longer served; Erick answers it at the terminal." When you put the project back in `projects`, its closed cards get their normal body and their buttons back without the note, and then the reminders again.
+- Keep each project's name as it was at its first start. The bridge knows a project only by its name, so a new name is a new project: the cards of the old name stop, and a question that sage marks again under the new name is not posted while its old card exists. To find the name, look at a card title or a thread title (`Question sage-bot/G1`, `Session 3 · sage-bot · Tue 4 Oct`), or at the keys in the team votes list. At each start, the bridge logs one line that names every card and mark of a project that is not in `projects`, for example "the gate file holds cards of project 'project', which is not in projects: G1, G2; keep a project's name as it was at its first start". If you see that line after a rename, put the old name back.
+- With one project, you also see its name: in the card title, in the ping and in the thread title, as in the table above.
+- At the first start after the update, the bridge moves its gate file, its team votes list and its leads-only list to the new names, once. Each card from before keeps its old buttons until the bridge edits it. Until then, an old button still counts on that card.
 
 ## Rules held in code
 
@@ -129,7 +157,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
   *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
 - [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. You can also leave both ids out and register the home channel with the script (see [Channels](#channels)). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
-  Then set `projects`, the projects that `/sage` may read. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, `/sage` reads only `project`, with no files. Remove the example's sample entry, or fill it in.
+  Then set `projects`, every project of the bridge: it posts the cards of each one, and `/sage` reads each one. Put the folder of `project` in it too, with a name. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, the bridge works only for `project`, with no files. Remove the example's sample entry, or fill it in.
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
 
@@ -161,7 +189,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage`, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
-- [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3. Use the absolute path of your sage-bot folder.
+- [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
 
   ```json
   {
@@ -173,7 +201,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   }
   ```
 
-  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel.
+  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel. The hook records a session in any project of `projects` and ignores every other folder.
 - [ ] **7. Deny the Discord plugin's `fetch_messages` tool** in the same settings file. Its name is probably `mcp__plugin_discord_discord__fetch_messages`: confirm the exact name with `/mcp` first.
 
   ```json
@@ -202,7 +230,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   launchctl load ~/Library/LaunchAgents/com.sage.bot.plist
   ```
 
-  The script refuses a config file that does not exist, is not JSON, lacks a field of step 3, or has a Discord id that is not 17 to 20 digits. It then exits 1 and leaves the plist file as it was, so fix the config and run it again. It writes the new plist to a temp file first, so a refused run never empties a working plist.
+  The script refuses a config file that does not exist, is not JSON, lacks a field of step 3, has a Discord id that is not 17 to 20 digits, or has `projects` that the bridge refuses (for example a folder that does not exist). It then exits 1 and leaves the plist file as it was, so fix the config and run it again. It writes the new plist to a temp file first, so a refused run never empties a working plist.
 
   The plist runs node through a path that a Node upgrade keeps, such as `/opt/homebrew/bin/node`. When the script prints "warning: … make the plist again after each Node upgrade", your node has no such path: after each Node upgrade, run the command above again and load the new plist. When it says that your node is an old node, a node from before a Homebrew upgrade still runs: run the command again with the current node that the message names. To see the node path of the plist, read the first entry of `ProgramArguments`:
 
@@ -215,11 +243,11 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
   *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
 
-  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
+  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder. Name the project with `--project`: the sage-bot folder is not the folder of a listed project.
 
-  <!-- check: run, prints "team votes: G42" -->
+  <!-- check: run, prints "team votes: your-project/G42" -->
   ```sh
-  node scripts/vote.mjs G42
+  node scripts/vote.mjs --project your-project G42
   ```
 
   While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
@@ -259,19 +287,20 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
 Run each command in the sage-bot folder.
 
-- `vote.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
+- `vote.mjs`, `reasons.mjs` and `session.mjs` read `~/.config/sage-bot/config.json`, unless you give `--config <file>` as the first argument.
+- `vote.mjs` and `reasons.mjs` take `--project <name>` next, for a question of a project in `projects`. Without it, the question is of the listed project whose folder holds the folder that sage runs it in (the deepest one, as for the hook). In any other folder they stop with one line that asks for `--project`, and nothing changes.
 - `bridge.mjs` and `launchd.mjs` take the path of the config file as their only argument.
-- `reasons.mjs` takes the gate file (the `statePath` of the config) and a gate id.
 
 | You want to | Do this |
 | --- | --- |
-| Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
+| Send a question to the team | `node scripts/vote.mjs G42` in the project's folder (several ids in one command for one batch) |
+| Send a question of a named project to the team, from any folder | `node scripts/vote.mjs --project <name> G42` |
 | Ask the sage-leads for a recommendation, as sage | `node scripts/vote.mjs --leads G42` (one Yes or No question) |
 | Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
 | Answer a question yourself | Answer sage in the chat as usual; that answer is final. (G10) |
 | Withdraw a single question | Tell sage to withdraw it. sage records an answer that names no option, and the card shows the question as withdrawn. |
-| Read the team's reasons, as sage | `node scripts/reasons.mjs <gate file> <gate id>` |
+| Read the team's reasons, as sage | `node scripts/reasons.mjs G42`, or `node scripts/reasons.mjs --project <name> G42` |
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
 | Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 

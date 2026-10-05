@@ -3,14 +3,15 @@
 // SAMPLE DATA ONLY. Every file is in a scratch folder; nothing writes into ~/Library or runs launchctl.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stableNode } from '../src/launchd.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const SAMPLE = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
+// The example's project folder is made up; launchd.mjs refuses a folder that does not exist, so the sample names this repository.
+const SAMPLE = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8').replaceAll('/Users/you/workspace/your-project', realpathSync.native(ROOT)));
 const OLD = '<plist>the working plist</plist>\n';
 
 /** Runs launchd.mjs with a config and --out <dir>/com.sage.bot.plist, where that file holds OLD at the start. */

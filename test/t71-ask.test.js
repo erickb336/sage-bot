@@ -2,13 +2,14 @@
 // with the fake Discord. SAMPLE DATA ONLY: every id, name and file is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
-import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
+import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
+import { loadProjects, projectsOf } from '../src/projects.js';
 import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
@@ -18,7 +19,8 @@ const ELSEWHERE = '400000000000000003'; // a channel that is not registered
 /** createAsk on the registry that the config makes at the first start (T130): #ask-sage and the parent channel. */
 const createAsk = (o) => {
   rmSync(`${o.config.statePath}.channels`, { force: true }); // each ask here is a first start, also for another project list
-  return rawAsk({ ...o, channels: openChannels(o.config, projectsOf(o.config)) });
+  const config = { project: o.config.projects?.[0].project, ...o.config }; // a bridge config always names its own project (F-T132-1)
+  return rawAsk({ ...o, config, channels: openChannels(config, loadProjects(config)) });
 };
 const SECRET = 'ZZSECRET';
 const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20
@@ -233,7 +235,7 @@ test('untrusted logbook text is made safe: no mention, no link, no markdown from
 
 /** A project folder with files for /sage files. */
 function filesProject(t) {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t71-files-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t71-files-'))); // the real path: a listed link to a folder outside git is refused (F-T132-24)
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const project = join(root, 'project');
   mkdirSync(join(project, 'docs'), { recursive: true });
@@ -329,7 +331,7 @@ const THREAD = '400000000000000077';
 
 /** A project folder `site` with the given files (name → content), and an ask whose only project is it, with `files` as its allow-list. */
 function site(t, b, contents, files) {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-r333-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-r333-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const project = join(root, 'site');
   mkdirSync(join(project, 'shots'), { recursive: true });

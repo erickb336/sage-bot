@@ -6,7 +6,7 @@
 // are in it, so nothing touches the owner's home folder or real logbook.
 process.env.TZ = 'UTC'; // the title of a thread has the host's date
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
@@ -44,7 +44,7 @@ if (outArg) {
 }
 let SAGE;
 try { SAGE = sagePath(); } catch (e) { fail(e.message); }
-const root = mkdtempSync(join(tmpdir(), 'sage-bot-demo-'));
+const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-demo-'))); // the real path, as loadProjects names the project
 const out = outArg ?? join(root, 'demo.html');
 const project = join(root, 'project');
 const statePath = join(root, 'state', 'gates.json');
@@ -52,8 +52,8 @@ const configPath = join(root, 'config.json');
 mkdirSync(project);
 mkdirSync(join(root, 'home'));
 const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage'), TZ: 'UTC' };
-writeFileSync(configPath, JSON.stringify({ ...CONFIG, project, statePath }));
-const node = (args, input) => execFileSync(process.execPath, args, { env, input, encoding: 'utf8' }).trim();
+writeFileSync(configPath, JSON.stringify({ ...CONFIG, project, sagePath: SAGE, statePath }));
+const node = (args, input) => execFileSync(process.execPath, args, { cwd: project, env, input, encoding: 'utf8' }).trim(); // sage runs in the project's folder
 const sage = (...args) => node([SAGE, ...args, '--project', project]);
 const script = (name) => new URL(name, import.meta.url).pathname;
 
@@ -77,7 +77,7 @@ const discord = { ...fake, async post(target, payload) {
   editedAt.set(id, [...editedAt.get(id) ?? [], now]);
 } };
 const log = [];
-const bridge = createBridge({ sage: sageTool({ sagePath: SAGE, project, env }), discord, config: CONFIG, statePath, now: () => now, log: (l) => log.push(l) });
+const bridge = createBridge({ sages: new Map([['project', sageTool({ sagePath: SAGE, project, env })]]), own: 'project', discord, config: CONFIG, statePath, now: () => now, log: (l) => log.push(l) });
 const loop = () => bridge.loop();
 /** Moves the clock on by `ms`, with a loop of the bridge every LOOP, as the running bridge does (a longer gap is a sleep of the Mac). */
 async function advance(ms) {
@@ -130,8 +130,9 @@ step(`vote.mjs: ${marked}`);
 // 5. The bridge on the fake Discord layer.
 await loop();
 await advance(SETTLE);
-const single = g1;
-const batch = `${g2}+${g3}`;
+// The bridge names each gate by its key: the project name (here the folder name, project), a slash and the sage gate ids (T132).
+const single = `project/${g1}`;
+const batch = `project/${g2}+${g3}`;
 step(`bridge: the session line and its thread, the card of ${single} and the card of ${batch}`);
 await advance(MINUTE);
 await press(MAYA, 'Maya presses A.', `press:${single}:0:0`);
@@ -166,7 +167,7 @@ node([script('vote.mjs'), '--config', configPath, g5, g6]);
 terminal(`sage adds ${g5} and ${g6} (T4, asked together) and marks both as team votes.`);
 await loop();
 await advance(SETTLE);
-const second = `${g5}+${g6}`;
+const second = `project/${g5}+${g6}`;
 step(`gate add ${g5}+${g6} (T4): a second batch card in the thread`);
 await advance(MINUTE);
 sage('gate', 'answer', g5, 'A');
@@ -198,7 +199,7 @@ step(`SessionEnd: the line says ended; the thread is ${thread.locked ? 'locked' 
 const [head, ...rowsTsv] = readFileSync(join(sage('logbook'), 'gates.tsv'), 'utf8').split('\n').filter(Boolean);
 const cols = head.split('\t');
 const gates = rowsTsv.map((l) => Object.fromEntries(l.split('\t').map((v, i) => [cols[i], v])));
-const reasons = [batch, second].map((id) => [id, node([script('reasons.mjs'), statePath, id])]);
+const reasons = [`${g2}+${g3}`, `${g5}+${g6}`].map((id) => [id, node([script('reasons.mjs'), '--config', configPath, id])]);
 
 // ---- The page ------------------------------------------------------------------------------------------------------------------
 const roles = (text) => text.replaceAll(`<@&${APPRENTICE}>`, '@sage-apprentice').replaceAll(`<@&${LEADR}>`, '@sage-lead');
@@ -242,7 +243,7 @@ ${shown.join('\n')}
 <section id="answers"><h2>The answers in sage (gates.tsv)</h2><table><tr><th>id</th><th>task</th><th>question</th><th>answer</th></tr>
 ${gates.map((g) => `<tr><td>${esc(g.id)}</td><td>${esc(g.task)}</td><td>${esc(g.question)}</td><td>${esc(g.answer || '(open)')}</td></tr>`).join('\n')}</table>
 <h2 style="margin-top:14px">The reasons for sage (scripts/reasons.mjs)</h2>
-${reasons.map(([id, text]) => `<p class="about">node scripts/reasons.mjs &lt;gate file&gt; ${esc(id)}</p><pre>${esc(text)}</pre>`).join('\n')}</section>
+${reasons.map(([id, text]) => `<p class="about">node scripts/reasons.mjs --config &lt;config.json&gt; ${esc(id)}</p><pre>${esc(text)}</pre>`).join('\n')}</section>
 </body></html>
 `;
 writeFileSync(out, page);

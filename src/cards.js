@@ -182,6 +182,8 @@ const leaders = (counts) => {
  */
 export const settled = (gate, ask) => gate.phase === 'closed'
   || (gate.parts ?? [gate]).every((p, i) => ask.parts[i].final || p.outcome.status === 'decided');
+/** The body line of a closed card of a project that left the config: the vote is closed (F-T132-20). */
+const SHUT = `**Closed:** this question's project is no longer served; ${OWNER} answers it at the terminal.`;
 /** The line of a part that the owner answered at the terminal. */
 const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
 
@@ -192,11 +194,13 @@ const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at
  * @param {{ task: string, title: string, parts: { question: string, why: string, recommended: string, default?: string, options: Record<string, string>,
  *   final?: { by: string, at: number, option?: string, text: string } }[] }} ask  `final`: the owner's answer at the terminal, made safe
  * @param {{ holders: Set<string>, names: Map<string, string> }} people
+ * @param {{ shut?: boolean }} [o]  `shut`: the card of a project that left the config (F-T132-20): its body has no rule, no reminder
+ *   and no who-can-answer line, only the line that the owner answers it at the terminal
  */
-export function card(gate, ask, { holders, names }) {
+export function card(gate, ask, { holders, names }, { shut = false } = {}) {
   const closed = settled(gate, ask);
   const withdrawn = gate.outcome.status === 'withdrawn';
-  const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names) : batch(gate, ask, holders, names);
+  const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names, shut) : batch(gate, ask, holders, names, shut);
   const color = withdrawn ? COLOR.withdrawn : closed ? COLOR.decided : gate.phase === 'tied' ? COLOR.tied : COLOR.open;
   if (rows.length > 5) throw new RangeError('card: Discord allows 5 rows of buttons on one message');
   return { embeds: [{ ...embed, color }], components: rows.map((r) => r.toJSON()), allowedMentions: NO_MENTIONS };
@@ -206,7 +210,7 @@ const button = (id, text, style, { chosen = false, disabled = false } = {}) => n
   .setLabel(cut(text, LIMIT.button)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
 const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key), cap)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
 
-function single(gate, ask, names) {
+function single(gate, ask, names, shut) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
   // A leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
@@ -218,7 +222,7 @@ function single(gate, ask, names) {
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      ...(ask.leads ? [`**Rule:** the first ${LEAD} answer is the leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first ${LEAD} answer is the leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
         `**Who can answer:** every ${LEAD}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
@@ -232,7 +236,7 @@ function single(gate, ask, names) {
   return { embed: budget(build, caps(ask), { why: 1, label: gate.options.length, question: 1 }), rows: [row] };
 }
 
-function batch(gate, ask, holders, names) {
+function batch(gate, ask, holders, names, shut) {
   const done = settled(gate, ask);
   const voting = gate.phase === 'voting' && !done;
   const withdrawn = gate.outcome.status === 'withdrawn';
@@ -257,7 +261,7 @@ function batch(gate, ask, holders, names) {
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.** A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`
+      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.**${shut ? '' : ` A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`}`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
@@ -282,7 +286,7 @@ function batch(gate, ask, holders, names) {
   const ended = gate.votingEndedAt === null ? ''
     : gate.votingEndedAt < gate.endsAt ? `Ended early by ${lead(gate.endedBy, names)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
     : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
-  const description = withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
+  const description = shut && !withdrawn ? SHUT : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
     : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote on each part; change your vote until the vote ends. The work on the task goes on. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
     : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for a ${LEAD}. ` +
@@ -296,7 +300,7 @@ function batch(gate, ask, holders, names) {
     // The dropped reasons leave one line that never shrinks (F-T27-35).
     description: plan.reasons < reasons.length ? `${description}\n${plural(reasons.length - plan.reasons, 'more reason')}; sage has them all` : description,
     fields: [...parts.map((field) => field(plan)), ...reasons.slice(reasons.length - plan.reasons).map(({ name, value }) => ({ name, value }))],
-    footer,
+    ...(!shut && { footer }),
   });
   // The voter cap starts at the longest list that the holders can make, so that the first step cuts a list.
   const plan = { reasons: reasons.length, voters: [...holders].reduce((sum, id) => sum + who(id, names).length + 13, 0), ...caps(ask) };

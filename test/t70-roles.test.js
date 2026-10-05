@@ -45,19 +45,19 @@ test('a new card pings sage-apprentice and sage-lead; a tie after the vote pings
   b.sh('gate', 'add', 'T7', '--question', 'Which date format?', '--options', 'ISO|Locale', '--recommend', 'ISO');
   await b.post();
   const pings = () => b.discord.posts.filter((p) => p.content).map((p) => [p.content, p.allowedMentions.roles]);
-  assert.deepEqual(pings(), [[`<@&${APPRENTICE}> <@&${LEAD}> T7 has 2 product questions. Vote on each part within 30 minutes.`, [APPRENTICE, LEAD]]]);
-  await b.press(MAYA, 'press:G1+G2:0:0');
-  await b.press(JON, 'press:G1+G2:0:1');
+  assert.deepEqual(pings(), [[`<@&${APPRENTICE}> <@&${LEAD}> project T7 has 2 product questions. Vote on each part within 30 minutes.`, [APPRENTICE, LEAD]]]);
+  await b.press(MAYA, 'press:project/G1+G2:0:0');
+  await b.press(JON, 'press:project/G1+G2:0:1');
   b.now += 30 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual(pings().at(-1), [`<@&${LEAD}> G1+G2 is tied after its vote. T7 waits: please break the tie with the buttons on the card.\nPart 1 is tied: A, B. Nobody gave a reason.\nPart 2 is tied: A, B. Nobody gave a reason.`, [LEAD]]);
+  assert.deepEqual(pings().at(-1), [`<@&${LEAD}> project/G1+G2 is tied after its vote. T7 waits: please break the tie with the buttons on the card.\nPart 1 is tied: A, B. Nobody gave a reason.\nPart 2 is tied: A, B. Nobody gave a reason.`, [LEAD]]);
 });
 
 test('a config with driverRole and no apprenticeRole stops the bridge with the rename message', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t70-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const config = { channelId: CHANNEL, ownerId: OWNER, driverRole: APPRENTICE, leadRole: LEAD };
-  assert.throws(() => createBridge({ sage: {}, discord: fakeDiscord([]), config, statePath: join(dir, 'gates.json'), log: () => {} }), { message: OLD_CONFIG });
+  assert.throws(() => createBridge({ sages: new Map([['project', {}]]), own: 'project', discord: fakeDiscord([]), config, statePath: join(dir, 'gates.json'), log: () => {} }), { message: OLD_CONFIG });
 });
 
 test('launchd.mjs refuses a config with driverRole and no apprenticeRole with the same message, and writes no plist', (t) => {

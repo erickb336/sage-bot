@@ -37,7 +37,7 @@ async function openMarker() {
   b.sh('gate', 'add', 'T1', '--question', 'Which login page?', '--options', 'Old page|New page', '--recommend', 'Old page');
   b.sh('gate', 'add', 'T2', '--question', 'Which footer?', '--options', 'Short|Long', '--recommend', 'Short');
   await b.post();
-  await b.press(MAYA, 'press:G1:0:0');
+  await b.press(MAYA, 'press:project/G1:0:0');
   assert.deepEqual(b.writes, ['G1 A. Old page', 'G1 New page']);
   assert.equal(b.answerOf('G1'), 'A. Old page'); // the marker of G1 is open: the owner's answer is only in decisions.tsv
   return b;
@@ -46,7 +46,7 @@ async function openMarker() {
 test('F-T43-7: a marker on a gate that is gone from gates.tsv is cleared, and the next gate is answered in the same flush', async () => {
   const b = await openMarker();
   b.hide.add('G1');
-  await b.press(MAYA, 'press:G2:0:0'); // one flush: the marker of G1 first, then the answer of G2
+  await b.press(MAYA, 'press:project/G2:0:0'); // one flush: the marker of G1 first, then the answer of G2
   assert.equal(b.answerOf('G2'), 'A. Short');
   assert.deepEqual(b.writes.slice(2), ['G2 A. Short']);
   const gone = 'G1: the gate is not in gates.tsv any more; the bridge stops its check of the owner\'s answer and writes nothing back';
@@ -60,9 +60,9 @@ test('F-T43-7: a marker on a gate that is gone from gates.tsv is cleared, and th
 test('F-T43-7: an error in the restore of one gate does not stop the answers of the other gates', async () => {
   const b = await openMarker();
   b.fail = 1; // the restore of G1 reads decisions.tsv first, and that read throws
-  await b.press(MAYA, 'press:G2:0:0');
+  await b.press(MAYA, 'press:project/G2:0:0');
   assert.equal(b.answerOf('G2'), 'A. Short');
-  assert.ok(b.lines.includes('the answers of G1 to sage failed; the bridge tries again: decisions.tsv is not readable'));
+  assert.ok(b.lines.includes('the answers of project/G1 to sage failed; the bridge tries again: decisions.tsv is not readable'));
   b.now += 60_000;
   await b.bridge.loop(); // the marker of G1 is still open, and the next flush writes the owner's answer back
   assert.equal(b.answerOf('G1'), 'New page');
