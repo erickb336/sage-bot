@@ -32,10 +32,16 @@ export const memberOf = (m) => ({ id: m.id, name: m.displayName, roles: [...m.ro
 
 /**
  * Whether an interaction is the bridge's: a button or a form in the configured channel or in a thread of it (T29). A press in any
- * other channel is not, also on a message with the bridge's custom ids.
+ * other channel is not, also on a message with the bridge's custom ids. A thread that is not in the cache (i.channel is null) comes
+ * from `fetch(i.channelId)`; a fetch that fails counts as another channel (F-T29-10).
+ * @param {(id: string) => Promise<{ isThread(): boolean, parentId?: string }>} fetch
  */
-export const accepts = (i, channelId) => (i.isButton() || i.isModalSubmit())
-  && (i.channelId === channelId || (i.channel?.isThread() === true && i.channel.parentId === channelId));
+export async function accepts(i, channelId, fetch) {
+  if (!(i.isButton() || i.isModalSubmit())) return false;
+  if (i.channelId === channelId) return true;
+  const channel = i.channel ?? await fetch(i.channelId).catch(() => null);
+  return channel?.isThread() === true && channel.parentId === channelId;
+}
 
 /**
  * Starts the bridge: takes the lock on the gate file (one bridge at a time, F-T28-30), reads the token, logs in, and runs the loop every LOOP ms.
@@ -72,7 +78,7 @@ export async function start(config) {
     },
   });
   client.on(Events.InteractionCreate, (i) => {
-    if (accepts(i, config.channelId)) bridge.interaction(i);
+    accepts(i, config.channelId, place).then((ok) => ok && bridge.interaction(i));
   });
   let busy = false;
   const turn = async () => {

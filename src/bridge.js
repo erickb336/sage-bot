@@ -26,6 +26,10 @@ export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
 export const MAX_PARTS = 4;
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
 
+/** Discord's codes for a channel or thread that is gone or that the bot cannot see: Unknown Channel and Missing Access (F-T29-9). */
+const GONE = new Set([10003, 50001]);
+/** Discord's code for a message that is gone: Unknown Message. */
+const UNKNOWN_MESSAGE = 10008;
 /** Only the code, status and message of a Discord error: its url and body can hold the interaction token (F-T28-23). */
 export const apiError = (e) => `code ${e?.code ?? '-'}, status ${e?.status ?? '-'}: ${e?.message ?? String(e)}`;
 /** Untrusted text for a card: cut first, so that `safe` never works on a long input (F-T28-24), then made safe; '' falls back. */
@@ -133,13 +137,26 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   /** A message that pings one role and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (role, text) => ({ content: `<@&${role}> ${text}`, allowedMentions: { parse: [], roles: [role] } });
   const post = async (target, payload) => {
-    try { return await discord.post(target, payload); } catch (e) { say(`Discord refused a post: ${apiError(e)}`); return null; }
+    try { return await discord.post(target, payload); } catch (e) {
+      const x = GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
+      if (x) lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
+      return null;
+    }
+  };
+  /** A session thread that Discord says is gone (deleted, or the bot lost access): the session forgets it, and its next card makes a new one (F-T29-9). */
+  const lost = (x, e) => {
+    sayOnce(`the thread ${x.thread} of ${x.title} is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: ${apiError(e)}`);
+    Object.assign(x, { thread: null, closed: false });
+    persist();
   };
   const edit = async (target, message, payload, what) => {
     try { await discord.edit(target, message, payload); } catch (e) { say(`Discord refused the edit of ${what}: ${apiError(e)}`); }
   };
   const setLocked = async (x, locked) => {
-    try { await discord.setLocked(x.thread, locked); x.closed = locked; persist(); return true; } catch (e) { sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`); return false; }
+    try { await discord.setLocked(x.thread, locked); x.closed = locked; persist(); return true; } catch (e) {
+      if (GONE.has(e?.code)) lost(x, e); else sayOnce(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`);
+      return false;
+    }
   };
   const running = (sid) => spools.has(sid) && runs(spools.get(sid), alive);
 
@@ -147,6 +164,8 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
    * The place of a new card of a chief session: its thread, made at the session's first card (G14 1) as a line in the parent channel and
    * a thread started from it. A locked thread opens again, because the new card is a question to settle in it (G15). When Discord refuses
    * the line, the thread or the unlock, the card goes to the parent channel, and the next card of the session tries again (F-T29-2).
+   * A thread that is gone was forgotten (`lost`): the next card starts a new thread from the line, or from a new line when the line is
+   * gone too or Discord keeps the dead thread on it (F-T29-9).
    * Only sync calls this, and only the loop runs sync, so two calls never make two lines or threads for one session (F-T29-6).
    */
   async function placeOf(sid) {
@@ -158,28 +177,37 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       sessions.set(sid, x);
       persist();
     }
-    if (!x.line) {
-      const text = lineText(x);
-      x.line = await post(config.channelId, { content: text, allowedMentions: NO_MENTIONS });
-      if (!x.line) return config.channelId;
-      lines.set(sid, text);
-      persist();
-    }
-    if (!x.thread) {
-      try {
-        x.thread = await startThread(x);
+    for (let tries = 0; !x.thread; tries++) {
+      if (!x.line) {
+        const text = lineText(x);
+        x.line = await post(config.channelId, { content: text, allowedMentions: NO_MENTIONS });
+        if (!x.line) return config.channelId;
+        lines.set(sid, text);
         persist();
-      } catch (e) {
+      }
+      let thread;
+      try { thread = await startThread(x); } catch (e) {
         sayOnce(`Discord refused the thread of ${x.title}, so its cards go to the parent channel until a later card makes it: ${apiError(e)}`);
         return config.channelId;
       }
+      if (!thread && tries > 0) return config.channelId;
+      if (!thread) sayOnce(`the line ${x.line} of ${x.title} is gone or keeps a deleted thread, so the session gets a new line`);
+      Object.assign(x, thread ? { thread } : { line: null });
+      persist();
     }
     if (x.closed && !(await setLocked(x, false))) return config.channelId;
     return x.thread;
   }
-  /** Starts the thread of a session from its line. Code 160004: the thread exists, but its reply was lost, so take that thread (F-T29-2). */
+  /**
+   * Starts the thread of a session from its line. Code 160004: the line has a thread, but its reply was lost, so take that thread (F-T29-2).
+   * Null when the line can start no thread: the line is gone, or its thread is deleted and Discord keeps it on the line (F-T29-9).
+   */
   async function startThread(x) {
-    try { return await discord.startThread(x.line, x.title); } catch (e) { if (e?.code === 160004) return discord.threadFrom(x.line); throw e; }
+    try { return await discord.startThread(x.line, x.title); } catch (e) {
+      if (e?.code === UNKNOWN_MESSAGE) return null;
+      if (e?.code !== 160004) throw e;
+    }
+    try { return await discord.threadFrom(x.line); } catch (e) { if (GONE.has(e?.code)) return null; throw e; }
   }
 
   /** Posts a message about the card of `id` where the card is (F-T29-4); nothing before the card is posted. */
@@ -376,8 +404,11 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       const { gate, ask } = gates.get(id);
       const text = gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
         : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`;
-      const at = await placeOf(m.session);
-      const message = await post(at, { ...card(gate, ask, ppl), ...alert(config.driverRole, text) });
+      const payload = { ...card(gate, ask, ppl), ...alert(config.driverRole, text) };
+      let at = await placeOf(m.session);
+      let message = await post(at, payload);
+      // The session's thread was gone (`post` forgot it): the card goes to the parent channel in this loop (F-T29-9).
+      if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
       if (message) { Object.assign(m, { message, channel: at }); persist(); }
     }
   }

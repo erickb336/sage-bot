@@ -34,7 +34,9 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
  * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
  * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
- * locked thread is refused, and so is an edit of a message in another place. `members` is the list that `members()` gives, as
+ * locked thread is refused, and so is an edit of a message in another place. `deleteThread` and `deleteMessage` do what a member's delete
+ * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
+ * message with code 10008 (Unknown Message). `members` is the list that `members()` gives, as
  * src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
  * @param {{ id: string, name: string, roles: string[], bot?: boolean }[]} members
  */
@@ -43,6 +45,10 @@ export function fakeDiscord(members) {
   const posts = [];
   const where = new Map();
   const threads = new Map();
+  const deleted = new Set();
+  const gone = (target) => {
+    if (deleted.has(target)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
+  };
   let next = 900000000000000000n;
   const archived = (target) => {
     if (threads.get(target)?.locked) throw Object.assign(new Error('Thread is locked'), { code: 50083, status: 400 });
@@ -57,7 +63,10 @@ export function fakeDiscord(members) {
     latest: (id) => messages.get(id).at(-1),
     /** The ids of the messages posted in one channel or thread, in order. */
     in: (target) => [...where].filter(([, t]) => t === target).map(([id]) => id),
+    deleteThread: (id) => { threads.delete(id); deleted.add(id); },
+    deleteMessage: (id) => { messages.delete(id); where.delete(id); },
     async post(target, payload) {
+      gone(target);
       archived(target);
       const id = String(next++);
       messages.set(id, [structuredClone(payload)]);
@@ -66,12 +75,14 @@ export function fakeDiscord(members) {
       return id;
     },
     async edit(target, id, payload) {
+      gone(target);
       if (where.get(id) !== target) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
       archived(target);
       messages.get(id).push(structuredClone(payload));
     },
     async startThread(from, name) {
-      if (!messages.has(from) || [...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
+      if (!messages.has(from)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
+      if ([...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
       const id = String(next++);
       threads.set(id, { from, name, archived: false, locked: false });
       return id;

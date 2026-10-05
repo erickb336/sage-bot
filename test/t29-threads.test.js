@@ -153,12 +153,12 @@ test('with no session at all (the hooks are not installed yet) a card goes to th
 test('a press in a thread of the configured channel counts; a press in another channel or in another channel\'s thread does not', async () => {
   const thread = '400000000000000009';
   const press = (channelId, channel) => ({ isButton: () => true, isModalSubmit: () => false, channelId, channel });
-  assert.equal(accepts(press(CHANNEL, { isThread: () => false }), CHANNEL), true);
-  assert.equal(accepts(press(thread, { isThread: () => true, parentId: CHANNEL }), CHANNEL), true);
-  assert.equal(accepts(press(thread, { isThread: () => true, parentId: '400000000000000002' }), CHANNEL), false);
-  assert.equal(accepts(press('400000000000000002', { isThread: () => false }), CHANNEL), false);
-  assert.equal(accepts(press(thread, null), CHANNEL), false);
-  assert.equal(accepts({ ...press(thread, { isThread: () => true, parentId: CHANNEL }), isButton: () => false }, CHANNEL), false);
+  const fetch = async () => { throw new Error('not fetched: the channel is in the cache'); };
+  assert.equal(await accepts(press(CHANNEL, { isThread: () => false }), CHANNEL, fetch), true);
+  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: CHANNEL }), CHANNEL, fetch), true);
+  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: '400000000000000002' }), CHANNEL, fetch), false);
+  assert.equal(await accepts(press('400000000000000002', { isThread: () => false }), CHANNEL, fetch), false);
+  assert.equal(await accepts({ ...press(thread, { isThread: () => true, parentId: CHANNEL }), isButton: () => false }, CHANNEL, fetch), false);
   // The press on the card in the thread answers the gate, and the card in the thread shows it.
   const b = setup();
   hook(b, S1, 'SessionStart');
@@ -508,6 +508,8 @@ test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to
   mkdirSync(join(b.root, 'other'));
   const event = (cwd, name, extra = {}) => runHook(b, { session_id: S1, cwd, hook_event_name: name, ...extra });
   assert.deepEqual(event(join(b.root, 'link'), 'SessionStart'), { code: 0, out: '', err: '' });
+  // F-T29-12: the link event alone writes the spool, so a check without the real paths fails here.
+  assert.deepEqual({ ...spool(b, S1), startedAt: 0 }, { id: S1, cwd: b.project, startedAt: 0, pid: process.pid, gates: [], tasks: [] });
   const out = b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   assert.deepEqual(event(sub, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T1' }, tool_response: { stdout: `${out}\n` } }), { code: 0, out: '', err: '' });
   assert.deepEqual(event(join(b.root, 'other'), 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T2' }, tool_response: { stdout: 'G2 open · Q?\n' } }), { code: 0, out: '', err: '' });
@@ -553,4 +555,92 @@ test('T29 with T39: a session thread gets the tie post after a lead ends the vot
   const entry = load(b.statePath).entries[0];
   assert.deepEqual([entry.session, entry.gate.endedBy, entry.gate.parts[0].outcome], [S1, JON, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt }]);
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. x']);
+});
+
+test('F-T29-10: a press in a thread that is not in the cache (i.channel is null) is fetched by its id: a thread of the channel counts, any other place does not', async () => {
+  const thread = '400000000000000009';
+  const places = new Map([
+    [thread, { isThread: () => true, parentId: CHANNEL }],
+    ['400000000000000008', { isThread: () => true, parentId: '400000000000000002' }],
+    ['400000000000000007', { isThread: () => false }],
+  ]);
+  const fetched = [];
+  const fetch = async (id) => { fetched.push(id); if (!places.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003 }); return places.get(id); };
+  const press = (channelId) => ({ isButton: () => true, isModalSubmit: () => false, channelId, channel: null });
+  const results = [];
+  for (const id of [thread, '400000000000000008', '400000000000000007', '400000000000000006']) results.push(await accepts(press(id), CHANNEL, fetch));
+  assert.deepEqual(results, [true, false, false, false]);
+  assert.deepEqual(fetched, [thread, '400000000000000008', '400000000000000007', '400000000000000006']);
+});
+
+test('F-T29-11: the hook records only a run of the sage state tool with gate add; ~ and $HOME in --project are the hook\'s HOME, any other shell value is ignored; a folder named ..cache is inside', () => {
+  const b = setup();
+  const home = b.root; // so ~/project is the project, and ~/other is outside it
+  mkdirSync(join(b.root, 'other'));
+  mkdirSync(join(b.project, '~', 'project'), { recursive: true });
+  const post = (command, stdout = 'G4 open · Q?\n', cwd = b.project) => record(
+    { session_id: S1, cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout, stderr: '' } },
+    { project: b.project, dir: spoolDir(b), pid: process.pid, now: b.now, home });
+  const results = [
+    post('cat notes.txt', 'G9 open · a line of a file\n'),
+    post('echo "G9 open · x" # gate add T9'),
+    post('node other.mjs gate add T9'),
+    post('node sage.mjs gate add T9 --project ~/other'),
+    post('node sage.mjs gate add T9 --project $HOME/other'),
+    post('node sage.mjs gate add T9 --project "${HOME}/other"'),
+    post('node sage.mjs gate add T9 --project "$(pwd)"'),
+    post('node sage.mjs gate add T9 --project `pwd`'),
+    post('node sage.mjs gate add T9 --project $PROJECT'),
+    post("node sage.mjs gate add T9 --project '~/project'"),
+  ];
+  assert.deepEqual(results, ['no gate add', 'no gate add', 'no gate add', 'another project', 'another project', 'another project',
+    'a project that only the shell knows', 'a project that only the shell knows', 'a project that only the shell knows', `PostToolUse ${S1}`]);
+  assert.deepEqual(spool(b, S1).gates, ['G4']); // only the last one: '~/project' in single quotes is a folder named ~ inside the project
+  // ~ and $HOME that name the project, a quoted path to sage.mjs, and a folder named ..cache in the project count.
+  const cache = join(b.project, '..cache');
+  mkdirSync(cache);
+  assert.equal(post('node ~/sage.mjs gate add T5 --project ~/project', 'G5 open · Q?\n'), `PostToolUse ${S1}`);
+  assert.equal(post(`node "/a b/skills/sage/sage.mjs" gate add T6 --project "$HOME/project/..cache"`, 'G6 open · Q?\n'), `PostToolUse ${S1}`);
+  assert.equal(post('node sage.mjs gate add T7', 'G7 open · Q?\n', cache), `PostToolUse ${S1}`);
+  assert.deepEqual([spool(b, S1).gates, spool(b, S1).tasks], [['G4', 'G5', 'G6', 'G7'], ['T9', 'T5', 'T6', 'T7']]);
+});
+
+test('F-T29-9: a session thread deleted in Discord: the next card goes to the parent channel in the same loop, one log line, the card after it gets a new thread from the line (or from a new line when the line is gone too)', async () => {
+  const b = setup();
+  hook(b, S1, 'SessionStart');
+  gateAdd(b, S1, 'T1');
+  await b.post();
+  const first = b.bridge.threadOf(S1);
+  const [line] = b.discord.in(CHANNEL);
+  b.discord.deleteThread(first);
+  gateAdd(b, S1, 'T2');
+  await b.post();
+  for (let i = 0; i < 4; i++) { b.now += LOOP_GAP; await b.bridge.loop(); }
+  assert.deepEqual([cardsIn(b, CHANNEL), b.bridge.threadOf(S1)], [['Question G2 · T2 '], undefined]);
+  assert.deepEqual(b.lines.filter((l) => /gone|refused/.test(l)), [
+    `the thread ${first} of Session 1 · Sun 4 Oct is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: code 10003, status 404: Unknown Channel`]);
+  // The next card makes a new thread from the same line.
+  gateAdd(b, S1, 'T3');
+  await b.post();
+  const second = b.bridge.threadOf(S1);
+  assert.notEqual(second, first);
+  assert.deepEqual([b.discord.threads.get(second).from, cardsIn(b, second)], [line, ['Question G3 · T3 ']]);
+  // The line and the new thread are both deleted: the next card goes to the parent channel, the one after it gets a new line and thread.
+  b.discord.deleteThread(second);
+  b.discord.deleteMessage(line);
+  gateAdd(b, S1, 'T4');
+  await b.post();
+  gateAdd(b, S1, 'T5');
+  await b.post();
+  const third = b.bridge.threadOf(S1);
+  const lines = b.discord.in(CHANNEL).filter((id) => b.discord.latest(id).content?.startsWith('**Session'));
+  assert.deepEqual([cardsIn(b, CHANNEL), cardsIn(b, third), lines.length, b.discord.threads.get(third).from], [['Question G2 · T2 ', 'Question G4 · T4 '], ['Question G5 · T5 '], 1, lines[0]]);
+  assert.match(lineOf(b, 'Session 1 · Sun 4 Oct'), /\nrunning · 5 tasks · 5 open questions$/);
+  // A lock of a deleted thread forgets it too: the session ends, the lock is refused once, and no loop tries again.
+  b.discord.deleteThread(third);
+  for (const id of ['G1', 'G2', 'G3', 'G4', 'G5']) b.sh('gate', 'answer', id, 'x');
+  hook(b, S1, 'SessionEnd');
+  for (let i = 0; i < 3; i++) { b.now += LOOP_GAP; await b.bridge.loop(); }
+  assert.equal(b.bridge.threadOf(S1), undefined);
+  assert.equal(b.lines.filter((l) => l.startsWith(`the thread ${third} `)).length, 1);
 });

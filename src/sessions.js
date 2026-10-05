@@ -2,7 +2,7 @@
 // hooks (SessionStart, PostToolUse on Bash, SessionEnd); the bridge reads the spool folder at each loop. The rest of this file is
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { GATE_ID, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
@@ -10,17 +10,29 @@ import { stamp } from './cards.js';
 export const TASK_ID = /^T\d{1,9}$/;
 /** The fixed first line that `sage gate add` prints: "G12 open · <question>". */
 const GATE_OPEN = /^(G\d{1,9}) open · /m;
-/** The task of a `gate add` command: `… gate add T7 --question …`. */
-const GATE_ADD = /\bgate\s+add\s+(T\d{1,9})\b/;
+/** A run of the sage state tool with `gate add` and its task: `node <…/>sage.mjs gate add T7 …`, the path bare or in quotes (F-T29-11). */
+const GATE_ADD = /(?:^|[\s;&|(])node\s+(?:"(?:[^"]*\/)?sage\.mjs"|'(?:[^']*\/)?sage\.mjs'|(?:[^\s;&|"'`$]*\/)?sage\.mjs)\s+gate\s+add\s+(T\d{1,9})\b/;
 /** The folder after `--project` (or `--project=`) in a command, as one shell word: in double or single quotes, or up to a space or ;&|. */
 const PROJECT = /--project(?:=|\s+)(?:"([^"]*)"|'([^']*)'|([^\s;&|]+))/;
+
+/**
+ * The folder that a `--project` word names, as the shell gives it, or undefined when only the shell knows it (F-T29-11). A single-quoted
+ * word is literal. A leading `$HOME` or `${HOME}` (bare or in double quotes) and a leading `~` or `~/` (bare) become `home`; any other
+ * `$`, a backtick, or a quote or backslash in a bare word is a value that only the shell knows.
+ */
+export function projectOf([double, single, bare], home) {
+  if (single !== undefined) return single;
+  const word = (double ?? bare).replace(/^(?:\$HOME|\$\{HOME\})(?=\/|$)/, home);
+  const expanded = bare === undefined ? word : word.replace(/^~(?=\/|$)/, home);
+  return (bare === undefined ? /[$`\\]/ : /[$`\\"']|^~/).test(expanded) ? undefined : expanded;
+}
 
 /** A path with its links resolved; a path that does not exist stays as it is. */
 const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
 /** Whether `path` is the project folder or a folder inside it (a subfolder, a worktree in it), by their real paths (F-T29-5). */
 export function inside(path, project) {
   const rel = relative(real(project), real(path));
-  return !rel.startsWith('..') && !isAbsolute(rel);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); // a folder named '..cache' is inside (F-T29-11)
 }
 
 /** The spool folder: `sessionsPath` in the config, or `<statePath>.sessions`. */
@@ -114,13 +126,14 @@ function locked(file, work) {
  * Records one Claude Code hook event in the spool (scripts/hook.mjs). Throws for input that it refuses; then it writes nothing.
  * An event in a folder outside the project, and a `gate add` with `--project` outside it, are not refused: they are not this project's.
  * - SessionStart: { id, cwd, startedAt, pid }; a resume or a compaction keeps the gates and tasks and takes away the end.
- * - PostToolUse on Bash: the gate id of `sage gate add`'s output line, and the task of its command.
+ * - PostToolUse on Bash: for a command that runs the sage state tool with `gate add`, the gate id of its output line and its task.
+ *   A `--project` whose folder only the shell knows (a variable other than HOME, a command) is ignored (F-T29-11).
  * - SessionEnd: the end.
  * @param {object} input  the hook's JSON from Claude Code
- * @param {{ project: string, dir: string, pid: number, now: number }} o
+ * @param {{ project: string, dir: string, pid: number, now: number, home: string }} o  `home` is the hook's HOME, for `~` and `$HOME`
  * @returns {string} what it did, for the tests
  */
-export function record(input, { project, dir, pid, now }) {
+export function record(input, { project, dir, pid, now, home }) {
   const id = input?.session_id;
   if (typeof id !== 'string' || !SESSION_ID.test(id)) throw new TypeError('the session_id is not a UUID');
   if (typeof project !== 'string') throw new TypeError('the config has no project');
@@ -132,12 +145,17 @@ export function record(input, { project, dir, pid, now }) {
   let task;
   if (event === 'PostToolUse') {
     if (input.tool_name !== 'Bash') return 'not a Bash tool';
-    gate = String(input.tool_response?.stdout ?? '').match(GATE_OPEN)?.[1];
-    if (!gate) return 'no gate add';
     const command = String(input.tool_input?.command ?? '');
-    const named = command.match(PROJECT)?.slice(1).find((x) => x !== undefined);
-    if (named !== undefined && !inside(resolve(input.cwd, named), project)) return 'another project';
-    task = command.match(GATE_ADD)?.[1];
+    const add = command.match(GATE_ADD);
+    gate = add && String(input.tool_response?.stdout ?? '').match(GATE_OPEN)?.[1];
+    if (!gate) return 'no gate add';
+    task = add[1];
+    const word = command.slice(add.index).match(PROJECT);
+    if (word) {
+      const named = projectOf(word.slice(1), home);
+      if (named === undefined) return 'a project that only the shell knows';
+      if (!inside(resolve(input.cwd, named), project)) return 'another project';
+    }
   } else if (event !== 'SessionStart' && event !== 'SessionEnd') {
     throw new TypeError('not a hook event of the sage bridge');
   }

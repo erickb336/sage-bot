@@ -27,7 +27,7 @@ try {
   const configPath = args[0] === '--config' ? args[1] : join(homedir(), '.config', 'sage-bot', 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const input = JSON.parse(readFileSync(0, 'utf8'));
-  record(input, { project: config.project, dir: sessionsPathOf(config), pid: claudePid(), now: Date.now() });
+  record(input, { project: config.project, dir: sessionsPathOf(config), pid: claudePid(), now: Date.now(), home: homedir() });
 } catch (e) {
   process.stderr.write(`sage-bot hook: nothing recorded: ${forTerminal(e?.message ?? e)}\n`);
 }
