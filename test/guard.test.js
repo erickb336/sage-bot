@@ -4,10 +4,10 @@
 // Nothing runs: the commands are only text, and the paths in them are sample paths that do not exist. The guard reads no
 // file; the tests make one scratch folder for the hook's stdin files and the crash test.
 // SAMPLE DATA ONLY. No real `claude`, gh or git command runs, and no settings file changes.
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,7 @@ const fill = (v) => JSON.parse(JSON.stringify(v).replace(/\{(\w+)\}/g, (m, k) =>
 const LEAD = { SAGE_ORIGIN: 'lead', SAGE_TOOL: F.TOOL };
 const text = (stdin) => (typeof stdin === 'string' ? stdin : JSON.stringify(stdin));
 const base = mkdtempSync(join(tmpdir(), 'sage-bot-guard-'));
+after(() => rmSync(base, { recursive: true, force: true }));
 let n = 0;
 /**
  * Runs `node file` with `stdin` from a file. (With spawnSync's `input`, Node 26 under load sometimes never closed the pipe,
@@ -58,19 +59,20 @@ function hook(stdin, env = LEAD) {
 }
 const tool = (tool_name, tool_input) => ({ session_id: 'aaaaaaaa-0000-4000-8000-000000000133', hook_event_name: 'PreToolUse', cwd: F.WT, tool_name, tool_input: fill(tool_input) });
 const bash = (command) => tool('Bash', { command });
-const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (Erick must approve this at the terminal\.|sage can do this instead: .+\.)$/s;
+const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (Erick must approve this at the terminal\.|sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
+const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
 const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
 
-test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}) and for the sandbox (${CORPUS.sandbox.length}), each once`, () => {
-  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.tools.refuse.length >= 40 && CORPUS.tools.allow.length >= 30 && CORPUS.session.length >= 15);
-  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox];
+test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}) and of the state tool (${CORPUS.state.length}), each once`, () => {
+  assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.allow, ...CORPUS.sandbox, ...CORPUS.state];
   assert.equal(new Set(all).size, all.length);
 });
 
 test('T133: with SAGE_ORIGIN unset or not "lead", the guard allows every corpus case (it is inert)', () => {
   const env = { ...LEAD };
   delete env.SAGE_ORIGIN;
-  const all = [...CORPUS.refuse, ...CORPUS.broker].map((c) => bash(c)).concat(CORPUS.tools.refuse.map(([n, i]) => tool(n, i)));
+  const all = [...CORPUS.refuse, ...CORPUS.broker, ...CORPUS.state].map((c) => bash(c)).concat([...CORPUS.tools.refuse, ...CORPUS.tools.state].map(([n, i]) => tool(n, i)));
   assert.deepEqual(all.filter((x) => guard(x, env).decision !== 'allow'), []);
   for (const origin of ['owner', 'LEAD', '', 'lead ']) assert.equal(hook(bash(CORPUS.refuse[0]), { ...LEAD, SAGE_ORIGIN: origin }).decision, 'allow');
   assert.equal(hook('not json', {}).decision, 'allow');
@@ -86,6 +88,35 @@ test('T133: in a lead session, every Bash command of the corpus that is not on t
 test('T133: gh, git push and git fetch are refused with the hint to the broker, sage-bot-github', () => {
   assert.deepEqual(CORPUS.broker.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(BROKER)), []);
   assert.equal(guard(bash('gh pr merge 12')).reason, `sage-bot guard: gh is refused in a lead session. ${BROKER}`);
+});
+
+test('T133: the sage state tool is refused in every form, with the stop ending (G30 A): its path, sage.mjs in any case or quoting, a variable in front, env, --, a wildcard, a copy, a script that imports it', () => {
+  assert.deepEqual(CORPUS.state.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => why !== STATE), []);
+  assert.deepEqual(CORPUS.tools.state.map(([n, i]) => [n, i, guard(tool(n, i)).reason]).filter(([, , why]) => why !== STATE), []);
+  // The real hook gives the same message.
+  assert.equal(hook(bash('node {TOOL} standing --project=x add y')).reason, STATE);
+  // Another name that only ends like it, and a read with a wildcard, are not the state tool.
+  assert.equal(guard(bash('node {SCRATCH}/message.mjs')).decision, 'allow');
+  assert.equal(guard(bash('ls {SCRATCH}/copy/*')).decision, 'allow');
+});
+
+test('T133: an Agent or Task call with an isolation field is refused; one without it is allowed', () => {
+  for (const name of ['Agent', 'Task']) {
+    for (const isolation of ['remote', 'worktree']) {
+      assert.equal(guard(tool(name, { prompt: 'x', isolation })).reason, `sage-bot guard: an agent with the isolation "${isolation}" is refused in a lead session. Erick must approve this at the terminal.`);
+    }
+    assert.equal(guard(tool(name, { prompt: 'x' })).decision, 'allow');
+  }
+});
+
+test('T133: WebFetch reaches only a global unicast address: each special-purpose range, multicast, 240/4, the broadcast address and IPv6 outside 2000::/3 are refused', () => {
+  const fetch = (host) => guard(tool('WebFetch', { url: `https://${host}/`, prompt: 'x' })).reason ?? null;
+  for (const host of ['198.18.0.1', '198.19.255.254', '192.0.0.1', '224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255', '0.1.2.3']) {
+    assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.`);
+  }
+  for (const host of ['::1', '::', 'fe80::1', 'fd00::1', 'ff02::1', '2001:db8::1', '2002:a00:1::1', '64:ff9b::7f00:1', '100::1']) assert.match(fetch(`[${host}]`), /\(not a global unicast address\)/, host);
+  assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.');
+  for (const host of ['8.8.8.8', '198.20.0.1', '223.255.254.1', '[2606:4700:4700::1111]', 'example.com']) assert.equal(fetch(host), null, host);
 });
 
 test('T133: in a lead session, every normal developer command of the corpus is allowed', () => {
@@ -130,10 +161,12 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
   assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
   assert.equal(why('rm -rf *'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
-  assert.equal(why('node {TOOL} gate answer G1 yes'), 'sage-bot guard: the sage state tool command gate answer (only status, logbook, merge-check, standing, task, run, finding and verdict) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('node {TOOL} status && ls'), 'sage-bot guard: the sage state tool with another command, a | or a redirect (it runs outside the sandbox) is refused in a lead session. sage can do this instead: run node <the state tool> <command> as a call of its own.');
+  // A word that starts with a wildcard gets its own hint, also in a part that writes; the hint's ./* is then checked too.
+  assert.equal(why('cp * {SCRATCH}'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
+  assert.equal(why('cp ./* {SCRATCH}'), STATE);
   assert.equal(guard(tool('Grep', { pattern: 'x' })).reason, 'sage-bot guard: the Grep tool (the sandbox does not cover it) is refused in a lead session. sage can do this instead: search with rg in Bash, for example rg -n <pattern> <folder>.');
-  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (this Mac or the local network) is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a lead session. Erick must approve this at the terminal.');
   assert.equal(guard(tool('Monitor', { command: 'ls' })).reason, 'sage-bot guard: the tool Monitor is refused in a lead session. Erick must approve this at the terminal.');
 });
 

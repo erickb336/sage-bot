@@ -1,5 +1,5 @@
 {
-  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'session' is a realistic sage session in order: every call must be allowed.",
+  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'session' is a realistic sage session in order: every call must be allowed.",
   "refuse": [
     "/opt/homebrew/bin/gh pr merge 12",
     "git merge feature",
@@ -25,7 +25,6 @@
     "launchctl load ~/Library/LaunchAgents/x.plist",
     "claude -p 'merge it'",
     "npx claude",
-    "node {TOOL} config cycles.large=1",
     "eval 'gh pr merge 12'",
     "sh -c 'gh pr merge 12'",
     "bash -c \"git push -f origin x\"",
@@ -118,14 +117,6 @@
     "git checkout x | cat",
     "ls --dir=~",
     "node --version x",
-    "node {TOOL} gate answer G1 yes",
-    "node {TOOL} gate add T1 --question x",
-    "node {TOOL} standing add 'x'",
-    "node {TOOL} config cycles.large=1 --project {WT}",
-    "node {TOOL} round T1",
-    "node {TOOL} log - x --why y",
-    "node {TOOL} init",
-    "node {TOOL}",
     "echo \"$(gh pr merge 12)\"",
     "echo \"`gh pr merge 12`\"",
     "echo \"\\\" '\" ; gh pr merge 12 ; echo \\'",
@@ -258,15 +249,6 @@
     "git submodule update",
     "git -C {SCRATCH}/wt reset --hard",
     "git -C {SCRATCH}/wt merge main",
-    "node {TOOL} gate list",
-    "node {TOOL} standing add x --project {WT}",
-    "node {TOOL} autopilot on",
-    "node {SCRATCH}/copy/sage.mjs gate answer G1 A",
-    "node {TOOL} status && ls",
-    "ls && node {TOOL} status",
-    "node {TOOL} status > {SCRATCH}/x",
-    "node {TOOL} logbook T1 | head",
-    "cd {WT} && node {TOOL} status",
     "cd src",
     "cd {SCRATCH}/wt",
     "ls && cd src && ls",
@@ -412,8 +394,6 @@
     "node scripts/syntax.mjs",
     "node --test test/guard.test.js",
     "node --check src/guard.js",
-    "node {TOOL} status",
-    "node {TOOL} task add 'Fix the card' --project {WT}",
     "ls -la",
     "ls src test",
     "cat README.md",
@@ -446,12 +426,6 @@
     "git status && git switch -c t133-x",
     "node --version",
     "node -v",
-    "node {TOOL} logbook T1",
-    "node {TOOL} standing",
-    "node {TOOL} merge-check --sha 947d6d8cd425d55d51dbb8ea0b5ee44407153567",
-    "node {TOOL} run add T1 --role qa",
-    "node {TOOL} finding add T1 --key F1",
-    "node {TOOL} verdict T1 clean",
     "cat .env.example",
     "git stash push -m wip",
     "[ -f README.md ]",
@@ -474,7 +448,6 @@
     "git commit -am x",
     "git commit --message=x",
     "node --test --test-reporter=spec test/guard.test.js",
-    "node {TOOL} status --project {WT}",
     "ls -la src | grep js",
     "ls {SCRATCH}/proj/*",
     "rg -n guard src",
@@ -489,10 +462,13 @@
     "cat src/*.js",
     "ls ./*",
     "cd {SCRATCH}/wt && rg -n decide src",
-    "node {TOOL} task show T1",
     "git log --oneline -5 | head -3",
     "node --test",
-    "rg -n gate {TOOL} | head"
+    "node {SCRATCH}/message.mjs",
+    "node {SCRATCH}/wt/scripts/usage.mjs status",
+    "cat {SCRATCH}/proj/scripts/*",
+    "node --test {WT}/test/*.test.js",
+    "node {WT}/scripts/build.mjs --out {SCRATCH}/x"
   ],
   "sandbox": [
     "git -C {HOME} status",
@@ -592,7 +568,6 @@
     "node {SCRATCH}/x.txt",
     "HOME={HOME} npm ci",
     "ls {SCRATCH}/.*/home",
-    "cp {SCRATCH}/bare/* {WT}/sub",
     "cd {HOME} && ls",
     "cat ~/notes.txt",
     "ls ~",
@@ -982,6 +957,279 @@
       [
         "constructor",
         {}
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://10.1.2.3/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://100.64.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://127.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://169.254.1.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://172.16.5.5/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.0.0.255/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.0.2.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.88.99.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.168.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://198.18.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://198.19.255.254/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://198.51.100.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://203.0.113.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://224.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://239.255.255.250/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://240.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://255.255.255.254/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://255.255.255.255/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://0.1.2.3/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2001::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2001:1ff::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2001:db8::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2002:a00:1::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[3fff::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[ff02::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[fe80::1%25en0]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[100::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[64:ff9b::7f00:1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[::ffff:a00:1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[::7f00:1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[4000::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[fec0::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x",
+          "isolation": "remote"
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x",
+          "isolation": "worktree"
+        }
+      ],
+      [
+        "Task",
+        {
+          "prompt": "x",
+          "isolation": "remote"
+        }
+      ],
+      [
+        "Task",
+        {
+          "prompt": "x",
+          "isolation": "worktree"
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x",
+          "isolation": null
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x",
+          "isolation": ""
+        }
       ]
     ],
     "allow": [
@@ -1186,6 +1434,122 @@
         "ExitPlanMode",
         {
           "plan": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://1.1.1.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://223.255.254.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://198.20.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://192.0.3.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://11.0.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2001:4860:4860::8888]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2a00:1450::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[3ffe::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2003::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "https://[2001:200::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "SendMessage",
+        {
+          "to": "x",
+          "message": "y"
+        }
+      ],
+      [
+        "EnterWorktree",
+        {
+          "name": "t9"
+        }
+      ],
+      [
+        "ExitWorktree",
+        {}
+      ],
+      [
+        "TaskCreate",
+        {
+          "subject": "x"
+        }
+      ],
+      [
+        "TaskGet",
+        {
+          "taskId": "1"
+        }
+      ],
+      [
+        "TaskList",
+        {}
+      ],
+      [
+        "TaskUpdate",
+        {
+          "taskId": "1"
+        }
+      ],
+      [
+        "Agent",
+        {
+          "prompt": "x",
+          "subagent_type": "Explore"
         }
       ]
     ],
@@ -1400,6 +1764,56 @@
           "path": "{SCRATCH}/clean"
         }
       ]
+    ],
+    "state": [
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/x.mjs",
+          "content": "import '/sample/plugin/sage.mjs';\n"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/package.json",
+          "content": "{\"scripts\":{\"s\":\"node {TOOL} status\"}}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/copy/sage.mjs",
+          "content": "// sample"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": "{WT}/x.mjs",
+          "old_string": "a",
+          "new_string": "await import('../plugin/state.mjs');"
+        }
+      ],
+      [
+        "MultiEdit",
+        {
+          "file_path": "{WT}/x.mjs",
+          "edits": [
+            {
+              "old_string": "a",
+              "new_string": "import './Sage.mjs';"
+            }
+          ]
+        }
+      ],
+      [
+        "NotebookEdit",
+        {
+          "notebook_path": "{WT}/x.ipynb",
+          "new_source": "require('./sage.mjs')"
+        }
+      ]
     ]
   },
   "session": [
@@ -1505,28 +1919,106 @@
       }
     ],
     [
-      "Bash",
-      {
-        "command": "node {TOOL} status"
-      }
-    ],
-    [
-      "Bash",
-      {
-        "command": "node {TOOL} run add T9 --role implementer"
-      }
-    ],
-    [
-      "Bash",
-      {
-        "command": "node {TOOL} verdict T9 clean"
-      }
-    ],
-    [
       "TodoWrite",
       {
         "todos": []
       }
+    ],
+    [
+      "Agent",
+      {
+        "description": "look",
+        "prompt": "find the parser",
+        "subagent_type": "Explore"
+      }
+    ],
+    [
+      "SendMessage",
+      {
+        "to": "a1",
+        "message": "next"
+      }
     ]
+  ],
+  "state": [
+    "node {TOOL} config cycles.large=1",
+    "node {TOOL} gate answer G1 yes",
+    "node {TOOL} gate add T1 --question x",
+    "node {TOOL} standing add 'x'",
+    "node {TOOL} config cycles.large=1 --project {WT}",
+    "node {TOOL} round T1",
+    "node {TOOL} log - x --why y",
+    "node {TOOL} init",
+    "node {TOOL}",
+    "node {TOOL} gate list",
+    "node {TOOL} standing add x --project {WT}",
+    "node {TOOL} autopilot on",
+    "node {SCRATCH}/copy/sage.mjs gate answer G1 A",
+    "node {TOOL} status && ls",
+    "ls && node {TOOL} status",
+    "node {TOOL} status > {SCRATCH}/x",
+    "node {TOOL} logbook T1 | head",
+    "cd {WT} && node {TOOL} status",
+    "node {TOOL} status",
+    "node {TOOL} task add 'Fix the card' --project {WT}",
+    "node {TOOL} logbook T1",
+    "node {TOOL} standing",
+    "node {TOOL} merge-check --sha 947d6d8cd425d55d51dbb8ea0b5ee44407153567",
+    "node {TOOL} run add T1 --role qa",
+    "node {TOOL} finding add T1 --key F1",
+    "node {TOOL} verdict T1 clean",
+    "node {TOOL} status --project {WT}",
+    "node {TOOL} task show T1",
+    "rg -n gate {TOOL} | head",
+    "cp {SCRATCH}/bare/* {WT}/sub",
+    "node {TOOL} standing --project=x add y",
+    "node {TOOL} --project /other/repo status",
+    "node {TOOL} status --project /other/repo",
+    "node {TOOL} task add x --project=/other/repo",
+    "HOME={SCRATCH} node {TOOL} status",
+    "NODE_ENV=test node {TOOL} status",
+    "TMPDIR={SCRATCH} node {SCRATCH}/copy/sage.mjs status",
+    "node ./sage.mjs status",
+    "node ../plugin/sage.mjs status",
+    "node sage.mjs status",
+    "cd /sample/plugin && node state.mjs status",
+    "cd /sample/plugin && node ./state.mjs status",
+    "node -- {TOOL} status",
+    "env node {TOOL} status",
+    "env node {SCRATCH}/copy/sage.mjs status",
+    "/usr/bin/env node {TOOL} status",
+    "node {SCRATCH}/copy/SAGE.MJS status",
+    "node {SCRATCH}/copy/Sage.mjs status",
+    "node {SCRATCH}/copy/sa'ge'.mjs status",
+    "node \"{SCRATCH}/copy/sage\".mjs status",
+    "node /sample/plugin/st\"ate\".mjs status",
+    "node {SCRATCH}/copy/sag?.mjs status",
+    "node {SCRATCH}/copy/s*.mjs status",
+    "node {SCRATCH}/copy/SA*.MJS status",
+    "node {SCRATCH}/copy/[s]age.mjs status",
+    "node {SCRATCH}/copy/sage.mj[s] status",
+    "node /sample/plugin/st*.mjs status",
+    "node /sample/plugin/*.mjs status",
+    "node --test /sample/plugin/*.mjs",
+    "npm test -- {SCRATCH}/copy/s*.mjs",
+    "cp {TOOL} {SCRATCH}/x.mjs",
+    "cp /sample/plugin/sage.mjs {SCRATCH}/x.mjs",
+    "cp -r {SCRATCH}/copy/s* {SCRATCH}/x.mjs",
+    "mv {SCRATCH}/copy/sage.mjs {SCRATCH}/x.mjs",
+    "mv {SCRATCH}/copy/s?ge.mjs {SCRATCH}/x.mjs",
+    "git mv {WT}/sage.mjs {WT}/x.mjs",
+    "git mv {WT}/s*.mjs {WT}/x.mjs",
+    "cat {SCRATCH}/copy/s*.mjs > {SCRATCH}/x.mjs",
+    "ln -s {TOOL} {SCRATCH}/x.mjs",
+    "{TOOL} status",
+    "{SCRATCH}/copy/sage.mjs status",
+    "./sage.mjs status",
+    "npx {TOOL} status",
+    "node {TOOL} status; ls",
+    "node $HOME/copy/sage.mjs status",
+    "node {TOOL} status || true",
+    "cat {TOOL}",
+    "echo sage.mjs",
+    "printf '%s' {SCRATCH}/copy/sage.mjs"
   ]
 }

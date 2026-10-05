@@ -11,23 +11,26 @@
 //   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
 //   each of its options must be an entry of that command's option table by its full spelling; the rest is refused.
 // - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds.
-// - The Grep tool is refused (rg in Bash searches inside the sandbox). Any tool that is not in TOOLS is refused.
+// - The sage state tool is refused in every form (G30 A): a lead session reaches the logbook only through sage-bot (T134).
+// - The Grep tool, and an Agent or Task call with an isolation field, are refused. Any tool that is not in TOOLS is refused.
+// - WebFetch reaches only a host name or a global unicast address.
 //
 // The environment (set by sage-bot, never by the session's model): SAGE_ORIGIN, and optionally SAGE_TOOL (the sage state
-// tool, sage.mjs; a script named sage.mjs is the state tool too).
+// tool, sage.mjs; a file named sage.mjs is the state tool too).
+import { BlockList, isIPv4, isIPv6 } from 'node:net';
 import { basename } from 'node:path';
 
 /** The largest hook input that the guard reads, in bytes. */
 export const MAX_INPUT = 64 * 1024;
 
 const ASK = 'Erick must approve this at the terminal.';
-// A rule can add the safe way to do the same thing after this mark: how(why, safe).
+// A rule can give its own ending after this mark: the safe way to do the same thing (how), or stop (stop).
 const MARK = '\u0001';
-const how = (why, safe) => `${why}${MARK}${safe}`;
+const how = (why, safe) => `${why}${MARK}sage can do this instead: ${safe}.`;
+const stop = (why) => `${why}${MARK}This needs Erick; tell the sage-lead and stop this action.`;
 const refusal = (why) => {
   const k = why.lastIndexOf(MARK);
-  const [what, safe] = k < 0 ? [why, null] : [why.slice(0, k), why.slice(k + 1)];
-  return `sage-bot guard: ${what} is refused in a lead session. ${safe ? `sage can do this instead: ${safe}.` : ASK}`;
+  return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? ASK : why.slice(k + 1)}`;
 };
 
 const BROKER = "sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)";
@@ -229,22 +232,34 @@ const GIT = {
   worktree: (args, env, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${args[0] ?? ''}`.trim()),
 };
 
-// The sage state tool's commands that a lead session may run: the reads, and the records of its own work.
-const SAGE_TOOL = new Set(['status', 'logbook', 'merge-check', 'standing', 'task', 'run', 'finding', 'verdict']);
-/** Whether the words of a part run the sage state tool: node with SAGE_TOOL, or with any script named sage.mjs. */
-const stateTool = (texts, env) => texts[0] === 'node' && texts.some((t) => t === env.SAGE_TOOL || basename(t) === 'sage.mjs');
 const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
 
-/** node: a script, never code from an option or from stdin; the sage state tool only with its allowed commands. */
-function node(args, env) {
+/** node: a script, never code from an option or from stdin. */
+function node(args) {
   if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;
   const ops = options('node', args, NODE, { posix: true });
   if (typeof ops === 'string') return ops;
-  const [script, ...rest] = ops;
-  if (!script) return args.includes('--test') ? null : 'node with no script file (code from stdin)';
-  if (!stateTool(['node', script], env)) return null;
-  return SAGE_TOOL.has(rest[0]) && !(rest[0] === 'standing' && rest[1] === 'add') ? null : `the sage state tool command ${rest.slice(0, 2).join(' ')} (only status, logbook, merge-check, standing, task, run, finding and verdict)`;
+  if (!ops[0]) return args.includes('--test') ? null : 'node with no script file (code from stdin)';
+  return null;
 }
+
+// ---- The sage state tool ------------------------------------------------------------------------------------------------
+
+const escape = (text) => text.replace(/[.*+?^$()[\]{}|\\]/g, '\\$&');
+/**
+ * Whether a tool call may name the sage state tool, by its text: a file name sage.mjs or the name of SAGE_TOOL in any text
+ * or word (in any case: the Mac's disk ignores it; message.mjs is another name), and a wildcard whose last part can match one.
+ * The guard cannot see a copy under another name, or a script that builds the name: the sandbox holds those (docs/reference.md).
+ */
+function namesStateTool(texts, globs, env) {
+  const names = ['sage.mjs', basename(env.SAGE_TOOL ?? '')].filter(Boolean);
+  const named = new RegExp(`(^|[^a-z0-9_.-])(${names.map(escape).join('|')})`, 'i');
+  // A wildcard as a pattern: each *, ? and [...] can stand for anything (refuse when in doubt).
+  const pattern = (g) => new RegExp(`^${basename(g).split(/(\[[^\]]*\]?|[*?])/).map((p) => (p === '*' ? '.*' : p === '?' || p.startsWith('[') ? '.' : escape(p))).join('')}$`, 'i');
+  return texts.some((t) => named.test(t)) || globs.some((g) => names.some((n) => pattern(g).test(n)));
+}
+const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git']);
+const STATE_TOOL = stop('a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)');
 
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
 
@@ -279,8 +294,14 @@ const REPHRASE = 'one command per call, or commands joined only by && (a | only 
 
 /** Why the Bash command is refused, or null. */
 export function bashRefusal(command, env) {
+  if (namesStateTool([String(command)], [], env)) return STATE_TOOL;
   const parsed = parse(command);
   if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, REPHRASE);
+  // The wildcards of a part that runs a script or writes a file (a renamed copy): a read (ls dir/*) runs nothing. A word that
+  // starts with a wildcard is refused below anyway, with the hint ./* (which this check then sees).
+  const globs = parsed.filter((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length)
+    .flatMap((seg) => seg.words.filter((w) => w.glob && !/^[*?[]/.test(w.text)).map((w) => w.text));
+  if (namesStateTool(parsed.flatMap((seg) => seg.words.map((w) => w.text)), globs, env)) return STATE_TOOL;
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
     if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${commandOf(texts)[0] ?? 'nothing'}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
@@ -291,10 +312,6 @@ export function bashRefusal(command, env) {
       }
       continue;
     }
-    // The state tool runs outside the sandbox (its excludedCommands entry), so nothing may ride along with it.
-    if (stateTool(commandOf(texts), env) && (parsed.length > 1 || seg.redirects.length)) {
-      return how('the sage state tool with another command, a | or a redirect (it runs outside the sandbox)', 'run node <the state tool> <command> as a call of its own');
-    }
     const why = simple(seg, env);
     if (why) return why;
   }
@@ -304,28 +321,46 @@ export function bashRefusal(command, env) {
 // ---- Other tools --------------------------------------------------------------------------------------------------------
 
 const allow = () => null;
-// Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules and the sandbox of step 6 hold their paths.
+// Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules and the sandbox of step 6 hold their paths. A file
+// tool may not name the state tool: a script that imports it, or a copy of it, is written through one.
+const file = (i, env) => (namesStateTool([JSON.stringify(i)], [], env) ? STATE_TOOL : null);
+// An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox.
+const agent = (i) => (Object.hasOwn(i, 'isolation') ? `an agent with the isolation ${JSON.stringify(i.isolation)}` : null);
 const TOOLS = {
   Bash: (i, env) => bashRefusal(i.command, env),
   Grep: () => how('the Grep tool (the sandbox does not cover it)', 'search with rg in Bash, for example rg -n <pattern> <folder>'),
   WebFetch: (i) => webRefusal(i.url),
-  Read: allow, Write: allow, Edit: allow, MultiEdit: allow, NotebookEdit: allow, Glob: allow,
-  WebSearch: allow, TodoWrite: allow, Task: allow, Agent: allow, ToolSearch: allow,
+  Read: allow, Write: file, Edit: file, MultiEdit: file, NotebookEdit: file, Glob: allow,
+  WebSearch: allow, TodoWrite: allow, Task: agent, Agent: agent, ToolSearch: allow, SendMessage: allow,
+  TaskCreate: allow, TaskGet: allow, TaskList: allow, TaskUpdate: allow, EnterWorktree: allow, ExitWorktree: allow,
   // A skill only loads instructions: the tools it then uses come through this hook too.
   Skill: allow, ExitPlanMode: allow, BashOutput: allow, TaskOutput: allow, KillShell: allow, KillBash: allow, TaskStop: allow,
 };
 
-/** WebFetch: http or https to a public host name or address; never this Mac, the local network or a .local name. */
+// WebFetch reaches an address only in the global unicast space (IPv4 1 to 223, IPv6 2000::/3) and not in a special-purpose
+// range inside it (the IANA registries): an allow-list, so 0/8, multicast, 240/4, the broadcast address and every IPv6
+// address outside 2000::/3 (::1, fe80::/10, fc00::/7, ff00::/8, ::ffff:0:0/96, 64:ff9b::/96) never pass.
+const UNICAST = new BlockList();
+UNICAST.addRange('1.0.0.0', '223.255.255.255', 'ipv4');
+UNICAST.addSubnet('2000::', 3, 'ipv6');
+const SPECIAL = new BlockList();
+for (const range of ['10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24', '192.88.99.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24']) {
+  SPECIAL.addSubnet(range.split('/')[0], Number(range.split('/')[1]), 'ipv4');
+}
+// IETF protocol assignments with Teredo, documentation, 6to4 (it holds an IPv4 address), documentation.
+for (const range of ['2001::/23', '2001:db8::/32', '2002::/16', '3fff::/20']) SPECIAL.addSubnet(range.split('/')[0], Number(range.split('/')[1]), 'ipv6');
+
+/** WebFetch: http or https to a public host name or a global unicast address; never this Mac, the local network or a .local name. */
 function webRefusal(url) {
   let u;
   try { u = new URL(String(url)); } catch { return 'a fetch of a URL that does not parse'; }
   if (!/^https?:$/.test(u.protocol)) return 'a fetch of a URL that is not http or https';
+  // The URL parser gives an IPv4 address in its dotted form (127.1 and 2130706433 are 127.0.0.1), an IPv6 one in [].
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  const private4 = /^(0|10|127)\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\.|^192\.168\.|^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./;
-  const ip6 = host.includes(':');
-  if (!host.includes('.') && !ip6) return `a fetch of ${host} (a local host name)`;
-  if (/(^|\.)(localhost|local|internal|home\.arpa)$/.test(host) || private4.test(host)) return `a fetch of ${host} (this Mac or the local network)`;
-  if (ip6 && (/^(::1?|fe[89ab][0-9a-f]:.*|f[cd][0-9a-f]{2}:.*)$/.test(host) || /^::ffff:/.test(host))) return `a fetch of ${host} (this Mac or the local network)`;
+  const type = isIPv4(host) ? 'ipv4' : isIPv6(host) ? 'ipv6' : null;
+  if (type) return UNICAST.check(host, type) && !SPECIAL.check(host, type) ? null : `a fetch of ${host} (not a global unicast address)`;
+  if (!host.includes('.')) return `a fetch of ${host} (a local host name)`;
+  if (/(^|\.)(localhost|local|internal|home\.arpa)$/.test(host)) return `a fetch of ${host} (this Mac or the local network)`;
   return null;
 }
 

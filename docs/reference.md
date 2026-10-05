@@ -582,8 +582,8 @@ node scripts/session.mjs thread aaaaaaaa-0000-4000-8000-000000000052
 
 | Part | Holds | Built in |
 | --- | --- | --- |
-| The guard hook | Which tools run; which commands, subcommands and options a Bash call names; one simple command per call, or allowed commands joined by `&&`; the rephrase hints; the state tool's allowed commands; WebFetch only to public hosts. | T133 (this hook) |
-| The Claude Code sandbox | Every Bash command and every process that it starts (`node`, `npm` scripts, git hooks, subagents): it fails closed; reads only in the worktree and the scratch folder; secret files denied; a strict list of hosts, with no GitHub; the GitHub token variables removed. Only the broker and the sage state tool run outside it (`excludedCommands`). | Step 6 (T134) |
+| The guard hook | Which tools run; which commands, subcommands and options a Bash call names; one simple command per call, or allowed commands joined by `&&`; the rephrase hints; no sage state tool in any form; no agent with an isolation field; WebFetch only to public hosts. | T133 (this hook) |
+| The Claude Code sandbox | Every Bash command and every process that it starts (`node`, `npm` scripts, git hooks, subagents): it fails closed; reads only in the worktree and the scratch folder; secret files denied; a strict list of hosts, with no GitHub; the GitHub token variables removed. Only the broker runs outside it (`excludedCommands`). The sage state tool must not be in `excludedCommands` for a lead session (G30 A). | Step 6 (T134) |
 | The permission rules | The Read, Edit and Write tools and WebFetch, which the sandbox does not cover: Read denied for secret files; Edit and Write only in the worktree and the scratch folder; the Grep tool denied. | Step 6 (T134) |
 | The broker `sage-bot-github` | GitHub: a fetch, an upload to the session's own branch, and the session's own pull request (create, edit, view). Nothing that merges. | Step 6 (T134); owner question G28 is open, default A (the broker) |
 
@@ -603,7 +603,7 @@ Step 6 adds the sandbox's folders, secret patterns, hosts and `excludedCommands`
 - The repository's `.git` folder: a worktree commit writes objects and refs there, but `.git/config` and `.git/hooks` must stay read-only. A hook script there runs in the owner's next commit, outside the sandbox. A worktree in the scratch folder, cloned from the repository, avoids the shared `.git`.
 - `.claude/settings*.json` and `.mcp.json` in the worktree: no write from Bash or from the Edit and Write tools.
 - sage's mode and autopilot state in `$TMPDIR/sage-hooks`: out of the sandbox's write folders.
-- The state tool's `excludedCommands` entry: `node <SAGE_TOOL>` exactly. The hook refuses the state tool with another command, a `|` or a redirect, because that call runs outside the sandbox.
+- No `excludedCommands` entry for the sage state tool, and no read or write of the logbooks (`~/.claude/sage`) in the sandbox or the permission rules. The hook refuses each call that names the state tool, but it cannot see a copy under another name or a script that builds the name (see below). A lead session reaches the logbook only through the few fixed broker verbs of T134, with the project fixed.
 - The sage-bot config, its token, the lead log and the kill-switch flag: outside the worktree and the scratch folder.
 
 The guard decides in well under a second: it reads no file, it refuses an input over 64 KB before it parses it, and its parser is linear. The timeout of 30 seconds leaves room for a slow start of `node`. A hook that runs past its timeout does not block the tool call, so the timeout must stay far above the guard's time.
@@ -613,9 +613,9 @@ It reads these variables from the environment of the `claude` process. The hook 
 | Variable | Value |
 | --- | --- |
 | `SAGE_ORIGIN` | `lead`. With any other value, or with none, the hook allows everything and prints nothing: the owner's sessions are unaffected. |
-| `SAGE_TOOL` | Optional: the sage state tool, `sage.mjs`. A script with this path, or any script named `sage.mjs`, is the state tool. Allowed: `status`, `logbook`, `merge-check`, `standing` (not `standing add`), `task`, `run`, `finding` and `verdict`. Refused: `gate`, `standing add`, `config` and every other command. |
+| `SAGE_TOOL` | Optional: the sage state tool, `sage.mjs`. The hook refuses each call that names the file name of this path or `sage.mjs`. |
 
-**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action. When a safe form of the same action exists, it ends with "sage can do this instead: …" and that form. Otherwise it ends with "Erick must approve this at the terminal." A malformed stdin, a tool call with no input, or a crash refuses too (a crash exits with code 2).
+**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action. When a safe form of the same action exists, it ends with "sage can do this instead: …" and that form. A call that names the sage state tool ends with "This needs Erick; tell the sage-lead and stop this action." Otherwise it ends with "Erick must approve this at the terminal." A malformed stdin, a tool call with no input, or a crash refuses too (a crash exits with code 2).
 
 **How to rephrase.** These are the safe forms that the refusals give:
 
@@ -627,7 +627,6 @@ It reads these variables from the environment of the `claude` process. The hook 
 | `cd <folder>` alone, or a `cd` after the first part | `cd <folder> && <command>`, or the full path in the command |
 | `HOME=… git …` | The same command with no variable in front of it |
 | A word that starts with a wildcard (`rm -rf *`): it can expand to a file named like an option | Start the word with a folder: `./*` |
-| The state tool with `&&`, `\|` or a redirect | The state tool as a call of its own |
 | An unknown option | The options that the message lists, each spelled in full |
 | An input over 64 KB | The text in a file in the scratch folder, written in parts of less than 64 KB |
 
@@ -641,13 +640,19 @@ It reads these variables from the environment of the `claude` process. The hook 
 | Command | Allowed | Refused |
 | --- | --- | --- |
 | `git` | `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`, `add`, `rm`, `mv`, `restore`, `commit` (`-m`, `-F`), `switch`, `checkout -b`, `branch` (list or create), `stash` (`list`, `push`, `pop`, `apply`, `show`), `remote -v`, `worktree add` and `list`; the global option `-C <folder>` | `push`, `fetch` (the broker), `merge`, `pull`, `rebase`, `reset`, `clean`, `tag`, `cherry-pick`, `config`, `credential`, `cat-file`, `branch -D` and `-d`, `stash clear` and `drop`, `remote add` and `set-url`, `worktree remove`; every global option but `-C` (`-c`, `--git-dir`, `--exec-path`); `--output`, `--ext-diff`, `--textconv`, `--no-index`, `commit --no-verify` |
-| `node` | `node --version`; a script; `--test`, `--check`; the state tool's allowed commands | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script (code from stdin) |
+| `node` | `node --version`; a script; `--test`, `--check` | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script (code from stdin) |
 | `npm` | `ci`, `test`, `run <script>`, `ls`, `outdated` | `publish`, `exec`, `install`, a script whose name has `deploy`, `release` or `publish`; `--prefix`, `--userconfig`, `--script-shell`, `--node-options`, `-g` |
 | `rg` | `-n`, `-i`, `-l`, `-c`, `-w`, `-F`, `-e`, `-g`, `-t`, `-A`, `-B`, `-C`, `--files` | `--pre`, `-L`, every other option |
 | `find` | names and tests | `-exec`, `-execdir`, `-ok`, `-delete`, `-fprint` |
 | Files and text | `ls`, `cat`, `head`, `tail`, `wc`, `diff`, `cut`, `jq`, `sort`, `uniq`, `grep` (never recursive), `tr`, `file`, `stat`, `du`, `realpath`, `mkdir`, `touch`, `rmdir`, `cp`, `mv`, `rm`, `echo`, `printf`, `test`, `[` and a few more | `sort -o`, `sort --compress-program`, `grep -r` (search with `rg`) |
 
-**The other tools.** Read, Write, Edit, MultiEdit, NotebookEdit and Glob are allowed: the permission rules and the sandbox of step 6 hold their paths. The Grep tool is refused. WebFetch is allowed for `http` and `https` to a public host; it refuses `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa`, a name with no dot, the IPv4 ranges `0`, `10`, `127`, `169.254`, `172.16–31`, `192.168` and `100.64–127`, and the IPv6 addresses `::`, `::1`, `fc00::/7`, `fe80::/10` and `::ffff:…`. WebSearch, TodoWrite, Task, Agent, ToolSearch, Skill, ExitPlanMode, BashOutput, TaskOutput, KillShell, KillBash and TaskStop are allowed. A skill only loads instructions; each tool that it then uses comes through this hook. Every other tool is refused, also `Monitor` and each MCP tool.
+**The sage state tool.** A lead session gets no direct state tool, with any command (G30 A). In T134 it reaches the logbook only through a few fixed broker verbs, with the project fixed. The hook refuses each call that may name the tool, with the stop ending:
+
+- a Bash command whose text or words hold the file name `sage.mjs` or the file name of `SAGE_TOOL`, in any case and through any quotes (`sa'ge'.mjs`), also after a variable, `env`, `--` or a `cd`, and also in `cp`, `mv`, `cat` or `echo`. A name that only ends like it (`message.mjs`) is another name;
+- a wildcard that can match one of these names (`s*.mjs`, `sag?.mjs`, `[s]age.mjs`, `dir/*`) in a part that runs a script or writes a file: `node`, `npm`, `cp`, `mv`, `git`, or a part with a redirect. A read (`ls dir/*`) runs nothing;
+- a Write, Edit, MultiEdit or NotebookEdit call whose path or text holds one of these names: a copy, or a script that imports it.
+
+**The other tools.** Read, Write, Edit, MultiEdit, NotebookEdit and Glob are allowed (the file tools only without the state tool's name): the permission rules and the sandbox of step 6 hold their paths. The Grep tool is refused. An Agent or Task call with an `isolation` field (`remote`, `worktree`, any value) is refused: it moves the work out of this hook or the sandbox. WebFetch is allowed for `http` and `https` to a host name or a global unicast address, by an allow-list: an IPv4 address from `1.0.0.0` to `223.255.255.255`, or an IPv6 address in `2000::/3`, and in neither case in a special-purpose range of the IANA registries (`10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.0.2/24`, `192.88.99/24`, `192.168/16`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, `2001::/23`, `2001:db8::/32`, `2002::/16`, `3fff::/20`). So `0/8`, multicast, `240/4`, `255.255.255.255`, `::1`, `fe80::/10`, `fc00::/7`, `ff00::/8`, `::ffff:…` and `64:ff9b::/96` never pass. The URL parser gives the dotted form first, so `2130706433` and `0x7f.1` are `127.0.0.1`. It refuses the host names `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.home.arpa` and a name with no dot. WebSearch, TodoWrite, Task and Agent (with no isolation field), ToolSearch, Skill, ExitPlanMode, BashOutput, TaskOutput, KillShell, KillBash, TaskStop, TaskCreate, TaskGet, TaskList, TaskUpdate, SendMessage, EnterWorktree and ExitWorktree are allowed. A skill only loads instructions; each tool that it then uses comes through this hook. Every other tool is refused, also `Monitor` and each MCP tool.
 
 **What neither the hook nor the sandbox holds.** These cases need GitHub's branch protection on `main`, the rules of the broker, or Erick:
 
@@ -656,12 +661,12 @@ It reads these variables from the environment of the `claude` process. The hook 
 - Damage inside the session's own folders: `rm -rf` of the worktree or the scratch folder, `git checkout` over uncommitted work.
 - A host name on the sandbox's list that resolves to another address, and WebFetch to a host name that resolves to a local address (DNS rebinding): the hook checks the name in the URL, not the address.
 - What the broker uploads: the broker must allow only the session's own branch and pull request.
-- What the state tool records with its allowed commands: it runs outside the sandbox.
+- A copy of the state tool under another name, made without its name (a `cp -r` of its folder, then a name that the hook does not know), and a script that builds the name or reads it from a folder listing: the sandbox, which runs it and denies the logbooks, holds it.
 - A hook that runs past its timeout: Claude Code then runs the tool call. The input limit keeps the guard far below the timeout.
 
 **The tests.** `test/guard.test.js` gives each case of `test/guard-corpus.json` to the guard. In a lead session, every command that is not on the allow-list must be refused with a message in the fixed form; `gh`, `git push` and `git fetch` must be refused with the broker hint; the normal developer commands, a realistic sage session in a worktree under the scratch folder, and the commands whose files the sandbox holds must be allowed; and all of them must be allowed when `SAGE_ORIGIN` is not `lead`. Other tests feed the real hook JSON on stdin, from a file: its answers, a crash, and the 64 KB limit with its time. Nothing runs: the commands are only text.
 
-**The mutation check.** `npm run check:guard-mutations` removes each rule of `src/guard.js` in turn (90 rules) and runs the guard tests against each copy. Each removal must make a test fail. It prints each rule that survives, each copy that breaks a known-good call and each run that does not end in 60 seconds, and exits with 1 when there is one. It takes about 30 seconds and starts many test processes at once, so it is not part of `npm run check`; run it after each change of a rule.
+**The mutation check.** `npm run check:guard-mutations` removes each rule of `src/guard.js` in turn (131 rules) and runs the guard tests against each copy. Each removal must make a test fail. It prints each rule that survives, each copy that breaks a known-good call and each run that does not end in 60 seconds, and exits with 1 when there is one. It takes about 40 seconds and starts many test processes at once, so it is not part of `npm run check`; run it after each change of a rule.
 
 ## Run the checks
 

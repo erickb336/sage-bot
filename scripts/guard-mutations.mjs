@@ -1,8 +1,8 @@
 // The mutation check of the guard (T133): npm run check:guard-mutations.
 // For each rule of src/guard.js, it makes a copy of the guard with that one rule removed, and runs test/guard.test.js
 // against the copy. Each removal must make at least one test fail; a removal that passes is a rule that no test pins.
-// A removal must keep the guard working: the copy must load and still allow the known-good calls (pwd, a Read, git status,
-// the sage state tool's status). A copy that does not is a broken mutation: its test failures prove nothing, so it is
+// A removal must keep the guard working: the copy must load and still allow the known-good calls (pwd, a Read, git status, an
+// Agent, a WebFetch to 8.8.8.8). A copy that does not is a broken mutation: its test failures prove nothing, so it is
 // reported, not counted as a kill; nor is a run that does not end in 60 s. It prints one line for each surviving, broken,
 // timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in src/guard.js, so this list is out of date).
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -63,20 +63,36 @@ const MUTATIONS = [
   ['git worktree: only add and list', ": `git worktree ${args[0] ?? ''}`.trim()),", ': null),'],
   ['git worktree list takes nothing more', "args[0] === 'list' && args.length === 1 ?", "args[0] === 'list' ?"],
   ['git worktree add: its option table', "cmd({ '-b': TEXT })(args.slice(1), env, name)", 'null'],
-  // node and the sage state tool
+  // node
   ['node --version and -v', "if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;", ''],
   ['node --version takes nothing after it', 'if (args.length === 1 && ', 'if ('],
-  ['node: only the listed options', "if (typeof ops === 'string') return ops;\n  const [script", "if (typeof ops === 'string') return null;\n  const [script"],
+  ['node: only the listed options', "if (typeof ops === 'string') return ops;\n  if (!ops[0])", "if (typeof ops === 'string') return null;\n  if (!ops[0])"],
   ['node: a script file is needed', "return args.includes('--test') ? null : 'node with no script file (code from stdin)';", 'return null;'],
   ['node --test needs no script', "return args.includes('--test') ? null :", 'return false ? null :'],
-  ['the state tool by SAGE_TOOL', 't === env.SAGE_TOOL || ', ''],
-  ['the state tool by the name sage.mjs', " || basename(t) === 'sage.mjs'", ''],
-  ['the state tool only through node', "texts[0] === 'node' && texts.some(", 'texts.some('],
-  ['the state tool: only the listed commands', 'SAGE_TOOL.has(rest[0]) && ', ''],
-  ['the state tool: no standing add', " && !(rest[0] === 'standing' && rest[1] === 'add')", ''],
-  ['the state tool: a call of its own', 'if (stateTool(commandOf(texts), env) && (parsed.length > 1 || seg.redirects.length)) {', 'if (false) {'],
-  ['the state tool: no chain', '(parsed.length > 1 || seg.redirects.length)', '(seg.redirects.length)'],
-  ['the state tool: no redirect', '(parsed.length > 1 || seg.redirects.length)', '(parsed.length > 1)'],
+  // The sage state tool: refused in every form (G30 A)
+  ['the state tool: the raw text', '  if (namesStateTool([String(command)], [], env)) return STATE_TOOL;\n', ''],
+  ['the state tool: the words, quotes joined', "if (namesStateTool(parsed.flatMap((seg) => seg.words.map((w) => w.text)), globs, env)) return STATE_TOOL;", ''],
+  ['the state tool: the name sage.mjs', "['sage.mjs', basename(env.SAGE_TOOL ?? '')]", "[basename(env.SAGE_TOOL ?? '')]"],
+  ["the state tool: SAGE_TOOL's name", "['sage.mjs', basename(env.SAGE_TOOL ?? '')]", "['sage.mjs']"],
+  ['the state tool: a name in any case', "join('|')})`, 'i');", "join('|')})`);"],
+  ['the state tool: another name that only ends like it', '`(^|[^a-z0-9_.-])(', '`(^|)('],
+  ['the state tool: a wildcard in any case', "join('')}$`, 'i');", "join('')}$`);"],
+  ['the state tool: a wildcard *', "(p === '*' ? '.*' :", "(p === '*' ? '' :"],
+  ['the state tool: a wildcard ?', "p === '?' || p.startsWith('[') ? '.'", "p.startsWith('[') ? '.'"],
+  ['the state tool: a wildcard [...]', "|| p.startsWith('[') ? '.'", "? '.'"],
+  ['the state tool: the wildcards are checked', 'globs.some((g) => names.some((n) => pattern(g).test(n)))', 'false'],
+  ['the state tool: wildcards of node', "new Set(['node', 'npm',", "new Set(['npm',"],
+  ['the state tool: wildcards of npm', "'node', 'npm', 'cp'", "'node', 'cp'"],
+  ['the state tool: wildcards of cp', "'npm', 'cp', 'mv'", "'npm', 'mv'"],
+  ['the state tool: wildcards of mv', "'cp', 'mv', 'git'", "'cp', 'git'"],
+  ['the state tool: wildcards of git', "'mv', 'git']);", "'mv']);"],
+  ['the state tool: wildcards of a part with a redirect', ' || seg.redirects.length)\n', ')\n'],
+  ['the state tool: a word that starts with a wildcard gets its own hint', "w.glob && !/^[*?[]/.test(w.text)", 'w.glob'],
+  ['the state tool: the Write tool', 'Write: file,', 'Write: allow,'],
+  ['the state tool: the Edit tool', 'Edit: file, MultiEdit', 'Edit: allow, MultiEdit'],
+  ['the state tool: the MultiEdit tool', 'MultiEdit: file,', 'MultiEdit: allow,'],
+  ['the state tool: the NotebookEdit tool', 'NotebookEdit: file,', 'NotebookEdit: allow,'],
+  ['the state tool: the stop ending', "`${why}${MARK}This needs Erick; tell the sage-lead and stop this action.`", '`${why}`'],
   // Simple commands, cd and chains
   ['only the listed variables', 'if (!ENV.has(name)) return', 'if (false) return'],
   ['a variable needs a command after it', "if (!name) return 'a part with no command';", 'if (!name) return null;'],
@@ -98,14 +114,40 @@ const MUTATIONS = [
   ['BashOutput is allowed', 'BashOutput: allow, ', ''],
   ['KillShell is allowed', 'KillShell: allow, ', ''],
   ['ExitPlanMode is allowed', 'ExitPlanMode: allow, ', ''],
-  ['Write is allowed', ', Write: allow, ', ', '],
+  ['Write is allowed', '(namesStateTool([JSON.stringify(i)], [], env) ? STATE_TOOL : null)', 'STATE_TOOL'],
+  ['SendMessage is allowed', ' SendMessage: allow,', ''],
+  ['EnterWorktree is allowed', ' EnterWorktree: allow,', ''],
+  ['TaskCreate is allowed', 'TaskCreate: allow, ', ''],
+  ['Agent and Task: no isolation field', "(Object.hasOwn(i, 'isolation') ?", '(false ?'],
+  ['Agent: the isolation rule', 'Agent: agent,', 'Agent: allow,'],
+  ['Task: the isolation rule', 'Task: agent,', 'Task: allow,'],
   ['Glob is allowed', ', Glob: allow,', ','],
   ['WebFetch: http and https only', 'if (!/^https?:$/.test(u.protocol)) return', 'if (false) return'],
   ['WebFetch: a URL that parses', "try { u = new URL(String(url)); } catch { return 'a fetch of a URL that does not parse'; }", "try { u = new URL(String(url)); } catch { return null; }"],
-  ['WebFetch: no host name without a dot', "if (!host.includes('.') && !ip6) return", 'if (false) return'],
-  ['WebFetch: no localhost, .local, .internal', '/(^|\\.)(localhost|local|internal|home\\.arpa)$/.test(host) || ', ''],
-  ['WebFetch: no private IPv4 address', ' || private4.test(host)) return', ') return'],
-  ['WebFetch: no local IPv6 address', 'if (ip6 && (', 'if (false && ('],
+  ['WebFetch: no host name without a dot', "if (!host.includes('.')) return", 'if (false) return'],
+  ['WebFetch: no localhost, .local, .internal', "if (/(^|\\.)(localhost|local|internal|home\\.arpa)$/.test(host)) return", 'if (false) return'],
+  ['WebFetch: an address is checked as one', 'if (type) return UNICAST', 'if (false) return UNICAST'],
+  ['WebFetch: only the unicast space', 'UNICAST.check(host, type) && ', ''],
+  ['WebFetch: IPv4 unicast ends at 223', "'223.255.255.255'", "'255.255.255.255'"],
+  ['WebFetch: IPv4 unicast starts at 1', "addRange('1.0.0.0',", "addRange('0.0.0.0',"],
+  ['WebFetch: IPv6 unicast is 2000::/3', "addSubnet('2000::', 3, 'ipv6')", "addSubnet('::', 0, 'ipv6')"],
+  ['WebFetch: no special-purpose range', '!SPECIAL.check(host, type) ?', 'true ?'],
+  ['WebFetch: no 10.0.0.0/8', "'10.0.0.0/8', ", ''],
+  ['WebFetch: no 100.64.0.0/10', "'100.64.0.0/10', ", ''],
+  ['WebFetch: no 127.0.0.0/8', "'127.0.0.0/8', ", ''],
+  ['WebFetch: no 169.254.0.0/16', "'169.254.0.0/16', ", ''],
+  ['WebFetch: no 172.16.0.0/12', "'172.16.0.0/12', ", ''],
+  ['WebFetch: no 192.0.0.0/24', "'192.0.0.0/24', ", ''],
+  ['WebFetch: no 192.0.2.0/24', "'192.0.2.0/24', ", ''],
+  ['WebFetch: no 192.88.99.0/24', "'192.88.99.0/24', ", ''],
+  ['WebFetch: no 192.168.0.0/16', "'192.168.0.0/16', ", ''],
+  ['WebFetch: no 198.18.0.0/15', "'198.18.0.0/15', ", ''],
+  ['WebFetch: no 198.51.100.0/24', "'198.51.100.0/24', ", ''],
+  ['WebFetch: no 203.0.113.0/24', ", '203.0.113.0/24'", ''],
+  ['WebFetch: no 2001::/23', "'2001::/23', ", ''],
+  ['WebFetch: no 2001:db8::/32', "'2001:db8::/32', ", ''],
+  ['WebFetch: no 2002::/16', "'2002::/16', ", ''],
+  ['WebFetch: no 3fff::/20', ", '3fff::/20'", ''],
   ['WebFetch: IPv6 brackets', ".replace(/^\\[|\\]$/g, '')", ''],
   ['WebFetch: a trailing dot', ".replace(/\\.$/, '')", ''],
   // The hook input
@@ -118,11 +160,11 @@ const MUTATIONS = [
 ];
 
 const work = mkdtempSync(join(tmpdir(), 'sage-bot-guard-mutations-'));
-// The known-good calls that every mutation must still allow: pwd, a Read, git status, the sage state tool's status.
+// The known-good calls that every mutation must still allow: pwd, a Read, git status, an Agent, a WebFetch to 8.8.8.8.
 writeFileSync(join(work, 'check.mjs'), `
 const { decide } = await import(process.argv[2]);
 const env = { SAGE_ORIGIN: 'lead', SAGE_TOOL: '/sample/state.mjs' };
-const calls = [['Bash', { command: 'pwd' }], ['Read', { file_path: '/sample/README.md' }], ['Bash', { command: 'git status' }], ['Bash', { command: 'node /sample/state.mjs status' }]];
+const calls = [['Bash', { command: 'pwd' }], ['Read', { file_path: '/sample/README.md' }], ['Bash', { command: 'git status' }], ['Agent', { prompt: 'x' }], ['WebFetch', { url: 'https://8.8.8.8/' }]];
 process.exit(calls.every(([tool_name, tool_input]) => decide({ tool_name, tool_input }, env) === null) ? 0 : 1);
 `);
 
@@ -156,7 +198,8 @@ const queue = MUTATIONS.filter((m) => !stale.includes(m));
 await Promise.all(Array.from({ length: Math.max(2, availableParallelism() - 1) }, async () => {
   for (let m = queue.shift(); m; m = queue.shift()) {
     const [name, from, to] = m;
-    const result = await run(name, SOURCE.replace(from, to));
+    // A function, so that a $ in the new text is taken as it is ($` and $& are patterns of replace).
+    const result = await run(name, SOURCE.replace(from, () => to));
     if (result === 'broken') broken.push(name);
     else if (result === 'timeout') timeouts.push(name);
     else if (result === 0) survivors.push(name);
