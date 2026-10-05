@@ -272,6 +272,8 @@ Discord shows every button of a message to everyone, so a non-lead sees "End vot
 - `ephemeral`: true when the pressed message was private (the lead's confirm); it sets the Ephemeral flag of `message.flags`.
 - `refuse`: an Error; every reply then rejects with it and records nothing, as Discord does for an unknown interaction.
 
+For the read commands it also exports `fakeCommand({ user, roles, bot, channelId, sub, options })` and `fakeMention({ user, bot, channelId, content })`: a `/sage` command and a message that mentions the bot, in the shape that `src/discord.js` gives `src/ask.js`. Each records its replies in `replies`; `fakeCommand` records an attached file as its name and size.
+
 ### The preview
 
 <!-- check: run, prints "with 12 moments" -->
@@ -294,6 +296,33 @@ This command renders the card JSON of the design's eleven moments, plus a card o
 The roles come from the config: `apprenticeRole` and `leadRole`. A config from before the two roles, with `driverRole` and no `apprenticeRole`, stops the bridge with exit 1 before it takes the lock or reads the Keychain, and `scripts/launchd.mjs` refuses it the same way: "the config has driverRole: sage-driver is gone. Rename driverRole to apprenticeRole and give that role id to the sage-apprentice role." When a member has both roles, the bridge counts the member as a lead and logs one line with the name and id of each such member; it logs the line again only when that list changes.
 
 Each event gets its time from the bridge's own clock: the wall clock (it runs on while the Mac sleeps), never earlier than its last value. No time comes from Discord data.
+
+### The read commands of #ask-sage
+
+`src/ask.js` answers `/sage` in the #ask-sage channel (`askChannelId`), with no AI (G18, option A). At start the bridge sets the `/sage` command for its guild only, with four subcommands. `project` is a choice of the listed projects; without it, the first project answers.
+
+| Command | The private answer |
+| --- | --- |
+| `/sage board [project]` | The count of tasks by state, the tasks left (not merged, concluded or abandoned), "Time left is not estimated yet: the logbook has no estimate.", and each open question with its id, task and text. |
+| `/sage task <id> [project]` | The task's id, title, size, state and pull request; the pull request is a link when the project has `repo`. |
+| `/sage gates [project]` | Each open question with its options, and whether it is a team vote (in the team votes file of the bridge's own project) or answered at the terminal. |
+| `/sage files [project]` | Up to 10 files from the project's `files`, sorted by path. |
+
+The rules, in the order the bridge applies them:
+
+1. A bot gets nothing.
+2. Every ask counts: 10 per person in a rolling hour, in memory (a restart clears the counts). The 11th gets "You asked 10 times in the last hour; that is the limit. Your next ask works at 15:12." with the time as a Discord timestamp.
+3. A member with neither role gets "Only people with the sage-apprentice or sage-lead role can use /sage. You can still read the channels." The roles come from the interaction's member, never from text.
+4. A command outside #ask-sage gets a pointer to it.
+5. A project that is not in the list gets `I do not know a shared project called "payroll".`, which names no other project.
+
+Each answer comes from the project's `tasks.tsv` and `gates.tsv`, which the bridge finds with `sage logbook` and reads through `pick`: only the id, title, size, state and pull request of a task, and the id, task, question and options of an open gate. It never reads `decisions.tsv`, findings, briefs, reports, a recommendation or a branch. Every logbook text goes through `safe` (the readers are people on Discord), each reply is cut to 2000 characters, and every reply has `allowedMentions: { parse: [] }`.
+
+A file of `/sage files` is attached only when it is a regular file (not a symlink, not a folder), its real path is inside the project, its name does not start with a dot, its type is .png, .jpg, .svg or .pdf, and it is at most 8 MB.
+
+**A mention.** A message that mentions the bot comes with the GuildMessages intent; the bridge needs no Message Content intent. Each mention in #ask-sage counts like a command and gets one public reply in place, which pings nobody: "Free questions come after the trial. Use /sage board, task, gates or files, or ask a lead." A mention that names a build word (add, build, change, create, delete, deploy, fix, implement, make, merge, refactor, remove, rename, start, update, write) also gets "Builds are for sage-leads: ask a lead." Over the limit, a person gets one note until the hour frees up, then nothing. A mention in another channel gets "I answer in #ask-sage, so everyone can find the answers. Please ask there." once per person per UTC day.
+
+**The config.** `askChannelId` is a Discord id. `projects` is a list of 1 to 25 entries `{ name, project, sagePath?, files?, repo? }`; without it, the list is the bridge's own `project` with no files. The bridge and `scripts/launchd.mjs` refuse at start a name that is not lower-case letters, digits and dashes (at most 32) or not unique, a `project` or `sagePath` that is not absolute, a `files` entry with `..`, a leading `/` or dot, a `*` in a folder, or another type, and a `repo` that is not `https://github.com/<owner>/<name>`.
 
 ### Which questions go to Discord
 
@@ -350,9 +379,9 @@ The file is version 2: each entry has its chief session (`session`, or null when
 
 The steps to set up the bridge are in the README: [Set up a live trial](../README.md#set-up-a-live-trial). These are the details behind them.
 
-1. **The Discord app.** A Discord application with a bot user in your server, with the Server Members intent on, and the roles sage-apprentice and sage-lead. Each person has one of them, never both.
+1. **The Discord app.** A Discord application with a bot user in your server, with the Server Members intent on (Message Content off), invited with the `bot` and `applications.commands` scopes, and the roles sage-apprentice and sage-lead. Each person has one of them, never both.
 2. **The Keychain item.** Put the bot token in the macOS Keychain as a generic password with the service name `sage-bot`, with Keychain Access (File, New Password Item: name `sage-bot`). Do not type it in a command, because the shell history keeps it. At start the bridge reads it with `/usr/bin/security find-generic-password -s sage-bot -w`. It never writes the token to a file, a log or an error. When the item is missing, the bridge stops with: "no bot token: the macOS Keychain has no generic password with the service "sage-bot". Add it with Keychain Access, then start the bridge again."
-3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the owner and the two roles; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
+3. **The config file.** Copy `examples/config.example.json` to a folder of your own, for example `~/.config/sage-bot/config.json`, and fill it in: the Discord ids of the guild, the channel, the #ask-sage channel, the owner and the two roles; the projects that `/sage` reads; the sage project folder; the path of the sage state tool (`sage.mjs`); and `statePath`, the gate file. The team votes file is `<statePath>.votes`, or `votesPath` when you set it.
 4. Start it: `node scripts/bridge.mjs ~/.config/sage-bot/config.json`. It logs to the terminal; every log line goes through an allow-list, so no control character reaches the terminal. Of a Discord error it logs only the code, the status and the message, never its url or body (they can hold an interaction token).
 
 **The launchd plist.** To start the bridge at each login and again after it stops, write its launchd agent:
@@ -364,7 +393,7 @@ node scripts/launchd.mjs ~/.config/sage-bot/config.json --out ~/Library/LaunchAg
 
 With `--out`, the script writes the plist to a temp file in the same folder and renames it over the file, so a refused or failed run leaves the old plist as it was. Without `--out`, it prints the plist on stdout.
 
-The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. Its node path is one that a Node upgrade keeps: a Homebrew link (`/opt/homebrew/bin/node`, then `/usr/local/bin/node`) when it resolves to the running node, else the running formula's link `<prefix>/opt/<formula>/bin/node`. It is never a path under `Cellar/<version>`. A Homebrew node with no link stops the script with "run brew link". An old Homebrew node that still runs after an upgrade, while Homebrew links its formula to a newer one, stops the script with a message that names the current node: run the script again with it. Any other node (for example of nvm) goes in as `process.execPath`, and the script prints a warning: make the plist again after each Node upgrade. The script stops with exit 1 and writes or prints no plist when the config file does not exist, is not JSON, lacks one of `guildId`, `channelId`, `ownerId`, `apprenticeRole`, `leadRole`, `project`, `sagePath` and `statePath`, or has a `guildId`, `channelId`, `ownerId`, `apprenticeRole` or `leadRole` that is not a Discord id (17 to 20 digits, the bridge's own rule). The script never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
+The plist runs `node scripts/bridge.mjs <config>` with `RunAtLoad` and `KeepAlive`, a umask of 077, and the log in `~/Library/Logs/sage-bot.log`. It holds no token. Its node path is one that a Node upgrade keeps: a Homebrew link (`/opt/homebrew/bin/node`, then `/usr/local/bin/node`) when it resolves to the running node, else the running formula's link `<prefix>/opt/<formula>/bin/node`. It is never a path under `Cellar/<version>`. A Homebrew node with no link stops the script with "run brew link". An old Homebrew node that still runs after an upgrade, while Homebrew links its formula to a newer one, stops the script with a message that names the current node: run the script again with it. Any other node (for example of nvm) goes in as `process.execPath`, and the script prints a warning: make the plist again after each Node upgrade. The script stops with exit 1 and writes or prints no plist when the config file does not exist, is not JSON, lacks one of `guildId`, `channelId`, `askChannelId`, `ownerId`, `apprenticeRole`, `leadRole`, `project`, `sagePath` and `statePath`, has a `guildId`, `channelId`, `askChannelId`, `ownerId`, `apprenticeRole` or `leadRole` that is not a Discord id (17 to 20 digits, the bridge's own rule), or has `projects` that the bridge refuses (see [The read commands of #ask-sage](#the-read-commands-of-ask-sage)). The script never runs `launchctl`. To load it, run `launchctl load ~/Library/LaunchAgents/com.sage.bot.plist` yourself.
 
 ### The reason contract
 
