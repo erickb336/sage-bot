@@ -23,14 +23,14 @@ import { basename } from 'node:path';
 /** The largest hook input that the guard reads, in bytes. */
 export const MAX_INPUT = 64 * 1024;
 
-const ASK = 'Erick must approve this at the terminal.';
-// A rule can give its own ending after this mark: the safe way to do the same thing (how), or stop (stop).
+/** The ending of a refusal with no safe form (R442 Q1 B): a lead session runs headless, so Erick is not at a terminal. */
+const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
+// A rule can give the safe way to do the same thing (how) after this mark; that text replaces STOP.
 const MARK = '\u0001';
 const how = (why, safe) => `${why}${MARK}sage can do this instead: ${safe}.`;
-const stop = (why) => `${why}${MARK}This needs Erick; tell the sage-lead and stop this action.`;
 const refusal = (why) => {
   const k = why.lastIndexOf(MARK);
-  return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? ASK : why.slice(k + 1)}`;
+  return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? STOP : why.slice(k + 1)}`;
 };
 
 const BROKER = "sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)";
@@ -259,7 +259,7 @@ function namesStateTool(texts, globs, env) {
   return texts.some((t) => named.test(t)) || globs.some((g) => names.some((n) => pattern(g).test(n)));
 }
 const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git']);
-const STATE_TOOL = stop('a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)');
+const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
 
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
 

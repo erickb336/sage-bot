@@ -7,7 +7,7 @@
 //   Claude Code, and the reason goes to stderr.
 if (process.env.SAGE_ORIGIN === 'lead') {
   const fail = (e) => {
-    process.stderr.write(`sage-bot guard: refused, the guard could not decide (${String(e?.message ?? e).slice(0, 200)}). Erick must approve this at the terminal.\n`);
+    process.stderr.write(`sage-bot guard: refused, the guard could not decide (${String(e?.message ?? e).slice(0, 200)}). This needs Erick; tell the sage-lead and stop this action.\n`);
     process.exit(2);
   };
   process.on('uncaughtException', fail);

@@ -615,7 +615,7 @@ It reads these variables from the environment of the `claude` process. The hook 
 | `SAGE_ORIGIN` | `lead`. With any other value, or with none, the hook allows everything and prints nothing: the owner's sessions are unaffected. |
 | `SAGE_TOOL` | Optional: the sage state tool, `sage.mjs`. The hook refuses each call that names the file name of this path or `sage.mjs`. |
 
-**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action. When a safe form of the same action exists, it ends with "sage can do this instead: …" and that form. A call that names the sage state tool ends with "This needs Erick; tell the sage-lead and stop this action." Otherwise it ends with "Erick must approve this at the terminal." A malformed stdin, a tool call with no input, or a crash refuses too (a crash exits with code 2).
+**What it answers.** No output and exit code 0 allows the tool call. A refusal prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"…"}}`. The reason names the action. When a safe form of the same action exists, it ends with "sage can do this instead: …" and that form. Otherwise it ends with "This needs Erick; tell the sage-lead and stop this action." A malformed stdin, a tool call with no input, or a crash refuses too (a crash exits with code 2).
 
 **How to rephrase.** These are the safe forms that the refusals give:
 

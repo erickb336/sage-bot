@@ -59,7 +59,7 @@ function hook(stdin, env = LEAD) {
 }
 const tool = (tool_name, tool_input) => ({ session_id: 'aaaaaaaa-0000-4000-8000-000000000133', hook_event_name: 'PreToolUse', cwd: F.WT, tool_name, tool_input: fill(tool_input) });
 const bash = (command) => tool('Bash', { command });
-const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (Erick must approve this at the terminal\.|sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
+const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
 const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
 const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
 
@@ -103,7 +103,7 @@ test('T133: the sage state tool is refused in every form, with the stop ending (
 test('T133: an Agent or Task call with an isolation field is refused; one without it is allowed', () => {
   for (const name of ['Agent', 'Task']) {
     for (const isolation of ['remote', 'worktree']) {
-      assert.equal(guard(tool(name, { prompt: 'x', isolation })).reason, `sage-bot guard: an agent with the isolation "${isolation}" is refused in a lead session. Erick must approve this at the terminal.`);
+      assert.equal(guard(tool(name, { prompt: 'x', isolation })).reason, `sage-bot guard: an agent with the isolation "${isolation}" is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.`);
     }
     assert.equal(guard(tool(name, { prompt: 'x' })).decision, 'allow');
   }
@@ -112,10 +112,10 @@ test('T133: an Agent or Task call with an isolation field is refused; one withou
 test('T133: WebFetch reaches only a global unicast address: each special-purpose range, multicast, 240/4, the broadcast address and IPv6 outside 2000::/3 are refused', () => {
   const fetch = (host) => guard(tool('WebFetch', { url: `https://${host}/`, prompt: 'x' })).reason ?? null;
   for (const host of ['198.18.0.1', '198.19.255.254', '192.0.0.1', '224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255', '0.1.2.3']) {
-    assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.`);
+    assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.`);
   }
   for (const host of ['::1', '::', 'fe80::1', 'fd00::1', 'ff02::1', '2001:db8::1', '2002:a00:1::1', '64:ff9b::7f00:1', '100::1']) assert.match(fetch(`[${host}]`), /\(not a global unicast address\)/, host);
-  assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   for (const host of ['8.8.8.8', '198.20.0.1', '223.255.254.1', '[2606:4700:4700::1111]', 'example.com']) assert.equal(fetch(host), null, host);
 });
 
@@ -142,21 +142,21 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   // The usual commit form, a heredoc in $( ), stays refused, and the message says how to give the text instead.
   assert.match(why("git commit -m \"$(cat <<'EOF'\nT133\nEOF\n)\""), /cannot read \(a \$ inside double quotes\) is refused .* sage can do this instead: .*put long or special text in a file in the scratch folder and pass it with git commit -F <file>\.$/s);
   assert.equal(why('HOME={SCRATCH} git status'), 'sage-bot guard: a variable in front of git (git reads its config from HOME) is refused in a lead session. sage can do this instead: run git with no variable in front of it.');
-  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   // Each option must be an entry of the command's table by its full spelling; the message lists the entries.
   assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a lead session. sage can do this instead: give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
   assert.equal(why('pwd -L'), 'sage-bot guard: pwd with the option -L is refused in a lead session. sage can do this instead: give pwd no option.');
-  assert.equal(why('node --test-reporter=x.mjs --test'), 'sage-bot guard: node --test-reporter x.mjs (only spec, tap, dot, junit) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('head -n'), 'sage-bot guard: head -n with no value is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git -C'), 'sage-bot guard: git -C with no folder is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git stash clear'), 'sage-bot guard: git stash clear is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git worktree remove x'), 'sage-bot guard: git worktree remove is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('git remote add x y'), 'sage-bot guard: git remote: a change of a remote is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('sh -c x'), 'sage-bot guard: the command sh is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('npm install x'), 'sage-bot guard: npm install (only ci, test, run, ls and outdated) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('npm run deploy'), 'sage-bot guard: npm run deploy (a deploy) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(why('node'), 'sage-bot guard: node with no script file (code from stdin) is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(why('node --test-reporter=x.mjs --test'), 'sage-bot guard: node --test-reporter x.mjs (only spec, tap, dot, junit) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('head -n'), 'sage-bot guard: head -n with no value is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git -C'), 'sage-bot guard: git -C with no folder is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git stash clear'), 'sage-bot guard: git stash clear is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git worktree remove x'), 'sage-bot guard: git worktree remove is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git remote add x y'), 'sage-bot guard: git remote: a change of a remote is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('sh -c x'), 'sage-bot guard: the command sh is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('npm install x'), 'sage-bot guard: npm install (only ci, test, run, ls and outdated) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('npm run deploy'), 'sage-bot guard: npm run deploy (a deploy) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('node'), 'sage-bot guard: node with no script file (code from stdin) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(why('cd src'), 'sage-bot guard: cd other than as the first part of cd <folder> && <command> is refused in a lead session. sage can do this instead: cd <folder> && <command>, or name the full path in the command.');
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
   assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
@@ -165,9 +165,9 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   assert.equal(why('cp * {SCRATCH}'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
   assert.equal(why('cp ./* {SCRATCH}'), STATE);
   assert.equal(guard(tool('Grep', { pattern: 'x' })).reason, 'sage-bot guard: the Grep tool (the sandbox does not cover it) is refused in a lead session. sage can do this instead: search with rg in Bash, for example rg -n <pattern> <folder>.');
-  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a lead session. Erick must approve this at the terminal.');
-  assert.equal(guard(tool('Monitor', { command: 'ls' })).reason, 'sage-bot guard: the tool Monitor is refused in a lead session. Erick must approve this at the terminal.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(guard(tool('Monitor', { command: 'ls' })).reason, 'sage-bot guard: the tool Monitor is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
 });
 
 test('T133: the hook answers allow with no output and deny with the PreToolUse JSON; a malformed stdin or a tool call with no input refuses (fail closed)', () => {
@@ -211,7 +211,7 @@ test('T133: a crash of the hook refuses in a lead session (exit code 2)', () => 
   writeFileSync(join(dir, 'src', 'guard.js'), 'throw new Error("sample crash");\n');
   const r = run(join(dir, 'scripts', 'guard.mjs'), JSON.stringify(bash('git status')), LEAD);
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /refused, the guard could not decide \(sample crash\)\. Erick must approve this at the terminal\./);
+  assert.match(r.stderr, /refused, the guard could not decide \(sample crash\)\. This needs Erick; tell the sage-lead and stop this action\./);
   const inert = run(join(dir, 'scripts', 'guard.mjs'), '{}', {});
   assert.deepEqual([inert.status, inert.stdout], [0, '']);
 });

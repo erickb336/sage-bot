@@ -92,7 +92,7 @@ const MUTATIONS = [
   ['the state tool: the Edit tool', 'Edit: file, MultiEdit', 'Edit: allow, MultiEdit'],
   ['the state tool: the MultiEdit tool', 'MultiEdit: file,', 'MultiEdit: allow,'],
   ['the state tool: the NotebookEdit tool', 'NotebookEdit: file,', 'NotebookEdit: allow,'],
-  ['the state tool: the stop ending', "`${why}${MARK}This needs Erick; tell the sage-lead and stop this action.`", '`${why}`'],
+  ['the stop ending', "const STOP = 'This needs Erick; tell the sage-lead and stop this action.';", "const STOP = 'Stop.';"],
   // Simple commands, cd and chains
   ['only the listed variables', 'if (!ENV.has(name)) return', 'if (false) return'],
   ['a variable needs a command after it', "if (!name) return 'a part with no command';", 'if (!name) return null;'],

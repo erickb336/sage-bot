@@ -131,7 +131,7 @@ sage-leads will talk to sage from Discord. sage-bot will start one headless `cla
 | The Claude Code sandbox (step 6) | Every Bash command and every program that it starts (`node` and `npm` scripts too): reads and writes only in the worktree and the scratch folder, secret files denied, a strict list of hosts with no GitHub, no GitHub token in the environment. |
 | The permission rules (step 6) | The Read, Edit and Write tools, which the sandbox does not cover: Read denied for secret files, Edit and Write only in the worktree and the scratch folder, the Grep tool denied. |
 
-The hook refuses anything that Erick must approve, and tells the session: "Erick must approve this at the terminal." A call that names the sage state tool ends with "This needs Erick; tell the sage-lead and stop this action." When a safe form exists, it gives that form instead, for example "sage can do this instead: cd <folder> && <command>".
+The hook refuses anything that Erick must approve, and tells the session: "This needs Erick; tell the sage-lead and stop this action." A lead session runs headless, so Erick is not at a terminal. When a safe form exists, it gives that form instead, for example "sage can do this instead: cd <folder> && <command>".
 
 - It acts only when the session's environment has `SAGE_ORIGIN=lead`. In every other session it allows everything at once.
 - It allows only what is on its allow-list. When it cannot parse a command, when the input is over 64 KB, or when it fails, it refuses.
