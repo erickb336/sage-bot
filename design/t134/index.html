@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lead sessions run</title>
+<link rel="icon" href="data:,">
+<style>
+/* T134 design. Colours, shapes and helpers follow the T72 page (design/t72/index.html on design/t72-full). One file: no font, no image, no network. */
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --text: #1d1d1b; --muted: #5f5e58; --line: #e3e0d8;
+  --accent: #6b4fd8; --accent-soft: #efeafd; --ok: #1f7a4d; --ok-soft: #e6f4ec; --warn: #9a5b00; --warn-soft: #fdf1dc;
+  --stop: #b3261e; --stop-soft: #fbe9e7; --code-bg: #f3f1ec; --app-side: #ecebe6;
+  --appr: #0f766e; --appr-soft: #e2f3f1; --lead: #9a3412; --lead-soft: #fdeee5; --none: #6b6960; --none-soft: #eeede8;
+  --owner: #2559b8; --owner-soft: #eaf1fc; --bot: #3f3d56;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; overflow-x: hidden; }
+a { color: var(--accent); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+button { font: inherit; cursor: pointer; color: inherit; }
+.sample { background: #fff1cc; color: #6b4200; text-align: center; font-weight: 700; font-size: .82rem; letter-spacing: .04em; padding: 5px 16px; border-bottom: 1px solid #f0d58a; }
+.sample span { font-weight: 500; letter-spacing: 0; }
+.doc { max-width: 1180px; margin: 0 auto; padding: 22px 16px 10px; }
+.doc.tail { padding-bottom: 80px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; line-height: 1.25; }
+.doc h2 { font-size: 1.15rem; margin: 30px 0 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.doc p, .doc li { max-width: 82ch; }
+.lead { background: var(--accent-soft); border-radius: 8px; padding: 12px 16px; }
+.lead p { margin: 4px 0; }
+.sub { color: var(--muted); margin-top: 0; font-size: .9rem; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 8px 12px; }
+table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+th { font-size: .74rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+td.y { color: var(--ok); font-weight: 700; } td.n { color: var(--muted); } td.q { color: var(--warn); font-weight: 700; }
+
+/* Role badges */
+.rb { display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; vertical-align: 1px; letter-spacing: .02em; white-space: nowrap; }
+.rb.appr { background: var(--appr-soft); color: var(--appr); } .rb.lead { background: var(--lead-soft); color: var(--lead); }
+.rb.none { background: var(--none-soft); color: var(--none); } .rb.owner { background: var(--owner-soft); color: var(--owner); }
+.rb.apptag { background: #4752c4; color: #fff; }
+.rb.drv { background: var(--accent-soft); color: var(--accent); }
+
+/* Moment control */
+.proto { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-top: 18px; background: var(--surface); }
+.moments { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); align-items: center; }
+.moments .grp { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 2px 0 8px; }
+.moments .grp:first-child { margin-left: 0; }
+.moments button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 3px 11px; font-size: .82rem; }
+.moments button[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.stepbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--bg); font-size: .82rem; }
+.stepbar .lbl { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+.stepbar button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 2px 9px; font-size: .8rem; }
+.stepbar button[aria-current="true"] { border-color: var(--text); font-weight: 700; }
+.stepbar button.var { border-style: dashed; }
+.stepbar button.var[aria-current="true"] { border-style: solid; background: var(--warn-soft); border-color: var(--warn); color: #6b4200; }
+.stepbar .nav { margin-left: auto; display: flex; gap: 6px; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 310px; }
+.stage { padding: 16px; min-width: 0; }
+.notes { border-left: 1px solid var(--line); padding: 16px; font-size: .9rem; background: var(--surface); }
+.notes h3 { font-size: 1rem; margin: 0 0 6px; }
+.notes p { margin: 6px 0; color: var(--muted); }
+.notes .box { border-radius: 8px; padding: 8px 10px; margin: 10px 0; font-size: .86rem; }
+.notes .box b { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+.notes .box.dec { background: var(--warn-soft); border: 1px dashed var(--warn); color: #6b4200; }
+.notes .box.see { background: var(--bg); border: 1px solid var(--line); }
+.notes .box.done { background: var(--ok-soft); border: 1px solid #b9dcc8; color: #17603c; }
+.notes .box.chg { background: var(--stop-soft); border: 1px solid #f2c4bf; color: var(--stop); }
+.notes ul { margin: 4px 0; padding-left: 18px; }
+
+/* Discord-like shell: a generic look, not Discord's brand */
+.app { display: grid; grid-template-columns: 190px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); min-height: 520px; }
+.srv { background: var(--app-side); padding: 12px 10px; font-size: .84rem; }
+.srv .ws { font-weight: 700; margin-bottom: 8px; }
+.srv .h { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 12px 0 4px; }
+.srv .ch { padding: 3px 6px; border-radius: 5px; }
+.srv .ch.on { background: var(--accent); color: #fff; font-weight: 600; }
+.srv .ch.sub { padding-left: 18px; font-size: .8rem; }
+.srv .mem { display: flex; align-items: center; gap: 6px; padding: 2px 4px; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.dot.off { background: #bdbab1; }
+.chan { display: flex; flex-direction: column; min-width: 0; }
+.chan .hd { padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.chan .hd span { font-weight: 400; color: var(--muted); font-size: .82rem; }
+.stream { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.foot { padding: 10px 12px; border-top: 1px solid var(--line); }
+.composer { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 9px 12px; color: var(--muted); font-size: .9rem; }
+.composer b { color: var(--text); font-weight: 500; }
+.av { width: 34px; height: 34px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; font-weight: 700; font-size: .82rem; flex: none; }
+.av.sm { width: 18px; height: 18px; font-size: .6rem; }
+.av.maya { background: #c2410c; } .av.ana { background: #0f766e; } .av.jon { background: #7c3aed; } .av.sam { background: #8a877d; } .av.erick { background: var(--owner); } .av.bot { background: var(--bot); font-size: .72rem; }
+.msg { display: flex; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.msg .body { min-width: 0; flex: 1; }
+.msg .meta { font-size: .78rem; color: var(--muted); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.msg .meta b { font-size: .92rem; color: var(--text); }
+.msg p { margin: 2px 0; }
+.msg ul { margin: 2px 0; padding-left: 18px; }
+.msg.hl { background: #fff4d0; }
+.msg.eph { background: var(--accent-soft); }
+.ephnote { font-size: .74rem; color: var(--accent); font-weight: 600; margin-top: 3px; }
+.vis { display: inline-block; font-size: .72rem; font-weight: 700; border-radius: 4px; padding: 0 5px; text-transform: uppercase; letter-spacing: .03em; }
+.vis.pub { background: var(--none-soft); color: var(--none); } .vis.me { background: var(--accent-soft); color: var(--accent); }
+.mention { background: #e8eafd; color: #3c45a5; border-radius: 3px; padding: 0 3px; font-weight: 600; }
+.reply { font-size: .76rem; color: var(--muted); margin-bottom: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply::before { content: "\21B1 "; }
+.typing { color: var(--muted); font-size: .85rem; font-style: italic; padding: 4px 8px 4px 52px; }
+.dots span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); margin-right: 3px; opacity: .6; }
+.react { display: inline-flex; gap: 4px; align-items: center; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 0 7px; font-size: .78rem; margin-top: 3px; }
+.divider { text-align: center; font-size: .75rem; color: var(--muted); margin: 8px 0; display: flex; align-items: center; gap: 10px; }
+.divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+/* impeccable-disable-next-line side-tab -- designer: copies Discord's embed (colour bar at the left of a rich card) */
+.embed { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; background: var(--bg); padding: 8px 12px 10px; margin-top: 5px; max-width: 560px; font-size: .88rem; }
+.embed.ok { border-left-color: var(--ok); } .embed.warn { border-left-color: var(--warn); } .embed.stop { border-left-color: var(--stop); } .embed.grey { border-left-color: #bdbab1; }
+.embed .et { font-weight: 700; margin-bottom: 4px; }
+.embed .ef { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 6px; }
+.embed .ef .k { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.embed .ef .v { margin-top: 1px; }
+.embed .full { grid-column: 1 / -1; }
+.embed ul { margin: 2px 0; padding-left: 16px; }
+.embed .efoot { font-size: .74rem; color: var(--muted); margin-top: 8px; }
+.embed dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 3px 10px; margin: 4px 0 0; }
+.embed dt { color: var(--muted); } .embed dd { margin: 0; overflow-wrap: anywhere; }
+.task { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; background: var(--code-bg); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.pill { display: inline-block; font-size: .7rem; font-weight: 700; padding: 0 6px; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); } .pill.stop { background: var(--stop-soft); color: var(--stop); } .pill.grey { background: var(--none-soft); color: var(--none); }
+.cols { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.col { flex: 1 1 96px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font-size: .8rem; }
+.col .ch { font-size: .72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+.db { border: 0; border-radius: 4px; padding: 4px 12px; font-size: .84rem; font-weight: 600; background: #4e5058; color: #fff; }
+.db.pri { background: #4752c4; } .db.ok { background: #248046; } .db.stop { background: #b3261e; } .db.sec { background: #e3e5e8; color: #2e3035; }
+.db.link { background: #e3e5e8; color: #2e3035; }
+.db.link::after { content: " \2197"; }
+.db[disabled] { opacity: .5; cursor: default; }
+.db.pressed { outline: 2px solid #e0a800; outline-offset: 2px; }
+.att { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.att figure { margin: 0; width: 230px; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.att figcaption { font-size: .72rem; color: var(--muted); padding: 3px 8px; border-top: 1px solid var(--line); }
+.att svg { display: block; width: 100%; height: auto; }
+.linkcard { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); max-width: 440px; margin-top: 6px; font-size: .85rem; }
+.linkcard .lh { font-size: .72rem; color: var(--muted); }
+.modalwrap { position: relative; }
+.modalbg { position: absolute; inset: 0; background: rgba(29,29,27,.38); display: grid; place-items: center; padding: 16px; border-radius: 10px; }
+.modal { background: var(--surface); border-radius: 10px; padding: 14px 16px; width: min(440px, 100%); box-shadow: 0 10px 30px rgba(0,0,0,.25); font-size: .9rem; }
+.modal h4 { margin: 0 0 4px; font-size: 1rem; }
+.modal label { display: block; font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 8px 0 2px; }
+.modal textarea { width: 100%; font: inherit; font-size: .86rem; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: none; }
+.modal .mb { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.term { background: #1d1d1b; color: #e8e6df; border-radius: 8px; overflow: hidden; margin-top: 12px; max-width: 620px; }
+.term .tt { font-size: .72rem; color: #a9a69c; padding: 4px 10px; background: #2b2a27; }
+.term pre { margin: 0; padding: 8px 10px; font-size: .78rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term .g { color: #8fd19e; } .term .y { color: #f2c46d; }
+.varhead { display: inline-block; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b4200; background: var(--warn-soft); border: 1px dashed var(--warn); border-radius: 6px; padding: 2px 8px; margin-bottom: 8px; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.opt { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px; font-size: .86rem; }
+.opt.rec { border: 2px solid var(--accent); }
+.opt h4 { margin: 0 0 6px; font-size: .95rem; }
+.done-tag, .open-tag { font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
+.done-tag { background: var(--ok); color: #fff; } .open-tag { background: var(--warn-soft); color: #6b4200; border: 1px dashed var(--warn); }
+.varhead.done { background: var(--ok-soft); border: 1px solid #b9dcc8; color: #17603c; }
+.rec-tag { font-size: .72rem; font-weight: 700; background: var(--accent); color: #fff; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; }
+.mini { border: 1px solid var(--line); border-radius: 8px; background: var(--app-side); padding: 6px 8px; font-size: .78rem; margin-bottom: 8px; }
+.mini div { padding: 1px 4px; border-radius: 4px; }
+.mini .on { background: var(--accent); color: #fff; }
+.mini .in { padding-left: 16px; }
+.opt ul { margin: 4px 0; padding-left: 18px; }
+
+/* Decisions */
+.dec { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 14px; margin: 10px 0; }
+.dec h3 { margin: 0 0 4px; font-size: 1rem; }
+.dec .why { color: var(--muted); font-size: .86rem; margin: 0 0 6px; }
+.dec ol { margin: 4px 0; padding-left: 22px; font-size: .9rem; }
+.dec li { margin: 3px 0; }
+.dec li.r { font-weight: 600; }
+.dec.decided { border-color: #b9dcc8; }
+.dec .pick { margin: 4px 0 6px; padding: 6px 10px; background: var(--ok-soft); border-radius: 6px; color: #17603c; font-size: .9rem; }
+.dec li.off { color: var(--muted); }
+.dec li.chosen { font-weight: 600; color: var(--text); }
+.dec .see { font-size: .8rem; color: var(--muted); }
+.dec .see button { border: 0; background: none; color: var(--accent); text-decoration: underline; padding: 0; font-size: .8rem; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .notes { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 700px) {
+  .app { grid-template-columns: 1fr; min-height: 0; }
+  .srv { display: none; }
+  .stage { padding: 10px 8px; }
+  .msg { padding: 6px 4px; gap: 8px; }
+  .av { width: 28px; height: 28px; font-size: .72rem; }
+  .typing { padding-left: 40px; }
+  .embed dl { grid-template-columns: 1fr; }
+  .embed dt { margin-top: 4px; }
+  .stepbar .nav { margin-left: 0; width: 100%; }
+  h1 { font-size: 1.3rem; }
+}
+
+/* T72 additions */
+.notes .box.open { background: #fffaf0; border: 1px dashed #b7791f; color: #6b4200; }
+.open-pt { font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .03em; vertical-align: 1px; background: #fffaf0; color: #6b4200; border: 1px dashed #b7791f; }
+.sugg { display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); letter-spacing: .02em; }
+.term .q { color: #b9b6ac; }
+.term .r { color: #f2a097; }
+.term .b { color: #9cc2ff; }
+.sees { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+.sees .term { margin-top: 0; max-width: none; }
+.logwin { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.logwin .lt { background: var(--app-side); padding: 8px 12px; font-size: .84rem; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.logwin .lt b { font-size: .92rem; }
+.logwin .lt span { color: var(--muted); }
+.logwin .lf { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: .82rem; align-items: center; }
+.logwin .lf .chip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 2px 10px; }
+.logwin .lf .chip.on { background: var(--text); border-color: var(--text); color: var(--surface); }
+.logwin .lb { padding: 8px 12px 12px; }
+.logwin table { font-size: .84rem; }
+.logwin td.t { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+.logwin tr.refused td { background: var(--stop-soft); }
+.logwin .lnote { font-size: .8rem; color: var(--muted); margin: 8px 0 0; }
+.banner { border: 1px solid #f2c4bf; background: var(--stop-soft); color: var(--stop); border-radius: 8px; padding: 8px 12px; margin: 4px 8px 6px; font-size: .88rem; }
+.banner b { color: var(--stop); }
+.silent { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin: 6px 8px; color: var(--muted); font-size: .86rem; }
+.av.sage { background: var(--accent); font-size: .72rem; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent-soft); color: var(--text); }
+.tchip { margin: 0 8px 6px 52px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 5px 10px; font-size: .84rem; color: var(--muted); max-width: 420px; }
+.tchip span { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--accent); }
+.tchip b { color: var(--text); }
+.app + .app { margin-top: 12px; }
+@media (max-width: 700px) { .tchip { margin-left: 40px; } }
+/* Audit repairs: readable line length, sentence-case labels, contrast, a clear size scale */
+.doc p, .doc li, .msg p, .msg li, .embed p, .opt li, td { max-width: 36em; }
+.stepbar .lbl { text-transform: none; letter-spacing: 0; font-size: .82rem; font-weight: 700; color: var(--text); }
+.notes .box b { text-transform: none; letter-spacing: 0; font-size: .8rem; }
+.av.sam { background: var(--none); }
+h1 { font-size: 1.8rem; }
+.doc h2 { font-size: 1.4rem; }
+.notes h3, .dec h3 { font-size: 1.1rem; }
+@media (max-width: 700px) { h1 { font-size: 1.8rem; } }
+.pill { text-transform: none; letter-spacing: 0; padding: 2px 7px; font-size: .74rem; }
+.opt h3 { margin: 0 0 6px; font-size: .95rem; }
+.msg.cont { padding-top: 6px; }
+.msg.cont .av { visibility: hidden; height: 0; }
+.app.noside { grid-template-columns: minmax(0, 1fr); }
+.app.noside .srv { display: none; }
+.lead { max-width: 46em; }
+.open-pt { white-space: nowrap; }
+/* T134 additions */
+.flow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; font-size: .84rem; }
+.flow .st { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.flow .st.ok { background: var(--ok-soft); border-color: #b9dcc8; color: #17603c; }
+.flow .st.warn { background: var(--warn-soft); border-color: #f0d58a; color: #6b4200; }
+.flow .st.stop { background: var(--stop-soft); border-color: #f2c4bf; color: var(--stop); }
+.flow .ar { color: var(--muted); }
+.flowrow { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 4px 10px; align-items: center; margin: 4px 0; }
+.flowrow .k { font-size: .8rem; font-weight: 700; color: var(--muted); }
+@media (max-width: 700px) { .flowrow { grid-template-columns: 1fr; } }
+.layer { display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; white-space: nowrap; background: var(--stop-soft); color: var(--stop); }
+.layer.hook { background: #f4ecfb; color: #6d28a8; }
+.layer.broker { background: #e8f0fb; color: #2559b8; }
+.layer.brief { background: var(--none-soft); color: var(--none); }
+.refline { border: 1px solid #f2c4bf; background: var(--stop-soft); border-radius: 6px; padding: 5px 9px; margin-top: 5px; font-size: .86rem; max-width: 560px; }
+.refline.fixed { border-color: #b9dcc8; background: var(--ok-soft); }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.two > div > .cap { font-size: .78rem; font-weight: 700; color: var(--muted); margin: 0 0 4px; }
+@media (max-width: 700px) { .two { grid-template-columns: 1fr; } }
+.term pre { overflow-x: auto; }
+.term .w { color: #ffffff; font-weight: 700; }
+.flow .st.grey { background: var(--none-soft); color: var(--none); }
+</style>
+</head>
+<body>
+<div class="sample">SAMPLE DATA <span>· a design only: no bot, no Discord, no sage session, no network. All people, tasks, messages, branches and times are invented. Times in UTC.</span></div>
+
+<div class="doc">
+<h1>sage-bot runs a lead's sage session</h1>
+<p class="sub">Task T134 (step 6 of the T72 plan) · run R497 · design branch <code>design/t134-sessions</code> · builds on the T72 page (branch <code>design/t72-full</code>, <code>design/t72/index.html</code>) · nothing is built</p>
+<div class="lead">
+<p><b>What this is.</b> A clickable design of what Jon, Rosa, the team and Erick see when sage-bot runs a sage session for a <span class="rb lead">sage-lead</span>. The session runs headless on Erick's Mac (<code>claude -p</code>), inside the Claude Code sandbox. The lead talks to it in one Discord thread. The page shows every state: starting, waiting for sage T127, working, refused, needs Erick, pull request opened, stopped, crashed, timed out, and two sessions at once.</p>
+<p><b>The main point.</b> Today no session can start: the owner's rule is that sessions wait for sage T127, which is framed and not built. So the first thing a lead sees is the waiting state (moment 1, step 2). Everything after it is what the team sees once T127 is available and Erick turns sessions on.</p>
+<p><b>Where it fits.</b> T72 designed the talk: a thread per mention, one session per lead thread, requests for Erick, the lead log and the kill switch. T130, T131 and T132 built the channels, threads, lead log, kill switch and project cards. T133, the guard hook, is in review. T134 is the step that starts and runs the sessions. Next: you answer the questions at the end; then the build.</p>
+<p><b>What I need from you.</b> A pick on the 10 product questions at the end. Each has my recommendation and a default. The most important are Q1 (how much of the work the thread shows), Q4 (who acts after you approve a merge) and Q5 (what the kill switch does to running work).</p>
+</div>
+
+<h2>Who refuses what in a lead session</h2>
+<p class="sub">Four layers limit a session, and Erick decides what none of them may do. Only the sandbox guarantees a file or network boundary (standing order 14); the hook is a second layer. The lead sees each refusal the same way: one short line in the thread, with the layer's name (moment 3).</p>
+<div class="tablewrap"><table>
+<tr><th>Layer</th><th>What it holds</th><th>What the lead sees</th><th>Recorded as</th></tr>
+<tr><td><span class="layer">sandbox</span></td><td>Every command and every process it starts. Reads only in the session's folder. Denied: secret files, the sage plugin folder and every logbook (F-T134-6), <code>$TMPDIR/sage-hooks</code> (F-T134-7), the lead log and the kill-switch flag (F-T134-2), writes to <code>.git/hooks</code> and <code>.git/config</code> (F-T134-3), <code>.claude</code> settings and <code>.mcp.json</code> (F-T134-4). A strict host list with no GitHub; no GitHub token variables. It fails closed: no sandbox, no session.</td><td>"Refused · sandbox · a file outside the project"</td><td>decided: owner, standing order 14</td></tr>
+<tr><td><span class="layer hook">guard hook</span></td><td>Which tools and commands run, before they run (T133). It often gives a safe form, and sage takes it.</td><td>"Refused · guard · gh. sage used the broker instead."</td><td>in review: T133</td></tr>
+<tr><td><span class="layer broker">broker</span></td><td><code>sage-bot-github</code>: fetch, upload to the session's own branch, create, edit and view its own pull request. Never merges (F-T134-1, G28 A). A few fixed logbook verbs, with the project fixed (G30 A).</td><td>"Refused · broker · a merge. Sent to Erick."</td><td>decided: G28 A, G30 A</td></tr>
+<tr><td><span class="layer brief">brief</span></td><td>The session's brief forbids any command that prints a secret value (G29 A). sage refuses in words.</td><td>sage's own answer: "I do not print secrets."</td><td>decided: G29 A</td></tr>
+<tr><td><span class="rb owner">Erick</span></td><td>Merges, deploys, deleting data, secrets and the automatic-merge mode (G22).</td><td>A request card for Erick (moment 4)</td><td>decided: G22</td></tr>
+</table></div>
+
+<h2>The states of one session</h2>
+<p class="sub">One word for each state. The same word shows in the thread, in the session card and at Erick's terminal.</p>
+<div class="flowrow"><span class="k">Before a start</span><div class="flow"><span class="st warn">not available · waiting for sage T127</span><span class="st stop">link off</span><span class="st warn">limit · 2 running</span><span class="st stop">no sandbox</span></div></div>
+<div class="flowrow"><span class="k">Normal path</span><div class="flow"><span class="st">starting</span><span class="ar">→</span><span class="st ok">working</span><span class="ar">⇄</span><span class="st">waiting for you</span><span class="ar">⇄</span><span class="st warn">waiting for Erick</span><span class="ar">→</span><span class="st grey">ended</span></div></div>
+<div class="flowrow"><span class="k">Ends early</span><div class="flow"><span class="st stop">stopped</span><span class="st stop">crashed</span><span class="st stop">timed out</span><span class="ar">→ the next lead message resumes it (Q7)</span></div></div>
+
+<h2 style="margin-bottom:0">The moments</h2>
+<p class="sub">9 moments. Pick a moment, then a step or a variant (dashed). Arrow keys move between steps. Under G20 every reply is <span class="vis pub">public</span>.</p>
+</div>
+
+<div class="proto">
+<nav class="moments" id="moments" aria-label="Moments"></nav>
+<div class="stepbar" id="stepbar"></div>
+<div class="layout"><section class="stage" id="stage" aria-live="polite"></section><aside class="notes" id="notes"></aside></div>
+</div>
+
+<div class="doc tail">
+<h2 id="questions">Product questions</h2>
+<p class="sub">The owner's decisions do not settle these. Each becomes a special case in code if nobody decides it. My recommendation is in bold. The default is what the build does if there is no answer.</p>
+<div id="qlist"></div>
+
+<h2>Recorded, not asked</h2>
+<p class="sub">These are fixed by the owner or by recorded findings. The page shows them; it does not ask about them again.</p>
+<div class="tablewrap"><table>
+<tr><th>Rule</th><th>Source</th><th>Where on this page</th></tr>
+<tr><td>Sessions refuse to start until sage T127 is available. No workaround.</td><td>owner</td><td>Moment 1, step 2</td></tr>
+<tr><td>The sandbox is the containment: <code>failIfUnavailable</code>, no unsandboxed commands, reads only in the working folder, secret patterns denied, a strict host list with no GitHub, GitHub token variables denied.</td><td>owner, standing order 14</td><td>Moment 1 (no sandbox), moment 3</td></tr>
+<tr><td>GitHub only through the broker; the broker never lands a pull request.</td><td>G28 A, F-T134-1</td><td>Moments 3, 4, 5</td></tr>
+<tr><td>No direct state tool; a few fixed logbook verbs through the broker, the project fixed.</td><td>G30 A</td><td>Moment 2 (status), moment 3</td></tr>
+<tr><td>The brief forbids any command that prints a secret value.</td><td>G29 A</td><td>Moment 3, variant</td></tr>
+<tr><td>Each project, path and command name comes from one resolver. The thread, the session card and the terminal read the same record.</td><td>standing order 15</td><td>Moment 9</td></tr>
+</table></div>
+
+<h2>Options I rejected, and why</h2>
+<div class="tablewrap"><table>
+<tr><td style="width:28%"><b>A message for every tool call</b> in the thread</td><td>A 20-minute build makes 100 to 300 tool calls (no measurement; a guess from T133's realistic session). The thread fills, Discord rate-limits sage-bot, and file paths of Erick's Mac go public. One card edited in place shows the same progress (Q1).</td></tr>
+<tr><td><b>Start sessions now, without T127</b>, and add it later</td><td>The owner said: do not work around it. The waiting state is designed instead (moment 1).</td></tr>
+<tr><td><b>Record talks while waiting, and run them when T127 lands</b></td><td>An old instruction can be wrong by then (T69 D10). Each talk is in the lead log; the lead sends it again.</td></tr>
+<tr><td><b>Retry a crashed session by itself</b></td><td>A crash in a loop costs money with nobody watching. The lead decides with one message (moment 7).</td></tr>
+<tr><td><b>A Discord button that lets Erick's press merge</b> through the broker</td><td>F-T134-1: the broker never lands a pull request. Erick's own session merges, with sage's merge check (Q4).</td></tr>
+<tr><td><b>Show the exact refused path or command</b> to the team</td><td>A path can name Erick's folders and files. The thread shows the kind of refusal; the lead log on the Mac keeps the exact text for Erick (Q3).</td></tr>
+</table></div>
+</div>
+<script>
+'use strict';
+// SAMPLE DATA ONLY. People: Maya (sage-apprentice), Jon and Rosa (sage-lead), Erick (owner). Projects: sage-bot, site.
+const P = {
+  maya: { n: 'Maya', r: '<span class="rb appr">apprentice</span>' },
+  jon: { n: 'Jon', r: '<span class="rb lead">lead</span>' },
+  rosa: { n: 'Rosa', r: '<span class="rb lead">lead</span>' },
+  erick: { n: 'Erick', r: '<span class="rb owner">owner</span>' },
+  bot: { n: 'sage-bot', r: '<span class="rb apptag">APP</span>' },
+  sage: { n: 'sage', r: '<span class="rb apptag">APP</span> <span class="rb drv">Session 21</span>' },
+  sage2: { n: 'sage', r: '<span class="rb apptag">APP</span> <span class="rb drv">Session 22</span>' },
+};
+const AV = { maya: 'M', jon: 'J', rosa: 'R', erick: 'E', bot: 'sb', sage: 'sg', sage2: 'sg' };
+const AVC = { rosa: 'maya', sage2: 'sage' };
+const BOT = '<span class="mention">@sage-bot</span>';
+const at = k => `<span class="mention">@${P[k].n}</span>`;
+const tk = t => `<span class="task">${t}</span>`;
+const PUB = '<span class="vis pub">public</span>';
+const ME = k => `<span class="vis me">only ${P[k].n}</span>`;
+const DONE = (k, t) => `<div class="box done"><b>Decided · ${k}</b>${t}</div>`;
+const Q = (k, t) => `<div class="box dec"><b>Question ${k}</b>${t}</div>`;
+const SEE = (k, t) => `<div class="box see"><b>${k}</b>${t}</div>`;
+const PE = t => `<div class="box open"><b>For the build (not a product question)</b>${t}</div>`;
+function msg(who, time, html, o = {}) {
+  if (o.cont) return `<div class="msg cont${o.hl ? ' hl' : ''}"><span class="av ${AVC[who] || who}" aria-hidden="true"></span><div class="body"><div class="meta"><span>${time}</span></div>${html}</div></div>`;
+  return `<div class="msg${o.eph ? ' eph' : ''}${o.hl ? ' hl' : ''}"><span class="av ${AVC[who] || who}">${AV[who]}</span><div class="body">
+    ${o.reply ? `<div class="reply">${o.reply}</div>` : ''}
+    <div class="meta"><b>${P[who].n}</b>${P[who].r}<span>${time}</span>${o.eph ? ME(o.eph) : PUB}${o.edited ? '<span>(edited)</span>' : ''}</div>${html}
+    ${o.react ? `<span class="react">${o.react}</span>` : ''}
+    ${o.eph ? `<div class="ephnote">Only you can see this · Dismiss message</div>` : ''}</div></div>`;
+}
+function slash(who, time, cmd, html, priv = false) {
+  return `<div class="msg${priv ? ' eph' : ''}"><span class="av bot">sb</span><div class="body"><div class="reply">${P[who].n} used <b>${cmd}</b></div>
+    <div class="meta"><b>sage-bot</b>${P.bot.r}<span>${time}</span>${priv ? ME(who) : PUB}</div>${html}${priv ? `<div class="ephnote">Only you can see this · Dismiss message</div>` : ''}</div></div>`;
+}
+const typing = (who = 'sage') => `<div class="typing"><span class="dots"><span></span><span></span><span></span></span> ${who} is working…</div>`;
+const btn = (label, cls = '', go = '', extra = '') => `<button class="db ${cls}"${go ? ` data-go="${go}"` : ''}${extra}>${label}</button>`;
+const small = t => `<p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">${t}</p>`;
+const CH = '#sage-bot-dev';
+const TH = 'Jon · CSV export of the board';
+const RTH = 'Rosa · footer links on site';
+function app(channel, topic, stream, o = {}) {
+  const on = c => c === channel ? ' on' : '';
+  return `<div class="app modalwrap${o.noside ? ' noside' : ''}"><div class="srv"><div class="ws">Acme team <span class="rb none">sample</span></div>
+    <div class="h">Text channels</div><div class="ch${on('#general')}">#general</div><div class="ch${on(CH)}">${CH}</div>
+    <div class="ch sub${on(TH)}">${TH}</div>
+    <div class="ch${on('#site')}">#site</div>${o.rosa ? `<div class="ch sub${on(RTH)}">${RTH}</div>` : ''}
+    <div class="ch${on('#sage-audit')}">#sage-audit</div>
+    <div class="h">Members</div>
+    <div class="mem"><span class="av sm erick">E</span>Erick<span class="dot" style="margin-left:auto"></span></div>
+    <div class="mem"><span class="av sm jon">J</span>Jon</div><div class="mem"><span class="av sm maya">R</span>Rosa</div><div class="mem"><span class="av sm maya">M</span>Maya</div>
+    <div class="mem"><span class="av sm bot">sb</span>sage-bot<span class="dot${o.paused ? ' off' : ''}" style="margin-left:auto"></span></div></div>
+    <div class="chan"><div class="hd">${channel}<span>${topic}</span></div>${o.banner || ''}<div class="stream">${stream}</div>
+    <div class="foot"><div class="composer">${o.composer || `Message ${channel}`}</div></div></div>${o.modal || ''}</div>`;
+}
+const ASK = 'Project: sage-bot · each @sage-bot mention opens a thread · every reply is public';
+const THT = 'Thread in #sage-bot-dev · public · Session 21 · Jon leads';
+const RTHT = 'Thread in #site · public · Session 22 · Rosa leads';
+const term = (title, lines) => `<div class="term"><div class="tt">${title}</div><pre>${lines}</pre></div>`;
+const tchip = (name, n) => `<div class="tchip"><span>Thread</span> <b>${name}</b> · ${n} messages</div>`;
+const pill = (cls, t) => `<span class="pill ${cls}">${t}</span>`;
+
+// The session card: one card per session, edited in place (Q1 option a).
+const STATE = {
+  starting: ['grey', 'starting'], working: ['ok', 'working'], you: ['grey', 'waiting for you'], erick: ['warn', 'waiting for Erick'],
+  ended: ['grey', 'ended'], stopped: ['stop', 'stopped'], crashed: ['stop', 'crashed'], timeout: ['stop', 'timed out'],
+};
+function card(st, o = {}) {
+  const [c, w] = STATE[st];
+  const emb = { ok: 'ok', warn: 'warn', stop: 'stop', grey: 'grey' }[c];
+  return `<div class="embed ${emb}"><div class="et">Session ${o.n || 21} · ${o.project || 'sage-bot'} · ${pill(c, w)}</div><dl>
+    <dt>Lead</dt><dd>${o.lead || 'Jon'}</dd>
+    <dt>Task</dt><dd>${o.task || `${tk('T70')} CSV export of the board`}</dd>
+    <dt>Now</dt><dd>${o.now || 'Reads the board card code.'}</dd>
+    <dt>Branch</dt><dd><code>${o.branch || 'sage-lead/s21'}</code>${o.pr ? ` · pull request ${o.pr}` : ''}</dd>
+    <dt>Time</dt><dd>${o.time || 'started 15:06 · 0 min'}</dd>
+    ${o.ref !== undefined ? `<dt>Refused</dt><dd>${o.ref}</dd>` : ''}</dl>
+    ${o.btns ? `<div class="btns">${o.btns}</div>` : ''}
+    <div class="efoot">${o.foot || 'One card per session; sage-bot edits it in place · updated ' + (o.upd || '15:06')} · sample data</div></div>`;
+}
+const cardMsg = (st, time, o = {}) => msg('bot', time, card(st, o), { edited: o.edited });
+
+// ---------- Messages reused across moments ----------
+const jTalk = msg('jon', '15:05', `<p>${BOT} talk: add a CSV export to the board card, same columns as the card. Open a PR when the tests pass.</p>`);
+const jTalkR = 'Jon: @sage-bot talk: add a CSV export to the board card…';
+const hello = msg('bot', '15:06', `<p>${at('jon')} This thread is <b>Session 21</b>, on sage-bot. You talk to sage as if from Erick's terminal. sage works on its own branch and opens its own pull request. Merges, deploys, deleting data, secrets and the automatic-merge mode go to Erick. sage-bot logs every lead message.</p>`);
+const sHello = msg('sage', '15:06', `<p>Hi Jon. I framed it as ${tk('T70')}, small: a "Download CSV" button on the board card, same columns (task, title, step, open questions, pull request). Route: build, code-review, qa. I start now and post here when the tests pass.</p>`);
+
+const M = [];
+const S = (label, stage, notes, o = {}) => Object.assign({ label, stage, notes }, o);
+
+// ---------- 1. Start ----------
+const t127 = msg('bot', '15:05', `<div class="embed warn"><div class="et">Lead sessions are not available yet</div><p>sage-bot starts a session only when sage T127 is available. T127 is framed in sage and not built. Nothing ran.</p><p>Your message is in the lead log. It does not run later: send it again when sessions are on. Read asks (board, a task, gates, files) work now.</p><div class="efoot">Erick turns sessions on at the terminal when T127 is in sage · sample data</div></div>`, { reply: jTalkR });
+M.push({ g: 'Start', t: '1 Start', title: 'A lead mentions @sage-bot and a session starts', steps: [
+  S('Mention', () => app(CH, ASK, jTalk + tchip(TH, 1)),
+    `<h3>Jon asks for work</h3><p>Jon mentions sage-bot with "talk" in a registered channel. As for any mention, sage-bot opens a thread named from his words (T131).</p><p>A lead's talk is the only thing that starts a session. A read ask never does (T72 Q13).</p>`),
+  S('Waiting for T127', () => app(TH, 'Thread in #sage-bot-dev · public · no session', jTalk + t127),
+    `<h3>Today: sessions are not available</h3><p>This is what every lead sees until sage T127 is built and Erick turns sessions on. It replaces today's dry-run reply.</p><ul><li>It says why, and that nothing ran.</li><li>It says the message does not run later.</li><li>It says what works now.</li></ul>${DONE('owner', 'Sessions refuse to start until sage T127 is available. "Do not work around it."')}${Q('Q2', 'How sessions turn on when T127 lands. I recommend: Erick turns them on at the terminal; sage-bot never turns them on by itself.')}`),
+  S('Erick · waiting', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs sessions</span>
+<span class="w">Lead sessions: OFF</span> · waiting for sage T127 (framed, not built)
+  sage-bot starts no session until T127 is in sage and you turn sessions on.
+  Talks recorded while off: 3 (Jon 2, Rosa 1) · last 15:05 · <span class="q">node scripts/leads.mjs read 5</span>
+<span class="q">sample data</span>`),
+    `<h3>Erick sees the same state</h3><p>The terminal says the same thing as the thread, and how many talks came in while sessions were off. So Erick knows that leads wait.</p><p>The command name is the T131 script with one new word. All names come from one place (standing order 15).</p>`, { v: 1 }),
+  S('Starting', () => app(TH, THT, jTalk + hello + cardMsg('starting', '15:06', { now: 'Makes the session folder and the branch.', ref: undefined }) + typing()),
+    `<h3>After T127: the session starts</h3><p>sage-bot posts one fixed line (from T72) and the <b>session card</b>. The card is the one place to look: state, task, what sage does now, branch, time.</p><p>sage-bot edits the card in place. The thread does not fill with progress lines (Q1).</p>`),
+  S('Working', () => app(TH, THT, jTalk + hello + cardMsg('working', '15:06', { now: 'Writes the CSV function and its test.', time: 'started 15:06 · 4 min', ref: 'none', upd: '15:10', edited: true }) + sHello),
+    `<h3>sage answers in the thread</h3><p>sage frames the request as a task and starts. Its messages carry <b>sage</b> and the session number; sage-bot's carry <b>sage-bot</b>.</p><p>A lead frames a task in words; the confirm card of T72 stays for a request that is not clear.</p>`),
+  S('No sandbox', () => app(TH, 'Thread in #sage-bot-dev · public · no session', jTalk + msg('bot', '15:06', `<div class="embed stop"><div class="et">I did not start a session</div><p>The sandbox that holds a lead session is not available on Erick's Mac, so nothing ran. Erick got a notice.</p><p>Your message is in the lead log. Send it again when Erick says it works.</p><div class="efoot">sample data</div></div>`, { reply: jTalkR })),
+    `<h3>Failure: no sandbox, no session</h3><p>The session's settings fail closed (<code>failIfUnavailable</code>). sage-bot checks this before it posts a card, so the lead never sees a session that dies at once.</p><p>Erick's terminal notice names the cause from Claude Code's own message.</p>`),
+  S('Limit · 2 running', () => app(RTH, 'Thread in #site · public · no session', msg('rosa', '15:20', `<p>${BOT} talk: fix the footer links on site</p>`) + msg('bot', '15:20', `<p>2 lead sessions run now: Session 21 (Jon) and Session 23 (Jon, in #design). That is the limit Erick set, so I did not start one. Your message is in the lead log. Send it again when one ends.</p>`, { reply: 'Rosa: @sage-bot talk: fix the footer links on site' }), { rosa: true }),
+    `<h3>Limit: sessions at once</h3><p>The T69 limit of 2 sessions now counts lead sessions. The reply names the running sessions, so Rosa knows whom to ask.</p>${Q('Q8', 'The limit. I recommend 2 lead sessions in total, apart from Erick\'s own sessions. No basis yet.')}`),
+  S('Link off', () => app(TH, 'Thread in #sage-bot-dev · public · no session', jTalk + msg('bot', '15:06', `<p>The link from Discord to sage is off (Jon, 14:50). No session starts. Your message is in the lead log. Only Erick turns the link on, at the terminal.</p>`, { reply: jTalkR }), { paused: true, banner: '<div class="banner"><b>Link to sage stopped</b> by Jon at 14:50. Only Erick can start it again.</div>' }),
+    `<h3>The kill switch is set</h3><p>The T131 reply holds. A stopped link also means no new session.</p>`),
+] });
+
+// ---------- 2. Works and reports ----------
+const jAsk = msg('jon', '15:18', `<p>How far is it?</p>`);
+const report = msg('sage', '15:31', `<div class="embed ok"><div class="et">Report · ${tk('T70')} build done</div><dl>
+  <dt>What changed</dt><dd>A "Download CSV" button on the board card. 2 files: <code>src/cards.js</code>, <code>test/cards.test.js</code>.</dd>
+  <dt>Checks</dt><dd><code>npm test</code>: 412 of 412 passed.</dd>
+  <dt>Branch</dt><dd><code>sage-lead/s21</code>, 2 commits</dd>
+  <dt>Refused</dt><dd>1, by the guard; I used the broker instead (see 15:24)</dd>
+  <dt>Next</dt><dd>I open the pull request now, then code-review and QA run.</dd></dl><div class="efoot">sample data</div></div>`);
+M.push({ g: 'Start', t: '2 Work and report', title: 'The session works and reports', steps: [
+  S('Card · working', () => app(TH, THT, hello + cardMsg('working', '15:06', { now: 'Runs <code>npm test</code> (step build).', time: 'started 15:06 · 12 min', ref: 'none', upd: '15:18', edited: true }) + sHello),
+    `<h3>Option a (recommended): one card, edited in place</h3><p>The card at the top of the thread changes as sage works. Anyone can look at it at any time. Nobody gets a ping for progress.</p><p>The "Now" line is a fixed phrase from sage-bot (the step and the command name), not sage's free text, so it never shows a path or a value.</p>${Q('Q1', 'How much of the work the thread shows: a card edited in place (recommended), a line per action, or only the start and the report.')}`),
+  S('Option b · every action', () => app(TH, THT, hello + ['15:07 · read src/cards.js', '15:08 · edit src/cards.js', '15:08 · ran npm test · 1 failed', '15:09 · read test/cards.test.js', '15:10 · edit test/cards.test.js', '15:11 · ran npm test · passed', '15:11 · git commit'].map((l, i) => msg('bot', l.slice(0, 5), `<p style="font-size:.86rem;color:var(--muted)">${l.slice(8)}</p>`, { cont: i > 0 })).join('') + small('…and 140 more lines for this task (estimate)')),
+    `<h3>Option b: a line for every action</h3><p>Everything is visible, but the thread is unreadable after five minutes. Discord limits sage-bot to about 5 posts in 5 seconds per channel, so lines queue up. File names of Erick's projects go public.</p><p>Rejected.</p>`, { v: 1 }),
+  S('Option c · start and report', () => app(TH, THT, hello + sHello + `<div class="silent">No post for 25 minutes.</div>` + report),
+    `<h3>Option c: only the start and the report</h3><p>A quiet thread, but a lead cannot tell "working" from "hung" for 25 minutes. Leads will ask "how far is it?", and each question costs a turn of the session.</p><p>Rejected, but it is the fallback when the card cannot be edited.</p>`, { v: 1 }),
+  S('Lead asks', () => app(TH, THT, cardMsg('working', '15:06', { now: 'Runs <code>npm test</code> (step build).', time: 'started 15:06 · 12 min', ref: 'none', upd: '15:18', edited: true }) + jAsk + msg('bot', '15:18', `<p>sage reads your message when its current command ends, usually within 1 minute (sample estimate; no basis yet). The card above shows what it does now.</p>`, { reply: 'Jon: How far is it?' }) + msg('sage', '15:19', `<p>The CSV function and its test are written. The full test run is going; then I commit.</p>`)),
+    `<h3>A lead writes while sage works</h3><p>A headless session reads a new lead message at its next turn. sage-bot says so at once, with an estimate and its basis, and points at the card.</p>`),
+  S('Report', () => app(TH, THT, cardMsg('working', '15:06', { now: 'Opens the pull request.', time: 'started 15:06 · 25 min', ref: '1 (guard)', upd: '15:31', edited: true }) + report),
+    `<h3>sage reports</h3><p>At the end of a step, sage posts a short report: what changed, the checks, the branch, refusals, what comes next.</p><p>sage-bot posts sage's text cleaned for people, at most 2000 characters; longer text goes as a file (Q10).</p>`),
+  S('Status from the logbook', () => app(TH, THT, msg('jon', '15:40', `<p>Status of T68 and T70?</p>`) + msg('sage', '15:40', `<div class="embed"><div class="et">Status · 15:40</div><dl><dt>${tk('T68')}</dt><dd>QA runs, started 15:32. Pull request #21.</dd><dt>${tk('T70')}</dt><dd>This session. Pull request #31; code-review starts.</dd></dl><div class="efoot">From the sage logbook, through sage-bot · sample data</div></div>`)),
+    `<h3>sage reads the board through sage-bot</h3><p>The session has no state tool (G30 A). It asks sage-bot, which reads the logbook with a few fixed verbs, for this project only.</p>${PE('The list of logbook verbs, and what each returns, is for the build and the PE: for example board, task, frame a task, open a request for Erick. The page does not fix the names.')}`),
+  S('Waiting for you', () => app(TH, THT, cardMsg('you', '15:06', { now: 'Waits for Jon\'s answer.', time: 'started 15:06 · 34 min', ref: '1 (guard)', upd: '15:40', edited: true }) + msg('sage', '15:40', `<p>${at('jon')} One question before QA: should the CSV include closed tasks? I recommend no: the board card does not show them.</p>`)),
+    `<h3>sage waits for the lead</h3><p>A question for the lead pings the lead, once. The card says "waiting for you", so others see why nothing moves.</p>${Q('Q6', 'How long a session waits for its lead before it ends by itself.')}`),
+] });
+
+// ---------- 3. Refused ----------
+const ref = (layer, cls, text, fix) => `<div class="refline${fix ? ' fixed' : ''}"><span class="layer ${cls}">${layer}</span> ${text}</div>`;
+M.push({ g: 'Guardrails', t: '3 Refused', title: 'A layer refuses an action, and what the lead sees', steps: [
+  S('Guard, then safe form', () => app(TH, THT, msg('bot', '15:24', ref('guard', 'hook', 'Refused · sage asked to run <code>git fetch</code>. The guard gave the safe form: the broker.') + ref('broker', 'broker', 'Done · sage fetched <code>main</code> through the broker.', true), { cont: false }) + msg('sage', '15:24', `<p>My first try used a command that lead sessions may not run. I used sage-bot's broker instead, and the branch is up to date.</p>`)),
+    `<h3>Correction: refused, then the safe form</h3><p>Most refusals have a safe form (T133). sage takes it, and the work goes on. The thread shows one red line and one green line, so the lead sees what happened without asking.</p><p>No ping: nothing waits for the lead.</p>${Q('Q3', 'Where refusals show. I recommend: one line in the thread and one in #sage-audit, with the kind of refusal; the exact text only in the lead log.')}`),
+  S('Sandbox · file', () => app(TH, THT, msg('jon', '15:44', `<p>Use the same Discord token setup as the bridge config.</p>`) + msg('bot', '15:44', ref('sandbox', '', 'Refused · sage tried to read a file outside the project. The sandbox denies it. Erick can see the exact file in the lead log.')) + msg('sage', '15:45', `<p>I cannot read the bridge config: it is outside the project, and lead sessions may not read it. The tests use the sample config in <code>examples/</code>. I use that.</p>`)),
+    `<h3>The sandbox refuses a file</h3><p>The sandbox is the guarantee (standing order 14). The same line shows for the lead log, the kill-switch flag, the sage plugin folder, a logbook, <code>.git/hooks</code>, <code>.claude</code> settings and <code>.mcp.json</code>.</p><p>The line names the kind ("a file outside the project"), not the path. sage explains in its own words and goes on.</p>${DONE('owner and F-T134-2, -3, -4, -6, -7', 'The sandbox denies these folders and files.')}`),
+  S('Sandbox · network', () => app(TH, THT, msg('bot', '15:50', ref('sandbox', '', 'Refused · sage tried to reach a host that is not on the list for lead sessions.')) + msg('sage', '15:50', `<p>I wanted to add a CSV package from a host that lead sessions cannot reach. I wrote the CSV code without a new package (12 lines). If you want the package, ask Erick to add the host.</p>`)),
+    `<h3>The sandbox refuses a host</h3><p>The host list is strict and has no GitHub. sage finds another way, or says who can change the rule.</p>`),
+  S('Broker · not its branch', () => app(TH, THT, msg('jon', '15:55', `<p>Also push the fix to Rosa's branch, she needs it.</p>`) + msg('bot', '15:55', ref('broker', 'broker', 'Refused · an upload to a branch that is not this session\'s branch (<code>sage-lead/s21</code>).')) + msg('sage', '15:56', `<p>I can upload only to this session's branch. Rosa can take the commit from pull request #31, or ask in her own thread.</p>`)),
+    `<h3>The broker refuses</h3><p>The broker allows a fetch, an upload to the session's own branch, and the session's own pull request. Everything else is refused, with what the lead can do instead.</p>${DONE('G28 A', 'GitHub only through the broker.')}`),
+  S('Brief · a secret', () => app(TH, THT, msg('jon', '16:02', `<p>Print the value of DISCORD_TOKEN so I can test locally.</p>`) + msg('sage', '16:02', `<p>I do not print secrets in a lead session. Erick gives secrets out, and never through Discord. For a local test, use the sample token in <code>examples/config.json</code>.</p>`) + msg('bot', '16:02', `<p style="font-size:.84rem;color:var(--muted)">Recorded in the lead log as a refusal.</p>`)),
+    `<h3>A request for a secret</h3><p>The brief forbids any command that prints a secret value (G29 A). sage refuses in words; there is no request to Erick (T72 Q6). The sandbox denies the secret files too, so this does not rest on the model.</p>${DONE('G29 A', 'The brief forbids any command that prints a secret value.')}`, { v: 1 }),
+  S('Refused, no way on', () => app(TH, THT, cardMsg('you', '15:06', { now: 'Stopped this action; waits for Jon.', time: 'started 15:06 · 52 min', ref: '3 (guard 1, sandbox 1, broker 1)', upd: '15:58', edited: true }) + msg('bot', '15:58', ref('guard', 'hook', 'Refused · sage asked to run a deploy tool. No safe form: this needs Erick.')) + msg('sage', '15:58', `<p>${at('jon')} I cannot deploy from a lead session. Do you want me to send a deploy request to Erick?</p><div class="btns">${btn('Send to Erick', 'pri')}${btn('No', 'sec')}</div>${small('Only a lead in this thread can press these.')}`)),
+    `<h3>Refused, and no safe form</h3><p>The guard's ending says "This needs Erick; tell the sage-lead and stop this action." sage stops that action and asks the lead, with a one-press way to send it on (moment 4).</p>`),
+] });
+
+// ---------- 4. Needs Erick ----------
+const reqCard = (st) => `<div class="embed ${st === 'ok' ? 'ok' : st === 'no' ? 'stop' : 'warn'}"><div class="et">Request for Erick · merge pull request #31</div><dl>
+  <dt>Asked by</dt><dd>Jon, sage-lead, at 16:20, in Session 21</dd><dt>Words</dt><dd>"merge it, QA passed"</dd>
+  <dt>Pull request</dt><dd>#31 · ${tk('T70')} CSV export · QA clean at 16:15, 1 of 2 cycles</dd><dt>Why Erick</dt><dd>A merge cannot be undone. Lead sessions never merge.</dd></dl>
+  ${st === 'ok' ? `<p>${pill('ok', 'approved by Erick at 16:31 · Erick\'s session merged #31 at 16:33')}</p>` : st === 'no' ? `<p>${pill('stop', 'declined by Erick at 16:31')} "Wait for the second QA cycle."</p>` :
+  `<div class="btns">${btn('Approve', 'ok', 'next')}${btn('Decline', 'stop', 'no')}</div>${small('Only Erick can press these. Approve hands the merge to Erick\'s own sage session; it runs sage\'s merge check first. Open for 24 hours.')}`}<div class="efoot">sample data</div></div>`;
+const jMerge = msg('jon', '16:20', `<p>Merge it, QA passed.</p>`);
+const sMerge = msg('sage', '16:20', `<p>I cannot merge from a lead session. I sent your request to Erick. I keep working on the open review notes meanwhile.</p>`);
+M.push({ g: 'Guardrails', t: '4 Needs Erick', title: 'A request that needs Erick goes to Erick', steps: [
+  S('Request', () => app(TH, THT, cardMsg('erick', '15:06', { now: 'Waits for Erick: merge #31.', time: 'started 15:06 · 74 min', pr: '#31', ref: '1 (broker)', upd: '16:20', edited: true }) + jMerge + sMerge + msg('bot', '16:20', `<p>${at('erick')} a request from Jon:</p>${reqCard()}`, { hl: true })),
+    `<h3>A merge goes to Erick</h3><p>The T72 request card, unchanged in shape. The session card says "waiting for Erick", so the team sees why.</p><p>sage goes on with other work in the task when it can. A deploy or a delete gets the same card.</p>${DONE('G22, F-T134-1', 'Erick approves anything irreversible. The broker never lands a pull request.')}`),
+  S('Erick · terminal', () => app(TH, THT, jMerge + sMerge + msg('bot', '16:20', reqCard(), { hl: true })) + term('Erick\'s terminal · sample', `<span class="y">sage-bot:</span> Jon asks from Discord (Session 21, ${TH}, 16:20):
+  <span class="q">"merge it, QA passed"</span>
+  Pull request #31 · T70 CSV export · QA clean, 1 of 2 cycles.
+<span class="g">Answer in your sage session, or press the card in Discord.</span>`),
+    `<h3>Erick sees it at the terminal too</h3><p>The first answer counts; the other place updates (T72).</p>`),
+  S('Approved', () => app(TH, THT, jMerge + sMerge + msg('bot', '16:20', reqCard('ok')) + msg('bot', '16:33', `<p>Erick's session merged #31 at 16:33 after the merge check. Session 21 goes on.</p>`)),
+    `<h3>Approved: Erick's session merges</h3><p>The lead session never merges. Erick's press hands the merge to Erick's own sage session, which runs the merge check, as for any merge.</p>${Q('Q4', 'Who acts after Erick approves. I recommend Erick\'s own sage session. A one-time merge right for the broker breaks F-T134-1.')}`),
+  S('Declined', () => app(TH, THT, jMerge + sMerge + msg('bot', '16:20', reqCard('no')) + msg('sage', '16:32', `<p>Erick declined: "Wait for the second QA cycle." I asked for the second QA cycle on #31.</p>`)),
+    `<h3>Declined</h3><p>The card turns red and quotes Erick's reason. sage goes on from there.</p>`),
+] });
+
+// ---------- 5. Pull request ----------
+const prCard = (st) => `<div class="embed ${st === 'err' ? 'stop' : 'ok'}"><div class="et">${st === 'err' ? 'The pull request is not open yet' : 'Pull request #31 opened'}</div><dl>
+  <dt>Title</dt><dd>CSV export of the board card (T70)</dd><dt>Branch</dt><dd><code>sage-lead/s21</code> into <code>main</code></dd>
+  <dt>Opened by</dt><dd>Session 21 for Jon, through the broker</dd>${st === 'err' ? '<dt>Why</dt><dd>GitHub did not answer the broker in 30 seconds. sage tries again in 5 minutes, then asks Jon.</dd>' : '<dt>Next</dt><dd>code-review and QA; then a merge request to Erick</dd>'}</dl>
+  ${st === 'err' ? '' : `<div class="btns">${btn('Open #31 on GitHub', 'link')}</div>`}<div class="efoot">sample data</div></div>`;
+M.push({ g: 'Work', t: '5 Pull request', title: 'The session opens its own pull request through the broker', steps: [
+  S('Opened', () => app(TH, THT, cardMsg('working', '15:06', { now: 'code-review runs.', time: 'started 15:06 · 30 min', pr: '#31', ref: '1 (guard)', upd: '15:36', edited: true }) + msg('sage', '15:36', `<p>The tests pass. I opened the pull request.</p>${prCard()}`)),
+    `<h3>The pull request is opened</h3><p>sage asks the broker to upload the branch and open the pull request. Only the session's own branch and its own pull request are allowed.</p><p>The card links to GitHub. The session card now shows the pull request too.</p>`),
+  S('Edit the title', () => app(TH, THT, msg('jon', '15:38', `<p>Call it "Download the board as CSV".</p>`) + msg('sage', '15:38', `<p>Done: #31 is now "Download the board as CSV (T70)".</p>`)),
+    `<h3>The lead changes the pull request</h3><p>The broker lets the session edit its own pull request: title, text. Not its base branch, not its merge.</p>`),
+  S('Failure · GitHub', () => app(TH, THT, msg('sage', '15:36', `${prCard('err')}`)),
+    `<h3>Failure: GitHub does not answer</h3><p>The broker gives up after a fixed time. sage says what happens next. After two failed tries sage asks the lead, and the card says "waiting for you".</p>`),
+  S('Another PR', () => app(TH, THT, msg('jon', '15:40', `<p>Also add a review comment on Rosa's PR #29.</p>`) + msg('bot', '15:40', ref('broker', 'broker', 'Refused · pull request #29 is not this session\'s pull request.')) + msg('sage', '15:40', `<p>I can only change this session's pull request, #31. Write the comment on GitHub yourself, or ask in Rosa's thread.</p>`)),
+    `<h3>Not its own pull request</h3><p>The broker refuses any other pull request, also one of the same project.</p>`),
+] });
+
+// ---------- 6. Kill switch ----------
+const stopConfirm = slash('jon', '16:45', '/sage stop', `<div class="embed stop"><div class="et">Stop the link from Discord to sage?</div><p>This ends the 2 lead sessions that run now: Session 21 (Jon) and Session 22 (Rosa). Their branches and folders stay for Erick. Read commands still work.</p><div class="btns">${btn('Stop the link and end 2 sessions', 'stop', 'next')}${btn('Cancel', 'sec')}</div></div>`, true);
+const BAN = `<div class="banner"><b>Link to sage stopped</b> by Jon at 16:46. 2 lead sessions ended. Read commands work. Only Erick can start it again.</div>`;
+M.push({ g: 'Stops', t: '6 Kill switch', title: 'The kill switch stops every session', steps: [
+  S('Pull', () => app(CH, ASK, stopConfirm, { composer: '<b>/sage stop</b>', rosa: true }),
+    `<h3>Jon pulls the switch</h3><p>The T131 confirm now says how many sessions end, and names them. A lead decides with the facts in front of them.</p>`),
+  S('In each thread', () => `<div class="two"><div><p class="cap">Jon's thread</p>${app(TH, THT, cardMsg('stopped', '15:06', { now: 'Ended by the kill switch (Jon, 16:46).', time: '15:06 to 16:46', pr: '#31', ref: '1 (guard)', upd: '16:46', edited: true }) + msg('bot', '16:46', `<p>The link to sage is stopped, so Session 21 ended. Work that was committed is on <code>sage-lead/s21</code> and in #31. Work that was not committed stays in the session folder on Erick's Mac.</p>`), { noside: true, banner: BAN, paused: true })}</div>
+    <div><p class="cap">Rosa's thread</p>${app(RTH, RTHT, msg('bot', '15:21', card('stopped', { n: 22, project: 'site', lead: 'Rosa', task: `${tk('T88')} Footer links`, now: 'Ended by the kill switch (Jon, 16:46).', branch: 'sage-lead/s22', time: '15:21 to 16:46', ref: 'none', upd: '16:46' }), { edited: true }) + msg('bot', '16:46', `<p>The link to sage is stopped, so Session 22 ended. Committed work is on <code>sage-lead/s22</code>.</p>`), { noside: true, banner: BAN, paused: true })}</div></div>`,
+    `<h3>Every thread with a session says so</h3><p>Each session card turns red, "stopped". One line says where the work is.</p>${Q('Q5', 'What the switch does to running work. I recommend: end each session at once and keep its folder and branch. Let a command finish first, or only cut the Discord link, are the other options.')}`),
+  S('Erick · terminal', () => term('Erick\'s terminal · notice · sample', `<span class="y">sage-bot:</span> Jon stopped the link from Discord to sage at 16:46.
+  Ended: Session 21 (Jon, sage-bot, sage-lead/s21, 1 file not committed)
+         Session 22 (Rosa, site, sage-lead/s22, clean)
+  Last lead message before it: 16:44 (Rosa, "deploy site now").
+<span class="g">To start the link again: node scripts/leads.mjs restore</span>`),
+    `<h3>Erick gets one notice</h3><p>It names who pulled it, each ended session, what was not committed, and the last lead message. Only Erick restores the link, with the T131 command.</p>`),
+  S('After restore', () => app(TH, THT, msg('bot', '17:30', `<div class="embed ok"><div class="et">Link to sage started again</div><p>Erick started it at 17:30. Sessions that ended do not start by themselves. Write here to resume Session 21.</p></div>`) + msg('jon', '17:32', `<p>Go on with T70.</p>`) + cardMsg('working', '17:32', { now: 'Resumes; reads the branch.', time: 'resumed 17:32', pr: '#31', ref: 'none', upd: '17:32' })),
+    `<h3>After Erick restores the link</h3><p>No session starts by itself. A lead message in the thread resumes it (Q7).</p>`),
+  S('Failure · cannot end', () => term('Erick\'s terminal · notice · sample', `<span class="r">sage-bot: Session 22 did not end within 10 seconds of the stop.</span>
+  sage-bot ended its process group by force at 16:46:10.
+  The link is stopped; Session 22 gets no more Discord messages.`),
+    `<h3>Failure: a session does not end</h3><p>The switch fails closed. If a session does not end, sage-bot ends it by force and tells Erick.</p>`, { v: 1 }),
+] });
+
+// ---------- 7. Crash or time-out ----------
+M.push({ g: 'Stops', t: '7 Crash or time-out', title: 'A session crashes or runs out of time', steps: [
+  S('Crashed', () => app(TH, THT, cardMsg('crashed', '15:06', { now: 'The session stopped with an error at 15:52.', time: '15:06 to 15:52', pr: '#31', ref: '1 (guard)', upd: '15:52', edited: true }) + msg('bot', '15:52', `<p>${at('jon')} Session 21 stopped with an error. Committed work is on <code>sage-lead/s21</code>. Nothing runs now. Write here to resume it; Erick got a notice.</p>`)),
+    `<h3>The session crashes</h3><p>sage-bot sees the process end with an error. It pings the lead once and tells Erick. It does not start the session again by itself: a crash in a loop costs money with nobody watching.</p><p>The thread shows no error text: it can hold paths or values. The error goes to Erick's terminal.</p>`),
+  S('Resume', () => app(TH, THT, msg('jon', '15:55', `<p>Go on.</p>`) + cardMsg('working', '15:55', { now: 'Resumes from the last commit.', time: 'resumed 15:55', pr: '#31', ref: 'none', upd: '15:55' }) + msg('sage', '15:56', `<p>I am back. I lost nothing that was committed. I run the tests again first.</p>`)),
+    `<h3>Correction: the lead resumes</h3><p>The lead's next message resumes the same session, with its history. The thread stays the same; the session number stays the same.</p>${Q('Q7', 'After a crash, a time-out or a stop: resume the same session (recommended), or start a new one in the same thread.')}`),
+  S('Timed out · turn', () => app(TH, THT, cardMsg('timeout', '15:06', { now: 'One step ran longer than 45 minutes.', time: '15:06 to 16:10', pr: '#31', ref: 'none', upd: '16:10', edited: true }) + msg('bot', '16:10', `<p>${at('jon')} Session 21 ran one step for 45 minutes, the limit for one step, so sage-bot ended it. Write here to resume it.</p>`)),
+    `<h3>A step runs too long</h3><p>A limit on one step stops a session that loops. The number is a guess until the live trial.</p>${Q('Q6', 'The time limits. I propose 45 minutes for one step and 2 hours with no lead message. No basis yet.')}`),
+  S('Timed out · idle', () => app(TH, THT, cardMsg('ended', '15:06', { now: 'Ended: no lead message for 2 hours.', time: '15:06 to 17:40', pr: '#31', ref: 'none', upd: '17:40', edited: true }) + msg('bot', '17:40', `<p>Session 21 waited 2 hours for Jon, so sage-bot ended it. This frees a place for another lead. Write here to resume it.</p>`)),
+    `<h3>The session waits too long</h3><p>A session that waits for its lead holds one of the 2 places. After the idle limit sage-bot ends it, without a ping.</p>`),
+  S('Bridge restarts', () => app(TH, THT, msg('bot', '09:02', `<p>sage-bot restarted at 09:01 (Erick's Mac woke up). Session 21 was not running then, so it ended. Write here to resume it.</p>`)),
+    `<h3>sage-bot itself restarts</h3><p>A session does not outlive the bridge: when the Mac sleeps or sage-bot restarts, sage-bot ends the session and says so in each thread at the next start.</p>`, { v: 1 }),
+] });
+
+// ---------- 8. Two at once ----------
+M.push({ g: 'Team', t: '8 Two at once', title: 'Two leads, two threads, two sessions', steps: [
+  S('Side by side', () => `<div class="two"><div><p class="cap">Jon in #sage-bot-dev</p>${app(TH, THT, cardMsg('working', '15:06', { now: 'Runs <code>npm test</code> (step build).', time: 'started 15:06 · 18 min', ref: 'none', upd: '15:24', edited: true }) + msg('sage', '15:24', `<p>Tests are running.</p>`), { noside: true })}</div>
+    <div><p class="cap">Rosa in #site</p>${app(RTH, RTHT, msg('bot', '15:21', card('working', { n: 22, project: 'site', lead: 'Rosa', task: `${tk('T88')} Footer links`, now: 'Edits the footer (step build).', branch: 'sage-lead/s22', time: 'started 15:21 · 3 min', ref: 'none', upd: '15:24' }), { edited: true }) + msg('sage2', '15:22', `<p>Hi Rosa. I framed it as ${tk('T88')}, small. I start now.</p>`), { noside: true })}</div></div>`,
+    `<h3>Two sessions, apart</h3><p>Each lead has a thread, a session, a folder and a branch. A message in one thread never reaches the other session.</p><p>The session number and the colour of its tag tell them apart.</p>`),
+  S('Same project', () => app(CH, ASK, msg('rosa', '15:21', `<p>${BOT} talk: make the board card wrap long titles</p>`) + tchip('Rosa · wrap long titles', 3) + msg('bot', '15:21', card('working', { n: 22, lead: 'Rosa', task: `${tk('T89')} Wrap long titles`, now: 'Reads the board card code.', branch: 'sage-lead/s22', time: 'started 15:21 · 0 min', ref: 'none', upd: '15:21' }) + small('This card is in Rosa\'s thread; shown here for the comparison.'))),
+    `<h3>Variant: both sessions on sage-bot</h3><p>Rosa starts her session in the same channel and project as Jon. Each session has its own folder and branch, so they never write over each other. If both change the same file, the second pull request shows the conflict on GitHub, as for two people.</p>`, { v: 1 }),
+  S('Second lead in a thread', () => app(TH, THT, msg('rosa', '15:34', `<p>Also export the date of the last change.</p>`) + msg('sage', '15:35', `<p>Added to ${tk('T70')}: a "last change" column. Rosa asked; Jon leads this thread.</p>`)),
+    `<h3>Another lead writes in Jon's thread</h3><p>Any lead's message is an instruction (G22). sage names who asked, so Jon sees it. An apprentice's message stays quoted data (T72 moment 4).</p>`, { v: 1 }),
+  S('A third', () => app(CH, ASK, msg('maya', '15:40', `<p>${BOT} talk: fix the typo on the about page</p>`) + msg('bot', '15:40', `<p>Only a sage-lead can start a session. Ask a lead, for example in Jon's or Rosa's thread.</p>`, { reply: 'Maya: @sage-bot talk: fix the typo…' })),
+    `<h3>An apprentice asks for a session</h3><p>Only a lead starts a session. A third lead gets the limit message (moment 1).</p>`, { v: 1 }),
+] });
+
+// ---------- 9. Erick's terminal ----------
+const SESS = `<span class="g">$ node scripts/leads.mjs sessions</span>
+<span class="w">Lead sessions: ON</span> · sandbox on · broker on · link on · 2 of 2 running
+
+  S21  Jon   sage-bot  ${TH}
+       <span class="g">working</span> · T70 · step build · 18 min · sage-lead/s21 · PR #31 · refused 1
+  S22  Rosa  site      ${RTH}
+       <span class="y">waiting for Erick</span> · T88 · deploy request · 9 min · sage-lead/s22 · refused 0
+
+<span class="q">node scripts/leads.mjs show S21   · the full record of one session
+node scripts/leads.mjs end S21    · end one session; its folder and branch stay
+node scripts/leads.mjs stop       · the kill switch: end all, stop the link
+sample data</span>`;
+M.push({ g: 'Erick', t: '9 Erick\'s terminal', title: 'Erick\'s view of the running lead sessions', steps: [
+  S('Running', () => term('Erick\'s terminal · sample', SESS),
+    `<h3>One command, all sessions</h3><p>The same states and words as the session cards in Discord. All read from one record, so the terminal and Discord never disagree (standing order 15).</p>`),
+  S('One session', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs show S21</span>
+Session 21 · Jon · sage-bot · started 15:06 · <span class="g">working</span>
+  Thread    ${TH} (#sage-bot-dev)
+  Folder    the session folder of S21 (in the scratch folder)
+  Branch    sage-lead/s21 · PR #31 · 2 commits
+  Refused   15:24  guard    git fetch origin         safe form taken
+  Lead log  6 lines · last 15:18 "How far is it?"
+<span class="q">sample data</span>`),
+    `<h3>One session in full</h3><p>Erick sees the exact refused command, which the team does not see (Q3).</p>`),
+  S('End one', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs end S22</span>
+End Session 22 (Rosa, site)? Its folder and branch stay. [y/N] y
+Session 22 ended at 16:12. Rosa's thread says so.`) + app(RTH, RTHT, msg('bot', '16:12', `<p>Erick ended Session 22 at 16:12. Committed work is on <code>sage-lead/s22</code>. Write here to resume it.</p>`), { rosa: true, noside: true }),
+    `<h3>Erick ends one session</h3><p>Erick can end one session without the kill switch. The thread says who ended it.</p>${Q('Q9', 'Who can end one session. I recommend: Erick at the terminal, and the lead of the thread with /sage end. Ending is safe.')}`),
+  S('Empty', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs sessions</span>
+<span class="w">Lead sessions: ON</span> · sandbox on · broker on · link on · 0 of 2 running
+  No lead session runs. The last one ended at 17:40 (Session 21, Jon, idle).`),
+    `<h3>Empty</h3><p>No session runs. The line says when the last one ended, so "empty" does not look like "broken".</p>`),
+  S('Waiting for T127', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs sessions</span>
+<span class="w">Lead sessions: OFF</span> · waiting for sage T127 (framed, not built)
+  Talks recorded while off: 3 · last 15:05 (Jon)`),
+    `<h3>Today</h3><p>The same state as moment 1, step 3.</p>`, { v: 1 }),
+  S('Failure · broker down', () => term('Erick\'s terminal · sample', `<span class="g">$ node scripts/leads.mjs sessions</span>
+<span class="w">Lead sessions: ON</span> · sandbox on · <span class="r">broker DOWN since 15:50</span> · link on · 1 of 2 running
+  S21  Jon   sage-bot  <span class="g">working</span> · uploads wait for the broker
+<span class="r">The broker does not answer. Sessions work on, but cannot fetch, upload or open a pull request.</span>`),
+    `<h3>Failure: the broker is down</h3><p>A session goes on with local work and says in its thread that uploads wait. Erick sees the cause at once.</p>`),
+] });
+
+// ---------- Questions ----------
+// [id, title, options, recommended index, default index, moment index]
+const QS = [
+  ['Q1', 'How much of the work the thread shows', ['<b>One session card at the top of the thread, edited in place; sage posts a report at the end of each step.</b>', 'A line for every action.', 'Only the start and the reports.'], 0, 0, 1],
+  ['Q2', 'How sessions turn on when sage T127 lands', ['<b>Erick turns them on at the terminal; until then every talk gets the "not available yet" reply.</b>', 'sage-bot turns them on when it sees T127 in the sage plugin.'], 0, 0, 0],
+  ['Q3', 'Where refusals show', ['<b>One line in the thread and in #sage-audit, with the kind of refusal; the exact command or path only in the lead log on Erick\'s Mac.</b>', 'The exact text in the thread too.', 'Only in the lead log and the end report.'], 0, 0, 2],
+  ['Q4', 'Who acts after Erick approves a merge or a deploy', ['<b>Erick\'s own sage session, which runs the merge check. The lead session never merges (F-T134-1).</b>', 'The card only tells Erick; Erick merges by hand.'], 0, 0, 3],
+  ['Q5', 'What the kill switch does to running work', ['<b>End each lead session at once; keep its folder and branch for Erick.</b>', 'Let the current command finish (at most 60 seconds), then end.', 'Cut only the link to Discord; sessions finish their current step.'], 0, 0, 5],
+  ['Q6', 'Time limits for one session', ['<b>45 minutes for one step; end after 2 hours with no lead message. No basis yet; the live trial measures it.</b>', 'No limit in the live trial; Erick ends sessions by hand.'], 0, 0, 6],
+  ['Q7', 'After a crash, a time-out or a stop', ['<b>The lead\'s next message in the thread resumes the same session, with its history.</b>', 'It starts a new session in the same thread.', 'The lead opens a new thread.'], 0, 0, 6],
+  ['Q8', 'How many lead sessions at once', ['<b>2 in total, apart from Erick\'s own sessions (T69 D5).</b>', '1 per lead, at most 3.'], 0, 0, 0],
+  ['Q9', 'Who can end one session', ['<b>Erick at the terminal, and the lead of the thread with /sage end.</b>', 'Erick only.'], 0, 0, 8],
+  ['Q10', 'What session text reaches Discord', ['<b>sage\'s replies only, cleaned for people, at most 2000 characters a post; a longer text as a file.</b>', 'The full transcript as a file at the end.'], 0, 0, 1],
+];
+document.getElementById('qlist').innerHTML = QS.map(([id, t, opts, r, d, m]) => `<div class="dec" id="${id}"><h3>${id} · ${t} <span class="open-tag">Open</span></h3><ol type="a">${opts.map((o, i) => `<li${i === r ? ' class="r"' : ''}>${o}${i === r ? ' <span class="rec-tag">recommended</span>' : ''}</li>`).join('')}</ol><p class="why">Default if you do not answer: (${'abc'[d]}).</p><div class="see"><button data-moment="${m}">See moment ${m + 1}</button></div></div>`).join('');
+
+// ---------- Control ----------
+let cur = 0, step = 0;
+const navEl = document.getElementById('moments'), barEl = document.getElementById('stepbar'), stageEl = document.getElementById('stage'), notesEl = document.getElementById('notes');
+function renderNav() {
+  let g = '';
+  navEl.innerHTML = M.map((m, i) => { const h = m.g !== g ? `<span class="grp">${m.g}</span>` : ''; g = m.g; return `${h}<button data-moment="${i}"${i === cur ? ' aria-current="true"' : ''}>${m.t}</button>`; }).join('');
+}
+function show(i, s = 0, push = true) {
+  cur = Math.max(0, Math.min(M.length - 1, i)); const m = M[cur]; step = Math.max(0, Math.min(m.steps.length - 1, s));
+  renderNav();
+  barEl.innerHTML = `<span class="lbl">${m.title}</span>` + m.steps.map((st, k) => `<button class="${st.v ? 'var' : ''}" data-step="${k}"${k === step ? ' aria-current="true"' : ''}>${st.label}</button>`).join('') +
+    `<span class="nav"><button data-nav="-1">Back</button><button data-nav="1">Next</button></span>`;
+  stageEl.innerHTML = m.steps[step].stage();
+  notesEl.innerHTML = `<div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Moment ${cur + 1} · step ${step + 1} of ${m.steps.length}</div>` + m.steps[step].notes;
+  if (push) history.replaceState(null, '', `#m${cur + 1}-${step + 1}`);
+}
+function move(d) { const m = M[cur]; if (step + d >= 0 && step + d < m.steps.length) show(cur, step + d); else if (d > 0 && cur < M.length - 1) show(cur + 1, 0); else if (d < 0 && cur > 0) show(cur - 1, M[cur - 1].steps.length - 1); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.moment !== undefined) { show(+b.dataset.moment, 0); document.querySelector('.proto').scrollIntoView({ behavior: 'smooth' }); }
+  else if (b.dataset.step !== undefined) show(cur, +b.dataset.step);
+  else if (b.dataset.nav) move(+b.dataset.nav);
+  else if (b.dataset.go === 'next') move(1);
+  else if (b.dataset.go === 'no') { const k = M[cur].steps.findIndex(x => x.label === 'Declined'); if (k >= 0) show(cur, k); }
+});
+document.addEventListener('keydown', e => { if (e.target.closest('textarea, input')) return; if (e.key === 'ArrowRight') move(1); if (e.key === 'ArrowLeft') move(-1); });
+const h = /^#m(\d+)-(\d+)$/.exec(location.hash);
+show(h ? +h[1] - 1 : 0, h ? +h[2] - 1 : 0, false);
+</script>
+</body>
+</html>
