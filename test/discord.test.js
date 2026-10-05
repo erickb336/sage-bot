@@ -17,7 +17,7 @@ import { openGate, step } from '../src/vote.js';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'sage-bot-discord-'));
 const [OWNER, MAYA, DRIVER, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
-const CONFIG = { ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
+const CONFIG = { channelId: '400000000000000001', ownerId: OWNER, driverRole: DRIVER, leadRole: LEADR };
 
 test('F-T28-20: memberOf maps a real discord.js GuildMember (no login) to { id, name, roles, bot }, which peopleOf reads', () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });

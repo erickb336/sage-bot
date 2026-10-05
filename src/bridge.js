@@ -1,11 +1,13 @@
 // The sage bridge (B3): it reads the open gates of a sage logbook, posts them as cards, turns presses into vote events,
 // and gives each final answer back to sage with `sage gate answer`. It also reminds, alerts the role and asks for a new
-// press after the Mac slept. Discord comes in as a port (`post`, `edit`, `members`): the real one is src/discord.js, the
-// tests use src/fake-discord.js. It posts only the gates that the chief marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
+// press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
+// src/discord.js, the tests use src/fake-discord.js. Each chief session that has a team vote gets one line in the parent channel and
+// one thread, started from that line; the cards and every post about them go to the thread of their session (T29, src/sessions.js). It posts only the gates that the chief marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { card, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
-import { load, loadVotes, save, votesPathOf } from './state.js';
+import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
+import { alive, load, loadVotes, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
@@ -87,21 +89,33 @@ export function askedTogether(rows) {
 /**
  * The bridge for one sage project and one Discord channel.
  * @param {{ sage: ReturnType<import('./sage.js').sageTool>,
- *   discord: { post(p: object): Promise<string>, edit(id: string, p: object): Promise<unknown>, members(): Promise<Iterable<object>> | Iterable<object> },
- *   config: { ownerId: string, driverRole: string, leadRole: string, votesPath?: string }, statePath: string, now?: () => number, log?: (line: string) => void }} o
+ *   discord: { post(target: string, p: object): Promise<string>, edit(target: string, id: string, p: object): Promise<unknown>,
+ *     startThread(lineId: string, name: string): Promise<string>, setLocked(thread: string, locked: boolean): Promise<unknown>,
+ *     members(): Promise<Iterable<object>> | Iterable<object> },
+ *   config: { channelId: string, ownerId: string, driverRole: string, leadRole: string, votesPath?: string, sessionsPath?: string },
+ *   statePath: string, now?: () => number, log?: (line: string) => void }} o
+ *   A `target` is the parent channel or a thread, by its Discord id.
  */
 export function createBridge({ sage, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
-  for (const key of ['ownerId', 'driverRole', 'leadRole']) {
+  for (const key of ['channelId', 'ownerId', 'driverRole', 'leadRole']) {
     if (!SNOWFLAKE.test(config[key] ?? '')) throw new TypeError(`the config needs ${key} as a Discord id (17 to 20 digits)`);
   }
   const say = (line) => log(forTerminal(line)); // every line for the terminal goes through the allow-list (F-T28-22)
   // `gates` is the map that `handle` reads and writes; `meta` holds the rest of each entry, by the same gate id.
   const gates = new Map();
   const meta = new Map();
-  for (const { gate, ask, ...rest } of load(statePath)) {
+  const loaded = load(statePath);
+  for (const { gate, ask, ...rest } of loaded.entries) {
     gates.set(gate.id, { gate, ask });
     meta.set(gate.id, rest);
   }
+  // The chief sessions that have a line and a thread, by session id; `spools` is the spool folder as the last loop read it.
+  const sessions = new Map(loaded.sessions.map((x) => [x.id, x]));
+  const spoolDir = sessionsPathOf({ statePath, sessionsPath: config.sessionsPath });
+  let spools = new Map();
+  const spoolErrors = new Set(); // refused spool files, so that the log says each once
+  const lines = new Map(); // session id → the text of its line as last posted or edited; only in memory
+  const quiet = new Set(); // ended sessions already logged as locked, so that the log says it once
   const clock = monotonic(now, Math.max(0, ...[...gates.values()].map((e) => e.gate.lastAt)));
   const firstSeen = new Map(); // sage gate id → when the bridge first saw it open; only in memory
   const refused = new Set(); // groups already refused, so that the log says it once
@@ -111,22 +125,77 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
   let lastLoop = null;
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
-  const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })));
+  const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), [...sessions.values()]);
   const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
   /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings one role and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (role, text) => ({ content: `<@&${role}> ${text}`, allowedMentions: { parse: [], roles: [role] } });
-  const post = async (payload) => {
-    try { return await discord.post(payload); } catch (e) { say(`Discord refused a post: ${apiError(e)}`); return null; }
+  const post = async (target, payload) => {
+    try { return await discord.post(target, payload); } catch (e) { say(`Discord refused a post: ${apiError(e)}`); return null; }
   };
+  const edit = async (target, message, payload, what) => {
+    try { await discord.edit(target, message, payload); } catch (e) { say(`Discord refused the edit of ${what}: ${apiError(e)}`); }
+  };
+  const setLocked = async (x, locked) => {
+    try { await discord.setLocked(x.thread, locked); x.closed = locked; persist(); return true; } catch (e) { say(`Discord refused to ${locked ? 'lock' : 'open'} the thread of ${x.title}: ${apiError(e)}`); return false; }
+  };
+  const running = (sid) => spools.has(sid) && runs(spools.get(sid), alive);
+
+  /**
+   * The thread of a chief session, made at its first post (G14 1): a line in the parent channel, then a thread started from it.
+   * An ended session's thread is locked (G14 4), and this gives null: the bridge posts nothing in it until a resume opens it (reconcile).
+   */
+  async function threadOf(sid) {
+    let x = sessions.get(sid);
+    if (!x) {
+      const n = Math.max(0, ...[...sessions.values()].map((y) => y.n)) + 1;
+      x = { id: sid, n, title: titleOf(n, spools.get(sid)?.startedAt ?? clock()), line: null, thread: null, closed: false };
+      sessions.set(sid, x);
+      persist();
+    }
+    if (!x.line) {
+      const text = lineText(x);
+      x.line = await post(config.channelId, { content: text, allowedMentions: NO_MENTIONS });
+      if (!x.line) return null;
+      lines.set(sid, text);
+      persist();
+    }
+    if (!x.thread) {
+      try { x.thread = await discord.startThread(x.line, x.title); } catch (e) { say(`Discord refused the thread of ${x.title}: ${apiError(e)}`); return null; }
+      persist();
+    }
+    if (x.closed) {
+      if (!quiet.has(sid)) say(`${x.title} has ended: its thread is locked, so the bridge posts nothing in it`);
+      quiet.add(sid);
+      return null;
+    }
+    quiet.delete(sid);
+    return x.thread;
+  }
+
+  /** Where the posts about the gate of `id` go: its session's thread, or the parent channel for a gate of no known session. */
+  const placeOf = async (id) => (meta.get(id).session ? threadOf(meta.get(id).session) : config.channelId);
+  /** Posts a message about the gate of `id` in its place. */
+  const postAbout = async (id, payload) => { const at = await placeOf(id); return at ? post(at, payload) : null; };
+
+  /** The questions of the gate of `id` that still wait for an answer: none on a closed gate, one per open single gate or open part. */
+  const openQuestions = (id) => {
+    const { gate, ask } = gates.get(id);
+    return gate.phase === 'closed' ? 0 : (gate.parts ?? [gate]).filter((p, i) => p.outcome.status === 'open' && !ask.parts[i].final).length;
+  };
+  /** The line of a session in the parent channel, from its spool and its gates. */
+  function lineText(x) {
+    const ids = [...meta].filter(([, m]) => m.session === x.id).map(([id]) => id);
+    const tasks = new Set([...(spools.get(x.id)?.tasks ?? []), ...ids.map((id) => gates.get(id).ask.task)]);
+    return lineOf(x, { tasks: tasks.size, open: ids.reduce((n, id) => n + openQuestions(id), 0) });
+  }
 
   /** Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
-    const { message } = meta.get(id);
-    if (!message) return;
-    try { await discord.edit(message, card(gate, ask, ppl)); } catch (e) { say(`Discord refused the edit of ${id}: ${apiError(e)}`); }
+    const { message, channel } = meta.get(id);
+    if (message) await edit(channel ?? config.channelId, message, card(gate, ask, ppl), id);
   }
 
   /** The parts of a batch that wait for a lead: tied after the vote, with no final answer from the terminal. */
@@ -214,11 +283,11 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       // The tie post is the leads' ping for this event: the 2-hour reminders count from it, so one loop never pings twice (F-T28-32).
       meta.get(id).remindedAt = clock();
       persist();
-      await post(tieMessage(gate, ask, ppl));
+      await postAbout(id, tieMessage(gate, ask, ppl));
     }
     for (const e of effects.filter((x) => x.type === 'decided' && x.how === 'lead-tiebreak')) {
       // The card cannot name the lead; the message in the thread does (F-T28-16).
-      await post({ content: `${nameOf(by, ppl.names)} (${LEAD}) broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
+      await postAbout(id, { content: `${nameOf(by, ppl.names)} (${LEAD}) broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
     }
     await flush();
   }
@@ -288,8 +357,9 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
         continue;
       }
       const { gate, ask, texts } = framed;
+      const sage = rowsOpen.map((r) => r.id);
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {} });
+      meta.set(gate.id, { sage, texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(sage, spools, alive) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
     // Post every entry that has no card yet, with the role alert.
@@ -298,8 +368,9 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       const { gate, ask } = gates.get(id);
       const text = gate.kind === 'single' ? `${ask.task} needs one product answer. The first answer is final.`
         : `${ask.task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`;
-      m.message = await post({ ...card(gate, ask, ppl), ...alert(config.driverRole, text) });
-      if (m.message) persist();
+      const at = await placeOf(id);
+      const message = at && await post(at, { ...card(gate, ask, ppl), ...alert(config.driverRole, text) });
+      if (message) { Object.assign(m, { message, channel: at }); persist(); }
     }
   }
 
@@ -314,14 +385,46 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       if (!due || due.at > clock() || !m.message) continue;
       m.remindedAt = clock();
       persist();
-      await post(due.to === 'holders'
+      await postAbout(id, due.to === 'holders'
         ? alert(config.driverRole, `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
         : alert(config.leadRole, `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
     }
   }
 
+  /** Reads the spool folder. A gate of no known session goes to the newest running session (also the gates of a version 1 gate file). */
+  function readSessions() {
+    const read = readSpools(spoolDir);
+    spools = read.spools;
+    for (const line of read.refused) if (!spoolErrors.has(line)) { spoolErrors.add(line); say(line); }
+    for (const [id, m] of meta) {
+      if (m.session || !waits(id)) continue;
+      m.session = sessionOf(m.sage, spools, alive);
+      if (m.session) persist();
+    }
+  }
+
+  /** Keeps each session's line up to date, and locks the thread of a session that ended (G14 4) or opens it again at a resume (G14 3). */
+  async function reconcile() {
+    for (const x of sessions.values()) {
+      if (!x.line) continue;
+      const on = running(x.id);
+      const endedAt = on ? undefined : x.endedAt ?? spools.get(x.id)?.endedAt ?? clock();
+      if (endedAt !== x.endedAt) {
+        if (on) delete x.endedAt; else x.endedAt = endedAt;
+        persist();
+      }
+      if (x.thread && x.closed === on) await setLocked(x, !on);
+      const text = lineText(x);
+      if (lines.get(x.id) === text) continue;
+      await edit(config.channelId, x.line, { content: text, allowedMentions: NO_MENTIONS }, `the line of ${x.title}`);
+      lines.set(x.id, text);
+    }
+  }
+
   return {
     clock,
+    /** The thread of a chief session, or undefined when it has none (scripts/session.mjs reads the same from the gate file). */
+    threadOf: (sid) => sessions.get(sid)?.thread ?? undefined,
     /** The gate of a bridge id and its ask, as `handle` keeps them. */
     entry: (id) => gates.get(id),
     /** One turn of the loop: notices a sleep, redraws the open cards when the holders changed, sends the due ticks and reminders,
@@ -329,9 +432,15 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
     async loop() {
       const ppl = await people();
       const wall = now();
-      // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1).
-      if (lastLoop !== null && wall - lastLoop > SLEPT && [...gates.keys()].some(waits)) {
-        await post({ content: `The host was asleep from ${stamp(lastLoop)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
+      readSessions();
+      await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
+      // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
+      // place that has an open question.
+      if (lastLoop !== null && wall - lastLoop > SLEPT) {
+        const places = new Set();
+        for (const id of gates.keys()) if (waits(id)) places.add(await placeOf(id));
+        places.delete(null);
+        for (const at of places) await post(at, { content: `The host was asleep from ${stamp(lastLoop)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
       }
       lastLoop = wall;
       // A card counts only the votes of the holders: when a role changed, each open card shows the count that the tick will use.
@@ -341,6 +450,7 @@ export function createBridge({ sage, discord, config, statePath, now = Date.now,
       await timers(ppl);
       await sync(ppl);
       await flush();
+      await reconcile(); // again, for the lines of the sessions that got a card or an answer in this loop
     },
     /** One Discord interaction (a button or the reason form). Never rejects. */
     async interaction(i) {
