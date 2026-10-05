@@ -111,7 +111,20 @@ These are the owner's decisions. Each one is in code and has tests. The ids in b
 | `/sage board`, `task`, `gates` and `files` work only in #ask-sage, only for a sage-apprentice or a sage-lead, and only for the projects in the config. The bridge answers them itself, with no AI, in a public reply that pings nobody. (G18, G20) | Everyone can see the questions and the answers. | `src/ask.js` |
 | sage-bot ignores every `/sage` command, @sage-bot mention and button press of a member with neither sage role: no reply, no note, and it does not count toward any limit or vote. A bot gets nothing too. (G20) | sage-bot acts only for the two roles; everyone else can still read. | `src/ask.js`, `src/bridge.js` |
 | An answer shows only the id, title, size, state and pull request of a task, and of each open question its text and its options; `/sage gates` adds sage's recommendation and the default. A reply holds at most 2000 characters, so `/sage gates` and `/sage board` show the open questions that fit in full, then one line "2 more open question(s): G7, G8." (only the count when the ids do not fit either). No question is cut, and none is left out without that line. It never reads `decisions.tsv`, findings, briefs or reports. `/sage files` attaches only the existing images and PDFs that the config lists: at most 10 files and at most 8 MB in one reply, so that the reply stays under Discord's upload limit for a server with no boosts. The reply lists the files that do not fit as not attached. | The logbook also holds security details and the owner's words. | `src/ask.js` |
+| In a sage session that sage-bot starts for a sage-lead, the guard hook refuses every merge, every push to a protected branch, every force-push and remote deletion, every read of a secret, every deploy, and every write outside the session's worktree and scratch folder. It allows only the commands it understands. The owner's own sessions are unaffected. (T133, the T72 plan) | Erick approves anything that he cannot undo, at the terminal. | `src/guard.js`, `scripts/guard.mjs` |
 | Each sage-apprentice and sage-lead can ask 10 times in a rolling hour; every ask counts. The limit note is public too. An @sage-bot mention gets one pointer to the commands, and no free answer. | The bridge runs on the owner's Mac; free questions come after the live trial. | `src/ask.js` |
+
+### The guard for lead sessions
+
+> **Status: built and tested; not installed yet.** Step 6 of the T72 plan installs it, when sage-bot starts sage sessions for sage-leads.
+
+sage-leads will talk to sage from Discord. sage-bot will start one headless `claude -p` session for each lead thread. The guard hook `scripts/guard.mjs` runs before each tool call of that session (a Claude Code PreToolUse hook). It refuses anything that Erick must approve, and tells the lead: "Erick must approve this at the terminal."
+
+- It acts only when the session's environment has `SAGE_ORIGIN=lead`. In every other session it allows everything at once. sage-bot sets the environment; the session's model cannot change the environment of the hook.
+- It allows only what it understands, and refuses the rest. When it cannot parse a command, or when it fails, it refuses.
+- It does not replace the Claude Code sandbox or GitHub's branch protection. Code that the lead writes in the worktree and then runs with `node` or `npm test` is outside what a hook can see.
+
+The [reference](docs/reference.md#the-guard-for-lead-sessions) lists what it refuses and how step 6 installs it.
 
 ## Set up a live trial
 
@@ -305,6 +318,7 @@ sage-bot ignores a member with neither sage role: a `/sage` command, a mention o
 | `src/ask.js` | The `/sage` read commands of #ask-sage, the answer to an @sage-bot mention, and the rate limit. |
 | `src/state.js`, `src/sessions.js`, `src/sage.js` | The gate file and its lock, the session threads, and the calls to the sage state tool. |
 | `src/clean.js` | The allow-lists for the terminal and for sage. |
+| `src/guard.js`, `scripts/guard.mjs` | The guard hook for lead sessions and its rules (installed by step 6). |
 | `src/fake-discord.js` | The fake Discord for the tests and the demo. |
 | `scripts/` | The commands: `bridge`, `vote`, `reasons`, `session`, `hook`, `launchd`, `demo` and `preview`. |
 | `design/b2/` | The card design: one page and its screenshots, made by `node scripts/preview.mjs`. |
