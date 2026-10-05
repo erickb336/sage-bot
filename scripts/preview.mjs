@@ -1,9 +1,12 @@
-// Renders the card JSON of the design's moments to one static HTML page (design/b2/index.html) and, with --shots,
-// screenshots each moment to design/b2/shots/ with the local Chrome (playwright-core, channel 'chrome').
+// Renders the card JSON of the design's moments to one static HTML page (design/b2/index.html, or --out) and, with --shots,
+// screenshots each moment to shots/ beside the page with the local Chrome (playwright-core, channel 'chrome').
 // SAMPLE DATA ONLY: made-up people and questions, times in UTC. No Discord, no network.
 //   node scripts/preview.mjs            the page only
 //   HOME=/tmp/scratch node scripts/preview.mjs --shots   the page and the screenshots
+//   node scripts/preview.mjs --out <page.html>          the page at another path (the shots go to shots/ beside it)
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
 import { handle, peopleOf } from '../src/handle.js';
 import { card } from '../src/cards.js';
 import { fakeInteraction } from '../src/fake-discord.js';
@@ -13,7 +16,9 @@ import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, SAM, clock, openAsk } from '..
 import { openGate } from '../src/vote.js';
 import { CSS, esc, message, modalHtml, noteHtml } from './render.mjs';
 
-const OUT = new URL('../design/b2/', import.meta.url);
+const at = process.argv.indexOf('--out');
+if (at !== -1 && !process.argv[at + 1]) throw new Error('usage: node scripts/preview.mjs [--shots] [--out <page.html>]');
+const PAGE = at === -1 ? new URL('../design/b2/index.html', import.meta.url) : pathToFileURL(resolve(process.argv[at + 1]));
 const people = peopleOf(MEMBERS, CONFIG);
 const gates = new Map();
 const ctx = { gates, people, clock: () => ctx.now, now: 0 };
@@ -93,9 +98,9 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>
 ${moments.map((m, i) => `<section id="m${i + 1}"><h2>${i + 1}. ${esc(m.title)}</h2><p class="about">${esc(m.about)}</p>${message(m.card, m.now)}
 ${m.note ? noteHtml(m.note, m.now) : ''}${m.confirm ? noteHtml(m.confirm, m.now) : ''}${m.modal ? modalHtml(m.modal) : ''}</section>`).join('\n')}
 </body></html>`;
-mkdirSync(new URL('shots/', OUT), { recursive: true });
-writeFileSync(new URL('index.html', OUT), page);
-console.log(`wrote ${new URL('index.html', OUT).pathname} with ${moments.length} moments`);
+mkdirSync(new URL('.', PAGE), { recursive: true });
+writeFileSync(PAGE, page);
+console.log(`wrote ${fileURLToPath(PAGE)} with ${moments.length} moments`);
 
 if (process.argv.includes('--shots')) {
   const { chromium } = await import('playwright-core');
@@ -103,9 +108,10 @@ if (process.argv.includes('--shots')) {
   // the GPU path moved 2 pixels of shot 01 by one shade in 1 run of 12, so the shots were not byte-identical (F-T27-22).
   const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--disable-gpu'] });
   const pg = await browser.newPage({ viewport: { width: 900, height: 900 }, deviceScaleFactor: 2 });
-  await pg.goto(new URL('index.html', OUT).href);
+  mkdirSync(new URL('shots/', PAGE), { recursive: true });
+  await pg.goto(PAGE.href);
   for (const [i, m] of moments.entries()) {
-    const path = new URL(`shots/${m.file}.png`, OUT).pathname;
+    const path = fileURLToPath(new URL(`shots/${m.file}.png`, PAGE));
     await pg.locator(`#m${i + 1}`).screenshot({ path });
     console.log(path);
   }
