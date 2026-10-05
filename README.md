@@ -34,12 +34,14 @@ All files go into a new scratch folder, so the demo never touches your home fold
 ![The flow of one question, in 9 numbered steps between five lanes: the chief, the sage logbook, the bridge, the session thread and the team. 1, the chief asks a question in the logbook. 2, the chief marks it as a team vote. 3, the bridge reads it every 15 seconds. 4, the bridge posts a card in the session thread and pings sage-driver. 5, the team presses an option. 6, the thread sends the press to the bridge. 7, the bridge checks the role and the vote rules, and edits the card. 8, the bridge gives the final answer to the logbook. 9, the chief reads it and goes on.](docs/flow.svg)
 
 1. The chief asks a question in sage, as usual. Most questions stay at the terminal for the owner.
-2. When a question is for the team, the chief marks it with `node scripts/vote.mjs G12`.
+2. When a question is for the team, the chief marks it with `node scripts/vote.mjs G42`.
 3. The bridge reads sage's logbook every 15 seconds. It finds the marked question.
 4. It posts a card in the thread of the chief's session, and pings the sage-driver role.
-5. The team presses buttons on the card. The bridge checks each person's role and applies the vote rules.
-6. When the question is decided, the bridge gives sage the option's letter and text through the sage state tool.
-7. The chief reads the answer in the logbook and goes on with the work.
+5. A member of the team presses an option on the card.
+6. The session thread sends the press to the bridge.
+7. The bridge checks the person's role and applies the vote rules, then edits the card.
+8. When the question is decided, the bridge gives sage the option's letter and text through the sage state tool.
+9. The chief reads the answer in the logbook and goes on with the work.
 
 The bridge only reads the logbook and calls the sage state tool. It never writes a logbook file itself.
 
@@ -125,6 +127,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
   **Do not let the Discord plugin watch this parent channel.** Chat with the chief in a separate channel.
+  **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
   *Why:* a session thread holds the votes and the chief's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. If the plugin watches the channel, an @sage message in any session thread reaches every running chief, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
@@ -155,23 +158,23 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   node scripts/bridge.mjs ~/.config/sage-bot/config.json
   ```
 
-  When it works, stop it with Ctrl+C. Then print its launchd agent, so that it starts at each login and again after it stops:
+  When it works, stop it with Ctrl+C. Then write its launchd agent, so that it starts at each login and again after it stops:
 
-  <!-- check: run -->
+  <!-- check: run, prints "wrote " -->
   ```sh
-  node scripts/launchd.mjs ~/.config/sage-bot/config.json > ~/Library/LaunchAgents/com.sage.bot.plist
+  node scripts/launchd.mjs ~/.config/sage-bot/config.json --out ~/Library/LaunchAgents/com.sage.bot.plist
   ```
 
-  The script only prints the plist. You load it yourself:
+  The script only writes the plist. You load it yourself:
 
   <!-- check: skip, changes the Mac's login items; the test never runs launchctl -->
   ```sh
   launchctl load ~/Library/LaunchAgents/com.sage.bot.plist
   ```
 
-  The script refuses a config file that does not exist, is not JSON or lacks a field of step 3. It then prints no plist and exits 1, so fix the path and run it again.
+  The script refuses a config file that does not exist, is not JSON, lacks a field of step 3, or has a Discord id that is not 17 to 20 digits. It then exits 1 and leaves the plist file as it was, so fix the config and run it again. It writes the new plist to a temp file first, so a refused run never empties a working plist.
 
-  The plist runs node through a path that a Node upgrade keeps, such as `/opt/homebrew/bin/node`. When the script prints "warning: … make the plist again after each Node upgrade", your node has no such path: after each Node upgrade, run the command above again and load the new plist. To see the node path of the plist, read the first entry of `ProgramArguments`:
+  The plist runs node through a path that a Node upgrade keeps, such as `/opt/homebrew/bin/node`. When the script prints "warning: … make the plist again after each Node upgrade", your node has no such path: after each Node upgrade, run the command above again and load the new plist. When it says that your node is an old node, a node from before a Homebrew upgrade still runs: run the command again with the current node that the message names. To see the node path of the plist, read the first entry of `ProgramArguments`:
 
   <!-- check: run -->
   ```sh
@@ -182,11 +185,11 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
   *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
 
-  Then ask the chief for one test question. Mark it with its id, for example G12:
+  Then ask the chief for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder:
 
-  <!-- check: run, prints "team votes: G12" -->
+  <!-- check: run, prints "team votes: G42" -->
   ```sh
-  node scripts/vote.mjs G12
+  node scripts/vote.mjs G42
   ```
 
   While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
@@ -226,13 +229,14 @@ Run each command in the sage-bot folder.
 
 | You want to | Do this |
 | --- | --- |
-| Send a question to the team | `node scripts/vote.mjs G12` (several ids in one command for one batch) |
-| Take a question back to the terminal | `node scripts/vote.mjs --unmark G12`, before the card is posted |
+| Send a question to the team | `node scripts/vote.mjs G42` (several ids in one command for one batch) |
+| Take a question back to the terminal | `node scripts/vote.mjs --unmark G42`, before the card is posted |
 | See the marked questions | `node scripts/vote.mjs --list` |
 | Answer a question yourself | Answer the chief in the chat as usual; that answer is final. (G10) |
 | Withdraw a single question | Tell the chief to withdraw it. The chief records an answer that names no option, and the card shows the question as withdrawn. |
 | Read the team's reasons, as the chief | `node scripts/reasons.mjs <gate file> <gate id>` |
 | Find a session's thread | `node scripts/session.mjs thread <session id>` |
+| Check the launchd plist | `plutil -p ~/Library/LaunchAgents/com.sage.bot.plist`: the first entry of `ProgramArguments` is the node path |
 
 ## FAQ
 
@@ -244,7 +248,7 @@ Run each command in the sage-bot folder.
 
 **What if two people press at once?** The bridge is one process, and it decides each press in one step before it takes the next one. On a single question, the first press that reaches the bridge is final. The second person gets the private note "Already answered by Maya: A". In a batch, both votes count, and each person's last vote counts.
 
-**How do I take a question back to the terminal?** Before the card is posted, unmark it: `node scripts/vote.mjs --unmark G12`. After the card is posted, unmarking does not take the card back. Then answer the chief in the chat as usual; that answer is final, the card shows "Answered by Erick (terminal)", and its buttons go grey. To cancel a single question, tell the chief to withdraw it: the chief records an answer that names no option, and the card shows the question as withdrawn.
+**How do I take a question back to the terminal?** Before the card is posted, unmark it: `node scripts/vote.mjs --unmark G42`. After the card is posted, unmarking does not take the card back. Then answer the chief in the chat as usual; that answer is final, the card shows "Answered by Erick (terminal)", and its buttons go grey. To cancel a single question, tell the chief to withdraw it: the chief records an answer that names no option, and the card shows the question as withdrawn.
 
 **What if the owner answers at the terminal while the team votes?** The owner's answer wins (G10). The bridge reads the logbook before each press and before each answer that it gives sage, so it never replaces the owner's answer. If the chief records the owner's answer at the same moment that the bridge records a Discord answer, the bridge puts the owner's answer back and logs one line.
 

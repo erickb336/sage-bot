@@ -4,11 +4,12 @@
 //   <!-- check: run, exit 1, prints "…" -->  each line exits 1; the block's output holds each "…"
 //   <!-- check: skip, <reason> -->           the block needs Discord, the Keychain or launchctl, or runs this test itself
 // The commands run with HOME and TMPDIR in a new scratch folder (one per document), with a filled-in sample config in
-// ~/.config/sage-bot/config.json. SAMPLE DATA ONLY. Nothing connects to Discord, reads the Keychain or runs launchctl.
+// ~/.config/sage-bot/config.json, and they write no file in the repo. SAMPLE DATA ONLY. Nothing connects to Discord, reads
+// the Keychain or runs launchctl. Every code block names its language, one of LANGUAGES.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,33 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = ['README.md', 'docs/reference.md'];
 // Lines of a runnable block that the test does not run itself, with the reason.
 const NOT_HERE = { 'npm ci': 'the test runs inside the installed tree: npm ci would remove node_modules under it; the check runs after npm ci' };
+// Commands that write a page into the repo by default: the test gives them a path in the scratch home.
+const IN_HOME = { 'npm run demo': (home) => `npm run demo -- --out ${join(home, 'demo.html')}`, 'node scripts/preview.mjs': (home) => `node scripts/preview.mjs --out ${join(home, 'preview', 'index.html')}` };
+// The languages a code block may name. The test runs only sh blocks, so a block of another shell language would never run.
+const LANGUAGES = new Set(['sh', 'json', 'js', 'text']);
+
+/** The language of each code block of a document (the word after its opening fence): { line, language }. */
+function fences(text) {
+  const out = [];
+  let open = false;
+  text.split('\n').forEach((l, i) => {
+    if (!l.trim().startsWith('```')) return;
+    if (!open) out.push({ line: i + 1, language: l.trim().slice(3).trim() });
+    open = !open;
+  });
+  return out;
+}
+
+/** Each file of the repo (outside .git, node_modules and the npm folders) with the time it last changed. */
+function repoFiles(dir = ROOT, out = new Map()) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (['.git', 'node_modules', '.npm-cache', '.npm-logs'].includes(e.name)) continue;
+    const path = join(dir, e.name);
+    if (e.isDirectory()) repoFiles(path, out);
+    else out.set(path, statSync(path).mtimeMs);
+  }
+  return out;
+}
 
 /** The ```sh blocks of a document, each with its mark: { line, mark, commands }. */
 function shellBlocks(text) {
@@ -51,6 +79,7 @@ for (const doc of DOCS) {
     const blocks = shellBlocks(readFileSync(join(ROOT, doc), 'utf8'));
     assert.ok(blocks.length > 0, `${doc} has no sh block`);
     const home = scratchHome();
+    const before = repoFiles();
     try {
       for (const { line, mark, commands } of blocks) {
         assert.ok(mark, `${doc}:${line}: the sh block has no <!-- check: run --> or <!-- check: skip, <reason> --> on the line before it`);
@@ -66,7 +95,7 @@ for (const doc of DOCS) {
         for (const command of commands) {
           if (NOT_HERE[command]) { t.diagnostic(`skipped: ${command} (${NOT_HERE[command]})`); continue; }
           assert.doesNotMatch(command, /<[a-z][a-z ]*>/, `${doc}:${line}: a runnable command holds a placeholder: ${command}`);
-          const run = command === 'npm run demo' ? `npm run demo -- --out ${join(home, 'demo.html')}` : command;
+          const run = IN_HOME[command]?.(home) ?? command;
           const r = spawnSync('/bin/sh', ['-c', run], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp') } });
           assert.equal(r.status, exit, `${doc}:${line}: ${run} exited ${r.status}, not ${exit}\n${r.stdout}\n${r.stderr}`);
           output += r.stdout + r.stderr;
@@ -74,8 +103,17 @@ for (const doc of DOCS) {
         }
         for (const p of prints) assert.ok(output.includes(p), `${doc}:${line}: the output does not hold "${p}":\n${output}`);
       }
+      const after = repoFiles();
+      const changed = [...new Set([...before.keys(), ...after.keys()])].filter((f) => before.get(f) !== after.get(f));
+      assert.deepEqual(changed, [], `${doc}: the runnable blocks wrote into the repo`);
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test(`${doc}: every code block names one of the languages ${[...LANGUAGES].join(', ')}`, () => {
+    for (const { line, language } of fences(readFileSync(join(ROOT, doc), 'utf8'))) {
+      assert.ok(LANGUAGES.has(language), `${doc}:${line}: the code block's language is "${language}", not one of ${[...LANGUAGES].join(', ')}`);
     }
   });
 
@@ -124,5 +162,6 @@ test('the mark parser finds an unmarked block and reads a skip reason (the parse
   assert.equal(unmarked.mark, null);
   assert.deepEqual([skipped.mark[1], skipped.mark[2], skipped.commands], ['skip', 'needs Discord', ['node a.mjs']]);
   assert.deepEqual([...anchorsOf('# A b\n```\n# not\n```\n## FAQ: what? · now\n')], ['a-b', 'faq-what--now']);
+  assert.deepEqual(fences('```sh\nls\n```\n  ```bash\n  ls\n  ```\n```\nx\n```\n```json\n{}\n```\n').map((f) => f.language), ['sh', 'bash', '', 'json']);
 });
 

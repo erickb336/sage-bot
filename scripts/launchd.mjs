@@ -1,35 +1,43 @@
-// Prints the launchd plist of the bridge. It never runs launchctl and writes no file: save the output yourself.
-//   node scripts/launchd.mjs <config.json> > ~/Library/LaunchAgents/com.sage.bot.plist
-// It refuses a config that the bridge cannot start with, and prints no plist then.
+// Makes the launchd plist of the bridge. It never runs launchctl.
+//   node scripts/launchd.mjs <config.json> --out ~/Library/LaunchAgents/com.sage.bot.plist   writes the plist
+//   node scripts/launchd.mjs <config.json>                                                 prints the plist
+// It refuses a config that the bridge cannot start with. Then it prints nothing and leaves the --out file as it was:
+// it writes a temp file in the same folder and renames it over the --out file only when the plist is complete.
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { readFileSync, realpathSync } from 'node:fs';
-import { CONFIG_FIELDS, plist, stableNode } from '../src/launchd.js';
+import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { SNOWFLAKE } from '../src/bridge.js';
+import { CONFIG_FIELDS, DISCORD_IDS, plist, stableNode } from '../src/launchd.js';
 import { forTerminal } from '../src/clean.js';
 
+const args = process.argv.slice(2);
+const at = args.indexOf('--out');
+const out = at === -1 ? null : args.splice(at, 2)[1];
+const nothing = out ? `No plist written: ${resolve(out)} is unchanged.` : 'No plist printed.';
 const stop = (message) => {
   console.error(`sage-bot launchd: ${forTerminal(message)}`);
   process.exit(1);
 };
 
-const [arg] = process.argv.slice(2);
-if (!arg) stop('usage: node scripts/launchd.mjs <absolute path of the config file>');
-const config = resolve(arg);
-let text;
+if (args.length !== 1 || (at !== -1 && !out)) stop('usage: node scripts/launchd.mjs <config file> [--out <plist file>]');
+const config = resolve(args[0]);
+let raw;
 try {
-  text = readFileSync(config, 'utf8');
+  raw = readFileSync(config, 'utf8');
 } catch (e) {
-  stop(`the config file ${config} ${e.code === 'ENOENT' ? 'does not exist' : `cannot be read (${e.code})`}. No plist printed.`);
+  stop(`the config file ${config} ${e.code === 'ENOENT' ? 'does not exist' : `cannot be read (${e.code})`}. ${nothing}`);
 }
 let fields;
 try {
-  fields = JSON.parse(text);
+  fields = JSON.parse(raw);
 } catch (e) {
-  stop(`the config file ${config} is not JSON (${e.message}). No plist printed.`);
+  stop(`the config file ${config} is not JSON (${e.message}). ${nothing}`);
 }
 const missing = CONFIG_FIELDS.filter((k) => typeof fields?.[k] !== 'string' || !fields[k]);
-if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. No plist printed.`);
+if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. ${nothing}`);
+const notIds = DISCORD_IDS.filter((k) => !SNOWFLAKE.test(fields[k]));
+if (notIds.length) stop(`in the config file ${config}, ${notIds.join(', ')} must each be a Discord id (17 to 20 digits). ${nothing}`);
 
 let node;
 try {
@@ -37,11 +45,25 @@ try {
   if (r.warning) console.error(`sage-bot launchd: warning: ${r.warning}`);
   node = r.node;
 } catch (e) {
-  stop(`${e.message}. No plist printed.`);
+  stop(`${e.message}. ${nothing}`);
 }
-process.stdout.write(plist({
+const text = plist({
   node,
   script: fileURLToPath(new URL('./bridge.mjs', import.meta.url)),
   config,
   logDir: resolve(homedir(), 'Library/Logs'),
-}));
+});
+if (!out) {
+  process.stdout.write(text);
+} else {
+  const target = resolve(out);
+  const temp = resolve(dirname(target), `.com.sage.bot.${process.pid}.tmp`);
+  try {
+    writeFileSync(temp, text);
+    renameSync(temp, target);
+  } catch (e) {
+    rmSync(temp, { force: true });
+    stop(`could not write ${target} (${e.code}). ${nothing}`);
+  }
+  console.log(forTerminal(`wrote ${target}`));
+}
