@@ -8,9 +8,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PermissionFlagsBits, PermissionsBitField } from 'discord.js';
-import { createAsk, projectsOf, UNREGISTER } from '../src/ask.js';
+import { CANCEL, createAsk, projectsOf, UNREGISTER } from '../src/ask.js';
 import { createBridge } from '../src/bridge.js';
 import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } from '../src/channels.js';
+import { enter, prepare, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, CHANNEL, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup } from './bridge-setup.js';
 
@@ -60,8 +61,8 @@ test('T130 file safety: the registry is 0600 and written whole; a symlink, a wro
   stops('is not JSON. Nothing was loaded.');
   writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [ASK]: { project: 'project', admin: true } } }));
   stops('has an entry that the bridge did not write. Nothing was loaded.');
-  writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [ASK]: { project: 'payroll', home: true } } }));
-  stops(`maps the channel ${ASK} to the project "payroll", which is not in the config's projects. Nothing was loaded.`);
+  writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { abc: { project: 'project', home: true } } })); // a key that is not a Discord id
+  stops('has an entry that the bridge did not write. Nothing was loaded.');
   writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [ASK]: { project: 'project', home: true }, [CHANNEL]: { project: 'project', home: true } } }));
   stops('must have exactly one home channel (the channel of the votes and cards). Nothing was loaded.');
   // In every case the bad file stays as it was: the start never writes over it.
@@ -92,7 +93,7 @@ test('T130 migration: an old config with channelId and askChannelId makes the re
 test('T130: with no registry and no channelId, the start stops and says how to register the home channel', (t) => {
   const b = world(t);
   assert.throws(() => openChannels({ ...b.config, channelId: undefined }, projectsOf(b.config)),
-    { message: `there is no channel registry ${b.registry}, and the config has no channelId to make one from. Register the home channel with: node scripts/channels.mjs <config> register <channel id> <project> --home` });
+    { message: `there is no channel registry ${b.registry}, and the config has no channelId to make one from. Register the home channel with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home` });
 });
 
 /** Runs Erick's script with a config file in the scratch folder. */
@@ -131,9 +132,12 @@ test('T130 terminal: the script refuses while a bridge holds the lock, and chang
   const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } }).trim();
   writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`); // this test process stands in for a running bridge
   const r = script(b, 'register', OTHER, 'project');
-  assert.equal(r.status, 1);
-  assert.match(r.err, /another sage bridge \(pid \d+\) runs on .+ Stop the bridge first/);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge, then run this again; list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
   assert.equal(existsSync(b.registry), false);
+  // F-T130-5: list only reads, so it works while the bridge runs.
+  openChannels(b.config, projectsOf(b.config));
+  const l = script(b, 'list');
+  assert.deepEqual([l.status, l.out], [0, `${ASK}  project\n${CHANNEL}  project  (home: votes and cards)\n`]);
 });
 
 test('T130 permissions: the start names each permission that sage-bot lacks in a registered channel, and a channel it cannot see', async () => {
@@ -149,10 +153,10 @@ test('T130 permissions: the start names each permission that sage-bot lacks in a
   assert.deepEqual(await checkChannels(new Map([[CHANNEL, { project: 'alpha', home: true }]]), async () => all), []);
 });
 
-/** A press of the confirm button, as src/discord.js maps it. */
-function press(user, roles, customId) {
+/** A press of a button of the confirm, as src/discord.js maps it; Discord made the confirm `age` ms ago. */
+function press(user, roles, customId, age = 0) {
   const replies = [];
-  return { user: { id: user, bot: false }, roles, customId, replies,
+  return { user: { id: user, name: `name-${user.slice(-2)}`, bot: false }, roles, customId, sentAt: Date.now() - age, replies,
     update: async (p) => { replies.push({ kind: 'update', ...p }); }, reply: async (p) => { replies.push({ kind: 'reply', ...p }); } };
 }
 
@@ -178,13 +182,14 @@ test('T130 unregister: a lead unregisters with a confirm; an apprentice is refus
   // A lead, in a thread of the channel: the confirm names the channel and has one button for it.
   const confirm = (await b.cmd(ask, JON, [LEADR], THREAD, 'unregister', {}, ASK))[1];
   assert.equal(confirm.content, `Unregister <#${ASK}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`);
-  assert.deepEqual(confirm.components, [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${ASK}` }] }]);
+  assert.deepEqual(confirm.components, [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${ASK}` },
+    { type: 2, style: 2, label: 'Cancel', custom_id: 'channel-unregister:cancel' }] }]);
   assert.equal(readFileSync(b.registry, 'utf8'), before); // nothing changes before the press
   const lead = press(JON, [LEADR], confirm.components[0].components[0].custom_id);
   await ask.press(lead);
   assert.deepEqual(lead.replies, [{ kind: 'update', content: `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`, components: [], allowedMentions: { parse: [] } }]);
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
-  assert.deepEqual(lines, [`the sage-lead ${JON} unregistered the channel ${ASK} (it was for the project project)`]);
+  assert.deepEqual(lines, [`the sage-lead name-03 (${JON}) unregistered the channel ${ASK} (it was for the project project)`]); // F-T130-6
   // After it, the channel is like any other that is not registered: one pointer a day, then nothing.
   assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'))[1].content, `I answer /sage in <#${CHANNEL}>, so please ask there.`);
   assert.deepEqual(await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'), [{ kind: 'defer' }, { kind: 'remove' }]);
@@ -203,7 +208,7 @@ test('T130: /sage works in two registered channels for two projects, each with i
   b.config.askChannelId = undefined;
   mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });
   writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [ASK]: { project: 'alpha', home: true }, [OTHER]: { project: 'beta' } } }), { mode: 0o600 });
-  const channels = loadChannels(b.registry, ['alpha', 'beta']);
+  const channels = loadChannels(b.registry);
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   const board = async (channelId, parentId = null, options = {}) => (await b.cmd(ask, MAYA, [APPRENTICE], channelId, 'board', options, parentId))[1].content.split('\n').slice(0, 2).join('\n');
   assert.equal(await board(ASK), '**Board · alpha**\n1 task(s) · framed 1');
@@ -220,4 +225,187 @@ test('T130: /sage works in two registered channels for two projects, each with i
   assert.equal((await mention(THREAD, OTHER)).length, 1);
   assert.deepEqual(await mention(NOWHERE), [`I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`]);
   assert.deepEqual(await mention(NOWHERE), []);
+});
+
+// ---- Repair round 1 (R402): the findings of QA R396, code review R394 and security review R395. ----
+
+test('F-T130-2: a new install with no channelId makes its first registry with register --home, as the README says; the bridge then starts', (t) => {
+  const b = world(t);
+  b.config = { ...b.config, channelId: undefined, askChannelId: undefined };
+  let r = script(b, 'list');
+  assert.deepEqual([r.status, r.out], [0, `there is no channel registry ${b.registry} yet. The bridge makes it from channelId at its first start; with no channelId, register the home channel with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home\n`]);
+  for (const args of [['register', OTHER, 'project'], ['unregister', OTHER]]) {
+    r = script(b, ...args); // only the home channel can come first
+    assert.deepEqual([r.status, r.err], [1, 'sage-bot channels: there is no channel registry yet: register the home channel first, with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home. Nothing was changed\n']);
+    assert.equal(existsSync(b.registry), false);
+  }
+  r = script(b, 'register', CHANNEL, 'project', '--home');
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, new RegExp(`^registered the channel ${CHANNEL} for the project project \\(home channel of the votes and cards\\)\n`));
+  assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
+  assert.equal(mode(b.registry), 0o600);
+  assert.equal(withHome(b.config, openChannels(b.config, projectsOf(b.config))).channelId, CHANNEL); // the bridge starts on it
+});
+
+test('F-T130-3: a project removed from the config: list and unregister still work and name it; the bridge refuses and names the repair', (t) => {
+  const b = world(t);
+  b.config.projects = [{ name: 'alpha', project: b.project }, { name: 'beta', project: join(b.root, 'beta') }];
+  assert.equal(script(b, 'register', OTHER, 'beta').status, 0);
+  b.config.projects = [{ name: 'gamma', project: b.project }]; // alpha and beta are gone
+  const names = 'which is not in the config\'s projects (gamma). Give the channel a listed project with: node scripts/channels.mjs --config <config.json> register <channel id> <project>, or remove it with: unregister <channel id>. Nothing was loaded.';
+  assert.throws(() => openChannels(b.config, projectsOf(b.config)), { message: `the channel registry ${b.registry} maps the channel ${ASK} to the project "alpha", the channel ${CHANNEL} to the project "alpha", the channel ${OTHER} to the project "beta", ${names}` });
+  const stale = '  (not in the config: register it again or unregister it)';
+  let r = script(b, 'list');
+  assert.deepEqual([r.status, r.out], [0, `${ASK}  alpha${stale}\n${CHANNEL}  alpha  (home: votes and cards)${stale}\n${OTHER}  beta${stale}\n`]);
+  r = script(b, 'unregister', OTHER);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, `unregistered the channel ${OTHER} (it was for the project beta)\n${ASK}  alpha${stale}\n${CHANNEL}  alpha  (home: votes and cards)${stale}\nThe bridge does not start while a channel has a project that is not in the config.\n`);
+  assert.equal(script(b, 'unregister', ASK).status, 0);
+  r = script(b, 'register', CHANNEL, 'gamma'); // the home keeps its place and gets a listed project
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'gamma', home: true } });
+  assert.deepEqual([...openChannels(b.config, projectsOf(b.config))], [[CHANNEL, { project: 'gamma', home: true }]]);
+});
+
+test('F-T130-8: the home cannot move while a card waits in the old home; it can stay where it is', async (t) => {
+  const b = world(t);
+  b.sh('task', 'add', '--title', 'Pick a name', '--size', 'tiny');
+  b.sh('gate', 'add', 'T1', '--question', 'Which name?', '--options', 'Ada|Bo', '--recommend', 'Ada');
+  await b.post(); // the card of G1 waits in CHANNEL, the home
+  assert.equal(b.discord.in(CHANNEL).length > 0, true);
+  let r = script(b, 'register', OTHER, 'project', '--home');
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: the home channel cannot move while 1 card(s) wait in the old home channel ${CHANNEL} or its threads (G1): their buttons would stop working. Wait until they are settled, or answer them at the terminal, then run this again. Nothing was changed.\n`]);
+  assert.deepEqual(file(b).channels, { [ASK]: { project: 'project' }, [CHANNEL]: { project: 'project', home: true } });
+  r = script(b, 'register', CHANNEL, 'project', '--home'); // not a move
+  assert.equal(r.status, 0, r.err);
+  r = script(b, 'register', OTHER, 'project'); // not the home
+  assert.equal(r.status, 0, r.err);
+});
+
+test('F-T130-9 keepHome: registering the home channel for another project keeps it the home', (t) => {
+  const b = world(t);
+  b.config.projects = [{ name: 'alpha', project: b.project }, { name: 'beta', project: join(b.root, 'beta') }];
+  const r = script(b, 'register', CHANNEL, 'beta');
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, new RegExp(`registered the channel ${CHANNEL} for the project beta \\(home channel of the votes and cards\\)\n`));
+  assert.deepEqual(file(b).channels, { [ASK]: { project: 'alpha' }, [CHANNEL]: { project: 'beta', home: true } });
+});
+
+test('F-T130-9 withHome: the start posts the cards in the registry\'s home channel, not in the config\'s channelId', (t) => {
+  const b = world(t);
+  mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });
+  writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [CHANNEL]: { project: 'project' }, [OTHER]: { project: 'project', home: true } } }), { mode: 0o600 });
+  const { config, channels } = prepare(b.config, () => {});
+  assert.equal(config.channelId, OTHER);
+  assert.deepEqual([...channels.keys()], [CHANNEL, OTHER]);
+});
+
+const GUILD = '200000000000000001';
+test('F-T130-9 permission check: after the login, the start logs each permission that sage-bot lacks in a registered channel', async () => {
+  const all = new PermissionsBitField(Object.values(PermissionFlagsBits));
+  const some = new PermissionsBitField([PermissionFlagsBits.ViewChannel]);
+  const set = [];
+  const guild = { members: { fetch: async () => {} }, commands: { set: async (c) => { set.push(c.map((x) => x.name)); } } };
+  const client = { user: { id: BOT_USER }, guilds: { fetch: async (id) => (id === GUILD ? guild : null) },
+    channels: { fetch: async (id) => ({ [CHANNEL]: { permissionsFor: () => all }, [ASK]: { permissionsFor: () => some } })[id] ?? null } };
+  const lines = [];
+  const channels = new Map([[CHANNEL, { project: 'alpha', home: true }], [ASK, { project: 'alpha' }], [OTHER, { project: 'beta' }]]);
+  assert.equal(await enter(client, { config: { guildId: GUILD }, channels, ask: { projects: [] }, log: (l) => lines.push(l) }), guild);
+  assert.deepEqual(set, [['sage']]);
+  assert.deepEqual(lines, [
+    `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links. Give them to its role in that channel`,
+    `sage-bot cannot see the registered channel ${OTHER} (beta): add it to the channel, or unregister the channel`,
+  ]);
+});
+
+const BOT_USER = '100000000000000099';
+/** A press of a button of the unregister confirm as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
+const button = ({ user = JON, roles = [LEADR], channelId = ASK, customId, age = 0 }) => {
+  const calls = [];
+  return { calls, guildId: GUILD, channelId, channel: null, customId, user: { id: user, bot: false, username: 'jon_l' },
+    member: { roles: { cache: new Map(roles.map((r) => [r, {}])) }, displayName: 'Jon <Lead>' }, message: { createdTimestamp: Date.now() - age },
+    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false,
+    update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
+};
+
+test('F-T130-9 and F-T130-6: routes take an unregister press in any registered channel to ask.press; the log names the lead and their id', async (t) => {
+  const b = world(t);
+  const channels = openChannels(b.config, projectsOf(b.config));
+  const lines = [];
+  const config = { ...withHome(b.config, channels), guildId: GUILD };
+  const ask = createAsk({ config, channels, env: b.env, log: (l) => lines.push(l) });
+  const pressed = [];
+  const on = routes({ config, ask, bridge: { interaction: async (i) => { pressed.push(i.customId); } }, fetch: async () => ({ isThread: () => false }), botId: BOT_USER });
+  const i = button({ customId: `${UNREGISTER}${ASK}` }); // ASK is not the home channel, where the bridge's own buttons work
+  await on.interaction(i);
+  assert.deepEqual(i.calls, [['update', `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`]]);
+  assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
+  assert.deepEqual(lines, [`the sage-lead Jon <Lead> (${JON}) unregistered the channel ${ASK} (it was for the project project)`]);
+  assert.deepEqual(pressed, []);
+});
+
+test('F-T130-7: the confirm has a Cancel button, and it expires after 10 minutes; neither changes the registry', async (t) => {
+  const b = world(t);
+  const channels = openChannels(b.config, projectsOf(b.config));
+  const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
+  const before = readFileSync(b.registry, 'utf8');
+  const run = async (p) => { await ask.press(p); return p.replies.map((x) => [x.kind, x.content]); };
+  assert.deepEqual(await run(press(JON, [LEADR], CANCEL)), [['update', 'Cancelled. Nothing changed.']]);
+  assert.deepEqual(await run(press(MAYA, [APPRENTICE], CANCEL)), [['reply', 'Only a sage-lead can unregister a channel. Nothing changed.']]);
+  assert.deepEqual(await run(press(JON, [LEADR], `${UNREGISTER}${ASK}`, 10 * 60_000 + 1)), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
+  assert.deepEqual(await run({ ...press(JON, [LEADR], `${UNREGISTER}${ASK}`), sentAt: undefined }), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
+  assert.equal(readFileSync(b.registry, 'utf8'), before);
+  assert.deepEqual(await run(press(JON, [LEADR], `${UNREGISTER}${ASK}`, 10 * 60_000 - 1000)), [['update', `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`]]);
+});
+
+test('F-T130-1: a press whose custom_id has no Discord id after the prefix gets nothing, and nothing is echoed', async (t) => {
+  const b = world(t);
+  const channels = openChannels(b.config, projectsOf(b.config));
+  const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
+  for (const id of ['@everyone', `${ASK}x`, '', '<@&300000000000000002>', `${ASK} `]) {
+    const p = press(JON, [LEADR], `${UNREGISTER}${id}`);
+    await ask.press(p);
+    assert.deepEqual(p.replies, [], id);
+  }
+  const p = press(JON, [LEADR], `${UNREGISTER}${NOWHERE}`); // a Discord id still gets its answer
+  await ask.press(p);
+  assert.deepEqual(p.replies.map((x) => x.content), [`<#${NOWHERE}> is not registered. Nothing changed.`]);
+});
+
+test('F-T130-10: a lead\'s press for the home channel is refused; a save that fails keeps the channel registered', async (t) => {
+  const b = world(t);
+  const channels = openChannels(b.config, projectsOf(b.config));
+  const lines = [];
+  const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: (l) => lines.push(l) });
+  const before = readFileSync(b.registry, 'utf8');
+  let p = press(JON, [LEADR], `${UNREGISTER}${CHANNEL}`);
+  await ask.press(p);
+  assert.deepEqual(p.replies.map((x) => x.content), [`<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`]);
+  assert.equal(readFileSync(b.registry, 'utf8'), before);
+  p = press(JON, [LEADR], `${UNREGISTER}${ASK}`);
+  chmodSync(dirname(b.registry), 0o500); // the save cannot write its temp file
+  try { await ask.press(p); } finally { chmodSync(dirname(b.registry), 0o700); }
+  assert.deepEqual(p.replies.map((x) => x.content), ['I could not unregister this channel just now. Nothing changed. Please try again in a minute.']);
+  assert.deepEqual([...channels], [[ASK, { project: 'project' }], [CHANNEL, { project: 'project', home: true }]]);
+  assert.equal(readFileSync(b.registry, 'utf8'), before);
+  assert.match(lines[0], new RegExp(`^the channel registry could not be saved, so ${ASK} stays registered: EACCES`));
+  assert.equal((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'))[1].content.split('\n')[0], '**Board · project**'); // /sage still works there
+});
+
+test('F-T130-10: the migration gives the home channel the bridge\'s own project, also when it is not the first project', (t) => {
+  const b = world(t);
+  b.config.projects = [{ name: 'beta', project: join(b.root, 'beta') }, { name: 'alpha', project: b.project }];
+  openChannels(b.config, projectsOf(b.config));
+  assert.deepEqual(file(b).channels, { [ASK]: { project: 'beta' }, [CHANNEL]: { project: 'alpha', home: true } });
+});
+
+test('F-T130-4: the script gives one clear line for a wrong verb, a missing config and --config with no path', (t) => {
+  const b = world(t);
+  const usage = 'usage: node scripts/channels.mjs [--config <config.json>] list | register <channel id> <project> [--home] | unregister <channel id>';
+  for (const args of [[], ['remove', OTHER], ['list', 'extra']]) assert.deepEqual(Object.values(script(b, ...args)).slice(0, 3), [1, '', `sage-bot channels: ${usage}\n`], args.join(' '));
+  const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'scripts', 'channels.mjs'), ...args], { encoding: 'utf8', env: b.env });
+  let r = run('--config', join(b.root, 'nothing.json'), 'list');
+  assert.deepEqual([r.status, r.stderr], [1, `sage-bot channels: cannot read the config ${join(b.root, 'nothing.json')} (ENOENT). Give the bridge's config with --config <config.json>.\n`]);
+  r = run('list', '--config');
+  assert.deepEqual([r.status, r.stderr], [1, `sage-bot channels: --config needs the path of the bridge's config file. ${usage}\n`]);
 });
