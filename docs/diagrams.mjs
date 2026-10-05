@@ -40,7 +40,7 @@ ${body}
 
 /** The flow of one question: five lanes, nine numbered messages from top to bottom. */
 function flow() {
-  const lanes = [['sage', 'at the terminal'], ['The sage', 'logbook'], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'both roles']];
+  const lanes = [['sage', 'at the terminal'], ['The logbook', "sage's record"], ['The bridge', "on the owner's Mac"], ['The session', 'thread (Discord)'], ['The team', 'both roles']];
   const x = (i) => 100 + i * 200;
   const top = 30, head = 90, first = 190, step = 78;
   const n = 9, bottom = first + (n - 1) * step + 40;

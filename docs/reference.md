@@ -10,7 +10,7 @@ In this page, a "gate" is a sage gate: a question that sage parks for the owner.
 
 The demo needs Node 22 or later, `npm ci` once, and the sage plugin. It finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `~/.claude/plugins/cache/sage/sage/*/skills/sage/`; else it stops with a message that names `SAGE_TOOL`. The bridge tests use the same lookup.
 
-The demo plays one sage session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in sage and the reasons for sage.
+The demo plays one sage session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in the logbook and the reasons for sage.
 
 The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes command (`scripts/vote.mjs`) and bridge, on the fake Discord layer:
 
@@ -70,7 +70,7 @@ Makes a new gate.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `id` | non-empty string | The gate's id in sage. |
+| `id` | non-empty string | The gate's id in the logbook. |
 | `kind` | `'single'` or `'batch'` | The kind of gate. |
 | `options` | array of unique non-empty strings | Single only: the options. |
 | `parts` | array of such arrays | Batch only: the options of each part. Parts count from 0. |
@@ -227,7 +227,7 @@ The card of a gate as `{ embeds, components, allowedMentions }`. Times are Disco
 | Single, open | The question, the options with Recommended and Default, the rule, one button per option. |
 | Single, answered | "Answered by Maya at 14:22: A. … Final." The buttons are off; the chosen one is green. |
 | Batch, voting | "Vote on each part; change your vote until the vote ends. The work on the task goes on. Closes at 15:01 (in 18 minutes)". Per part: each option with its votes and voters ("Erick (terminal), Jon"), sage's recommendation, "Voted: … · Not voted: …", and "Ahead: A", "Even so far" or "No votes yet". Each reason as one line, cut to 200 characters; when the card is full, the oldest reasons go first and one line says "N more reasons; sage has them all"; a visibly empty reason (nothing but spaces, hidden characters or combining marks) shows no line. A button per option of each part, "Part 1, A: Only the columns visible in the table" (cut to 80 characters), and "End vote now (sage-lead only)". |
-| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." (with every part tied: "2 parts are tied: they wait for a sage-lead. T7 waits."). After a lead's early end: "Ended early by Jon (sage-lead) at 15:28, with the votes so far." A tied part shows "Tied: A, B at 1 vote each. A sage-lead breaks the tie. sage reminds @sage-lead every 2 h." (plain text: it pings nobody) and a button "Part 2, break the tie: A (sage-lead only)" for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 of 3 votes". |
+| Batch, tied | "Voting ended at 15:01. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits." (with every part tied: "2 parts are tied: they wait for a sage-lead. T7 waits."). After a lead's early end: "Ended early by Jon (sage-lead) at 15:28, with the votes so far." A tied part shows "Tied: A, B at 1 vote each. A sage-lead breaks the tie. sage-bot reminds @sage-lead every 2 h." (plain text: it pings nobody) and a button "Part 2, break the tie: A (sage-lead only)" for each tied option only (every option when nobody voted). Decided parts say "Provisional: A · 3 of 3 votes". |
 | Batch, decided | "Voting ended at 15:01. Closed: every part is decided. T7 goes on." A part that a lead decided says "Decided: A · tie broken by Jon (sage-lead) at 17:05". Every button is off. |
 | Withdrawn | "Withdrawn by Erick at 15:30. Closed: nothing is decided." Every button is off. |
 
@@ -385,7 +385,7 @@ The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` f
 | A marked gate whose question or options name a merge ("merge", "merges", "merged", "merging") | Not posted. Merges never go to a vote; they stay at the terminal. |
 | A new card | The post mentions the sage-apprentice and sage-lead roles, and only those roles: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." |
 | The owner answers a posted gate in the chat, and sage records that answer with `sage gate answer` | Final, whatever the owner's roles. The card shows "Answered by Erick (terminal) at 14:05: B. text. Final." on that question, or on that part of a batch, and its buttons go grey. A press on it gets "Already answered by Erick at the terminal: … Your press did not count." The other parts of a batch keep voting, and the leads never get a tie for an answered part. The answer is no ballot. |
-| An answer in sage that the bridge did not write | The owner's: sage recorded it with `sage gate answer`. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
+| An answer in the logbook that the bridge did not write | The owner's: sage recorded it with `sage gate answer`. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
 | sage answers an open single gate with text that names no option | A withdraw by the asker (the owner): the card closes as withdrawn. A withdraw comes only from sage, never from Discord. On a part of a batch, such text is the owner's final answer to that part. |
 | A single gate is answered in Discord | The bridge gives sage "B. Show a Session ended screen" (the letter and sage's option text). |
 | A batch closes as decided | The bridge gives sage the answer of every part, the same way. It acts only on the `'closed'` effect, never on a part's `'decided'` effect, which is provisional while another part is tied. A withdrawn gate gives sage nothing. |

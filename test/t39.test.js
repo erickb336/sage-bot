@@ -98,5 +98,5 @@ test('T39: the two design sentences: the open intro says the work goes on; a tie
   const open = run(openAsk('B7', T0), [ballot(MAYA, 0, 'A', T0 + MINUTE)]);
   assert.match(card(open, ASKS.B7, PEOPLE).embeds[0].description, /^3 product questions of T7\. Vote on each part; change your vote until the vote ends\. The work on the task goes on\. Closes at /);
   assert.equal(lastLine(card(tied(), ASKS.B7, PEOPLE).embeds[0].fields[1].value),
-    '**Tied: A, B at 1 vote each.** A sage-lead breaks the tie. sage reminds @sage-lead every 2 h.');
+    '**Tied: A, B at 1 vote each.** A sage-lead breaks the tie. sage-bot reminds @sage-lead every 2 h.');
 });
