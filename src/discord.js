@@ -94,10 +94,11 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 export function prepare(file, log) {
   refuseOldRoles(file);
   const projects = projectsOf(file);
+  const own = pickProject(file, projects).name; // a config whose project is not listed stops here (F-T132-1)
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
-  return { config, channels, projects, ask: createAsk({ config, channels, log }) };
+  return { config, channels, projects, own, ask: createAsk({ config, channels, log }) };
 }
 
 /**
@@ -119,7 +120,7 @@ export async function enter(client, { config, channels, ask, log }) {
  */
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const { config, channels, projects, ask } = prepare(file, log);
+  const { config, channels, projects, own, ask } = prepare(file, log);
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
@@ -132,7 +133,7 @@ export async function start(file) {
   const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
   const bridge = createBridge({
     sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
-    own: pickProject(config, projects).name,
+    own,
     config,
     statePath: config.statePath,
     log,

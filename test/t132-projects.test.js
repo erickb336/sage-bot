@@ -139,7 +139,7 @@ test('T132 migration: a gate file, a team votes file and a spool file of the tim
   const [[threadId, thread]] = [...b.discord.threads];
   assert.equal(thread.name, 'Session 1 · project · Sun 4 Oct');
   assert.deepEqual(b.discord.in(threadId).map((id) => b.discord.messages.get(id)[0].embeds?.[0].title), ['Question project/G2 · T1 Alpha export']);
-  assert.deepEqual([...loadVotes(`${b.statePath}.votes`, 'project')], ['project/G1', 'project/G2']);
+  assert.deepEqual([...loadVotes(`${b.statePath}.votes`)], ['project/G1', 'project/G2']);
 });
 
 test('T132: the hook records a session in every listed project, the deepest one for nested folders, and ignores every other folder', () => {

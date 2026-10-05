@@ -20,7 +20,7 @@ test('F-T47-1: a link at the gate file or the team votes file is refused, and a 
   symlinkSync(join(dir, 'real.json'), join(dir, 'gates.json'));
   symlinkSync(join(dir, 'real.json'), join(dir, 'gates.json.votes'));
   assert.throws(() => load(join(dir, 'gates.json')), { message: REFUSED('gate file', join(dir, 'gates.json')) });
-  assert.throws(() => loadVotes(join(dir, 'gates.json.votes'), 'project'), { message: REFUSED('team votes file', join(dir, 'gates.json.votes')) });
+  assert.throws(() => loadVotes(join(dir, 'gates.json.votes')), { message: REFUSED('team votes file', join(dir, 'gates.json.votes')) });
   // A link or a 0644 file that comes in between the check and the read, 1,000s of times.
   const path = join(dir, 'gates.json.votes');
   rmSync(path);
@@ -56,12 +56,12 @@ test('F-T47-1: a folder that group or other users may write is refused without t
   for (const [mode, ok] of [[0o700, true], [0o755, true], [0o770, false], [0o777, false], [0o1777, true], [0o1770, true]]) {
     const dir = scratch('dir');
     const path = join(dir, 'gates.json.votes');
-    own(path, '["G7"]');
+    own(path, '["project/G7"]');
     chmodSync(dir, mode);
     try {
-      if (ok) assert.deepEqual([...loadVotes(path, 'project')], ['project/G7'], `mode ${mode.toString(8)}`);
+      if (ok) assert.deepEqual([...loadVotes(path)], ['project/G7'], `mode ${mode.toString(8)}`);
       else {
-        assert.throws(() => loadVotes(path, 'project'), {
+        assert.throws(() => loadVotes(path), {
           message: `the team votes file ${path} is in a folder that other users may write. Make the folder 0700. Nothing was loaded.`,
         }, `mode ${mode.toString(8)}`);
       }

@@ -44,7 +44,7 @@ async function asked({ question = QUESTION[0], options = QUESTION[1], members } 
   const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', question, '--options', options, '--recommend', 'No');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['G1']));
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1']));
   await b.post();
   return b;
 }
@@ -187,8 +187,8 @@ test('F-T73-2: a gate in both the team votes file and the leads-only file gets n
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
-  saveVotes(`${b.statePath}.votes`, new Set(['G1']));
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['G1']));
+  saveVotes(`${b.statePath}.votes`, new Set(['project/G1']));
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1']));
   await b.post();
   await b.bridge.loop();
   assert.deepEqual(cards(b), []);
@@ -218,7 +218,7 @@ test('F-T73-11: a team vote and the leads-only question of one task, asked toget
   b.sh('gate', 'add', 'T1', '--question', 'Ship it?', '--options', 'Yes|No', '--recommend', 'No');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G1');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['G2']));
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G2']));
   await b.post();
   assert.deepEqual(cards(b).map((p) => [p.embeds[0].title, p.allowedMentions.roles]), [
     ['Question project/G1 · T1 Ship the export page', [APPRENTICE, LEAD]],
@@ -257,7 +257,7 @@ test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both"
   // A gate that stays in both files after the second read gets no card and one line.
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G2');
-  saveVotes(`${b.statePath}.votes.leads`, new Set(['G1', 'G2']));
+  saveVotes(`${b.statePath}.votes.leads`, new Set(['project/G1', 'project/G2']));
   await b.post();
   await b.bridge.loop();
   assert.equal(cards(b).length, 1);

@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { forTerminal } from '../src/clean.js';
 import { projectsOf } from '../src/ask.js';
+import { pickProject } from '../src/sage.js';
 import { record, sessionsPathOf } from '../src/sessions.js';
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash']);
@@ -29,7 +30,9 @@ try {
   const configPath = args[0] === '--config' ? args[1] : join(homedir(), '.config', 'sage-bot', 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   const input = JSON.parse(readFileSync(0, 'utf8'));
-  record(input, { projects: projectsOf(config), dir: sessionsPathOf(config), pid: claudePid(), now: Date.now(), home: homedir() });
+  const projects = projectsOf(config);
+  pickProject(config, projects); // a config whose project is not listed records nothing (F-T132-1)
+  record(input, { projects, dir: sessionsPathOf(config), pid: claudePid(), now: Date.now(), home: homedir() });
 } catch (e) {
   process.stderr.write(`sage-bot hook: nothing recorded: ${forTerminal(e?.message ?? e)}\n`);
 }

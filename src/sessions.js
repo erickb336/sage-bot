@@ -47,7 +47,7 @@ export function projectOf(word, home) {
 }
 
 /** A path with its links resolved; a path that does not exist stays as it is. */
-const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
+export const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
 /** Whether `path` is the project folder or a folder inside it (a subfolder, a worktree in it), by their real paths (F-T29-5). */
 export function inside(path, project) {
   const rel = relative(real(project), real(path));

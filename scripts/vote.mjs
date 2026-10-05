@@ -9,38 +9,14 @@
 // A leads-only gate is the automatic-merge question (LEADS_QUESTION in src/bridge.js) with the options Yes|No. Only the sage-leads answer it,
 // as a recommendation; the owner decides at the terminal. --leads reads the gate from the logbook of the project and refuses any other.
 // Its list is `<votes list>.leads`. A gate is in one list at most: a mark moves it.
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { projectsOf } from '../src/ask.js';
 import { notLeadsOnly } from '../src/bridge.js';
 import { forTerminal } from '../src/clean.js';
 import { pickProject, sageTool } from '../src/sage.js';
-import { alive, GATE_ID, keyOf, leadsPathOf, loadLeads, loadVotes, saveVotes, unlock, votesPathOf } from '../src/state.js';
-
-/**
- * Runs `work` while this run holds `<path>.lock`, so that two runs at once never lose a mark (F-T47-1). The lock holds the pid of its
- * run. A lock of a pid that no process has (or of this pid) is stale and replaced; a lock with no pid yet is being written. A live
- * holder has 2 s to finish.
- */
-function withLock(path, work) {
-  const file = `${path}.lock`;
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  for (const until = Date.now() + 2000; ;) {
-    let fd;
-    try { fd = openSync(file, 'wx', 0o600); } catch (e) { if (e.code !== 'EEXIST') throw e; }
-    if (fd !== undefined) {
-      try { writeSync(fd, String(process.pid)); } finally { closeSync(fd); }
-      try { return work(); } finally { rmSync(file, { force: true }); }
-    }
-    let text;
-    try { text = readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
-    const pid = /^\d+$/.test(text) ? Number(text) : undefined;
-    if (pid !== undefined && (pid === process.pid || !alive(pid))) { unlock(file, text); continue; }
-    if (Date.now() > until) throw new Error(`another vote run (pid ${pid ?? 'unknown'}) holds ${file}. If none runs, remove ${file}. Nothing changed.`);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-  }
-}
+import { GATE_ID, keyOf, leadsPathOf, loadLeads, loadVotes, migrateMarks, saveVotes, votesPathOf, withLock } from '../src/state.js';
 
 const USAGE = 'usage: node scripts/vote.mjs [--config <config.json>] [--project <name>] <gate id> ... | --leads <gate id> | --unmark <gate id> ... | --list';
 
@@ -63,6 +39,7 @@ try {
   const own = pickProject(config, projects).name;
   const path = votesPathOf(config);
   const leadsPath = leadsPathOf(config);
+  migrateMarks(config, own); // the bare gate ids of the lists before T132 become keys of the own project, once
   if (mode === '--leads') {
     // A missing or wrong sagePath gives one line, never the child's stack (F-T73-7).
     const rows = await sageTool(project).gates().catch(() => {
@@ -74,7 +51,7 @@ try {
   }
   if (mode !== '--list') {
     withLock(path, () => {
-      const [votes, leads] = [loadVotes(path, own), loadLeads(leadsPath, own)];
+      const [votes, leads] = [loadVotes(path), loadLeads(leadsPath)];
       const before = leads.size;
       for (const id of args.map((x) => keyOf(project.name, x))) {
         votes[mode === '--mark' ? 'add' : 'delete'](id);
@@ -85,8 +62,8 @@ try {
       if (mode === '--leads') { saveVotes(path, votes); saveLeads(); } else { saveLeads(); saveVotes(path, votes); }
     });
   }
-  const ids = [...loadVotes(path, own)];
-  const leads = [...loadLeads(leadsPath, own)];
+  const ids = [...loadVotes(path)];
+  const leads = [...loadLeads(leadsPath)];
   console.log(ids.length ? `team votes: ${ids.join(' ')}` : 'team votes: none');
   if (leads.length) console.log(`leads only: ${leads.join(' ')}`);
 } catch (e) {

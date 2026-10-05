@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { real } from './sessions.js';
 
 const run = promisify(execFile);
 
@@ -41,12 +42,20 @@ export function sageTool({ sagePath, project, env = process.env }) {
 }
 
 /**
- * The project of the config named `name`, or the bridge's own project (the one whose folder is `project`, else the first) when `name` is
- * undefined (T132). Throws for a name that the config does not list.
+ * The project of the config named `name`, or the bridge's own project when `name` is undefined (T132): the listed project whose folder is
+ * the config's `project`, by their real paths (a trailing slash or a symlink names the same folder). Throws for a name that the config
+ * does not list, and for a `project` that no listed project has: the bridge, the hook, vote.mjs and reasons.mjs then refuse to start,
+ * and never take another project's gates for their own (F-T132-1).
  * @param {{ project?: string }} config @param {{ name: string, project: string, sagePath: string }[]} projects  src/ask.js projectsOf
  */
 export function pickProject(config, projects, name) {
-  const p = name === undefined ? projects.find((x) => x.project === config.project) ?? projects[0] : projects.find((x) => x.name === name);
+  if (name === undefined) {
+    const at = typeof config.project === 'string' ? real(config.project) : undefined;
+    const p = projects.find((x) => real(x.project) === at);
+    if (!p) throw new Error(`the config's project (${config.project ?? 'missing'}) is not in its projects. Add it to projects, with a name. Nothing was started.`);
+    return p;
+  }
+  const p = projects.find((x) => x.name === name);
   if (!p) throw new Error(`the project "${name}" is not in the config's projects (${projects.map((x) => x.name).join(', ')}). Nothing changed.`);
   return p;
 }

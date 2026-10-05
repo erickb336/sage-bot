@@ -18,7 +18,8 @@ const ELSEWHERE = '400000000000000003'; // a channel that is not registered
 /** createAsk on the registry that the config makes at the first start (T130): #ask-sage and the parent channel. */
 const createAsk = (o) => {
   rmSync(`${o.config.statePath}.channels`, { force: true }); // each ask here is a first start, also for another project list
-  return rawAsk({ ...o, channels: openChannels(o.config, projectsOf(o.config)) });
+  const config = { project: o.config.projects?.[0].project, ...o.config }; // a bridge config always names its own project (F-T132-1)
+  return rawAsk({ ...o, config, channels: openChannels(config, projectsOf(config)) });
 };
 const SECRET = 'ZZSECRET';
 const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20

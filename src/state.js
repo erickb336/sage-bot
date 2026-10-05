@@ -37,7 +37,9 @@ function entryOf(e) {
     // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
     // T73: a leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
-    && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'));
+    && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'))
+    // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).
+    && (e.oldButtons === undefined || e.oldButtons === true);
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
   if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
     throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
@@ -70,7 +72,8 @@ export function load(path, own) {
   if (![1, 2, VERSION].includes(data?.version) || !Array.isArray(data.entries) || !Array.isArray(sessions)) throw new TypeError(`the gate file ${path} is not version 1, 2 or 3`);
   const old = data.version < VERSION;
   if (old && own === undefined) return { version: data.version, entries: data.entries, sessions: sessions.map(sessionOf) };
-  const entries = old ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) } })) : data.entries;
+  // An old entry with a card gets the mark `oldButtons`: its buttons name the bare gate id until the bridge edits the card (F-T132-5).
+  const entries = old ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) }, ...(e?.message && { oldButtons: true }) })) : data.entries;
   return { version: data.version, entries: entries.map(entryOf), sessions: sessions.map(sessionOf) };
 }
 
@@ -139,22 +142,64 @@ export function votesPathOf({ votesPath, statePath }) {
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
 /** The keys in the leads-only file, checked like the team votes file. */
-export const loadLeads = (path, own) => loadVotes(path, own, 'leads-only file');
+export const loadLeads = (path) => loadVotes(path, 'leads-only file');
 
 /**
  * The marked gate keys, as a Set; an empty Set when there is no file. Throws for a file that is not this user's 0600 file, or not a list
- * of gate keys. A bare gate id (the file before T132) is a gate of `own`, the bridge's own project; the next save writes its key.
+ * of gate keys: a bare gate id (the file before T132) too, because only `migrateMarks` gives it its project (F-T132-1).
  * `what` names the file in the message: the team votes file, or the leads-only file.
  */
-export function loadVotes(path, own, what = 'team votes file') {
+export function loadVotes(path, what = 'team votes file') {
   const text = readOwn(path, what);
   if (text === undefined) return new Set();
   let ids;
   try { ids = JSON.parse(text); } catch { ids = null; }
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && (GATE_KEY.test(id) || (GATE_ID.test(id) && PROJECT_NAME.test(own ?? ''))))) {
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === 'string' && GATE_KEY.test(id))) {
     throw new TypeError(`the ${what} ${path} must be a JSON list of sage gate keys (a project name, a slash, G and digits). Nothing was loaded.`);
   }
-  return new Set(ids.map((id) => (GATE_ID.test(id) ? keyOf(own, id) : id)));
+  return new Set(ids);
+}
+
+/**
+ * Rewrites the bare gate ids of the team votes file and the leads-only file of the time before T132 as keys of `own`, the bridge's own
+ * project, once, under the lock of scripts/vote.mjs: no later read gives a bare id a project again (F-T132-1). A file with no bare id,
+ * or that is not a list of gate ids and keys, stays as it is; `loadVotes` says what is wrong with it.
+ */
+export function migrateMarks(config, own) {
+  const path = votesPathOf(config);
+  withLock(path, () => {
+    for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'leads-only file']]) {
+      const text = readOwn(file, what);
+      let ids;
+      try { ids = JSON.parse(text ?? 'null'); } catch { ids = null; }
+      if (!Array.isArray(ids) || !ids.every((id) => GATE_KEY.test(id) || GATE_ID.test(id)) || !ids.some((id) => GATE_ID.test(id))) continue;
+      saveVotes(file, new Set(ids.map((id) => (GATE_ID.test(id) ? keyOf(own, id) : id))));
+    }
+  });
+}
+
+/**
+ * Runs `work` while this run holds `<path>.lock`, so that two runs at once never lose a mark (F-T47-1). The lock holds the pid of its
+ * run. A lock of a pid that no process has (or of this pid) is stale and replaced; a lock with no pid yet is being written. A live
+ * holder has 2 s to finish.
+ */
+export function withLock(path, work) {
+  const file = `${path}.lock`;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  for (const until = Date.now() + 2000; ;) {
+    let fd;
+    try { fd = openSync(file, 'wx', 0o600); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    if (fd !== undefined) {
+      try { writeSync(fd, String(process.pid)); } finally { closeSync(fd); }
+      try { return work(); } finally { rmSync(file, { force: true }); }
+    }
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+    const pid = /^\d+$/.test(text) ? Number(text) : undefined;
+    if (pid !== undefined && (pid === process.pid || !alive(pid))) { unlock(file, text); continue; }
+    if (Date.now() > until) throw new Error(`another vote run (pid ${pid ?? 'unknown'}) holds ${file}. If none runs, remove ${file}. Nothing changed.`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
 }
 
 /** Replaces the team votes file whole, sorted by project and then by number. */

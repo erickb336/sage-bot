@@ -51,7 +51,7 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const lines = [];
   const b = { root, project, sh, discord, lines, now: T0, statePath };
   /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys. */
-  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Set([...loadVotes(`${statePath}.votes`, NAME), ...ids.map((id) => `${NAME}/${id}`)]));
+  b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Set([...loadVotes(`${statePath}.votes`), ...ids.map((id) => `${NAME}/${id}`)]));
   b.sage = sageTool({ sagePath: SAGE, project, env });
   b.make = () => createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
   b.bridge = b.make();

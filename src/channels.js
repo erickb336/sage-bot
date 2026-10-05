@@ -5,6 +5,7 @@
 // (a lead's unregister) or scripts/channels.mjs (Erick, while the bridge is stopped). A bad file stops the bridge at start.
 import { lstatSync } from 'node:fs';
 import { PermissionFlagsBits } from 'discord.js';
+import { pickProject } from './sage.js';
 import { readOwn, writeWhole } from './state.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -77,7 +78,7 @@ export function migrate(config, projects, log = () => {}) {
     if (config[key] !== undefined && !SNOWFLAKE.test(config[key])) throw new TypeError(`the config: ${key} must be a Discord id (17 to 20 digits)`);
   }
   const path = channelsPathOf(config);
-  const own = (projects.find((p) => p.project === config.project) ?? projects[0]).name;
+  const own = pickProject(config, projects).name;
   const map = new Map();
   if (config.askChannelId && config.askChannelId !== config.channelId) map.set(config.askChannelId, { project: projects[0].name });
   map.set(config.channelId, { project: config.askChannelId === config.channelId ? projects[0].name : own, home: true });

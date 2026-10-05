@@ -3,11 +3,11 @@
 // press after the Mac slept. Discord comes in as a port (`post`, `edit`, `startThread`, `setLocked`, `members`): the real one is
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
-import { card, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
+import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
-import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, projectOfKey, save, votesPathOf } from './state.js';
+import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
@@ -161,9 +161,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
   const persist = () => save(statePath, [...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), [...sessions.values()]);
-  // A gate file of the time before T132 gets the keys at once. Its open cards carry buttons with the old ids: the first loop redraws them.
-  let restyle = loaded.version < 3 && gates.size > 0;
+  // The files of the time before T132 get the keys at once. A card posted before keeps its old buttons, with the mark `oldButtons`,
+  // until an edit of it works: each loop tries (F-T132-5).
   if (loaded.version < 3) persist();
+  migrateMarks({ statePath, votesPath: config.votesPath }, own);
+  const gone = new Set(); // the cards of a project that left the config, already logged once (F-T132-2)
   /** The sage tool of the project of the entry `id`. */
   const sageOf = (id) => sages.get(projectOfKey(id));
   /** The entries of `project`, as [id, meta]. */
@@ -205,10 +207,12 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     persist();
     for (const [id] of moving) say(`${id}: its card moves to the parent channel, because the thread of ${x.title} is gone (G17)`);
   };
+  /** Edits a message; true when Discord took the edit. */
   const edit = async (target, message, payload, what) => {
-    try { await discord.edit(target, message, payload); } catch (e) {
+    try { await discord.edit(target, message, payload); return true; } catch (e) {
       const x = goneThread(target, e);
       if (x) lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
+      return false;
     }
   };
   const setLocked = async (x, locked) => {
@@ -336,11 +340,17 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /** The questions of a session that still wait for an answer, on its cards and on the gates that wait for their card. */
   const openOf = (sid) => [...meta].reduce((n, [id, m]) => n + (m.session === sid ? openQuestions(id) : 0), 0);
 
-  /** Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). */
+  /**
+   * Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). The first edit that works gives a card of the time
+   * before T132 the buttons with the keys, so it loses its mark `oldButtons` (F-T132-5).
+   */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
-    const { message, channel } = meta.get(id);
-    if (message) await edit(channel ?? config.channelId, message, card(gate, ask, ppl), id);
+    const m = meta.get(id);
+    if (m.message && (await edit(m.channel ?? config.channelId, m.message, card(gate, ask, ppl), id)) && m.oldButtons) {
+      delete m.oldButtons;
+      persist();
+    }
   }
 
   /** The parts of a batch that wait for a lead: tied after the vote, with no final answer from the terminal. */
@@ -546,7 +556,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
    */
   function teamVotes() {
     try {
-      const read = () => ({ votes: loadVotes(votesPath, own), leads: loadLeads(leadsPath, own) });
+      const read = () => ({ votes: loadVotes(votesPath), leads: loadLeads(leadsPath) });
       let marks = read();
       if ([...marks.votes].some((id) => marks.leads.has(id))) marks = read();
       votesError = null;
@@ -686,10 +696,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       const ppl = await people();
       const wall = now();
       readSessions();
-      if (restyle) { // the first loop after the move to keys: each open card gets its buttons with the keys
-        restyle = false;
-        for (const id of gates.keys()) if (waits(id)) await redraw(id, ppl);
-      }
+      for (const [id, m] of meta) if (m.oldButtons) await redraw(id, ppl); // the cards with old buttons, open or settled (F-T132-5)
       await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
       // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
       // place that has an open question.
@@ -717,8 +724,19 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (!ppl.holders.has(by)) return;
         // The owner's answers at the terminal come first: a press never counts on a part that has one (G10). Only the logbook of the
         // project in the key of the press: a key of a project that the config does not list finds no gate (T132).
-        const pressed = parseCustomId(i.customId);
+        let pressed = parseCustomId(i.customId);
+        // An old button (a bare gate id) of a card that still has its old buttons is a press on that card: the own project's (F-T132-5).
+        if (pressed && meta.get(keyOf(own, pressed.gateId))?.oldButtons) {
+          pressed = { ...pressed, gateId: keyOf(own, pressed.gateId) };
+          i = Object.create(i, { customId: { value: customId(pressed.action, pressed.gateId, pressed.part, pressed.index) } });
+        }
         const project = projectOfKey(pressed?.gateId);
+        // A card of a project that left the config: sage of that project never gets an answer from the bridge (F-T132-2).
+        if (pressed && gates.has(pressed.gateId) && !sages.has(project)) {
+          if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: its project is no longer in the config, so its card takes no press; ${OWNER} answers it at the terminal`); }
+          await i.reply(ephemeral(`This question's project is no longer served; ${OWNER} answers it at the terminal.`));
+          return;
+        }
         if (sages.has(project)) await takeOwner(project, await sages.get(project).gates(), ppl);
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;

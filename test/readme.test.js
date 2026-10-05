@@ -67,6 +67,7 @@ function scratchHome() {
   const home = mkdtempSync(join(tmpdir(), 'sage-bot-readme-'));
   const config = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
   Object.assign(config, { project: join(home, 'project'), sagePath: join(home, 'sage.mjs'), statePath: join(home, 'state', 'gates.json') });
+  config.projects[0].project = config.project; // the owner fills in the same folder in both places (F-T132-1)
   mkdirSync(join(home, '.config', 'sage-bot'), { recursive: true });
   mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
   mkdirSync(join(home, 'tmp'));
