@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
-import { askCommand, createAsk, projectsOf, STOP, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, projectsOf, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
 import { sageTool } from './sage.js';
 import { forTerminal } from './clean.js';
@@ -78,7 +78,7 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch)) : undefined;
-    if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP)) {
+    if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP || i.customId === STOP_CANCEL)) {
       return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member),
         customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
     }

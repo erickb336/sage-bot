@@ -6,11 +6,18 @@ import { REASON_MAX } from './vote.js';
  * Text for sage, a MODEL reader (F-T28-25, F-T28-3, F-T28-14): a voter's ballot reason, before sage reads it.
  * The hazards for a model are terminal escapes, hidden or reordered text (format, bidi and tag characters), shell
  * metacharacters, and text written as instructions, also sage's switch phrases. The allow-list keeps only letters, decimal
- * digits, at most 3 marks on a letter, one space between words, and `. , : -`. So no escape, no hidden character, no quote,
+ * digits, at most 3 marks on a letter, one space between words, and `. , : -`. So no escape, no hidden character, no quote (also no letter that looks like one),
  * no newline and no shell metacharacter stays, and the reason cannot leave the quotes that sage's view puts around it.
  * Words stay words: an instruction in a reason is still there, so sage's view frames each reason as quoted data
  * (see `reasonLines`), never as an instruction. The cut comes before NFKC, so a short text that expands stays bounded (F-T28-5, F-T28-8).
  */
+/**
+ * Characters that look like `<` or `>` (F-T131-10) and letters that look like a quote (F-T131-9), from Unicode's confusables and
+ * NFKC. A model could read one as a tag bracket or as the end of a quoted frame: forModel keeps none of them, forLead maps the angles.
+ */
+export const LOOKS_LT = /^[<\u02C2\u1438\u16B2\u2329\u276C\u276E\u2770\u226E\u27E8\u3008\uFE64\uFF1C\u{1D236}]$/u;
+export const LOOKS_GT = /^[>\u02C3\u1433\u232A\u276D\u276F\u2771\u226F\u27E9\u3009\uFE65\uFF1E\u{1D237}\u{16F3F}]$/u;
+const LOOKS_QUOTE = /^[\u02B9-\u02BF\u02C8\u02CA\u02CB\u02EE\u0559\u07F4\u07F5\u144A\u16CC\uA78B\uA78C]$/u;
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
 const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
 const KEEP = /^[\p{Nd}.,:\-]$/v;
@@ -19,7 +26,7 @@ export function forModel(text) {
   let out = '';
   let marks = -1; // -1: no letter before, so no mark may stay; else the marks on the last letter
   for (const ch of cut) {
-    if (LETTER.test(ch)) [out, marks] = [out + ch, 0];
+    if (LETTER.test(ch) && !LOOKS_QUOTE.test(ch) && !LOOKS_LT.test(ch) && !LOOKS_GT.test(ch)) [out, marks] = [out + ch, 0];
     else if (MARK.test(ch) && marks >= 0 && marks < 3) [out, marks] = [out + ch, marks + 1];
     else if (KEEP.test(ch)) [out, marks] = [out + ch, -1];
     else if (!MARK.test(ch)) [out, marks] = [out + ' ', -1]; // every other character parts words

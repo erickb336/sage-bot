@@ -17,7 +17,7 @@ import { auditPathOf, entryOf, forLead, killPathOf, linkOff, openLog, quoted, se
 import { DRY_RUN, foreign, isTalk, LINK_OFF, loadThreads, noRight, readAsk, saveThreads, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of a role holder counts,
- * also a refused one; a mention that opens a thread counts once. */
+ * also a refused one; a mention that opens a thread counts once. A /sage stop of a sage-lead or Erick does not count: the kill switch always works. */
 export const ASK_LIMIT = 10;
 export const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -178,10 +178,11 @@ export function readShared(files) {
 /** The custom_id of the confirm button of /sage unregister: this prefix and the channel id. Its Cancel button is CANCEL. */
 export const UNREGISTER = 'channel-unregister:';
 export const CANCEL = `${UNREGISTER}cancel`;
-/** How long the confirm of /sage unregister works after Discord made it. */
+/** How long the confirm of /sage unregister or /sage stop works after Discord made it. */
 export const CONFIRM_FOR = 10 * 60_000;
-/** The custom_id of the confirm button of /sage stop (the kill switch). */
+/** The custom_ids of the confirm button of /sage stop (the kill switch) and of its Cancel button. */
 export const STOP = 'leads-stop';
+export const STOP_CANCEL = 'leads-stop:cancel';
 /** Discord's codes for a right that sage-bot lacks: Missing Access and Missing Permissions. */
 const NO_RIGHT = new Set([50001, 50013]);
 
@@ -277,7 +278,7 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     if (!isLead(roles) && user.id !== config.ownerId) return { content: 'Only a sage-lead or Erick can turn off the link from Discord to sage. Ask a lead.' };
     if (linkOff(killPath)) return { content: 'The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.' };
     return { content: 'Turn off the link from Discord to sage? Then nothing of a lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.',
-      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }] }] };
+      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: STOP_CANCEL }] }] };
   }
 
   /**
@@ -311,7 +312,8 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     if (t.kind === 'lead' || (lead && isTalk(m.content))) {
       const off = linkOff(killPath); // checked before each would-be delivery; a flag that cannot be checked counts as set
       if (t.kind === 'answer') { // a lead's talk turns an answer thread into a lead thread; its apprentices' text goes first, as quoted data (G27)
-        while (t.held.length) { const h = t.held[0]; record({ ...h, user: { id: h.user } }, { thread, project: t.project, outcome: 'earlier' }); t.held.shift(); }
+        // Safe to repeat (F-T131-13): a held mention that the log already holds (a failed save of the thread map, then a restart) is not logged again.
+        for (const h of t.held) if (!leadLog.has(h.id)) record({ ...h, user: { id: h.user } }, { thread, project: t.project, outcome: 'earlier' });
         delete t.held;
         t.kind = 'lead';
         keep(thread);
@@ -326,7 +328,11 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : BUILDS}` : POINTER };
   }
 
-  /** A press of the /sage stop confirm: a sage-lead or Erick sets the kill switch; anyone else changes nothing. */
+  /**
+   * A press of the /sage stop confirm: a sage-lead or Erick sets the kill switch; Cancel, or a confirm older than CONFIRM_FOR (or of no
+   * known time), changes nothing and closes the confirm (F-T131-2), so an old confirm cannot set the flag again after Erick's restore.
+   * Anyone else changes nothing.
+   */
   async function stopPress(b, roles) {
     const fail = (e) => say(`Discord refused the stop reply: code ${e?.code ?? '-'}: ${e?.message}`);
     if (!isLead(roles) && b.user.id !== config.ownerId) {
@@ -334,14 +340,16 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
       return;
     }
     let content;
-    try {
+    if (b.customId === STOP_CANCEL) content = 'Cancelled. Nothing changed.';
+    else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.';
+    else try {
       setLinkOff(killPath, b.user.id, now());
       say(`${b.user.id} turned off the link from Discord to sage (the kill switch ${killPath}). Turn it on again with: node scripts/leads.mjs restore`);
       content = `<@${b.user.id}> turned off the link from Discord to sage. Nothing of a lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.`;
       try { record({ ...b, roles, content: '/sage stop' }, { outcome: 'link-off-set' }); } catch (e) { say(`the lead log could not record the stop: ${e?.message}`); }
     } catch (e) {
       say(`the kill switch ${killPath} could not be set: ${e?.message}`);
-      content = 'I could not turn off the link just now. Ask Erick to turn it off at the terminal.';
+      content = 'I could not turn off the link just now. Ask Erick to turn it off at the terminal with: node scripts/leads.mjs stop';
     }
     await b.update({ content, components: [], allowedMentions: NO_MENTIONS }).catch(fail);
   }
@@ -405,14 +413,16 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
       }
       let payload;
       try {
-        const at = await registered(i.channelId, i.parentId);
-        const text = at ? null : pointer(i.user.id, `I answer /sage in ${here()}, so please ask there.`);
-        if (!at && !text) { // ignored: the deferred reply goes again, so nothing stays in the channel
+        // The kill switch always works (F-T131-3): a /sage stop of a sage-lead or Erick skips the limit and works in any channel.
+        const stop = i.sub === 'stop' && (isLead(i.roles ?? []) || i.user.id === config.ownerId);
+        const at = stop ? null : await registered(i.channelId, i.parentId);
+        const text = stop || at ? null : pointer(i.user.id, `I answer /sage in ${here()}, so please ask there.`);
+        if (!stop && !at && !text) { // ignored: the deferred reply goes again, so nothing stays in the channel
           await i.remove().catch((e) => say(`Discord refused to remove a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`));
           return;
         }
         const next = at && spend(i.user.id);
-        payload = !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
+        payload = stop ? stopAsk(i.user, i.roles) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
       } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
@@ -423,16 +433,16 @@ export function createAsk({ config, channels, now = Date.now, log = (line) => pr
     },
     /**
      * A press of a button of the /sage unregister confirm or the /sage stop confirm: `{ user: { id, name, bot }, roles, customId, sentAt,
-     * update, reply }`, where `sentAt` is when Discord made the confirm. STOP goes to the kill switch (stopPress). A sage-lead's press of
+     * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL go to the kill switch (stopPress). A sage-lead's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the lead's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. An
      * apprentice's press changes nothing and gets a reply of its own, so the lead's confirm stays. A member with neither sage role, and a
-     * custom_id that is not STOP, CANCEL or a channel id, get nothing. Never rejects.
+     * custom_id that is not STOP, STOP_CANCEL, CANCEL or a channel id, get nothing. Never rejects.
      */
     async press(b) {
       const roles = b.roles ?? [];
       if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '') || !(isHolder(roles) || b.user.id === config.ownerId)) return;
-      if (b.customId === STOP) return stopPress(b, roles);
+      if (b.customId === STOP || b.customId === STOP_CANCEL) return stopPress(b, roles);
       const id = String(b.customId).slice(UNREGISTER.length);
       if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
       let content;
