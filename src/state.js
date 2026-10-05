@@ -3,7 +3,7 @@
 // user owns or that others may write. Every gate in it goes through parseGate on fresh JSON.parse output. The bridge loads
 // it only from this path, never from Discord or a shared place.
 import { execFileSync } from 'node:child_process';
-import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseGate } from './vote.js';
 
@@ -50,14 +50,29 @@ export function load(path) {
   return { entries: data.entries.map(entryOf), sessions: sessions.map(sessionOf) };
 }
 
-/** The text of a file that only this user may read and write, or undefined when there is none. Throws for any other file. */
+/**
+ * The text of a file that only this user may read and write, or undefined when there is none. Throws for any other file (F-T47-1).
+ * The checks are on the open file, not on its name, so a file swapped in after a check is never read: the open refuses a link, and
+ * the read is from the same descriptor that fstat checked. A folder that other users may write, without the sticky bit, is refused:
+ * they could replace the file there.
+ */
 export function readOwn(path, what) {
-  const st = lstatSync(path, { throwIfNoEntry: false });
-  if (!st) return undefined;
-  if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
-    throw new Error(`the ${what} ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`);
+  const dir = statSync(dirname(path), { throwIfNoEntry: false });
+  if (!dir) return undefined;
+  if ((dir.mode & 0o022) !== 0 && (dir.mode & 0o1000) === 0) {
+    throw new Error(`the ${what} ${path} is in a folder that other users may write. Make the folder 0700. Nothing was loaded.`);
   }
-  return readFileSync(path, 'utf8');
+  const refuse = () => new Error(`the ${what} ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`);
+  let fd;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); } catch (e) {
+    if (e.code === 'ENOENT') return undefined;
+    throw e.code === 'ELOOP' ? refuse() : e;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) throw refuse();
+    return readFileSync(fd, 'utf8');
+  } finally { closeSync(fd); }
 }
 
 /** Replaces the gate file whole. */
@@ -185,7 +200,7 @@ export function lock(path) {
  * Removes a stale lock when it still has this text. Only one start at a time does this, under `<lock>.break`: a check and a remove are
  * two steps, and without it a slow start could remove the new lock of a faster one. A break file of a crash goes after GRACE ms.
  */
-function unlock(file, text) {
+export function unlock(file, text) {
   const guard = `${file}.break`;
   try { closeSync(openSync(guard, 'wx', 0o600)); } catch (e) {
     if (e.code !== 'EEXIST') throw e;
