@@ -1,7 +1,8 @@
 // The read commands of #ask-sage (T71, G18 option A): /sage board, task, gates and files, and one pointer for an @sage-bot mention.
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
 // columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
-// and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. A member with neither sage role gets nothing. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
+// and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. A member with neither sage role gets
+// nothing. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
