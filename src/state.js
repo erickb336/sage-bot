@@ -111,7 +111,7 @@ export const save = (path, entries, sessions = []) => writeWhole(path, JSON.stri
 
 /** A sage gate id, as sage writes it: G and digits. */
 export const GATE_ID = /^G\d{1,9}$/;
-/** The name of a project of the config: lower-case letters, digits and dashes, at most 32 (src/ask.js projectsOf). */
+/** The name of a project of the config: lower-case letters, digits and dashes, at most 32 (src/projects.js projectsOf). */
 export const PROJECT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 /**
  * The key of a gate of one project (T132): `<project name>/<gate id>`, for example `sage-bot/G1`. sage's gate ids start at G1 in each

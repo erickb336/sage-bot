@@ -5,7 +5,7 @@
 // (a lead's unregister) or scripts/channels.mjs (Erick, while the bridge is stopped). A bad file stops the bridge at start.
 import { lstatSync } from 'node:fs';
 import { PermissionFlagsBits } from 'discord.js';
-import { pickProject } from './sage.js';
+import { pickProject } from './projects.js';
 import { readOwn, writeWhole } from './state.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -78,7 +78,7 @@ export function migrate(config, projects, log = () => {}) {
     if (config[key] !== undefined && !SNOWFLAKE.test(config[key])) throw new TypeError(`the config: ${key} must be a Discord id (17 to 20 digits)`);
   }
   const path = channelsPathOf(config);
-  const own = pickProject(config, projects).name;
+  const own = pickProject(projects).name;
   const map = new Map();
   if (config.askChannelId && config.askChannelId !== config.channelId) map.set(config.askChannelId, { project: projects[0].name });
   map.set(config.channelId, { project: config.askChannelId === config.channelId ? projects[0].name : own, home: true });
@@ -90,7 +90,7 @@ export function migrate(config, projects, log = () => {}) {
 /**
  * The registry of the bridge at its start: the file, or a new one made by `migrate`. Throws, and the bridge stops before Discord, when
  * there is neither, or when a channel's project is not in the config; each message names the command that repairs it.
- * @param {{ name: string, project: string }[]} projects  the checked projects of the config (src/ask.js projectsOf)
+ * @param {{ name: string, project: string }[]} projects  the projects of the config (src/projects.js loadProjects)
  */
 export function openChannels(config, projects, log = () => {}) {
   const path = channelsPathOf(config);

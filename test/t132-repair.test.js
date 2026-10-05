@@ -9,7 +9,8 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
 import { prepare } from '../src/discord.js';
-import { pickProject, sageTool } from '../src/sage.js';
+import { sageTool } from '../src/sage.js';
+import { loadProjects, pickProject } from '../src/projects.js';
 import { record } from '../src/sessions.js';
 import { openGate } from '../src/vote.js';
 import { CHANNEL, CONFIG, MAYA, SAGE, setup, T0 } from './bridge-setup.js';
@@ -58,12 +59,13 @@ test('F-T132-1: the own project is found by its real folder: a trailing slash an
   const b = two();
   const link = join(b.root, 'link');
   symlinkSync(b.project, link);
-  assert.equal(pickProject({ project: `${b.project}/` }, b.projects).name, 'project');
-  assert.equal(pickProject({ project: link }, b.projects).name, 'project');
-  assert.equal(pickProject({ project: b.project }, [b.projects[0], { ...b.projects[1], project: `${link}/` }]).name, 'project');
+  const own = (project, projects = b.projects) => pickProject(loadProjects({ project, projects })).name;
+  assert.equal(own(`${b.project}/`), 'project');
+  assert.equal(own(link), 'project');
+  assert.equal(own(b.project, [b.projects[0], { ...b.projects[1], project: `${link}/` }]), 'project');
   const elsewhere = join(b.root, 'elsewhere');
-  assert.throws(() => pickProject({ project: elsewhere }, b.projects), { message: REFUSED(elsewhere) });
-  assert.throws(() => pickProject({}, b.projects), { message: REFUSED('missing') });
+  assert.throws(() => own(elsewhere), { message: REFUSED(elsewhere) });
+  assert.throws(() => own(undefined), { message: REFUSED('missing') });
 });
 
 test('F-T132-1: a config whose project is not listed: the bridge, vote.mjs, reasons.mjs and the hook each refuse with one line and change nothing', () => {
@@ -91,7 +93,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   const b = two();
   const old = await oldCard(b);
   const config = { project: `${b.project}/`, statePath: b.statePath, projects: b.projects };
-  const own = pickProject(config, b.projects).name;
+  const own = pickProject(loadProjects(config)).name;
   assert.equal(own, 'project');
   b.bridge = b.with([['beta', b.betaSage], ['project', b.sage]], own);
   assert.deepEqual([saved(b).entries[0].gate.id, readFileSync(`${b.statePath}.votes`, 'utf8')], ['project/G1', '["project/G1"]']);
@@ -163,17 +165,18 @@ test('F-T132-3: a settled card with old buttons answers an old press with the us
   assert.equal(b.answerOf('G1'), 'A');
 });
 
-test('F-T132-6: a session keeps the project of its first event; an event of the same session in another project changes nothing', () => {
+test('F-T132-6, G43 A: a session keeps the project of its first event, also for an event in another project\'s folder; a gate add for another --project changes nothing', () => {
   const b = two();
   const dir = `${b.statePath}.sessions`;
   const at = (cwd, extra = {}) => record({ session_id: S1, cwd, ...extra }, { projects: b.projects, dir, pid: process.pid, now: b.now, home: b.root });
   assert.equal(at(b.project, { hook_event_name: 'SessionStart' }), `SessionStart ${S1}`);
   const gateAdd = { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T1 --question "Q?"' }, tool_response: { stdout: 'G7 open · Q?\n', stderr: '' } };
-  assert.equal(at(b.beta, gateAdd), 'another project');
-  assert.equal(at(b.beta, { hook_event_name: 'SessionStart' }), 'another project');
+  assert.equal(at(b.beta, gateAdd), `PostToolUse ${S1}`);
+  assert.equal(at(b.beta, { hook_event_name: 'SessionStart' }), `SessionStart ${S1}`);
+  const toBeta = { ...gateAdd, tool_input: { command: `node sage.mjs gate add T1 --project ${b.beta}` }, tool_response: { stdout: 'G8 open · Q?\n' } };
+  assert.equal(at(b.project, toBeta), 'another project');
   const spool = JSON.parse(readFileSync(join(dir, `${S1}.json`), 'utf8'));
-  assert.deepEqual([spool.project, spool.gates], ['project', []]);
-  assert.equal(at(b.project, gateAdd), `PostToolUse ${S1}`);
+  assert.deepEqual([spool.project, spool.cwd, spool.gates], ['project', b.project, ['G7']]);
 });
 
 test('F-T132-6: a settled card of a project that left the config sends no answer and logs no failure; the own project\'s answers still go', async () => {

@@ -705,7 +705,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     for (const [id, m] of meta) {
       if (served(id) || m.shut || !m.message || !waits(id)) continue;
       const { gate, ask } = gates.get(id);
-      const payload = { ...card(gate, ask, ppl), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
+      const payload = { ...card(gate, ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
       let why = null;
       try { await discord.edit(m.channel ?? config.channelId, m.message, payload); } catch (e) {
         if (!NO_EDIT.has(e?.code)) { say(`Discord refused the edit of ${id}: ${apiError(e)}`); continue; }

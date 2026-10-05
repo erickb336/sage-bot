@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
-import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, projectsOf, readShared, sharedFiles } from '../src/ask.js';
+import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
+import { loadProjects, projectsOf } from '../src/projects.js';
 import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
@@ -19,7 +20,7 @@ const ELSEWHERE = '400000000000000003'; // a channel that is not registered
 const createAsk = (o) => {
   rmSync(`${o.config.statePath}.channels`, { force: true }); // each ask here is a first start, also for another project list
   const config = { project: o.config.projects?.[0].project, ...o.config }; // a bridge config always names its own project (F-T132-1)
-  return rawAsk({ ...o, config, channels: openChannels(config, projectsOf(config)) });
+  return rawAsk({ ...o, config, channels: openChannels(config, loadProjects(config)) });
 };
 const SECRET = 'ZZSECRET';
 const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20

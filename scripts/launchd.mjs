@@ -8,7 +8,7 @@ import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { refuseOldRoles, SNOWFLAKE } from '../src/bridge.js';
-import { projectsOf } from '../src/ask.js';
+import { loadProjects } from '../src/projects.js';
 import { CONFIG_FIELDS, DISCORD_IDS, plist, stableNode } from '../src/launchd.js';
 import { forTerminal } from '../src/clean.js';
 
@@ -45,9 +45,9 @@ if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}
 const notIds = DISCORD_IDS.filter((k) => (CONFIG_FIELDS.includes(k) || fields[k] !== undefined) && !SNOWFLAKE.test(fields[k]));
 if (notIds.length) stop(`in the config file ${config}, ${notIds.join(', ')} must each be a Discord id (17 to 20 digits). ${nothing}`);
 try {
-  projectsOf(fields); // the projects of /sage, checked as the bridge checks them at start (T71)
+  loadProjects(fields); // the projects, checked as the bridge checks them at start (T71, F-T145-L1)
 } catch (e) {
-  stop(`in the config file ${config}, ${e.message}. ${nothing}`);
+  stop(`in the config file ${config}, ${e.message.replace(/\.? Nothing (changed|was started)\.$/, '')}. ${nothing}`);
 }
 
 let node;

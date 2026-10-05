@@ -22,7 +22,8 @@ function launchd(config) {
     rmSync(home, { recursive: true, force: true });
   }
 }
-const SAMPLE = readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8');
+// The example's project folder is made up; launchd.mjs refuses a folder that does not exist, so the sample names this repository.
+const SAMPLE = readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8').replaceAll('/Users/you/workspace/your-project', realpathSync.native(ROOT));
 const firstArgument = (text) => /<key>ProgramArguments<\/key>\n  <array>\n    <string>([^<]+)<\/string>/.exec(text)?.[1];
 
 test('on this Mac, the plist node is not under Cellar/<version>, and it is the brew symlink when that symlink runs this node', () => {

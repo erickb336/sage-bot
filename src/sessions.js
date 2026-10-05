@@ -1,8 +1,9 @@
 // Sage sessions (T29). A session is one Claude Code session id. scripts/hook.mjs writes one spool file per session from three
 // hooks (SessionStart, PostToolUse on Bash, SessionEnd); the bridge reads the spool folder at each loop. The rest of this file is
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { projectAt } from './projects.js';
 import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
@@ -44,14 +45,6 @@ export function projectOf(word, home) {
     out += parts.join(home);
   }
   return out;
-}
-
-/** A path with its links resolved; a path that does not exist stays as it is. */
-export const real = (path) => { try { return realpathSync(path); } catch { return resolve(path); } };
-/** Whether `path` is the project folder or a folder inside it (a subfolder, a worktree in it), by their real paths (F-T29-5). */
-export function inside(path, project) {
-  const rel = relative(real(project), real(path));
-  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); // a folder named '..cache' is inside (F-T29-11)
 }
 
 /** The spool folder: `sessionsPath` in the config, or `<statePath>.sessions`. */
@@ -150,36 +143,28 @@ function locked(file, work) {
 }
 
 /**
- * The listed project of a folder: the project whose folder holds it, the deepest one when project folders are inside each other.
- * @param {{ name: string, project: string }[]} projects
- */
-export const projectAt = (path, projects) => projects.filter((p) => inside(path, p.project))
-  .sort((a, b) => real(b.project).length - real(a.project).length)[0];
-
-/**
  * Records one Claude Code hook event in the spool (scripts/hook.mjs). Throws for input that it refuses; then it writes nothing.
- * The session is of the listed project whose folder holds its cwd (T132). An event in a folder outside every listed project, and a
- * `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
+ * A session keeps the project it started in (G43 A): its first event takes the listed project whose folder holds its cwd (T132), and once
+ * its spool exists, each later event is of the spool's project, whatever its cwd. A first event in a folder outside every listed project,
+ * and a `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
  * - SessionStart: { id, cwd, startedAt, pid }; a resume or a compaction keeps the gates and tasks and takes away the end.
  * - PostToolUse on Bash: for a command that runs the sage state tool with `gate add`, the gate id of its output line and its task.
  *   A `--project` whose folder only the shell knows (a variable other than HOME, a command) is ignored (F-T29-11).
  * - SessionEnd: the end.
  * @param {object} input  the hook's JSON from Claude Code
- * @param {{ projects: { name: string, project: string }[], dir: string, pid: number, now: number, home: string }} o  the config's projects
- *   (src/ask.js projectsOf); `home` is the hook's HOME, for `~` and `$HOME`
+ * @param {{ projects: ReturnType<typeof import('./projects.js').loadProjects>, dir: string, pid: number, now: number, home: string }} o
+ *   `home` is the hook's HOME, for `~` and `$HOME`
  * @returns {string} what it did, for the tests
  */
 export function record(input, { projects, dir, pid, now, home }) {
   const id = input?.session_id;
   if (typeof id !== 'string' || !SESSION_ID.test(id)) throw new TypeError('the session_id is not a UUID');
   if (typeof input.cwd !== 'string') throw new TypeError('the cwd is not a path');
-  const at = projectAt(input.cwd, projects);
-  if (!at) return 'outside the projects';
-  const { name, project } = at;
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new TypeError('the pid is not a whole number');
   const event = input.hook_event_name;
   let gate;
   let task;
+  let named; // the folder that `--project` names
   if (event === 'PostToolUse') {
     if (input.tool_name !== 'Bash') return 'not a Bash tool';
     const command = String(input.tool_input?.command ?? '');
@@ -189,15 +174,18 @@ export function record(input, { projects, dir, pid, now, home }) {
     task = add[1];
     const word = command.slice(add.index).match(PROJECT);
     if (word) {
-      const named = projectOf(word[1], home);
+      named = projectOf(word[1], home);
       if (named === undefined) return 'a project that only the shell knows';
-      if (projectAt(resolve(input.cwd, named), projects)?.name !== name) return 'another project';
     }
   } else if (event !== 'SessionStart' && event !== 'SessionEnd') {
     throw new TypeError('not a hook event of the sage bridge');
   }
   const file = spoolPath(dir, id);
-  if (event === 'SessionEnd' && !existsSync(file)) return 'no session';
+  const here = projectAt(input.cwd, projects);
+  if (!existsSync(file)) {
+    if (event === 'SessionEnd') return 'no session';
+    if (!here) return 'outside the projects';
+  }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return locked(file, () => {
     let old;
@@ -206,8 +194,10 @@ export function record(input, { projects, dir, pid, now, home }) {
       old = parseSpool(raw, projectAt(String(raw?.cwd), projects)?.name); // a spool file of the time before T132: of the project of its cwd
     } catch { old = undefined; }
     if (event === 'SessionEnd' && !old) return 'no session';
-    if (old && old.project !== name) return 'another project'; // a session keeps the project of its first event
-    const s = old ?? { id, project: name, cwd: resolve(project), startedAt: now, pid, gates: [], tasks: [] };
+    if (!old && !here) return 'outside the projects';
+    const name = old?.project ?? here.name;
+    if (named !== undefined && projectAt(resolve(input.cwd, named), projects)?.name !== name) return 'another project';
+    const s = old ?? { id, project: name, cwd: here.project, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;
     if (gate && !s.gates.includes(gate)) s.gates.push(gate);

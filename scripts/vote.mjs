@@ -13,11 +13,10 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { projectsOf } from '../src/ask.js';
 import { notLeadsOnly } from '../src/bridge.js';
 import { forTerminal } from '../src/clean.js';
-import { projectAt } from '../src/sessions.js';
-import { pickProject, refuseMissing, sageTool } from '../src/sage.js';
+import { loadProjects, pickProject, projectAt } from '../src/projects.js';
+import { sageTool } from '../src/sage.js';
 import { GATE_ID, keyOf, leadsPathOf, loadLeads, loadVotes, migrateMarks, saveVotes, votesPathOf, withLock } from '../src/state.js';
 
 const USAGE = 'usage: node scripts/vote.mjs [--config <config.json>] [--project <name>] <gate id> ... | --leads <gate id> | --unmark <gate id> ... | --list';
@@ -36,11 +35,10 @@ try {
     throw new Error(`a leads-only question is one Yes or No question, never a batch: give one gate id to --leads, not ${args.length}. Nothing changed.`);
   }
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
-  const projects = projectsOf(config);
-  refuseMissing(projects); // a listed folder that does not exist is refused, and nothing changes (F-T132-14)
+  const projects = loadProjects(config); // a config whose projects the bridge cannot serve is refused, and nothing changes (G43 A)
   // Without --project: the listed project whose folder holds the cwd, as the hook finds it; the own project outside them all (F-T132-13).
-  const project = pickProject(config, projects, name ?? projectAt(process.cwd(), projects)?.name); // a name that the config does not list is refused
-  const own = pickProject(config, projects).name;
+  const project = pickProject(projects, name ?? projectAt(process.cwd(), projects)?.name); // a name that the config does not list is refused
+  const own = pickProject(projects).name;
   const path = votesPathOf(config);
   const leadsPath = leadsPathOf(config);
   migrateMarks(config, own); // the bare gate ids of the lists before T132 become keys of the own project, once

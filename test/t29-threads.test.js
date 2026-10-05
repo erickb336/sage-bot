@@ -500,7 +500,7 @@ test('F-T29-6 and F-T29-4: a press that posts while the loop waits for a session
   assert.deepEqual(cardsIn(b, b.bridge.threadOf(S1)), ['Question project/G3 · T1 ']);
 });
 
-test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to the project; an event outside the project is ignored with no stderr', async () => {
+test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to the project; a first event outside the project is ignored with no stderr', async () => {
   const b = setup();
   const sub = join(b.project, '.claude', 'worktrees', 't9', 'src');
   mkdirSync(sub, { recursive: true });
@@ -512,10 +512,13 @@ test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to
   assert.deepEqual({ ...spool(b, S1), startedAt: 0 }, { id: S1, project: 'project', cwd: b.project, startedAt: 0, pid: process.pid, gates: [], tasks: [] });
   const out = b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   assert.deepEqual(event(sub, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T1' }, tool_response: { stdout: `${out}\n` } }), { code: 0, out: '', err: '' });
-  assert.deepEqual(event(join(b.root, 'other'), 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T2' }, tool_response: { stdout: 'G2 open · Q?\n' } }), { code: 0, out: '', err: '' });
-  assert.deepEqual(event(join(b.root, 'project-2'), 'SessionEnd'), { code: 0, out: '', err: '' }); // a sibling folder whose name starts the same
+  // A first event outside the project: in a sibling folder whose name starts the same, and in another folder. No spool, no stderr.
+  for (const cwd of [join(b.root, 'project-2'), join(b.root, 'other')]) {
+    assert.deepEqual(runHook(b, { session_id: S2, cwd, hook_event_name: 'SessionStart' }), { code: 0, out: '', err: '' });
+  }
+  assert.equal(existsSync(join(spoolDir(b), `${S2}.json`)), false);
   assert.deepEqual([spool(b, S1).gates, spool(b, S1).endedAt], [['G1'], undefined]);
-  assert.deepEqual(event(sub, 'SessionEnd'), { code: 0, out: '', err: '' });
+  assert.deepEqual(event(join(b.root, 'other'), 'SessionEnd'), { code: 0, out: '', err: '' }); // G43 A: a later event keeps the session's project
   assert.equal(typeof spool(b, S1).endedAt, 'number');
 });
 

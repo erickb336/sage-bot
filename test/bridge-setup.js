@@ -1,7 +1,7 @@
 // The scratch logbook and the bridge on the fake Discord layer, for the bridge tests. SAMPLE DATA ONLY: every id and name is made up.
 // The sage state tool runs with HOME and SAGE_HOME in a scratch folder, so no test touches a real logbook.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, SETTLE } from '../src/bridge.js';
@@ -35,7 +35,7 @@ export const key = (id) => `${NAME}/${id}`;
  * the G13 tests pass `markAll: false` and mark gates with `b.mark`.
  */
 export function setup({ members = MEMBERS, markAll = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-b3-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-b3-'))); // the folder as the disk spells it, as loadProjects resolves it
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };

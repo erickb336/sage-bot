@@ -4,11 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PermissionFlagsBits, PermissionsBitField } from 'discord.js';
-import { CANCEL, createAsk, projectsOf, UNREGISTER } from '../src/ask.js';
+import { CANCEL, createAsk, UNREGISTER } from '../src/ask.js';
+import { loadProjects } from '../src/projects.js';
 import { createBridge } from '../src/bridge.js';
 import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } from '../src/channels.js';
 import { enter, prepare, routes } from '../src/discord.js';
@@ -26,6 +27,7 @@ function world(t) {
   t.after(() => rmSync(b.root, { recursive: true, force: true }));
   b.env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
   b.config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
+  mkdirSync(join(b.root, 'beta')); // the folder of the second project of the tests: loadProjects refuses one that does not exist
   b.registry = channelsPathOf(b.config);
   b.cmd = async (ask, user, roles, channelId, sub, options = {}, parentId = null) => {
     const i = fakeCommand({ user, roles, channelId, parentId, sub, options });
@@ -39,7 +41,7 @@ const mode = (path) => statSync(path).mode & 0o777;
 
 test('T130 file safety: the registry is 0600 and written whole; a symlink, a wrong mode or bad JSON stops the start with a clear message', (t) => {
   const b = world(t);
-  const projects = projectsOf(b.config);
+  const projects = loadProjects(b.config);
   openChannels(b.config, projects);
   assert.equal(mode(b.registry), 0o600);
   assert.deepEqual(readdirSync(dirname(b.registry)).filter((n) => n.endsWith('.tmp')), []); // the temp file was renamed over it
@@ -74,7 +76,7 @@ test('T130 migration: an old config with channelId and askChannelId makes the re
   const b = world(t);
   assert.equal(existsSync(b.registry), false);
   const lines = [];
-  const channels = openChannels(b.config, projectsOf(b.config), (l) => lines.push(l));
+  const channels = openChannels(b.config, loadProjects(b.config), (l) => lines.push(l));
   assert.deepEqual(file(b), { version: 1, channels: { [ASK]: { project: 'project' }, [CHANNEL]: { project: 'project', home: true } } });
   assert.deepEqual(lines, [`made the channel registry ${b.registry} from the config: ${ASK} -> project, ${CHANNEL} -> project (home)`]);
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
@@ -87,13 +89,13 @@ test('T130 migration: an old config with channelId and askChannelId makes the re
   assert.equal(b.discord.in(CHANNEL).length > 0, true);
   assert.equal(b.discord.in(ASK).length, 0);
   // A second start reads the file and changes nothing.
-  openChannels({ ...b.config, askChannelId: undefined, channelId: undefined }, projectsOf(b.config));
+  openChannels({ ...b.config, askChannelId: undefined, channelId: undefined }, loadProjects(b.config));
   assert.deepEqual(file(b), { version: 1, channels: { [ASK]: { project: 'project' }, [CHANNEL]: { project: 'project', home: true } } });
 });
 
 test('T130: with no registry and no channelId, the start stops and says how to register the home channel', (t) => {
   const b = world(t);
-  assert.throws(() => openChannels({ ...b.config, channelId: undefined }, projectsOf(b.config)),
+  assert.throws(() => openChannels({ ...b.config, channelId: undefined }, loadProjects(b.config)),
     { message: `there is no channel registry ${b.registry}, and the config has no channelId to make one from. Register the home channel with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home` });
 });
 
@@ -136,7 +138,7 @@ test('T130 terminal: the script refuses while a bridge holds the lock, and chang
   assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
   assert.equal(existsSync(b.registry), false);
   // F-T130-5: list only reads, so it works while the bridge runs.
-  openChannels(b.config, projectsOf(b.config));
+  openChannels(b.config, loadProjects(b.config));
   const l = script(b, 'list');
   assert.deepEqual([l.status, l.out], [0, `${ASK}  project\n${CHANNEL}  project  (home: votes and cards)\n`]);
 });
@@ -164,7 +166,7 @@ function press(user, roles, customId, age = 0) {
 test('T130 unregister: a lead unregisters with a confirm; an apprentice is refused; a member with no role gets nothing; the home cannot go', async (t) => {
   const b = world(t);
   const lines = [];
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: (l) => lines.push(l) });
   const before = readFileSync(b.registry, 'utf8');
   // No role: nothing, for the command and for a press.
@@ -199,7 +201,6 @@ test('T130 unregister: a lead unregisters with a confirm; an apprentice is refus
 test('T130: /sage works in two registered channels for two projects, each with its own default project, and in their threads', async (t) => {
   const b = world(t);
   const beta = join(b.root, 'beta');
-  mkdirSync(beta);
   const sage = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', beta], { env: b.env, encoding: 'utf8' });
   sage('init');
   sage('task', 'add', '--title', 'Beta one', '--size', 'tiny');
@@ -245,7 +246,7 @@ test('F-T130-2: a new install with no channelId makes its first registry with re
   assert.match(r.out, new RegExp(`^registered the channel ${CHANNEL} for the project project \\(home channel of the votes and cards\\)\n`));
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
   assert.equal(mode(b.registry), 0o600);
-  assert.equal(withHome(b.config, openChannels(b.config, projectsOf(b.config))).channelId, CHANNEL); // the bridge starts on it
+  assert.equal(withHome(b.config, openChannels(b.config, loadProjects(b.config))).channelId, CHANNEL); // the bridge starts on it
 });
 
 test('F-T130-3: a project removed from the config: list and unregister still work and name it; the bridge refuses and names the repair', (t) => {
@@ -254,7 +255,7 @@ test('F-T130-3: a project removed from the config: list and unregister still wor
   assert.equal(script(b, 'register', OTHER, 'beta').status, 0);
   b.config.projects = [{ name: 'gamma', project: b.project }]; // alpha and beta are gone
   const names = 'which is not in the config\'s projects (gamma). Give the channel a listed project with: node scripts/channels.mjs --config <config.json> register <channel id> <project>, or remove it with: unregister <channel id>. Nothing was loaded.';
-  assert.throws(() => openChannels(b.config, projectsOf(b.config)), { message: `the channel registry ${b.registry} maps the channel ${ASK} to the project "alpha", the channel ${CHANNEL} to the project "alpha", the channel ${OTHER} to the project "beta", ${names}` });
+  assert.throws(() => openChannels(b.config, loadProjects(b.config)), { message: `the channel registry ${b.registry} maps the channel ${ASK} to the project "alpha", the channel ${CHANNEL} to the project "alpha", the channel ${OTHER} to the project "beta", ${names}` });
   const stale = '  (not in the config: register it again or unregister it)';
   let r = script(b, 'list');
   assert.deepEqual([r.status, r.out], [0, `${ASK}  alpha${stale}\n${CHANNEL}  alpha  (home: votes and cards)${stale}\n${OTHER}  beta${stale}\n`]);
@@ -265,7 +266,7 @@ test('F-T130-3: a project removed from the config: list and unregister still wor
   r = script(b, 'register', CHANNEL, 'gamma'); // the home keeps its place and gets a listed project
   assert.equal(r.status, 0, r.err);
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'gamma', home: true } });
-  assert.deepEqual([...openChannels(b.config, projectsOf(b.config))], [[CHANNEL, { project: 'gamma', home: true }]]);
+  assert.deepEqual([...openChannels(b.config, loadProjects(b.config))], [[CHANNEL, { project: 'gamma', home: true }]]);
 });
 
 test('F-T130-8: the home cannot move while a card waits in the old home; it can stay where it is', async (t) => {
@@ -331,7 +332,7 @@ const button = ({ user = JON, roles = [LEADR], channelId = ASK, customId, age = 
 
 test('F-T130-9 and F-T130-6: routes take an unregister press in any registered channel to ask.press; the log names the lead and their id', async (t) => {
   const b = world(t);
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   const lines = [];
   const config = { ...withHome(b.config, channels), guildId: GUILD };
   const ask = createAsk({ config, channels, env: b.env, log: (l) => lines.push(l) });
@@ -347,7 +348,7 @@ test('F-T130-9 and F-T130-6: routes take an unregister press in any registered c
 
 test('F-T130-7: the confirm has a Cancel button, and it expires after 10 minutes; neither changes the registry', async (t) => {
   const b = world(t);
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   const before = readFileSync(b.registry, 'utf8');
   const run = async (p) => { await ask.press(p); return p.replies.map((x) => [x.kind, x.content]); };
@@ -361,7 +362,7 @@ test('F-T130-7: the confirm has a Cancel button, and it expires after 10 minutes
 
 test('F-T130-1: a press whose custom_id has no Discord id after the prefix gets nothing, and nothing is echoed', async (t) => {
   const b = world(t);
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   for (const id of ['@everyone', `${ASK}x`, '', '<@&300000000000000002>', `${ASK} `]) {
     const p = press(JON, [LEADR], `${UNREGISTER}${id}`);
@@ -375,7 +376,7 @@ test('F-T130-1: a press whose custom_id has no Discord id after the prefix gets 
 
 test('F-T130-10: a lead\'s press for the home channel is refused; a save that fails keeps the channel registered', async (t) => {
   const b = world(t);
-  const channels = openChannels(b.config, projectsOf(b.config));
+  const channels = openChannels(b.config, loadProjects(b.config));
   const lines = [];
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: (l) => lines.push(l) });
   const before = readFileSync(b.registry, 'utf8');
@@ -396,7 +397,7 @@ test('F-T130-10: a lead\'s press for the home channel is refused; a save that fa
 test('F-T130-10: the migration gives the home channel the bridge\'s own project, also when it is not the first project', (t) => {
   const b = world(t);
   b.config.projects = [{ name: 'beta', project: join(b.root, 'beta') }, { name: 'alpha', project: b.project }];
-  openChannels(b.config, projectsOf(b.config));
+  openChannels(b.config, loadProjects(b.config));
   assert.deepEqual(file(b).channels, { [ASK]: { project: 'beta' }, [CHANNEL]: { project: 'alpha', home: true } });
 });
 
@@ -493,20 +494,20 @@ test('F-T130-14: the refusal while the bridge runs gives the launchctl lines tha
 test('F-T130-15: askChannelId equal to channelId migrates to one home entry for the first project, also when the bridge\'s own project is not first', (t) => {
   const b = world(t);
   b.config = { ...b.config, askChannelId: CHANNEL, projects: [{ name: 'beta', project: join(b.root, 'beta') }, { name: 'alpha', project: b.project }] };
-  openChannels(b.config, projectsOf(b.config));
+  openChannels(b.config, loadProjects(b.config));
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'beta', home: true } });
 });
 
 test('F-T130-15: the migration refuses a channelId or askChannelId that is not a Discord id, and writes nothing', (t) => {
   const b = world(t);
-  assert.throws(() => openChannels({ ...b.config, channelId: '12345' }, projectsOf(b.config)), { message: 'the config: channelId must be a Discord id (17 to 20 digits)' });
-  assert.throws(() => openChannels({ ...b.config, askChannelId: `${ASK}x` }, projectsOf(b.config)), { message: 'the config: askChannelId must be a Discord id (17 to 20 digits)' });
+  assert.throws(() => openChannels({ ...b.config, channelId: '12345' }, loadProjects(b.config)), { message: 'the config: channelId must be a Discord id (17 to 20 digits)' });
+  assert.throws(() => openChannels({ ...b.config, askChannelId: `${ASK}x` }, loadProjects(b.config)), { message: 'the config: askChannelId must be a Discord id (17 to 20 digits)' });
   assert.equal(existsSync(b.registry), false);
 });
 
 test('F-T130-15: register with an unknown option is refused, and the registry stays as it was', (t) => {
   const b = world(t);
-  openChannels(b.config, projectsOf(b.config));
+  openChannels(b.config, loadProjects(b.config));
   const before = readFileSync(b.registry, 'utf8');
   const r = script(b, 'register', OTHER, 'project', '--hom');
   assert.deepEqual([r.status, r.err], [1, 'sage-bot channels: unknown option --hom\n']);
@@ -515,7 +516,7 @@ test('F-T130-15: register with an unknown option is refused, and the registry st
 
 test('F-T130-15: scripts/launchd.mjs makes the plist for a config with no channelId and no askChannelId (a new install)', (t) => {
   const b = world(t);
-  const sample = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
+  const sample = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8').replaceAll('/Users/you/workspace/your-project', realpathSync.native(ROOT))); // a folder that exists
   delete sample.channelId;
   delete sample.askChannelId;
   const path = join(b.root, 'new-install.json');

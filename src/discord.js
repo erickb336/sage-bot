@@ -4,9 +4,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
-import { askCommand, createAsk, projectsOf, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
-import { pickProject, refuseMissing, sageTool } from './sage.js';
+import { sageTool } from './sage.js';
+import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
 
@@ -103,9 +104,8 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
  */
 export function prepare(file, log, fetchChannel) {
   refuseOldRoles(file);
-  const projects = projectsOf(file);
-  refuseMissing(projects); // a listed folder that does not exist stops here, before the lock (F-T132-14)
-  const own = pickProject(file, projects).name; // a config whose project is not listed stops here (F-T132-1)
+  const projects = loadProjects(file); // a config whose projects the bridge cannot serve stops here, before the lock (G43 A)
+  const own = pickProject(projects).name;
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
@@ -113,7 +113,7 @@ export function prepare(file, log, fetchChannel) {
   let auditChannel = null;
   const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
   if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
-  return { config, channels, projects, own, ask: createAsk({ config, channels, log, audit }) };
+  return { config, channels, projects, own, ask: createAsk({ config, channels, projects, log, audit }) };
 }
 
 /**
