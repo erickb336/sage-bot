@@ -90,7 +90,7 @@ const M = [
   ['spool and votes not denied', ', sessionsPathOf, votesPathOf, leadsPathOf]', ']'],
   ['statePath not checked when not set', "if (config[key] !== undefined || key === 'statePath') canonicalPath", "if (config[key] !== undefined) canonicalPath"],
   ...CONFIG_PATHS.map((key) => [`${key} not checked (F-T156-30)`, `const CONFIG_PATHS = [${CONFIG_PATHS.map((k) => `'${k}'`).join(', ')}];`, `const CONFIG_PATHS = [${CONFIG_PATHS.filter((k) => k !== key).map((k) => `'${k}'`).join(', ')}];`]),
-  ['HOME not checked', "canonicalPath('HOME', home); ", ''],
+  ['HOME not checked', "  canonicalPath('HOME', home);\n", ''],
   ['DARWIN_USER_TEMP_DIR not checked (F-T156-40)', "canonicalPath('DARWIN_USER_TEMP_DIR', ", "('DARWIN_USER_TEMP_DIR', "],
   ['TMPDIR read again (F-T156-40)', "'userTemp' in host ? host.userTemp : userTemp())", "env.TMPDIR || ('userTemp' in host ? host.userTemp : userTemp()))"],
   ['SAGE_HOME not checked', "for (const key of ['SAGE_HOME', 'SAGE_TOOL'])", "for (const key of ['SAGE_TOOL'])"],
