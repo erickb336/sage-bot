@@ -30,7 +30,8 @@ export const LEAD_HOSTS = [];
 export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git'];
 /** The GitHub credential variables that sandboxed commands never read; launchOf leaves them out of the environment too. */
 export const DENIED_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
-/** The variable of the model credential that Claude Code needs: the one value besides the locale and TERM that a session takes from the host. */
+/** The variable of the model credential that Claude Code needs: the one value besides the locale and TERM that a session takes from the host.
+ * Sandboxed commands never read it (F-T156-21): sandbox.credentials.envVars denies it and the environment sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB. */
 export const MODEL_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The PATH of a lead session: fixed system and Homebrew folders, never the host's (F-T156-16). */
 export const LEAD_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
@@ -177,7 +178,7 @@ export function settingsOf(policy) {
       },
       credentials: {
         files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),
-        envVars: policy.deniedEnv.map((name) => ({ name, mode: 'deny' })),
+        envVars: [...policy.deniedEnv, MODEL_KEY].map((name) => ({ name, mode: 'deny' })), // F-T156-21: Claude Code keeps MODEL_KEY for its own calls
       },
     },
   };
@@ -187,7 +188,7 @@ export function settingsOf(policy) {
  * The command of a lead session: `claude` and its arguments, its working folder and its environment, from the policy only. The
  * environment is an allow-list (F-T156-16): from the host only MODEL_KEY, LANG, LC_* and TERM; the rest is fixed: LEAD_PATH, the real
  * HOME (its reads stay denied), the session's own temp, config and hook-state folders, no global or system git config, and no
- * nonessential traffic. Every other variable of the host, a secret or not, stays out.
+ * nonessential traffic, and CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1. Every other variable of the host, a secret or not, stays out.
  * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
  */
 export function launchOf(policy, env = process.env) {
@@ -201,6 +202,7 @@ export function launchOf(policy, env = process.env) {
     env: {
       ...kept, PATH: LEAD_PATH, HOME: policy.home, TMPDIR: policy.tmp, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir,
       SAGE_HOOKS_STATE: policy.hooksState, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', // F-T156-21: a second layer; commands get no credential variable of Claude Code
     },
   };
 }

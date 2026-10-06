@@ -89,6 +89,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
       credentials: { files: CREDENTIALS.map((path) => ({ path, mode: 'deny' })), envVars: [
         { name: 'GH_TOKEN', mode: 'deny' }, { name: 'GITHUB_TOKEN', mode: 'deny' },
         { name: 'GH_ENTERPRISE_TOKEN', mode: 'deny' }, { name: 'GITHUB_ENTERPRISE_TOKEN', mode: 'deny' },
+        { name: 'CLAUDE_CODE_OAUTH_TOKEN', mode: 'deny' }, // F-T156-21
       ] },
     },
   });
@@ -115,10 +116,10 @@ test('the launch: claude -p with the settings, sage-bot\'s settings only, strict
     env: { LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', [MODEL_KEY]: 'sample-not-a-key',
       PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: '/h', TMPDIR: '/st/sage-lead-s21', CLAUDE_CODE_TMPDIR: '/st/sage-lead-s21',
       CLAUDE_CONFIG_DIR: '/h/.local/share/sage-bot/leads/claude', SAGE_HOOKS_STATE: '/s/state/lead-hooks/s21',
-      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' },
   });
   assert.equal(MODEL_KEY, 'CLAUDE_CODE_OAUTH_TOKEN'); // the one model credential variable, by name
-  assert.deepEqual(Object.keys(launchOf(policy, {}).env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']);
+  assert.deepEqual(Object.keys(launchOf(policy, {}).env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']);
   assert.ok(!launchOf({ ...policy, pluginDir: null }, env).args.includes('--plugin-dir')); // no state tool: no plugin
 });
 
@@ -292,7 +293,7 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.equal(out.policy.folder, join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's7'));
     assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(1, 3), [join(root, 'state'), join(root, 'state', 'gates.json.leads.jsonl')]);
     assert.ok(out.settings.sandbox.filesystem.denyRead.includes(join(root, 'home', '.config', 'sage-bot')));
-    assert.deepEqual(Object.keys(out.launch.env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']); // no value of the host's environment
+    assert.deepEqual(Object.keys(out.launch.env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']); // no value of the host's environment
     assert.deepEqual(out.settings.sandbox.filesystem.allowRead, [out.policy.folder, out.policy.tmp]);
     assert.equal(out.settings.sandbox.filesystem.denyRead[0], join(root, 'home'));
     assert.ok(!s.stdout.includes('sample-secret'));
