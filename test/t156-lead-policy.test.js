@@ -5,13 +5,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from './bridge-setup.js';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, relative } from 'node:path';
-import { LEAD_PATH, MODEL_KEY, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
+import { LEAD_PATH, MODEL_KEYS, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
 
 const ROOT = join(import.meta.dirname, '..');
 // Folders that do not exist on the host, so the resolver takes them as written.
-const HOST = { env: {}, home: '/h', tmp: '/t', userTemp: '/u', shortTmp: '/st' };
+const HOST = { env: {}, home: '/h', owner: '/h', tmp: '/t', userTemp: '/u', shortTmp: '/st' };
 const CONFIG = { statePath: '/s/state/gates.json' };
 
 const DENIED = [
@@ -47,6 +47,7 @@ test('one resolver gives every path and name of a lead session', () => {
     folder: '/h/.local/share/sage-bot/leads/sessions/s21',
     tmp: '/st/sage-lead-s21',
     home: '/h',
+    homes: ['/h'],
     credentialFiles: CREDENTIALS,
     hooksState: '/s/state/lead-hooks/s21',
     claudeDir: '/h/.local/share/sage-bot/leads/claude',
@@ -89,7 +90,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
       credentials: { files: CREDENTIALS.map((path) => ({ path, mode: 'deny' })), envVars: [
         { name: 'GH_TOKEN', mode: 'deny' }, { name: 'GITHUB_TOKEN', mode: 'deny' },
         { name: 'GH_ENTERPRISE_TOKEN', mode: 'deny' }, { name: 'GITHUB_ENTERPRISE_TOKEN', mode: 'deny' },
-        { name: 'CLAUDE_CODE_OAUTH_TOKEN', mode: 'deny' }, // F-T156-21
+        { name: 'CLAUDE_CODE_OAUTH_TOKEN', mode: 'deny' }, { name: 'ANTHROPIC_API_KEY', mode: 'deny' }, // F-T156-21, F-T157-8
       ] },
     },
   });
@@ -105,15 +106,16 @@ test('a host on the list: WebFetch only to it, and the sandbox reaches only it',
 test('the launch: claude -p with the settings, sage-bot\'s settings only, strict MCP, sage the only plugin, the budget, and the session\'s own folders', () => {
   const policy = { ...leadPolicy(CONFIG, 's21', HOST), pluginDir: '/h/.claude/plugins/cache/sage/sage/v1' };
   // F-T156-16: an allow-list. A sample secret, the GitHub variables and every other host variable stay out. SAMPLE VALUES ONLY.
-  const env = { PATH: '/bin', HOME: '/elsewhere', LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', [MODEL_KEY]: 'sample-not-a-key', SAMPLE_SECRET: 'sample-secret',
+  const env = { PATH: '/bin', HOME: '/elsewhere', LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', CLAUDE_CODE_OAUTH_TOKEN: 'sample-not-a-key', SAMPLE_SECRET: 'sample-secret',
     AWS_SECRET_ACCESS_KEY: 'sample-5', ANTHROPIC_API_KEY: 'sample-6', GH_TOKEN: 'sample-1', GITHUB_TOKEN: 'sample-2', GH_ENTERPRISE_TOKEN: 'sample-3', GITHUB_ENTERPRISE_TOKEN: 'sample-4',
     CLAUDE_CONFIG_DIR: '/h/.claude', SAGE_TOOL: '/x/sage.mjs', SAGE_HOME: '/h/.claude/sage', XDG_CONFIG_HOME: '/x', GIT_DIR: '/x', NODE_OPTIONS: '--require /x', LC_: 'x', TERM_PROGRAM: 'x' };
-  assert.deepEqual(launchOf(policy, env), {
+  const model = { CLAUDE_CODE_OAUTH_TOKEN: 'sample-from-the-caller' }; // F-T157-8: the caller names and gives it; the host's is not taken
+  assert.deepEqual(launchOf(policy, env, model), {
     command: 'claude',
     args: ['-p', '--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', '--strict-mcp-config',
       '--plugin-dir', '/h/.claude/plugins/cache/sage/sage/v1', '--max-budget-usd', '5'],
     cwd: '/h/.local/share/sage-bot/leads/sessions/s21',
-    env: { LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', [MODEL_KEY]: 'sample-not-a-key',
+    env: { LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', CLAUDE_CODE_OAUTH_TOKEN: 'sample-from-the-caller',
       PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: '/h', TMPDIR: '/st/sage-lead-s21', CLAUDE_CODE_TMPDIR: '/st/sage-lead-s21',
       CLAUDE_CONFIG_DIR: '/h/.local/share/sage-bot/leads/claude', SAGE_HOOKS_STATE: '/s/state/lead-hooks/s21',
       GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
@@ -121,7 +123,7 @@ test('the launch: claude -p with the settings, sage-bot\'s settings only, strict
   // F-T156-22: the scrub forces the permission mode to default (no dontAsk) and strips CLAUDE_CONFIG_DIR from hooks; set on the host or not, it stays out
   assert.ok(!('CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' in launchOf(policy, env).env));
   assert.ok(!('CLAUDE_CODE_SUBPROCESS_ENV_SCRUB' in launchOf(policy, { ...env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' }).env));
-  assert.equal(MODEL_KEY, 'CLAUDE_CODE_OAUTH_TOKEN'); // the one model credential variable, by name
+  assert.deepEqual(Object.keys(launchOf(policy, env).env).filter((k) => MODEL_KEYS.includes(k)), []); // F-T157-8: none from the host by name
   assert.deepEqual(Object.keys(launchOf(policy, {}).env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']);
   assert.ok(!launchOf({ ...policy, pluginDir: null }, env).args.includes('--plugin-dir')); // no state tool: no plugin
 });
@@ -297,7 +299,7 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.equal(s.status, 0, s.stderr);
     const out = JSON.parse(s.stdout);
     assert.equal(out.policy.folder, join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's7'));
-    assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(1, 3), [join(root, 'state'), join(root, 'state', 'gates.json.leads.jsonl')]);
+    assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(1, 4), [realpathSync.native(userInfo().homedir), join(root, 'state'), join(root, 'state', 'gates.json.leads.jsonl')]); // F-T157-7
     assert.ok(out.settings.sandbox.filesystem.denyRead.includes(join(root, 'home', '.config', 'sage-bot')));
     assert.deepEqual(Object.keys(out.launch.env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']); // no value of the host's environment
     assert.deepEqual(out.settings.sandbox.filesystem.allowRead, [out.policy.folder, out.policy.tmp]);

@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js'];
+const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js', 'test/t157-lead-policy.test.js'];
 
 /**
  * The verdict of one mutation from its run of `node --test --test-reporter=tap` on test files. A failure named after a test file is
@@ -56,12 +56,12 @@ const M = [
   ['no network list', 'network: { allowedDomains: policy.hosts, strictAllowlist: true },', ''],
   ['strictAllowlist removed', 'allowedDomains: policy.hosts, strictAllowlist: true }', 'allowedDomains: policy.hosts }'],
   ['strictAllowlist false', 'strictAllowlist: true }', 'strictAllowlist: false }'],
-  ['no denyRead of the denied paths', 'denyRead: [policy.home, ...policy.denied]', 'denyRead: [policy.home]'],
-  ['home not denied for reads', 'denyRead: [policy.home, ...policy.denied]', 'denyRead: [...policy.denied]'],
+  ['no denyRead of the denied paths', 'denyRead: [...policy.homes, ...policy.denied]', 'denyRead: [...policy.homes]'],
+  ['home not denied for reads', 'denyRead: [...policy.homes, ...policy.denied]', 'denyRead: [...policy.denied]'],
   ['session folder not re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.tmp]'],
   ['temp folder not re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.folder]'],
   ['home re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.home]'],
-  ['home not resolved by its real path', 'home: real(home),', 'home,'],
+  ['home not resolved by its real path', 'new Set([real(home), real(owner)])', 'new Set([home, real(owner)])'],
   ['no denyWrite of the denied paths', 'denyWrite: [...policy.denied, ', 'denyWrite: ['],
   ['no git control denyWrite', ', ...gitControl(policy.folder)]', ']'],
   ...GIT_CONTROL.map((name) => [`no .git/${name} denyWrite`, LIST, LIST.replace(`'${name}', `, '').replace(`, '${name}'`, '')]),
@@ -72,8 +72,20 @@ const M = [
   ['no credential files', "        files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),\n", ''],
   ['~/.ssh not a credential file', "['.ssh', '.aws',", "['.aws',"],
   ['~/.config/gh not a credential file', "'.aws', '.config/gh',", "'.aws',"],
-  ['no credential variables', "        envVars: [...policy.deniedEnv, MODEL_KEY].map((name) => ({ name, mode: 'deny' })),", '        //'],
-  ['model credential not denied to commands (F-T156-21)', '[...policy.deniedEnv, MODEL_KEY].map', 'policy.deniedEnv.map'],
+  ['no credential variables', "        envVars: [...policy.deniedEnv, ...MODEL_KEYS].map((name) => ({ name, mode: 'deny' })),", '        //'],
+  ['model credentials not denied to commands (F-T156-21)', '[...policy.deniedEnv, ...MODEL_KEYS].map', 'policy.deniedEnv.map'],
+  // F-T157-8: both model variables denied to commands; a launch takes at most one, from its caller
+  ['ANTHROPIC_API_KEY not denied to commands', '[...policy.deniedEnv, ...MODEL_KEYS].map', '[...policy.deniedEnv, MODEL_KEYS[0]].map'],
+  ['CLAUDE_CODE_OAUTH_TOKEN not denied to commands', '[...policy.deniedEnv, ...MODEL_KEYS].map', '[...policy.deniedEnv, MODEL_KEYS[1]].map'],
+  ['two model variables accepted', 'if (names.length > 1 || names.some', 'if (names.some'],
+  ['any variable accepted as the model credential', ' || names.some((n) => !MODEL_KEYS.includes(n))) throw', ') throw'],
+  ['the model credential from the host by name', "filter(([k]) => k === 'LANG' ||", "filter(([k]) => MODEL_KEYS.includes(k) || k === 'LANG' ||"],
+  ['the caller\'s model credential dropped', '...kept, ...model, PATH', '...kept, PATH'],
+  // F-T157-7: the owner's real home folder stays denied with a scratch HOME
+  ['owner home not denied', 'new Set([real(home), real(owner)])', 'new Set([real(home)])'],
+  ['owner home from $HOME', 'export const ownerHome = () => userInfo().homedir;', 'export const ownerHome = () => process.env.HOME;', SAGE],
+  ['credential files only in $HOME', 'homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f)))', 'CREDENTIAL_FILES.map((f) => join(homes[0], f))'],
+  ['the session HOME is the owner home', 'home: homes[0], // the session', 'home: homes[homes.length - 1], // the session'],
   ['GitHub on the host list', 'export const LEAD_HOSTS = [];', "export const LEAD_HOSTS = ['github.com'];"],
   ['GH_TOKEN not denied', "['GH_TOKEN', 'GITHUB_TOKEN',", "['GITHUB_TOKEN',"],
   ['budget 10', 'export const MAX_USD = 5;', 'export const MAX_USD = 10;'],
@@ -132,7 +144,6 @@ const M = [
   ['git reads the system config', "GIT_CONFIG_NOSYSTEM: '1', ", ''],
   ['subprocess scrub back (F-T156-22)', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',\n", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',\n"],
   ['nonessential traffic on', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',", ''],
-  ['no model credential', 'k === MODEL_KEY || ', ''],
   ['no LANG', "k === 'LANG' || ", ''],
   ['no TERM', "k === 'TERM' || ", ''],
   ['no LC_*', ' || /^LC_[A-Z]+$/.test(k)', ''],

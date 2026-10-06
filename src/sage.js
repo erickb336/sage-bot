@@ -44,11 +44,15 @@ export function sageTool({ sagePath, project, env = process.env }) {
   };
 }
 
+/** The owner's home folder from the user database (os.userInfo), not $HOME: the demo, the tests and the proof run with HOME set to a
+ * scratch folder. The one place that reads it (F-T157-7). */
+export const ownerHome = () => userInfo().homedir;
+
 /**
  * The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. An empty CLAUDE_CONFIG_DIR
  * counts as not set; a relative one throws, because it would resolve against the working folder (F-T156-17).
  */
-export function claudeDirOf({ env = process.env, home = userInfo().homedir } = {}) {
+export function claudeDirOf({ env = process.env, home = ownerHome() } = {}) {
   const dir = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
   if (!isAbsolute(dir)) throw new TypeError(`CLAUDE_CONFIG_DIR must be an absolute path, not ${JSON.stringify(dir)}.`);
   return dir;
@@ -71,7 +75,7 @@ export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skil
  * HOME is the real home folder from the user database (os.userInfo), not $HOME: the demo and the tests run with HOME set to a scratch folder.
  * @param {{ env?: NodeJS.ProcessEnv, home?: string }} [o] @returns {string} the path of sage.mjs
  */
-export function sagePath({ env = process.env, home = userInfo().homedir } = {}) {
+export function sagePath({ env = process.env, home = ownerHome() } = {}) {
   if (env.SAGE_TOOL) {
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);
