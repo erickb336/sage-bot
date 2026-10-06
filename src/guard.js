@@ -11,7 +11,8 @@
 //   Anything it does not parse (;, ||, a $, a backtick, parentheses, braces, a backslash, a newline outside quotes, a
 //   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
 //   each of its options must be an entry of that command's option table by its full spelling; the rest is refused.
-// - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds (F-T134-1).
+// - GitHub (gh, git push, git fetch) goes through the sage-bot broker tools of the session: in-process MCP tools of the Agent
+//   SDK (G57 A, T158), which T134 adds to TOOLS. The hint names no command: the guard refuses each GitHub command (F-T133-63).
 // - The sage state tool is refused by its name (G30 A): a lead session reaches the logbook only through sage-bot (T134).
 //   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A, F-T134-6); this check is a
 //   second layer. Its class rules: in a pipeline that runs or writes, every word is printable ASCII and has no [ wildcard; a
@@ -44,7 +45,9 @@ export const refusal = (why) => {
 // twice, and the hook's whole output must stay far below the 64 KB that a pipe holds.
 const say = (text) => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
 
-const BROKER = "sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)";
+const BROKER = 'the sage-bot broker tools of the session (open a pull request, upload your branch)';
+// sed and awk stay refused (F-T133-64); a read of some lines of a file has a safe form.
+const LINES = 'to read lines of a file: head -n 40 <file>, tail -n +20 <file> | head -n 20, or the Read tool with offset and limit';
 
 // ---- Bash: the parser ---------------------------------------------------------------------------------------------------
 
@@ -197,6 +200,8 @@ const COMMANDS = {
   find: cmd({ '-name': TEXT, '-iname': TEXT, '-type': TEXT, '-path': TEXT, '-maxdepth': TEXT, '-mindepth': TEXT, '-newer': TEXT, '-not': FLAG, '-print': FLAG, '-o': FLAG, '-a': FLAG, '-empty': FLAG }),
   git, node,
   gh: () => how('gh', BROKER),
+  sed: () => how('sed', LINES),
+  awk: () => how('awk', LINES),
   // npm: no option that changes its config, its prefix or its shell is in the table.
   npm: cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
     if (!NPM_RUN.has(sub)) return `npm ${say(sub ?? '')} (only ci, test, run, ls and outdated)`.trim();
@@ -241,7 +246,8 @@ const GIT = {
   switch: cmd({ '-c': TEXT, '--create': TEXT }),
   checkout: cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>'),
   branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '-u': TEXT, '--set-upstream-to': TEXT, '--contains': TEXT }),
-  stash: (args, env, name) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${say(args[0])}`),
+  // git takes a bare git stash with an option as git stash push (git stash -m wip): its options are checked as push's (F-T133-65).
+  stash: (args, env, name) => (args[0]?.startsWith('-') ? STASH(args, env, name) : ['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${say(args[0])}`),
   remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'git remote: a change of a remote'),
   worktree: (args, env, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${say(args[0] ?? '')}`.trim()),
 };

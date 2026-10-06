@@ -48,6 +48,12 @@ const MUTATIONS = [
   ['npm: no deploy script', "return /deploy|release|publish/i.test(script ?? '') ?", 'return false ?'],
   ['npm: no option that changes its config', "'--prefer-offline': FLAG, '--': FLAG }", "'--prefer-offline': FLAG, '--prefix': TEXT, '--script-shell': TEXT, '--': FLAG }"],
   ['gh goes to the broker', "gh: () => how('gh', BROKER),", ''],
+  // F-T133-63: the old hint named a CLI that the guard itself refuses.
+  ['the broker hint names the broker tools, no command (F-T133-63)', "const BROKER = 'the sage-bot broker tools of the session (open a pull request, upload your branch)';", "const BROKER = \"sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)\";"],
+  // F-T133-64: a read of some lines with sed or awk gets the safe form.
+  ['sed gets the line-read hint (F-T133-64)', "  sed: () => how('sed', LINES),\n", ''],
+  ['awk gets the line-read hint (F-T133-64)', "  awk: () => how('awk', LINES),\n", ''],
+  ['the line-read hint names head, tail and Read (F-T133-64)', ', tail -n +20 <file> | head -n 20, or the Read tool with offset and limit', ''],
   ['only the listed commands', 'if (!Object.hasOwn(COMMANDS, name)) return `the command ${say(name)}`;', 'if (!Object.hasOwn(COMMANDS, name)) return null;'],
   ['no inherited name as a command', 'if (!Object.hasOwn(COMMANDS, name)) return', 'if (!COMMANDS[name]) return'],
   // git
@@ -60,7 +66,9 @@ const MUTATIONS = [
   ['git: the option table of each subcommand', "const gitCmd = (table) => cmd({ ...table, '--': FLAG });", 'const gitCmd = () => () => null;'],
   ['git commit: no --no-verify', "commit: cmd({ '-m': TEXT,", "commit: cmd({ '--no-verify': FLAG, '-m': TEXT,"],
   ['git branch: no -D', "branch: cmd({ '-a': FLAG,", "branch: cmd({ '-D': TEXT, '-a': FLAG,"],
-  ['git stash: only the listed subcommands', "(['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0])", '(true'],
+  ['git stash: only the listed subcommands', "['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0])", 'true'],
+  ['git stash <option> is git stash push <option> (F-T133-65)', "args[0]?.startsWith('-') ? STASH(args, env, name) : ", ''],
+  ['git stash <option>: its first option is checked too (F-T133-65)', "? STASH(args, env, name) :", '? STASH(args.slice(1), env, name) :'],
   ['git stash: its option table', '? STASH(args.slice(1), env, name) :', '? null :'],
   ['git remote: no change', "(args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null", '(true ? null'],
   ['git worktree: only add and list', ": `git worktree ${say(args[0] ?? '')}`.trim()),", ': null),'],

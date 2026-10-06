@@ -1,5 +1,5 @@
 {
-  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'wildcard' (a wildcard in a pipeline that runs or writes that may match the state tool, or any [ there, and in an operand that git or node --test expands as a pattern, a quoted one too: refused with the hint to name the files), 'pattern' (any other character than letters, digits, a space and _ - . / , : = % ~ ^ * ? in such an operand, such as @, +, (, { or \\: refused with the stop ending, F-T133-51), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'slow' (F-T133-62) are forms of a wildcard word that a backtracking match took minutes to decide: the test fills {STARS} with 48 stars and with 64 KB of wildcard shapes, and each must decide in under 1 s. 'session' is a realistic sage session in order: every call must be allowed.",
+  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to the sage-bot broker tools of the session), 'state' (the sage state tool in any form: refused with the stop ending), 'wildcard' (a wildcard in a pipeline that runs or writes that may match the state tool, or any [ there, and in an operand that git or node --test expands as a pattern, a quoted one too: refused with the hint to name the files), 'pattern' (any other character than letters, digits, a space and _ - . / , : = % ~ ^ * ? in such an operand, such as @, +, (, { or \\: refused with the stop ending, F-T133-51), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'slow' (F-T133-62) are forms of a wildcard word that a backtracking match took minutes to decide: the test fills {STARS} with 48 stars and with 64 KB of wildcard shapes, and each must decide in under 1 s. 'session' is a realistic sage session in order: every call must be allowed.",
   "refuse": [
     "/opt/homebrew/bin/gh pr merge 12",
     "git merge feature",
@@ -283,7 +283,12 @@
     "node ../../../../../../../dev/stdin < {SCRATCH}/x.mjs",
     "node /x/../dev/fd/3 3< {SCRATCH}/x.mjs",
     "node --test /dev/stdin",
-    "node --no-warnings /dev/stdin status < {SCRATCH}/x.mjs"
+    "node --no-warnings /dev/stdin status < {SCRATCH}/x.mjs",
+    "git stash -u",
+    "git stash --keep-index",
+    "sed -n 1,40p src/a.js",
+    "awk \"NR<40\" src/a.js",
+    "sage-bot-github pr create"
   ],
   "broker": [
     "gh pr merge 12",
@@ -502,7 +507,11 @@
     "git log --oneline -- \"src/guard.js\"",
     "node scripts/x.mjs /dev/null",
     "git diff HEAD~1 -- src/guard.js",
-    "node --test test/dev/x.test.js"
+    "node --test test/dev/x.test.js",
+    "git stash -m wip",
+    "git stash --message wip",
+    "git stash -q",
+    "tail -n +20 src/a.js | head -n 20"
   ],
   "sandbox": [
     "git -C {HOME} status",

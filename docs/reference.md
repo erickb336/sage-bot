@@ -644,10 +644,11 @@ Step 6 adds the sandbox's folders, secret patterns, hosts and `excludedCommands`
 - sage's mode and autopilot state in `$TMPDIR/sage-hooks`: out of the sandbox's write folders (F-T134-7), and denied for reads (F-T134-12).
 - No `excludedCommands` entry for the sage state tool, and no read or write of the logbooks (`~/.claude/sage`) in the sandbox or the permission rules. The hook refuses each call that names the state tool, but it cannot see a copy under another name or a script that builds the name (see below). A lead session reaches the logbook only through the few fixed broker verbs of T134, with the project fixed (F-T134-6).
 - The sage-bot config, its token, the lead log and the kill-switch flag: outside the worktree and the scratch folder (F-T134-2).
+- The broker's MCP tools in the guard's `TOOLS` (`src/guard.js`): the broker runs in-process as MCP tools of the Agent SDK (G57 A, T158), and the guard refuses every tool that is not in `TOOLS`. The refusal of `gh`, `git push` and `git fetch` names these tools and no command (F-T133-63).
 
 A hook that runs past its timeout does not block the tool call (F-T134-13), so the guard has a deadline of its own: the rules run in a worker thread, and when they do not decide in 5 seconds, the hook writes a deny and exits (F-T133-62). The 30-second timeout leaves room for a slow start of `node`. The guard reads no file and refuses an input over 64 KB before it parses it. Its wildcard match goes back only to the last `*`, so its time grows with the word's length times the name's (F-T133-62; a regex match took 84 seconds for 48 stars). The worst case measured on the owner's Mac: 0.1 seconds in the rules for 40 wildcard shapes of 64 KB, and 0.3 seconds for the whole hook.
 
-It reads these variables from the environment of the `claude` process. The hook inherits them, and the session's model cannot change them.
+It reads these variables from the environment of the `claude` process, and the hook inherits them. The session's model cannot change them only because T134 holds three settings: the launch flag `--setting-sources ""` that T156 generates, so that no project or user settings file loads and no `env` of a settings file reaches the hook (F-T134-10); the deny on writes to `.claude/settings*.json` (F-T134-4); and the T134 test that an `env` in a settings file cannot reach the hook (F-T134-18).
 
 | Variable | Value |
 | --- | --- |
@@ -661,7 +662,8 @@ It reads these variables from the environment of the `claude` process. The hook 
 | Refused | Safe form |
 | --- | --- |
 | A command that the guard cannot read: `$`, a backtick, a heredoc, `(`, `{`, `\`, `;`, `\|\|`, a newline. For example `git commit -m "$(cat <<'EOF' …)"`. | Write the text to a file in the scratch folder, then `git commit -F <file>`. One simple command per call, or commands joined by `&&`. |
-| `gh`, `git push`, `git fetch` | `sage-bot-github`, the broker of step 6 |
+| `gh`, `git push`, `git fetch` | The sage-bot broker tools of the session (open a pull request, upload your branch): MCP tools that T134 adds (T158) |
+| `sed`, `awk` (for example `sed -n 1,40p <file>`) | `head -n 40 <file>`, `tail -n +20 <file> \| head -n 20`, or the Read tool with offset and limit |
 | The Grep tool | `rg` in Bash, for example `rg -n <pattern> <folder>` |
 | `cd <folder>` alone, or a `cd` after the first part | `cd <folder> && <command>`, or the full path in the command |
 | `HOME=… git …` | The same command with no variable in front of it |
@@ -680,7 +682,7 @@ It reads these variables from the environment of the `claude` process. The hook 
 
 | Command | Allowed | Refused |
 | --- | --- | --- |
-| `git` | `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`, `add`, `rm`, `mv`, `restore`, `commit` (`-m`, `-F`), `switch`, `checkout -b`, `branch` (list or create), `stash` (`list`, `push`, `pop`, `apply`, `show`), `remote -v`, `worktree add` and `list`; the global option `-C <folder>`; `--pretty=<value>` and `--format=<value>` (a value in the next word is an operand, not their value: the pattern rule 4 below checks it, so `git log --pretty "%h (%s)"` is refused for its `(`; an operand that rule 4 allows reaches git, which then fails) | `push`, `fetch` (the broker), `merge`, `pull`, `rebase`, `reset`, `clean`, `tag`, `cherry-pick`, `config`, `credential`, `cat-file`, `branch -D` and `-d`, `stash clear` and `drop`, `remote add` and `set-url`, `worktree remove`; every global option but `-C` (`-c`, `--git-dir`, `--exec-path`); `--output`, `--ext-diff`, `--textconv`, `--no-index`, `commit --no-verify` |
+| `git` | `status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `blame`, `add`, `rm`, `mv`, `restore`, `commit` (`-m`, `-F`), `switch`, `checkout -b`, `branch` (list or create), `stash` (`list`, `push`, `pop`, `apply`, `show`; git takes a bare `git stash -m <text>` as `git stash push -m <text>`, and the guard checks it so), `remote -v`, `worktree add` and `list`; the global option `-C <folder>`; `--pretty=<value>` and `--format=<value>` (a value in the next word is an operand, not their value: the pattern rule 4 below checks it, so `git log --pretty "%h (%s)"` is refused for its `(`; an operand that rule 4 allows reaches git, which then fails) | `push`, `fetch` (the broker), `merge`, `pull`, `rebase`, `reset`, `clean`, `tag`, `cherry-pick`, `config`, `credential`, `cat-file`, `branch -D` and `-d`, `stash clear` and `drop`, `remote add` and `set-url`, `worktree remove`; every global option but `-C` (`-c`, `--git-dir`, `--exec-path`); `--output`, `--ext-diff`, `--textconv`, `--no-index`, `commit --no-verify` |
 | `node` | `node --version`; a script; `--test`, `--check` | `-e`, `-p`, `--eval`, `--require`, `--import`, a loader; no script or the script `-` (code from stdin); a script under `/dev/` |
 | `npm` | `ci`, `test`, `run <script>`, `ls`, `outdated` | `publish`, `exec`, `install`, a script whose name has `deploy`, `release` or `publish`; `--prefix`, `--userconfig`, `--script-shell`, `--node-options`, `-g` |
 | `rg` | `-n`, `-i`, `-l`, `-c`, `-w`, `-F`, `-e`, `-g`, `-t`, `-A`, `-B`, `-C`, `--files` | `--pre`, `-L`, every other option |

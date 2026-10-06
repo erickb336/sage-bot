@@ -64,7 +64,7 @@ const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (sage can do
 const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
 const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.';
-const BROKER = "sage can do this instead: sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view).";
+const BROKER = 'sage can do this instead: the sage-bot broker tools of the session (open a pull request, upload your branch).';
 
 test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}), of wildcards (${CORPUS.wildcard.length}) and of pattern characters (${CORPUS.pattern.length}), each once`, () => {
   assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.pattern.length >= 15 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
@@ -88,9 +88,33 @@ test('T133: in a lead session, every Bash command of the corpus that is not on t
   assert.deepEqual(results.filter(([, r]) => !MESSAGE.test(r.reason)).map(([c, r]) => [c, r.reason]), []);
 });
 
-test('T133: gh, git push and git fetch are refused with the hint to the broker, sage-bot-github', () => {
+test('T133: gh, git push and git fetch are refused with the hint to the broker tools of the session', () => {
   assert.deepEqual(CORPUS.broker.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(BROKER)), []);
   assert.equal(guard(bash('gh pr merge 12')).reason, `sage-bot guard: gh is refused in a lead session. ${BROKER}`);
+  assert.equal(guard(bash('git push origin x')).reason, `sage-bot guard: git push is refused in a lead session. ${BROKER}`);
+  assert.equal(guard(bash('gh pr create')).reason, `sage-bot guard: gh is refused in a lead session. ${BROKER}`);
+});
+
+test('F-T133-63: the broker hint names no command that the guard refuses, so a lead session can finish the pull request step', () => {
+  // The refused GitHub commands: the command name (quotes joined) of each broker case, and the old broker CLI.
+  const names = new Set(CORPUS.broker.map((c) => c.split(' ')[0].replace(/["']/g, '')).concat('sage-bot-github', 'git push', 'git fetch'));
+  assert.equal(guard(bash('sage-bot-github pr create')).reason, `sage-bot guard: the command sage-bot-github is refused in a lead session. ${STOP}`);
+  const hint = guard(bash('git push origin x')).reason.split('sage can do this instead: ')[1];
+  const words = ` ${hint.replace(/[(),.]/g, ' ')} `;
+  assert.deepEqual([...names].filter((n) => words.includes(` ${n} `)), []);
+});
+
+test('F-T133-64: sed and awk stay refused, with the hint to head, tail or the Read tool, and the guard allows the commands of the hint', () => {
+  const LINES = 'sage can do this instead: to read lines of a file: head -n 40 <file>, tail -n +20 <file> | head -n 20, or the Read tool with offset and limit.';
+  assert.equal(guard(bash('sed -n 1,40p src/a.js')).reason, `sage-bot guard: sed is refused in a lead session. ${LINES}`);
+  assert.equal(guard(bash('awk "NR<40" src/a.js')).reason, `sage-bot guard: awk is refused in a lead session. ${LINES}`);
+  for (const c of ['head -n 40 src/a.js', 'tail -n +20 src/a.js | head -n 20']) assert.equal(guard(bash(c)).decision, 'allow', c);
+  assert.equal(guard(tool('Read', { file_path: '/sample/repo/wt/src/a.js', offset: 20, limit: 20 })).decision, 'allow');
+});
+
+test('F-T133-65: git takes a bare git stash with an option as git stash push, so the guard checks it by the options of push', () => {
+  for (const c of ['git stash -m wip', 'git stash --message wip', 'git stash -q']) assert.equal(guard(bash(c)).decision, 'allow', c);
+  for (const opt of ['--include-untracked', '-u', '--keep-index']) assert.match(guard(bash(`git stash ${opt}`)).reason, new RegExp(`^sage-bot guard: git stash with the option ${opt} is refused`));
 });
 
 test('T133: the sage state tool is refused in every form, with the stop ending (G30 A): its path, sage.mjs in any case or quoting, a variable in front, env, --, a wildcard, a copy, a script that imports it', () => {
