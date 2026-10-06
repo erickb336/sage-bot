@@ -12,19 +12,18 @@
 // as a recommendation; the owner decides at the terminal. --leads reads the gate from the logbook of the project and refuses any other.
 // Its list is `<votes list>.leads`. A gate is in one list at most: a mark moves it.
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { notLeadsOnly } from '../src/bridge.js';
 import { forTerminal } from '../src/clean.js';
 import { loadProjects, pickProject, projectHere } from '../src/projects.js';
 import { sageTool } from '../src/sage.js';
 import { GATE_ID, keyOf, leadsPathOf, loadLeads, loadVotes, migrateMarks, saveVotes, votesPathOf, withLock } from '../src/state.js';
+import { defaultConfigPath } from '../src/lead-policy.js';
 
 const USAGE = 'usage: node scripts/vote.mjs [--config <config.json>] [--project <name>] <gate id> ... | --leads <gate id> | --unmark <gate id> ... | --list';
 
 try {
   const args = process.argv.slice(2);
-  let configPath = join(homedir(), '.config', 'sage-bot', 'config.json');
+  let configPath = defaultConfigPath();
   if (args[0] === '--config') [, configPath] = args.splice(0, 2);
   let name;
   if (args[0] === '--project') [, name] = args.splice(0, 2);

@@ -84,7 +84,7 @@ test('a bad --out fails at once with a clear message, before anything runs (F-T5
 });
 
 test('the sage tool lookup: SAGE_TOOL first, then the newest version in the plugin cache, then a message that names SAGE_TOOL (F-T51-4)', async () => {
-  const { sagePath } = await import('../scripts/sage-path.mjs');
+  const { sagePath } = await import('../src/sage.js');
   const home = mkdtempSync(join(tmpdir(), 'sage-bot-t51-home-'));
   const tool = (version, sec) => {
     const dir = join(home, '.claude', 'plugins', 'cache', 'sage', 'sage', version, 'skills', 'sage');

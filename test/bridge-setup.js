@@ -10,9 +10,8 @@ import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
-import { sageTool } from '../src/sage.js';
+import { sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
-import { sagePath } from '../scripts/sage-path.mjs';
 
 /** The pinned copy of the sage state tool (test/fixtures/sage/README.md). */
 export const FIXTURE = new URL('fixtures/sage/39e9bf767a1f/sage.mjs', import.meta.url).pathname;

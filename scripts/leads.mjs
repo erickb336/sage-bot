@@ -8,15 +8,14 @@
 // The config is the bridge's (default ~/.config/sage-bot/config.json). Only Erick runs this: only the terminal turns the link on.
 // It needs no stop of the bridge: the bridge checks the flag before each would-be delivery, and only appends to the log.
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { auditPathOf, killPathOf, linkOff, restoreLink, setLinkOff, verifyLog } from '../src/audit.js';
 import { forTerminal } from '../src/clean.js';
+import { defaultConfigPath } from '../src/lead-policy.js';
 
 const say = (line) => console.log(forTerminal(line));
 const args = process.argv.slice(2);
 const at = args.indexOf('--config');
-const path = at === -1 ? join(homedir(), '.config', 'sage-bot', 'config.json') : args.splice(at, 2)[1];
+const path = at === -1 ? defaultConfigPath() : args.splice(at, 2)[1];
 try {
   const config = JSON.parse(readFileSync(path, 'utf8'));
   const [verb, n = '20'] = args;

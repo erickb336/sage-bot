@@ -4,17 +4,16 @@
 // file is the config's `statePath`; the config is the bridge's (default ~/.config/sage-bot/config.json).
 // sage reads reasons only here, never from Discord. Each line is quoted data, cleaned for a model reader (src/clean.js).
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { forTerminal, reasonLines } from '../src/clean.js';
 import { loadProjects, pickProject, projectHere } from '../src/projects.js';
 import { keyOf, load, projectOfKey } from '../src/state.js';
+import { defaultConfigPath } from '../src/lead-policy.js';
 
 const USAGE = 'usage: node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>';
 
 try {
   const args = process.argv.slice(2);
-  let configPath = join(homedir(), '.config', 'sage-bot', 'config.json');
+  let configPath = defaultConfigPath();
   if (args[0] === '--config') [, configPath] = args.splice(0, 2);
   let name;
   if (args[0] === '--project') [, name] = args.splice(0, 2);
