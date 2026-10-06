@@ -1,17 +1,19 @@
 // T51: npm run demo plays one sage session on the fake Discord layer and writes one HTML page. The test runs the demo twice, as the
-// owner does, each time into its own scratch folder with a scratch HOME, and reads the pages. SAMPLE DATA ONLY.
+// owner does, each time into its own scratch folder with a scratch HOME and the pinned sage state tool, and reads the pages.
+// SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SAGE } from './bridge-setup.js';
 
 const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
 function demo() {
   const root = mkdtempSync(join(tmpdir(), 'sage-bot-t51-'));
   const out = join(root, 'demo.html');
-  const env = { PATH: process.env.PATH, HOME: root, ...(process.env.SAGE_TOOL && { SAGE_TOOL: process.env.SAGE_TOOL }) };
+  const env = { PATH: process.env.PATH, HOME: root, SAGE_TOOL: SAGE };
   const said = execFileSync(process.execPath, [DEMO, '--out', out], { env, encoding: 'utf8' });
   return { root, said, page: readFileSync(out, 'utf8') };
 }
@@ -70,7 +72,7 @@ test('the demo page shows the session line, the thread in order with the private
 test('a bad --out fails at once with a clear message, before anything runs (F-T51-5)', () => {
   const root = mkdtempSync(join(tmpdir(), 'sage-bot-t51-out-'));
   writeFileSync(join(root, 'a-file'), 'x');
-  const env = { PATH: process.env.PATH, HOME: root, TMPDIR: root, ...(process.env.SAGE_TOOL && { SAGE_TOOL: process.env.SAGE_TOOL }) };
+  const env = { PATH: process.env.PATH, HOME: root, TMPDIR: root, SAGE_TOOL: SAGE };
   const bad = spawnSync(process.execPath, [DEMO, '--out', join(root, 'a-file', 'demo.html')], { env, encoding: 'utf8' });
   assert.equal(bad.status, 1);
   assert.equal(bad.stdout, ''); // no step ran
