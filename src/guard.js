@@ -45,9 +45,9 @@ export const refusal = (why) => {
 // twice, and the hook's whole output must stay far below the 64 KB that a pipe holds.
 const say = (text) => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
 
-const BROKER = 'the sage-bot broker tools of the session (open a pull request, upload your branch)';
+const BROKER = 'the sage-bot broker tools of the session (fetch, open a pull request, upload your branch)';
 // sed and awk stay refused (F-T133-64); a read of some lines of a file has a safe form.
-const LINES = 'to read lines of a file: head -n 40 <file>, tail -n +20 <file> | head -n 20, or the Read tool with offset and limit';
+const LINES = 'to read lines of a file: head -n 40 <file>, tail -n +20 <file> | head -n 20, or the Read tool with offset and limit; to change a file: the Edit tool';
 
 // ---- Bash: the parser ---------------------------------------------------------------------------------------------------
 

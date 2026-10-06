@@ -49,11 +49,13 @@ const MUTATIONS = [
   ['npm: no option that changes its config', "'--prefer-offline': FLAG, '--': FLAG }", "'--prefer-offline': FLAG, '--prefix': TEXT, '--script-shell': TEXT, '--': FLAG }"],
   ['gh goes to the broker', "gh: () => how('gh', BROKER),", ''],
   // F-T133-63: the old hint named a CLI that the guard itself refuses.
-  ['the broker hint names the broker tools, no command (F-T133-63)', "const BROKER = 'the sage-bot broker tools of the session (open a pull request, upload your branch)';", "const BROKER = \"sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)\";"],
+  ['the broker hint names the broker tools, no command (F-T133-63)', "const BROKER = 'the sage-bot broker tools of the session (fetch, open a pull request, upload your branch)';", "const BROKER = \"sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)\";"],
   // F-T133-64: a read of some lines with sed or awk gets the safe form.
+  ['the broker hint names fetch (F-T133-70)', '(fetch, open a pull request', '(open a pull request'],
   ['sed gets the line-read hint (F-T133-64)', "  sed: () => how('sed', LINES),\n", ''],
   ['awk gets the line-read hint (F-T133-64)', "  awk: () => how('awk', LINES),\n", ''],
   ['the line-read hint names head, tail and Read (F-T133-64)', ', tail -n +20 <file> | head -n 20, or the Read tool with offset and limit', ''],
+  ['the sed hint names the Edit tool for a change (F-T133-69)', '; to change a file: the Edit tool', ''],
   ['only the listed commands', 'if (!Object.hasOwn(COMMANDS, name)) return `the command ${say(name)}`;', 'if (!Object.hasOwn(COMMANDS, name)) return null;'],
   ['no inherited name as a command', 'if (!Object.hasOwn(COMMANDS, name)) return', 'if (!COMMANDS[name]) return'],
   // git
