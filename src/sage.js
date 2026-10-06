@@ -1,10 +1,10 @@
 // The bridge's only way to sage: the state tool, run with execFile (no shell). It reads the gates and tasks of the
 // logbook as sage wrote them, and records an answer with `sage gate answer`. It never writes a logbook file itself.
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -44,23 +44,42 @@ export function sageTool({ sagePath, project, env = process.env }) {
   };
 }
 
+/** A part of a canonical path: only these characters (an allow-list, standing order 12), and never "." or "..". */
+const PART = /^[A-Za-z0-9._-]+$/;
+/** The macOS Data volume. A path in it names the same file as its short form, but the macOS sandbox matches only the short form (F-T156-39). */
+const DATA = '/System/Volumes/Data';
 /**
- * The one rule for a path that the config or the environment gives: an absolute path with no empty, "." or ".." part. Such a path names
- * one file by its text, so no step that reads it as text (resolve, join, dirname) can move it away from the file that the OS opens: a
- * ".." after a link (F-T156-28), a relative path (F-T156-10, F-T156-30) or "~" is refused, never guessed. Returns the path, else throws
- * one line that names `what`.
+ * The one rule for a path that the config or the environment gives (G48 A): a canonical path. It is absolute; each part has only the
+ * characters of PART (no glob character, space, "~", non-ASCII or control character: F-T156-37) and is not empty, "." or ".."; it is not
+ * in the Data volume (F-T156-39); and the deepest part of it that exists is its own real path (`realpathSync.native`), so no part is a
+ * link and the letter case is the disk's. The path then names one file by its text, and every rule made from it (a deny, an allow,
+ * an overlap) is about that file. Links of the system are written in their real form: /private/tmp, not /tmp. The reader of the path
+ * is the sandbox and the permission rules, so the allow-list is for them. Returns the path, else throws one line that names `what`.
  */
-export function exactPath(what, path) {
-  if (typeof path === 'string' && isAbsolute(path) && path.slice(1).split('/').every((part) => part !== '' && part !== '.' && part !== '..')) return path;
-  throw new TypeError(`${what} must be an absolute path with no empty, "." or ".." part, not ${JSON.stringify(path ?? null)}. Nothing was started.`);
+export function canonicalPath(what, path) {
+  const parts = typeof path === 'string' ? path.split('/') : [];
+  let real = path;
+  if (parts.length > 1 && parts[0] === '' && parts.slice(1).every((p) => PART.test(p) && p !== '.' && p !== '..') && path !== DATA && !path.startsWith(`${DATA}/`)) {
+    real = realOfDeepest(path);
+    if (real === path) return path;
+  }
+  throw new TypeError(`${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_" and "-"; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${typeof real === 'string' && real !== path ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`);
+}
+/** `path` with its deepest part that exists replaced by that part's real path; null when that part has no real path (a link to nothing, a loop) or cannot be read. */
+function realOfDeepest(path) {
+  for (let at = path; ; at = dirname(at)) {
+    let s;
+    try { s = lstatSync(at, { throwIfNoEntry: false }); } catch (e) { if (e.code !== 'ENOTDIR') return null; } // a part below a file: not there
+    if (s) { try { return realpathSync.native(at) + path.slice(at.length); } catch { return null; } } // "/" is always there
+  }
 }
 
 /**
  * The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. An empty CLAUDE_CONFIG_DIR
- * counts as not set; any other must pass exactPath (F-T156-17, F-T156-28).
+ * counts as not set; any other must be canonicalPath (F-T156-17, F-T156-28).
  */
 export function claudeDirOf({ env = process.env, home = userInfo().homedir } = {}) {
-  return env.CLAUDE_CONFIG_DIR ? exactPath('CLAUDE_CONFIG_DIR', env.CLAUDE_CONFIG_DIR) : join(home, '.claude');
+  return env.CLAUDE_CONFIG_DIR ? canonicalPath('CLAUDE_CONFIG_DIR', env.CLAUDE_CONFIG_DIR) : join(home, '.claude');
 }
 
 /** The sage plugin's two folders in a Claude Code config folder (claudeDirOf): its cache (each version) and its marketplace copy. */
