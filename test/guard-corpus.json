@@ -101,13 +101,10 @@
     "grep -rn token {SCRATCH}/proj/config",
     "grep -R token {SCRATCH}/proj",
     "grep --recursive token {SCRATCH}/proj",
-    "rg --hidden token {SCRATCH}/proj",
     "cd {SCRATCH}/proj && grep -r token",
     "grep -r x {SCRATCH}/clean/node_modules",
     "grep -R x {SCRATCH}/links",
     "grep -r url {REPO}",
-    "git stash push -u",
-    "git stash --include-untracked",
     "git diff --no-index {SCRATCH}/proj/config/.env x",
     "git cat-file -p HEAD:.env",
     "HOME={SCRATCH} git status",
@@ -284,12 +281,10 @@
     "node /x/../dev/fd/3 3< {SCRATCH}/x.mjs",
     "node --test /dev/stdin",
     "node --no-warnings /dev/stdin status < {SCRATCH}/x.mjs",
-    "git stash -u",
     "git stash --keep-index",
     "sed -n 1,40p src/a.js",
     "awk \"NR<40\" src/a.js",
     "sage-bot-github pr create",
-    "git worktree add .claude/worktrees/t9 -b claude/t9",
     "echo '{}' > ~/.claude/settings.json",
     "echo x > .claude/settings.local.json",
     "cp x {WT}/.claude/settings.json",
@@ -308,7 +303,13 @@
     "rm -rf {WT}/.claude",
     "cd {WT} && cp {SCRATCH}/hooks.json ./.claude/settings.local.json",
     "cat a.md > {HOME}/.claude/skills/x/SKILL.md",
-    "node scripts/x.mjs .claude/agents/a.md"
+    "node scripts/x.mjs .claude/agents/a.md",
+    "rm -rf .*",
+    "echo x > .git/hooks/pre-commit",
+    "echo x >> .mcp.json",
+    "uniq README.md .mcp.json",
+    "node {SCRATCH}/x.txt",
+    "git log --pretty \"%h (%s)\""
   ],
   "broker": [
     "gh pr merge 12",
@@ -536,7 +537,13 @@
     "cat .claude/settings.json",
     "ls .claude/skills",
     "cp x {SCRATCH}/notes.claude/a.md",
-    "mkdir -p {SCRATCH}/my.claude"
+    "mkdir -p {SCRATCH}/my.claude",
+    "rg --hidden token {SCRATCH}/proj",
+    "git stash push -u",
+    "git stash --include-untracked",
+    "git stash -u",
+    "git worktree add .claude/worktrees/t9 -b claude/t9",
+    "git stash pop 'stash@{0}'"
   ],
   "sandbox": [
     "git -C {HOME} status",
@@ -559,15 +566,12 @@
     "rm -rf {WT}",
     "rm -rf .",
     "rm -rf {REPO}",
-    "rm -rf .*",
     "rm -rf {WT}/../../../..",
     "echo x > {HOME}/.config/sage-bot/lead.log",
     "touch {HOME}/.config/sage-bot/stop",
     "cp evil.mjs {REPO}/scripts/guard.mjs",
     "echo '{\"autopilot\":true}' > {TMPDIR}/sage-hooks/state.json",
     "mkdir -p {SCRATCH}/sage-hooks",
-    "echo x > .git/hooks/pre-commit",
-    "echo x >> .mcp.json",
     "find / -name id_rsa",
     "node {HOME}/x.mjs",
     "cat {WT}/keys/id_ed25519",
@@ -629,8 +633,6 @@
     "git mv README.md {HOME}/x",
     "git commit -F {HOME}/msg.txt",
     "git worktree add {HOME}/x",
-    "uniq README.md .mcp.json",
-    "node {SCRATCH}/x.txt",
     "HOME={HOME} npm ci",
     "ls {SCRATCH}/.*/home",
     "cd {HOME} && ls",
@@ -647,7 +649,6 @@
     "rg token {SCRATCH}/proj/config",
     "rg token {SCRATCH}/clean/src/*",
     "cat {SCRATCH}/proj/config",
-    "git -C {SCRATCH}/proj add -- 'conf?g/.e*'",
     "git add --all",
     "git add -u",
     "git add -- .",
@@ -1371,6 +1372,17 @@
           "file_path": "{HOME}/.CLAUDE/skills/x/SKILL.md",
           "content": "x"
         }
+      ],
+      [
+        "Write",
+        {}
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.mcp.json",
+          "content": "{}"
+        }
       ]
     ],
     "allow": [
@@ -1782,10 +1794,6 @@
         }
       ],
       [
-        "Write",
-        {}
-      ],
-      [
         "Glob",
         {
           "pattern": "x",
@@ -1797,13 +1805,6 @@
         {
           "file_path": "{REPO}/README.md",
           "content": "x"
-        }
-      ],
-      [
-        "Write",
-        {
-          "file_path": "{WT}/.mcp.json",
-          "content": "{}"
         }
       ],
       [
@@ -2233,10 +2234,10 @@
     "git add -- \"{SCRATCH}/[s]age.mjs\"",
     "git add 'app/[id]/page.tsx'",
     "node --test 'test/[a].test.js'",
-    "cp ./sta*te.mjs* {SCRATCH}/out"
+    "cp ./sta*te.mjs* {SCRATCH}/out",
+    "git -C {SCRATCH}/proj add -- 'conf?g/.e*'"
   ],
   "pattern": [
-    "git log --pretty \"%h (%s)\"",
     "git -C {SCRATCH}/proj add ':(glob)**/.e*'",
     "git -C {SCRATCH}/proj add -- ':(glob)config/*'",
     "git -C {SCRATCH}/proj add -- ':(icase)CONFIG/.ENV'",
@@ -2250,11 +2251,11 @@
     "git add src/@types/x.d.ts",
     "git add src/c++.js",
     "git show 'HEAD:docs/a+b.md'",
-    "git stash pop 'stash@{0}'",
-    "git log --oneline 'HEAD@{1}'"
+    "git log --oneline 'HEAD@{1}'",
+    "git add 'src/{a,b}.js'"
   ],
   "slow": [
-    "node ./{STARS}q && python3 -c 'print(1)'",
+    "node ./{STARS}q.mjs && python3 -c 'print(1)'",
     "ls > ./{STARS}q && python3 -c 'print(1)'",
     "git add './{STARS}q' && python3 -c 'print(1)'",
     "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"

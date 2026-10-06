@@ -52,8 +52,8 @@ async function answers() {
 // A form in a hint, as a pattern for the call of its target: a <placeholder> is one word or more.
 const form = (names) => new RegExp(names.split(/<[^>]+>/).map((t) => t.replace(/[.*+?^$()[\]{}|\\]/g, '\\$&')).join('\\S+'));
 
-test(`G64 A: the normal lead work has 140 to 170 entries (${entries.length}), each id once, each a hint to an allowed entry or to T158`, () => {
-  assert.ok(entries.length >= 140 && entries.length <= 170, String(entries.length));
+test(`G64 A: the normal lead work has 180 to 220 entries (${entries.length}), each id once, each a hint to an allowed entry or to T158`, () => {
+  assert.ok(entries.length >= 180 && entries.length <= 220, String(entries.length));
   assert.equal(byId.size, entries.length);
   const bad = entries.filter((e) => e.expect === 'hint').filter((e) => {
     if (e.leads_to === 'T158') return false;
