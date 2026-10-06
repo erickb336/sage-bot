@@ -3,8 +3,8 @@
 // the arguments and environment of `claude -p`, and preflight says whether a session can start. Only the sandbox guarantees a file or
 // network boundary (standing order 14); the guard hook (T133) is a second layer. PR 2 of T134 proves each setting in a scratch HOME.
 import { execFile, execFileSync } from 'node:child_process';
-import { accessSync, constants, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { homedir, platform, tmpdir } from 'node:os';
+import { accessSync, constants, lstatSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { auditPathOf, killPathOf } from './audit.js';
 import { canonicalPath, claudeDirOf, sagePath, sagePlugin, sageToolIn } from './sage.js';
@@ -55,8 +55,8 @@ export const CLAUDE_TMP_MAX = 44;
 export const defaultConfigPath = (home = homedir()) => join(home, '.config', 'sage-bot', 'config.json');
 
 /**
- * `path`, a folder that the lead sessions own: the leads folder, the sessions folder, each session folder, the folder of all temp folders
- * and each temp folder. Refused when it is there and is a link, not a folder, not the user's, or writable by the group or other users:
+ * `path`, a folder that a lead session uses: the leads folder, the sessions folder, the folder of all temp folders, and this session's
+ * folder and temp folder. Other entries of the two roots are not looked at (F-T156-41): each session checks its own two. Refused when it is there and is a link, not a folder, not the user's, or writable by the group or other users:
  * the session, or another user of the Mac, could point it at any folder, and the next session would read and write there (F-T156-29,
  * F-T156-34). ACLs are not checked. Not there yet is fine; the launcher makes it. Then it must be canonicalPath (its letter case).
  */
@@ -66,8 +66,6 @@ function ownFolder(what, path, uid) {
   if (why) throw new Error(`the lead session's ${what} ${path} is ${why}: a session could reach another folder through it. Remove it. Nothing was started.`);
   return canonicalPath(`the lead session's ${what}`, path);
 }
-/** The names in the folder `dir`; none when it is not there. */
-const namesIn = (dir) => { try { return readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return []; throw e; } };
 /** The command `name` by its absolute path: the first executable file of that name in `PATH`, else `name` as it is. */
 function which(name, PATH = '') {
   if (isAbsolute(name)) return name;
@@ -79,39 +77,46 @@ function which(name, PATH = '') {
 /** Whether `inner` is `outer` or inside it. */
 const within = (inner, outer) => { const rel = relative(outer, inner); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }; // "" (equal) is within
 
-/** The macOS per-user temp folder (getconf DARWIN_USER_TEMP_DIR), the one that os.tmpdir() gives when TMPDIR is not set, by its real path (/private/var/...). */
+/**
+ * The macOS per-user temp folder (getconf DARWIN_USER_TEMP_DIR, run with no shell) by its real path (/private/var/folders/.../T): the
+ * folder that the owner's Terminal and the launchd bridge have in TMPDIR (F-T156-40). The policy never reads TMPDIR itself. Throws one
+ * line when getconf fails.
+ */
 function userTemp() {
-  if (platform() !== 'darwin') return undefined;
-  try { return realpathSync.native(execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).trim()); } catch { return undefined; }
+  try { return realpathSync.native(execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); } catch (e) {
+    throw new Error(`getconf DARWIN_USER_TEMP_DIR gave no folder (${String(e.message).split('\n')[0]}): the policy cannot deny sage's hook state in it. Nothing was started.`);
+  }
 }
 
 /**
  * Every path and name of one lead session's containment. Every path is canonicalPath, so each rule made from it is about the file that
  * its text names. Throws one line when the session cannot be contained:
  * - a session name that is not s and a number;
- * - a path of the config (CONFIG_PATHS), HOME, TMPDIR, SAGE_HOME, SAGE_TOOL or CLAUDE_CONFIG_DIR that is not canonical (an empty variable
+ * - getconf DARWIN_USER_TEMP_DIR that fails;
+ * - a path of the config (CONFIG_PATHS), HOME, DARWIN_USER_TEMP_DIR (its real path), SAGE_HOME, SAGE_TOOL or CLAUDE_CONFIG_DIR that is not canonical (an empty variable
  *   counts as not set), or a denied path or a state tool that is not (for example a link at the state file);
- * - a folder that the lead sessions own (ownFolder) that is a link, not a folder, not the user's, or writable by others (F-T156-29);
+ * - a folder that the lead sessions use (ownFolder: the two roots, this session's folder and its temp folder; other entries of the
+ *   roots are not looked at, F-T156-41) that is a link, not a folder, not the user's, or writable by others (F-T156-29);
  * - the sessions folder or the folder of all temp folders equal to, in, or holding the other or a denied path (F-T156-34);
  * - a per-user temp folder longer than CLAUDE_TMP_MAX (F-T156-35);
  * - a state tool (SAGE_TOOL) that is not in the sage plugin's cache, the one folder that the session loads sage from (F-T156-14).
  * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadSessionsPath
  * @param {string} session  the session's name, for example s21
- * @param {{ env?: NodeJS.ProcessEnv, home?: string, tmp?: string, userTemp?: string, tempRoot?: string, claude?: string, uid?: number }} [host]
+ * @param {{ env?: NodeJS.ProcessEnv, home?: string, userTemp?: string, tempRoot?: string, claude?: string, uid?: number }} [host]
  *   the host's values, for the tests; by default the real ones. `tempRoot` is TEMP_ROOT, which the tests move to a scratch folder.
  *   `claude` is found in the host's PATH: the session's PATH is fixed.
  */
 export function leadPolicy(config, session, host = {}) {
   if (!SESSION.test(session ?? '')) throw new TypeError(`a lead session's name is s and a number, such as s21, not ${JSON.stringify(session)}. Nothing was started.`);
   for (const key of CONFIG_PATHS) if (config[key] !== undefined || key === 'statePath') canonicalPath(`the config: ${key}`, config[key]);
-  const { env = process.env, home = homedir(), tmp = env.TMPDIR || '/private/tmp', tempRoot = TEMP_ROOT, claude = 'claude', uid = process.getuid() } = host;
-  canonicalPath('HOME', home); canonicalPath('TMPDIR', tmp);
+  const { env = process.env, home = homedir(), tempRoot = TEMP_ROOT, claude = 'claude', uid = process.getuid() } = host;
+  canonicalPath('HOME', home);
+  const userTempDir = canonicalPath('DARWIN_USER_TEMP_DIR', 'userTemp' in host ? host.userTemp : userTemp()); // F-T156-40: never TMPDIR
   for (const key of ['SAGE_HOME', 'SAGE_TOOL']) if (env[key]) canonicalPath(key, env[key]); // CLAUDE_CONFIG_DIR: claudeDirOf
   const own = (what, path) => ownFolder(what, path, uid);
   const leads = own('leads folder', config.leadSessionsPath ?? join(home, '.local', 'share', 'sage-bot', 'leads'));
   const sessions = own('sessions folder', join(leads, 'sessions')), temps = own('folder of all temp folders', tempRoot);
-  for (const name of namesIn(sessions)) own('session folder', join(sessions, name)); // F-T156-29: every session's, not only this one's
-  for (const name of namesIn(temps)) own('temp folder', join(temps, name));
+  own('session folder', join(sessions, session)); own('temp folder', join(temps, session)); // F-T156-41: only this session's; a .DS_Store is no matter
   const stateDir = dirname(config.statePath);
   const claudeConfig = claudeDirOf({ env, home }); // F-T156-11: the plugin and sage's root from one config folder
   const plugin = sagePlugin(claudeConfig);
@@ -120,13 +125,12 @@ export function leadPolicy(config, session, host = {}) {
   const version = sageTool && (relative(plugin.cache, sageTool).split(sep)[1] ?? ''); // F-T156-24: exactly sage/<version>/skills/sage/sage.mjs
   if (sageTool && sageTool !== sageToolIn(plugin.cache, version)) throw new Error(`the sage state tool ${sageTool} is not ${sageToolIn(plugin.cache, '<version>')}, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.`);
   const sageRoot = env.SAGE_HOME || join(claudeConfig, 'sage');
-  const hookTemps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()].filter(Boolean);
   const claudeDir = join(leads, 'claude');
   const denied = [...new Set([
     stateDir, config.statePath, ...[auditPathOf, killPathOf, sessionsPathOf, votesPathOf, leadsPathOf].map((of) => of(config)), // F-T134-2
     dirname(defaultConfigPath(home)), // F-T134-2
     plugin.cache, plugin.marketplace, sageRoot, // F-T134-6, F-T134-12
-    ...hookTemps.map((t) => join(t, 'sage-hooks')), join(sageRoot, '.hooks'), // F-T134-7, F-T134-12
+    join(userTempDir, 'sage-hooks'), '/private/tmp/sage-hooks', join(sageRoot, '.hooks'), // F-T134-7, F-T156-40, F-T134-12
     claudeDir, // F-T134-10
   ].map((d) => canonicalPath('the denied path', d)))];
   // F-T156-31, F-T156-34: the two folders of all sessions' folders apart from each other and from every denied path. Their folders are

@@ -11,7 +11,7 @@ import { CLAUDE_TMP_MAX, LEAD_PATH, MODEL_KEY, TEMP_ROOT, launchOf, leadPolicy, 
 
 const ROOT = join(import.meta.dirname, '..');
 // Folders that do not exist on the host, so the resolver takes them as written.
-const HOST = { env: {}, home: '/h', tmp: '/t', userTemp: '/u', tempRoot: '/st/sage-lead' };
+const HOST = { env: {}, home: '/h', userTemp: '/u', tempRoot: '/st/sage-lead' };
 const CONFIG = { statePath: '/s/state/gates.json' };
 /** The one-line refusal of a path that is not canonical (canonicalPath in src/sage.js); `real` when the path's real path differs. */
 const notCanonical = (what, path, real) => `${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${real ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`;
@@ -22,7 +22,7 @@ const DENIED = [
   '/s/state/gates.json.sessions', '/s/state/gates.json.votes', '/s/state/gates.json.votes.leads', // the spool and the vote files
   '/h/.config/sage-bot', // the bridge's config folder (F-T134-2)
   '/h/.claude/plugins/cache/sage', '/h/.claude/plugins/marketplaces/sage', '/h/.claude/sage', // the sage plugin and root (F-T134-6, -12)
-  '/t/sage-hooks', '/u/sage-hooks', '/h/.claude/sage/.hooks', // sage's hook state (F-T134-7, -12)
+  '/u/sage-hooks', '/private/tmp/sage-hooks', '/h/.claude/sage/.hooks', // sage's hook state (F-T134-7, F-T156-40, -12)
   '/h/.local/share/sage-bot/leads/claude', // the lead sessions' Claude Code config folder (F-T134-10)
 ];
 const fileRules = (tool) => DENIED.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
@@ -70,9 +70,6 @@ test('the configured paths: auditPath, killPath, leadSessionsPath, SAGE_HOME and
   for (const d of ['/a/leads.jsonl', '/k/off', '/c/sage', '/c/sage/.hooks', '/l/claude', '/c/plugins/cache/sage', '/c/plugins/marketplaces/sage']) assert.ok(p.denied.includes(d), d);
   for (const d of ['/s/state/gates.json.leads.jsonl', '/h/.claude/sage', '/h/.claude/plugins/cache/sage', '/h/.claude/plugins/marketplaces/sage']) assert.ok(!p.denied.includes(d), d);
   assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, env: { SAGE_HOME: '/sh', CLAUDE_CONFIG_DIR: '/c' } }).denied.includes('/sh/.hooks'));
-  // TMPDIR: the host's tmp, else the environment's TMPDIR, else /private/tmp (the real form of /tmp)
-  assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, tmp: undefined }).denied.includes('/private/tmp/sage-hooks'));
-  assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, tmp: undefined, env: { TMPDIR: '/x' } }).denied.includes('/x/sage-hooks'));
 });
 
 test('the settings snapshot: the sandbox, the file-tool rules, the host list, WebFetch and the credential variables', () => {
@@ -218,7 +215,8 @@ test('refusal: a link at the leads folder, at sessions, at any session folder or
     symlinkSync(state, join(root, 'l3', 'sessions', 's1')); // sessions/s1
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l1') }, 's1', HOST), { message: notCanonical('the config: leadSessionsPath', join(root, 'l1'), state) });
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l2') }, 's1', HOST), link('sessions folder', join(root, 'l2', 'sessions')));
-    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's2', HOST), link('session folder', join(root, 'l3', 'sessions', 's1'))); // also for s2
+    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's1', HOST), link('session folder', join(root, 'l3', 'sessions', 's1')));
+    assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's2', HOST).folder, join(root, 'l3', 'sessions', 's2')); // s1's link is s1's to refuse (F-T156-41)
     assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'l4') }, 's2', HOST).folder, join(root, 'l4', 'sessions', 's2')); // no link: fine
     mkdirSync(join(root, 'l5', 'Sessions'), { recursive: true }); // on the case-insensitive volume, "sessions" names this folder
     if (existsSync(join(root, 'l5', 'sessions'))) assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l5') }, 's2', HOST), { message: notCanonical('the lead session\'s sessions folder', join(root, 'l5', 'sessions'), join(root, 'l5', 'Sessions')) });
@@ -245,7 +243,7 @@ function host({ tool = "console.log('lead-sessions 1')", status = { supported: t
     `printf '%s\\n%s\\n' "$TMPDIR" "$CLAUDE_CODE_TMPDIR" > "${root}/tmp-vars"\ntest -d "$CLAUDE_CODE_TMPDIR" && echo there >> "${root}/tmp-vars"\necho '${JSON.stringify(status)}'\nexit ${claudeExit}\n`);
   chmodSync(claude, 0o755);
   const env = { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: join(root, 'claude-config') };
-  const policy = leadPolicy({ statePath: join(root, 'state', 'gates.json') }, 's1', { env, home: join(root, 'home'), tmp: join(root, 'tmp'), userTemp: undefined, tempRoot: '/st/sage-lead', claude });
+  const policy = leadPolicy({ statePath: join(root, 'state', 'gates.json') }, 's1', { env, home: join(root, 'home'), userTemp: join(root, 'tmp'), tempRoot: '/st/sage-lead', claude });
   return { root, env, policy, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -304,7 +302,9 @@ test('the script prints the settings of a sample config, and the preflight state
     const config = join(root, 'config.json');
     writeFileSync(config, JSON.stringify({ statePath: join(root, 'state', 'gates.json') }));
     // A state tool in the scratch plugin cache that prints no capability line: the tests' spawnSync gives every child SAGE_TOOL (T162).
-    const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), GH_TOKEN: 'sample-secret', CLAUDE_CONFIG_DIR: join(root, 'claude-config'), SAGE_TOOL: pluginCache(root, '') };
+    // TMPDIR through a link, as macOS's /var/folders/<x>/T is (F-T156-40): the policy does not read it.
+    mkdirSync(join(root, 'private-var', 'T'), { recursive: true }); symlinkSync(join(root, 'private-var'), join(root, 'var'));
+    const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'var', 'T'), GH_TOKEN: 'sample-secret', CLAUDE_CONFIG_DIR: join(root, 'claude-config'), SAGE_TOOL: pluginCache(root, '') };
     const run = (...a) => spawnSync(process.execPath, ['scripts/lead-policy.mjs', '--config', config, ...a], { cwd: ROOT, encoding: 'utf8', env });
     const s = run('--session', 's7', 'settings');
     assert.equal(s.status, 0, s.stderr);
@@ -318,6 +318,8 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.ok(!s.stdout.includes('sample-secret'));
     assert.equal(out.policy.pluginDir, join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1'));
     assert.equal(out.policy.tempRoot, '/private/tmp/sage-lead'); // the fixed temp root, in its real form
+    const userTemp = realpathSync.native(spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).stdout.trim());
+    for (const d of [join(userTemp, 'sage-hooks'), '/private/tmp/sage-hooks']) assert.ok(out.settings.sandbox.filesystem.denyWrite.includes(d), d); // F-T156-40
     const p = run('preflight');
     assert.equal(p.status, 1);
     assert.equal(p.stdout, 'lead sessions: waiting for sage T127 (the state tool does not print "lead-sessions 1")\n');
@@ -352,7 +354,7 @@ test('preflight with the real claude: "ready" with the generated settings, and o
     pluginCache(root);
     const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), CLAUDE_CONFIG_DIR: join(root, 'claude-config'), DISABLE_TELEMETRY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
     mkdirSync(env.TMPDIR);
-    const policy = leadPolicy({ statePath: join(root, 'state', 'gates.json') }, 's1', { env, home: env.HOME, tmp: env.TMPDIR, userTemp: undefined, tempRoot: '/st/sage-lead' });
+    const policy = leadPolicy({ statePath: join(root, 'state', 'gates.json') }, 's1', { env, home: env.HOME, userTemp: env.TMPDIR, tempRoot: '/st/sage-lead' });
     assert.deepEqual(await preflight(policy, env), { state: 'ready', why: 'the state tool prints the line, and the sandbox is supported, enabled and strict' });
     const loose = settingsOf(policy); loose.sandbox.allowUnsandboxedCommands = true;
     const status = JSON.parse(spawnSync(policy.claude, ['--settings', JSON.stringify(loose), '--setting-sources', '', 'sandbox', 'status'], { encoding: 'utf8', env: { ...launchOf(policy, env).env, TMPDIR: env.TMPDIR, CLAUDE_CODE_TMPDIR: env.TMPDIR } }).stdout);
@@ -431,6 +433,65 @@ test('F-T156-31, F-T156-34: the sessions folder as a link into a temp folder, or
   assert.throws(() => leadPolicy({ ...CONFIG, leadSessionsPath: '/l' }, 's2', { ...HOST, tempRoot: '/l/sessions' }), nested('sessions folder', '/l/sessions', 'is in', 'folder of all temp folders', '/l/sessions'));
   assert.throws(() => leadPolicy(CONFIG, 's2', { ...HOST, tempRoot: '/h/.config' }), nested('folder of all temp folders', '/h/.config', 'holds', 'denied path', '/h/.config/sage-bot'));
   assert.equal(leadPolicy({ ...CONFIG, leadSessionsPath: '/l' }, 's2', HOST).folder, '/l/sessions/s2'); // apart: fine
+});
+
+test('F-T156-40: the policy never reads TMPDIR; it denies sage-hooks in the real DARWIN_USER_TEMP_DIR and in /private/tmp', () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  try {
+    // A stand-in of macOS's /var/folders/<x>/T, a link to /private/var/folders/<x>/T: the TMPDIR of the owner's Terminal and of launchd.
+    const T = join(root, 'private', 'var', 'folders', 'x', 'T'), linked = join(root, 'var', 'folders', 'x', 'T');
+    mkdirSync(T, { recursive: true });
+    symlinkSync(join(root, 'private', 'var'), join(root, 'var'));
+    const p = leadPolicy(CONFIG, 's1', { ...HOST, env: { TMPDIR: linked }, userTemp: T });
+    const s = settingsOf(p);
+    for (const d of [join(T, 'sage-hooks'), '/private/tmp/sage-hooks']) {
+      assert.ok(p.denied.includes(d), d);
+      assert.ok(s.sandbox.filesystem.denyWrite.includes(d), d);
+      assert.ok(s.permissions.deny.includes(`Read(/${d}/**)`), d);
+    }
+    assert.ok(!JSON.stringify(s).includes(linked)); // TMPDIR's text is in no rule
+    assert.deepEqual(leadPolicy(CONFIG, 's1', { ...HOST, env: { TMPDIR: 'not a path' } }), leadPolicy(CONFIG, 's1', HOST)); // TMPDIR changes nothing
+    // the folder from getconf goes through the one path rule: by its link it is refused, with its real path
+    assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, userTemp: linked }), { message: notCanonical('DARWIN_USER_TEMP_DIR', linked, T) });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T156-40: by default the policy runs getconf DARWIN_USER_TEMP_DIR and takes its real path; when getconf fails, it refuses with one line', () => {
+  const { userTemp: _, ...host } = HOST;
+  const real = realpathSync.native(spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).stdout.trim());
+  assert.match(real, /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/);
+  assert.ok(leadPolicy(CONFIG, 's1', host).denied.includes(join(real, 'sage-hooks')));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  try {
+    const policy = (getconf) => {
+      writeFileSync(join(root, 'getconf'), `#!/bin/sh\n${getconf}\n`, { mode: 0o755 });
+      const code = `import { leadPolicy } from ${JSON.stringify(join(ROOT, 'src', 'lead-policy.js'))};\ntry { leadPolicy(${JSON.stringify(CONFIG)}, 's1', ${JSON.stringify(host)}); console.log('started'); } catch (e) { console.log(e.message); }`;
+      return spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', env: { PATH: `${root}:/usr/bin:/bin` } }).stdout;
+    };
+    assert.equal(policy('exit 1'), 'getconf DARWIN_USER_TEMP_DIR gave no folder (Command failed: getconf DARWIN_USER_TEMP_DIR): the policy cannot deny sage\'s hook state in it. Nothing was started.\n');
+    assert.equal(policy('exit 0'), 'getconf DARWIN_USER_TEMP_DIR gave no folder (ENOENT: no such file or directory, realpath \'\'): the policy cannot deny sage\'s hook state in it. Nothing was started.\n');
+    assert.equal(policy(`echo ${root}/`), 'started\n'); // the same run with a getconf that gives a folder
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T156-41: a .DS_Store in the sessions folder or the temp root is no refusal; a link or a bad folder that this session uses still is', () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  try {
+    const leads = join(root, 'leads'), sessions = join(leads, 'sessions'), temps = join(root, 'tt');
+    for (const d of [leads, sessions, temps]) mkdirSync(d, { mode: 0o700 });
+    for (const d of [sessions, temps]) writeFileSync(join(d, '.DS_Store'), 'Finder');
+    const config = { ...CONFIG, leadSessionsPath: leads };
+    assert.equal(leadPolicy(config, 's1', HOST).folder, join(sessions, 's1'));
+    // every folder rule passes with the temp root here; the scratch root is too long for the per-user temp rule, which comes last
+    const long = { message: new RegExp(`^the lead session's per-user temp folder ${temps}/s1/claude-\\d+ is longer than 44 bytes`) };
+    assert.throws(() => leadPolicy(config, 's1', { ...HOST, tempRoot: temps }), long);
+    const bad = (what, path, why) => ({ message: `the lead session's ${what} ${path} is ${why}: a session could reach another folder through it. Remove it. Nothing was started.` });
+    symlinkSync(root, join(sessions, 's1'));
+    assert.throws(() => leadPolicy(config, 's1', HOST), bad('session folder', join(sessions, 's1'), 'a link'));
+    writeFileSync(join(temps, 's1'), '');
+    assert.throws(() => leadPolicy({ ...config, leadSessionsPath: join(root, 'l2') }, 's1', { ...HOST, tempRoot: temps }), bad('temp folder', join(temps, 's1'), 'not a folder'));
+    assert.throws(() => leadPolicy(config, 's2', { ...HOST, uid: process.getuid() + 1 }), bad('leads folder', leads, `owned by the user ${process.getuid()}, not ${process.getuid() + 1}`));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('F-T156-35: the per-user temp folder <temp folder>/claude-<uid> is at most CLAUDE_TMP_MAX bytes, else Claude Code would use the shared /tmp/claude-<uid>', () => {

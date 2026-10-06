@@ -31,7 +31,7 @@ function denied(denyWrite, path, kind) {
 
 const ROOT = realpathSync(mkdtempSync(join(tmpdir(), 'sage-bot-git-control-')));
 process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
-const POLICY = leadPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: ROOT }, 's1', { env: {}, home: '/h', tmp: '/t', userTemp: '/u', shortTmp: '/st' });
+const POLICY = leadPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: ROOT }, 's1', { env: {}, home: '/h', userTemp: '/u' });
 const F = POLICY.folder, TEMPLATE = join(ROOT, 'template'), MARK = join(ROOT, 'pwned');
 const DENY_WRITE = settingsOf(POLICY).sandbox.filesystem.denyWrite;
 const ENV = { PATH: process.env.PATH, HOME: ROOT, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't',

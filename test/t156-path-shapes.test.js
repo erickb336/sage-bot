@@ -19,7 +19,7 @@ const TEMPS = '/st/sage-lead';
 function inputs(root, set = {}) {
   const config = { statePath: join(root, 's', 'state', 'gates.json') };
   const env = { CLAUDE_CONFIG_DIR: join(root, 'cc') };
-  const host = { env, home: join(root, 'h'), tmp: join(root, 't'), userTemp: undefined, tempRoot: TEMPS, uid: process.getuid() };
+  const host = { env, home: join(root, 'h'), userTemp: join(root, 't'), tempRoot: TEMPS, uid: process.getuid() };
   for (const [key, value] of Object.entries(set)) {
     const { in: where } = CORPUS.keys.find((k) => k.key === key);
     (where === 'config' ? config : where === 'env' ? env : host)[key] = value;
@@ -37,7 +37,7 @@ test('the corpus covers every key that leadPolicy reads: each is a path key with
   try {
     const all = { statePath: join(root, 's', 'gates.json'), auditPath: join(root, 'a'), killPath: join(root, 'k'), sessionsPath: join(root, 'sp'), votesPath: join(root, 'v'), leadSessionsPath: join(root, 'l') };
     const env = spy('env', { CLAUDE_CONFIG_DIR: join(root, 'cc'), SAGE_HOME: join(root, 'sh'), PATH: '/bin' });
-    leadPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), tmp: join(root, 't'), userTemp: undefined, tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
+    leadPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), userTemp: join(root, 't'), tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
   } finally { rmSync(root, { recursive: true, force: true }); }
   for (const where of ['config', 'env', 'host']) {
     const keys = CORPUS.keys.filter((k) => k.in === where).map((k) => k.key);
@@ -115,7 +115,7 @@ const PROBES = {
   SAGE_HOME: (p, q) => [[join(p, 'probe'), q.denied], [join(p, '.hooks', 'probe'), q.denied]],
   CLAUDE_CONFIG_DIR: (p, q) => [[join(p, 'sage', 'probe'), q.denied], [join(p, 'plugins', 'cache', 'sage', 'probe'), q.denied], [join(p, 'plugins', 'marketplaces', 'sage', 'probe'), q.denied], [join(p, 'probe'), q.credentialFiles]],
   home: (p, q) => [[join(p, 'probe'), [q.home]], [join(p, '.config', 'sage-bot', 'probe'), q.denied], [join(p, '.ssh', 'probe'), q.credentialFiles]],
-  tmp: (p, q) => [[join(p, 'sage-hooks', 'probe'), q.denied]],
+  userTemp: (p, q) => [[join(p, 'sage-hooks', 'probe'), q.denied]],
 };
 
 test('every shape has its maker, every key its probes', () => {
@@ -187,6 +187,8 @@ const placesOf = (root) => {
     'folder of all temp folders': [temps, []],
     'temp folder': [join(temps, 's1'), [temps]],
     'other temp folder': [join(temps, 's2'), [temps]],
+    '.DS_Store in the sessions folder': [join(sessions, '.DS_Store'), [leads, sessions]],
+    '.DS_Store in the folder of all temp folders': [join(temps, '.DS_Store'), [temps]],
   };
 };
 
@@ -227,7 +229,7 @@ const PAIRS = {
   'sessions-in-denied': (p) => ({ leads: join(p.state, 'l') }),
   'denied-in-sessions': (p) => ({ statePath: join(p.sessions, 's1', 'state', 'gates.json'), state: join(p.sessions, 's1', 'state') }),
   'temp-root-in-denied': (p) => ({ temps: join(p.state, 'sage-lead') }),
-  'denied-in-temp-root': (p) => ({ tmp: join(p.temps, 'x') }),
+  'denied-in-temp-root': (p) => ({ userTemp: join(p.temps, 'x') }),
 };
 test('every pair row has its maker', () => assert.deepEqual(CORPUS.pairs.map((r) => r.id).sort(), Object.keys(PAIRS).sort()));
 
@@ -239,7 +241,7 @@ for (const row of CORPUS.pairs) {
       const p = { ...base, state: join(root, 's', 'state') };
       const o = PAIRS[row.id](p);
       const leads = o.leads ?? p.leads, temps = o.temps ?? p.temps, state = o.state ?? p.state;
-      const { config, host } = inputs(root, { ...(o.leads && { leadSessionsPath: leads }), ...(o.statePath && { statePath: o.statePath }), ...(o.tmp && { tmp: o.tmp }) });
+      const { config, host } = inputs(root, { ...(o.leads && { leadSessionsPath: leads }), ...(o.statePath && { statePath: o.statePath }), ...(o.userTemp && { userTemp: o.userTemp }) });
       host.tempRoot = temps;
       const says = row.says.replaceAll('{sessions}', join(leads, 'sessions')).replaceAll('{temps}', temps).replaceAll('{state}', state);
       assert.throws(() => leadPolicy(config, o.session ?? 's1', host), (e) => {
