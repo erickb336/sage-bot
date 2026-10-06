@@ -11,7 +11,8 @@
     "check": "node scripts/syntax.mjs && node --test \"test/*.test.js\"",
     "check:guard-mutations": "node scripts/guard-mutations.mjs",
     "check:npmrc-probe": "node -e \"console.log('probe')\"",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "proof": "node scripts/proof/run.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
