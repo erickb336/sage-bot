@@ -13,11 +13,14 @@ if (process.env.SAGE_ORIGIN === 'lead') {
   process.on('uncaughtException', fail);
   process.on('unhandledRejection', fail);
   try {
-    const { readFileSync } = await import('node:fs');
+    const { readFileSync, writeSync } = await import('node:fs');
     const { decideText } = await import('../src/guard.js');
     const reason = decideText(readFileSync(0, 'utf8'), process.env);
     if (reason) {
-      process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } })}\n`);
+      // A synchronous write (F-T133-57): process.stdout.write to a pipe is asynchronous on macOS, and process.exit then cut
+      // the JSON at 64 KB; a deny that does not parse lets the call run.
+      const out = Buffer.from(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } })}\n`);
+      for (let done = 0; done < out.length;) done += writeSync(1, out, done);
     }
     process.exit(0);
   } catch (e) {

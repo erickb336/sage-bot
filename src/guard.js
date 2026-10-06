@@ -4,15 +4,16 @@
 //
 // The guard is a thin allow-list of text: which tools a lead session may use, and which commands, subcommands and options a
 // Bash call may name. It reads no file and resolves no path. Where a program may read or write files, and which hosts it
-// may reach, is the job of the Claude Code sandbox and the permission rules that step 6 (T134) sets: docs/reference.md.
+// may reach, is the job of the Claude Code sandbox and the permission rules that step 6 (T134) sets (F-T134-1, F-T134-6,
+// F-T134-15, F-T134-16): docs/reference.md.
 // - An input over 64 KB is refused before it is parsed, so the hook always decides well inside its timeout.
 // - Bash: a strict parser takes the command apart into simple commands joined only by && (or a | into a read-only filter).
 //   Anything it does not parse (;, ||, a $, a backtick, parentheses, braces, a backslash, a newline outside quotes, a
 //   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
 //   each of its options must be an entry of that command's option table by its full spelling; the rest is refused.
-// - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds.
+// - GitHub (gh, git push, git fetch) goes through sage-bot's broker, sage-bot-github, which step 6 adds (F-T134-1).
 // - The sage state tool is refused by its name (G30 A): a lead session reaches the logbook only through sage-bot (T134).
-//   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A); this check is a
+//   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A, F-T134-6); this check is a
 //   second layer. Its class rules: in a pipeline that runs or writes, every word is printable ASCII and has no [ wildcard; a
 //   redirect target is a word like any other; node runs no script from stdin (-) or from a path under /dev/ (a device); an
 //   operand that git or node --test expands as a pattern is a wildcard also inside quotes; a file tool's strings are
@@ -38,6 +39,10 @@ const refusal = (why) => {
   const k = why.lastIndexOf(MARK);
   return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? STOP : why.slice(k + 1)}`;
 };
+
+// A word of the call as a refusal shows it: at most 200 characters, then an ellipsis (F-T133-57). A refusal can echo a word
+// twice, and the hook's whole output must stay far below the 64 KB that a pipe holds.
+const say = (text) => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
 
 const BROKER = "sage-bot-github, the GitHub broker of step 6, for a fetch, an upload to the session's own branch and the session's own pull request (create, edit, view)";
 
@@ -143,12 +148,12 @@ function options(name, args, table, { posix = false, safe } = {}) {
     const kind = Object.hasOwn(table, opt) ? table[opt] : undefined;
     if (kind === undefined || (kind === FLAG && eq >= 0)) {
       const list = Object.keys(table).join(' ');
-      return how(`${name} with the option ${a}`, safe ?? (list ? `give ${name} only the options ${list}, each one spelled in full and alone` : `give ${name} no option`));
+      return how(`${name} with the option ${say(a)}`, safe ?? (list ? `give ${name} only the options ${list}, each one spelled in full and alone` : `give ${name} no option`));
     }
     if (kind === FLAG || (kind === EQ && eq < 0)) continue;
     const value = eq < 0 ? args[++i] : a.slice(eq + 1);
     if (value === undefined) return `${name} ${opt} with no value`;
-    if (Array.isArray(kind) && !kind.includes(value)) return `${name} ${opt} ${value} (only ${kind.join(', ')})`;
+    if (Array.isArray(kind) && !kind.includes(value)) return `${name} ${opt} ${say(value)} (only ${kind.join(', ')})`;
   }
   return ops;
 }
@@ -194,8 +199,8 @@ const COMMANDS = {
   gh: () => how('gh', BROKER),
   // npm: no option that changes its config, its prefix or its shell is in the table.
   npm: cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
-    if (!NPM_RUN.has(sub)) return `npm ${sub ?? ''} (only ci, test, run, ls and outdated)`.trim();
-    return /deploy|release|publish/i.test(script ?? '') ? `npm ${sub} ${script} (a deploy)` : null;
+    if (!NPM_RUN.has(sub)) return `npm ${say(sub ?? '')} (only ci, test, run, ls and outdated)`.trim();
+    return /deploy|release|publish/i.test(script ?? '') ? `npm ${sub} ${say(script)} (a deploy)` : null;
   }),
 };
 // The commands that may read the output of the part before them through a |: read-only filters, never a shell.
@@ -214,7 +219,7 @@ function git(args, env) {
   if (sub === 'push' || sub === 'fetch') return how(`git ${sub}`, BROKER);
   // Object.hasOwn: a plain lookup finds Object.prototype's functions (git hasOwnProperty), which refuse only by a crash.
   const rule = Object.hasOwn(GIT, sub ?? '') ? GIT[sub] : null;
-  if (!rule) return `git ${sub ?? ''} (only the listed subcommands; no global option but -C)`.trim();
+  if (!rule) return `git ${say(sub ?? '')} (only the listed subcommands; no global option but -C)`.trim();
   return rule(rest, env, `git ${sub}`);
 }
 
@@ -236,9 +241,9 @@ const GIT = {
   switch: cmd({ '-c': TEXT, '--create': TEXT }),
   checkout: cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>'),
   branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '-u': TEXT, '--set-upstream-to': TEXT, '--contains': TEXT }),
-  stash: (args, env, name) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${args[0]}`),
+  stash: (args, env, name) => (['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${say(args[0])}`),
   remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'git remote: a change of a remote'),
-  worktree: (args, env, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${args[0] ?? ''}`.trim()),
+  worktree: (args, env, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${say(args[0] ?? '')}`.trim()),
 };
 
 const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
@@ -255,7 +260,7 @@ function node(args) {
   if (typeof ops === 'string') return ops;
   if (ops[0] === '-' || (!ops[0] && !args.includes('--test'))) return 'node with no script file (code from stdin)';
   const dev = (args.includes('--test') ? ops : ops.slice(0, 1)).find((p) => DEV.test(posix.normalize(p)));
-  return dev ? `node with the script ${dev} (a device under /dev/, such as stdin)` : ops;
+  return dev ? `node with the script ${say(dev)} (a device under /dev/, such as stdin)` : ops;
 }
 
 // ---- The sage state tool ------------------------------------------------------------------------------------------------
@@ -266,7 +271,7 @@ const fold = (text) => text.normalize('NFKC').toLowerCase();
 const stateNames = (env) => ['sage.mjs', basename(env.SAGE_TOOL ?? '')].filter(Boolean).map(fold);
 /**
  * Whether one of the texts holds the file name sage.mjs or the name of SAGE_TOOL, folded (message.mjs is another name).
- * The guard cannot see a copy under another name, or a script that builds the name: the sandbox holds those (docs/reference.md).
+ * The guard cannot see a copy under another name, or a script that builds the name: the sandbox holds those (F-T134-6).
  */
 function namesStateTool(texts, env) {
   const named = new RegExp(`(^|[^a-z0-9_.-])(${stateNames(env).map(escape).join('|')})`);
@@ -290,9 +295,9 @@ const WILDCARD = 'name each file in full instead of a wildcard, or add its folde
 function wildcard(text, chars, env, pattern = false) {
   const odd = pattern ? text.match(/[^A-Za-z0-9 _\-./,:=%~^*?]/) : chars.includes('[') && ['['];
   // Any other character than [ in a pattern operand (@, +, (, {, \) has no safe form: a file or revision may hold it (F-T133-51).
-  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${text} (git and node --test can read it as a pattern)`;
-  if (odd) return how(`the wildcard ${odd[0]} in ${text} (in a part that runs or writes)`, WILDCARD);
-  return /[*?]/.test(chars) && mayMatchStateTool(text, env) ? how(`the wildcard ${text} (it can match the sage state tool)`, WILDCARD) : null;
+  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${say(text)} (git and node --test can read it as a pattern)`;
+  if (odd) return how(`the wildcard ${odd[0]} in ${say(text)} (in a part that runs or writes)`, WILDCARD);
+  return /[*?]/.test(chars) && mayMatchStateTool(text, env) ? how(`the wildcard ${say(text)} (it can match the sage state tool)`, WILDCARD) : null;
 }
 
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
@@ -311,7 +316,7 @@ function simple({ words }, env) {
   let i = 0;
   for (; i < texts.length && VAR.test(texts[i]); i++) {
     const name = texts[i].slice(0, texts[i].indexOf('='));
-    if (!ENV.has(name)) return `setting ${name} in front of a command`;
+    if (!ENV.has(name)) return `setting ${say(name)} in front of a command`;
   }
   const [name, ...args] = texts.slice(i);
   if (!name) return 'a part with no command';
@@ -319,8 +324,8 @@ function simple({ words }, env) {
   // A word that starts with a wildcard can expand to a file name that starts with -, an option that no table checked. The
   // command's own name is looked up as it is (a wildcard in it names no command; `[` is the test command).
   const glob = words.slice(i + 1).find((w) => w.glob && /^[*?[]/.test(w.text));
-  if (glob) return how(`the word ${glob.text} (a wildcard at its start can expand to an option)`, `start the word with a folder, for example ./${glob.text}`);
-  if (!Object.hasOwn(COMMANDS, name)) return `the command ${name}`;
+  if (glob) return how(`the word ${say(glob.text)} (a wildcard at its start can expand to an option)`, `start the word with a folder, for example ./${say(glob.text)}`);
+  if (!Object.hasOwn(COMMANDS, name)) return `the command ${say(name)}`;
   const ops = COMMANDS[name](args, env, name);
   if (typeof ops === 'string') return ops;
   // git (a pathspec) and node --test (a test file) expand a pattern in an operand themselves, also a quoted one; the only
@@ -356,7 +361,7 @@ export function bashRefusal(command, env) {
   }
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
-    if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${commandOf(texts)[0] ?? 'nothing'}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
+    if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${say(commandOf(texts)[0] ?? 'nothing')}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
     // cd only as the first part of a chain: the shell of the Bash tool keeps its folder, so a cd of its own moves the session.
     if (texts[0] === 'cd') {
       if (k !== 0 || parsed.length < 2 || parsed[1].pipe || texts.length !== 2 || texts[1].startsWith('-') || seg.redirects.length) {
@@ -373,7 +378,8 @@ export function bashRefusal(command, env) {
 // ---- Other tools --------------------------------------------------------------------------------------------------------
 
 const allow = () => null;
-// Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules and the sandbox of step 6 hold their paths. A file
+// Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules of step 6 hold their paths (Edit and Write only in
+// the session folder and its scratch folder, Read and Glob denied on every denied path: F-T134-16; secret files: F-T134-15). A file
 // tool may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
 // input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
 /** Each string of a tool input with its key. An explicit stack: a recursive walk overflowed at a nesting of about 3000 (F-T133-50). */
@@ -393,7 +399,7 @@ function file(i, env) {
   return namesStateTool(all.map(([, v]) => v), env) ? STATE_TOOL : null;
 }
 // An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox.
-const agent = (i) => (Object.hasOwn(i, 'isolation') ? `an agent with the isolation ${JSON.stringify(i.isolation)}` : null);
+const agent = (i) => (Object.hasOwn(i, 'isolation') ? `an agent with the isolation ${say(String(JSON.stringify(i.isolation)))}` : null);
 const TOOLS = {
   Bash: (i, env) => bashRefusal(i.command, env),
   Grep: () => how('the Grep tool (the sandbox does not cover it)', 'search with rg in Bash, for example rg -n <pattern> <folder>'),
@@ -408,8 +414,8 @@ const TOOLS = {
 // WebFetch is checked by the host text in the URL, as a second layer; a name that resolves to a local address passes; T134
 // adds the WebFetch permission rule (T156). An address in the URL must be in the global unicast space (IPv4 1 to 223, IPv6
 // 2000::/3) and not in a special-purpose range inside it (the IANA registries): an allow-list, so 0/8, multicast, 240/4, the
-// broadcast address and every IPv6 address outside 2000::/3 (::1, fe80::/10, fc00::/7, ff00::/8, ::ffff:0:0/96,
-// 64:ff9b::/96) never pass.
+// broadcast address and every IPv6 address outside 2000::/3 (::1, fe80::/10, fc00::/7, ff00::/8, 64:ff9b::/96) never pass.
+// BlockList checks an IPv4-mapped address (::ffff:0:0/96) as its IPv4 address: ::ffff:8.8.8.8 passes, ::ffff:127.0.0.1 not (F-T133-59).
 const UNICAST = new BlockList();
 UNICAST.addRange('1.0.0.0', '223.255.255.255', 'ipv4');
 UNICAST.addSubnet('2000::', 3, 'ipv6');
@@ -428,9 +434,9 @@ function webRefusal(url) {
   // The URL parser gives an IPv4 address in its dotted form (127.1 and 2130706433 are 127.0.0.1), an IPv6 one in [].
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   const type = isIPv4(host) ? 'ipv4' : isIPv6(host) ? 'ipv6' : null;
-  if (type) return UNICAST.check(host, type) && !SPECIAL.check(host, type) ? null : `a fetch of ${host} (not a global unicast address)`;
-  if (!host.includes('.')) return `a fetch of ${host} (a local host name)`;
-  if (/(^|\.)(localhost|local|internal|home\.arpa)$/.test(host)) return `a fetch of ${host} (this Mac or the local network)`;
+  if (type) return UNICAST.check(host, type) && !SPECIAL.check(host, type) ? null : `a fetch of ${say(host)} (not a global unicast address)`;
+  if (!host.includes('.')) return `a fetch of ${say(host)} (a local host name)`;
+  if (/(^|\.)(localhost|local|internal|home\.arpa)$/.test(host)) return `a fetch of ${say(host)} (this Mac or the local network)`;
   return null;
 }
 
@@ -445,7 +451,7 @@ export function decide(input, env) {
     return refusal('a hook input that is not a tool call');
   }
   const rule = Object.hasOwn(TOOLS, input.tool_name) ? TOOLS[input.tool_name] : null;
-  if (!rule) return refusal(`the tool ${input.tool_name}`);
+  if (!rule) return refusal(`the tool ${say(input.tool_name)}`);
   const why = rule(input.tool_input, env);
   return why ? refusal(why) : null;
 }

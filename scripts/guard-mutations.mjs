@@ -1,10 +1,10 @@
 // The mutation check of the guard (T133): npm run check:guard-mutations.
-// For each rule of src/guard.js, it makes a copy of the guard with that one rule removed, and runs test/guard.test.js
+// For each rule of src/guard.js (and of the hook's output in scripts/guard.mjs), it makes a copy of the guard with that one rule removed, and runs test/guard.test.js
 // against the copy. Each removal must make at least one test fail; a removal that passes is a rule that no test pins.
 // A removal must keep the guard working: the copy must load and still allow the known-good calls (pwd, a Read, git status, an
 // Agent, a WebFetch to 8.8.8.8). A copy that does not is a broken mutation: its test failures prove nothing, so it is
 // reported, not counted as a kill; nor is a run that does not end in 60 s. It prints one line for each surviving, broken,
-// timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in src/guard.js, so this list is out of date).
+// timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in its file, so this list is out of date).
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -12,9 +12,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const SOURCE = readFileSync(join(ROOT, 'src', 'guard.js'), 'utf8');
+const SOURCES = { 'src/guard.js': readFileSync(join(ROOT, 'src', 'guard.js'), 'utf8'), 'scripts/guard.mjs': readFileSync(join(ROOT, 'scripts', 'guard.mjs'), 'utf8') };
 
-// [rule, the text of the rule, what replaces it]
+// [rule, the text of the rule, what replaces it, the file (src/guard.js when there is none)]
 const MUTATIONS = [
   // The Bash parser
   ['double quotes: $, backtick, \\ and !', "if (/[$`\\\\!]/.test(command[j])) throw `a ${command[j]} inside double quotes`;", ''],
@@ -48,14 +48,14 @@ const MUTATIONS = [
   ['npm: no deploy script', "return /deploy|release|publish/i.test(script ?? '') ?", 'return false ?'],
   ['npm: no option that changes its config', "'--prefer-offline': FLAG, '--': FLAG }", "'--prefer-offline': FLAG, '--prefix': TEXT, '--script-shell': TEXT, '--': FLAG }"],
   ['gh goes to the broker', "gh: () => how('gh', BROKER),", ''],
-  ['only the listed commands', 'if (!Object.hasOwn(COMMANDS, name)) return `the command ${name}`;', 'if (!Object.hasOwn(COMMANDS, name)) return null;'],
+  ['only the listed commands', 'if (!Object.hasOwn(COMMANDS, name)) return `the command ${say(name)}`;', 'if (!Object.hasOwn(COMMANDS, name)) return null;'],
   ['no inherited name as a command', 'if (!Object.hasOwn(COMMANDS, name)) return', 'if (!COMMANDS[name]) return'],
   // git
   ['git -C needs a folder', "if (!a[1]) return 'git -C with no folder';", ''],
   ['git -C and its folder come before the subcommand', 'a = a.slice(2);', 'a = a.slice(1);'],
   ['git push and git fetch go to the broker', "if (sub === 'push' || sub === 'fetch') return how(`git ${sub}`, BROKER);", ''],
   ['git fetch goes to the broker', " || sub === 'fetch') return how", ') return how'],
-  ['git: only the listed subcommands', 'if (!rule) return `git ${sub', 'if (!rule) return null && `git ${sub'],
+  ['git: only the listed subcommands', 'if (!rule) return `git ${say(sub', 'if (!rule) return null && `git ${say(sub'],
   ['git: no inherited name as a subcommand', "Object.hasOwn(GIT, sub ?? '') ? GIT[sub] : null", 'GIT[sub]'],
   ['git: the option table of each subcommand', "const gitCmd = (table) => cmd({ ...table, '--': FLAG });", 'const gitCmd = () => () => null;'],
   ['git commit: no --no-verify', "commit: cmd({ '-m': TEXT,", "commit: cmd({ '--no-verify': FLAG, '-m': TEXT,"],
@@ -63,7 +63,7 @@ const MUTATIONS = [
   ['git stash: only the listed subcommands', "(['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0])", '(true'],
   ['git stash: its option table', '? STASH(args.slice(1), env, name) :', '? null :'],
   ['git remote: no change', "(args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null", '(true ? null'],
-  ['git worktree: only add and list', ": `git worktree ${args[0] ?? ''}`.trim()),", ': null),'],
+  ['git worktree: only add and list', ": `git worktree ${say(args[0] ?? '')}`.trim()),", ': null),'],
   ['git worktree list takes nothing more', "args[0] === 'list' && args.length === 1 ?", "args[0] === 'list' ?"],
   ['git worktree add: its option table', "cmd({ '-b': TEXT })(args.slice(1), env, name)", 'null'],
   // node
@@ -86,7 +86,7 @@ const MUTATIONS = [
   ['the state tool: a wildcard *', "(p === '*' ? '.*' :", "(p === '*' ? '' :"],
   ['the state tool: a wildcard ?', "p === '?' ? '.'", "false ? '.'"],
   ['the state tool: the wildcards are checked', 'return /[*?]/.test(chars) && mayMatchStateTool(text, env) ?', 'return false ?'],
-  ['the state tool: a wildcard gets the safe-form hint (F-T133-44)', '? how(`the wildcard ${text} (it can match the sage state tool)`, WILDCARD) : null;', '? STATE_TOOL : null;'],
+  ['the state tool: a wildcard gets the safe-form hint (F-T133-44)', '? how(`the wildcard ${say(text)} (it can match the sage state tool)`, WILDCARD) : null;', '? STATE_TOOL : null;'],
   ['the wildcard hint names the folder form (F-T133-55)', ', or add its folder (git add <folder>); for the tests:', ' (for the tests:'],
   ['no [ wildcard in a part that runs or writes', ": chars.includes('[') && ['['];", ': false;'],
   ['the wildcards of a part that runs or writes are checked', '    const why = wildcard(w.text, w.glob, env);', '    const why = null;'],
@@ -99,7 +99,7 @@ const MUTATIONS = [
   ['a quoted * or ? in a pattern operand can match the state tool (F-T133-46)', 'const why = wildcard(op, op, env, true);', "const why = wildcard(op, '', env, true);"],
   ['a pattern operand: no pattern character but * and ? (F-T133-46)', 'pattern ? text.match(/[^A-Za-z0-9 _\\-./,:=%~^*?]/) :', "pattern ? text.match(/\\[/) :"],
   // G47 A: a pattern character other than [ in such an operand has no safe form, so it gets the stop ending (F-T133-51).
-  ['a pattern operand: a character with no safe form gets the stop ending (F-T133-51)', "  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${text} (git and node --test can read it as a pattern)`;\n", ''],
+  ['a pattern operand: a character with no safe form gets the stop ending (F-T133-51)', "  if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${say(text)} (git and node --test can read it as a pattern)`;\n", ''],
   ['git checkout --: the hint to git restore (F-T133-52)', "cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>')", "cmd({ '-b': TEXT })"],
   // F-T133-47 (G46 A): a pipeline runs or writes as a whole.
   ['a pipeline is checked as a whole (F-T133-47)', '(seg.pipe ? pipelines.at(-1) : pipelines[pipelines.push([]) - 1]).push(seg);', 'pipelines[pipelines.push([]) - 1].push(seg);'],
@@ -192,8 +192,11 @@ const MUTATIONS = [
   ['an input that is not a tool call', "if (!input || typeof input !== 'object' || typeof input.tool_name !== 'string' || !input.tool_input || typeof input.tool_input !== 'object' || Array.isArray(input.tool_input)) {", 'if (!input) {'],
   ['an input that is not a tool call: an array (F-T133-45)', ' || Array.isArray(input.tool_input)', ''],
   ['a Bash call with no command text (F-T133-45)', "if (typeof command !== 'string') return 'a Bash call with no command text';", ''],
-  ['only the listed tools', 'if (!rule) return refusal(`the tool ${input.tool_name}`);', 'if (!rule) return null;'],
+  ['only the listed tools', 'if (!rule) return refusal(`the tool ${say(input.tool_name)}`);', 'if (!rule) return null;'],
   ['no inherited name as a tool', 'Object.hasOwn(TOOLS, input.tool_name) ? TOOLS[input.tool_name] : null', 'TOOLS[input.tool_name]'],
+  // F-T133-57 (G46 A, G47 A): the deny must reach Claude Code whole; a JSON cut at 64 KB does not parse, and the call runs.
+  ['a refusal cuts each word it echoes (F-T133-57)', 'const say = (text) => (text.length > 200 ?', 'const say = (text) => (false ?'],
+  ['the hook writes the deny synchronously (F-T133-57)', 'for (let done = 0; done < out.length;) done += writeSync(1, out, done);', 'process.stdout.write(out);', 'scripts/guard.mjs'],
 ];
 
 const work = mkdtempSync(join(tmpdir(), 'sage-bot-guard-mutations-'));
@@ -213,20 +216,22 @@ const node = (args, cwd) => new Promise((done) => {
   child.on('close', (code) => { clearTimeout(timer); done(timedOut ? 'timeout' : code); });
 });
 
-/** Runs a copy of the guard with `source` as src/guard.js: 'broken' when it fails the known-good calls, else the tests' exit code. */
-async function run(name, source) {
+/** Runs a copy of the guard with `file` as `source`: 'broken' when it fails the known-good calls, else the tests' exit code. */
+async function run(name, source, file = 'src/guard.js') {
   const dir = join(work, name.replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + Math.random().toString(36).slice(2, 6));
-  for (const f of ['package.json', 'scripts/guard.mjs', 'test/guard.test.js', 'test/guard-corpus.json']) cpSync(join(ROOT, f), join(dir, f));
-  mkdirSync(join(dir, 'src'));
-  writeFileSync(join(dir, 'src', 'guard.js'), source);
+  for (const f of ['package.json', 'test/guard.test.js', 'test/guard-corpus.json']) cpSync(join(ROOT, f), join(dir, f));
+  for (const [f, text] of Object.entries({ ...SOURCES, [file]: source })) {
+    mkdirSync(join(dir, f, '..'), { recursive: true });
+    writeFileSync(join(dir, f), text);
+  }
   if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
   return node(['--test', 'test/guard.test.js'], dir);
 }
 
-const stale = MUTATIONS.filter(([, from]) => SOURCE.split(from).length !== 2);
-for (const [name, from] of stale) console.log(`STALE  ${name}: its text is not in src/guard.js exactly once: ${JSON.stringify(from)}`);
+const stale = MUTATIONS.filter(([, from, , file = 'src/guard.js']) => SOURCES[file].split(from).length !== 2);
+for (const [name, from, , file = 'src/guard.js'] of stale) console.log(`STALE  ${name}: its text is not in ${file} exactly once: ${JSON.stringify(from)}`);
 const start = Date.now();
-const unmutated = await run('unmutated', SOURCE);
+const unmutated = await run('unmutated', SOURCES['src/guard.js']);
 if (unmutated !== 0) console.log(`FAIL   the unmutated guard: ${unmutated === 'broken' ? 'it refuses a known-good call' : 'its tests fail'}`);
 const survivors = [];
 const broken = [];
@@ -234,9 +239,9 @@ const timeouts = [];
 const queue = MUTATIONS.filter((m) => !stale.includes(m));
 await Promise.all(Array.from({ length: Math.max(2, availableParallelism() - 1) }, async () => {
   for (let m = queue.shift(); m; m = queue.shift()) {
-    const [name, from, to] = m;
+    const [name, from, to, file = 'src/guard.js'] = m;
     // A function, so that a $ in the new text is taken as it is ($` and $& are patterns of replace).
-    const result = await run(name, SOURCE.replace(from, () => to));
+    const result = await run(name, SOURCES[file].replace(from, () => to), file);
     if (result === 'broken') broken.push(name);
     else if (result === 'timeout') timeouts.push(name);
     else if (result === 0) survivors.push(name);

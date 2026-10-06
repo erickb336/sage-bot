@@ -2150,6 +2150,7 @@
     "node --test 'test/[a].test.js'"
   ],
   "pattern": [
+    "git log --pretty \"%h (%s)\"",
     "git -C {SCRATCH}/proj add ':(glob)**/.e*'",
     "git -C {SCRATCH}/proj add -- ':(glob)config/*'",
     "git -C {SCRATCH}/proj add -- ':(icase)CONFIG/.ENV'",
