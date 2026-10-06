@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from './bridge-setup.js';
 
 const file = new URL('../examples/vote-example.mjs', import.meta.url);
 

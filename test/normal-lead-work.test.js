@@ -5,11 +5,11 @@
 // SAMPLE DATA ONLY: the paths do not exist, and nothing runs; the commands are only text.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from './bridge-setup.js';
 
 const HOOK = fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url));
 const { entries } = JSON.parse(readFileSync(new URL('./normal-lead-work.json', import.meta.url), 'utf8'));

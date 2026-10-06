@@ -4,11 +4,11 @@
 // copies of the sage state tool (test/fixtures/sage/<version>/sage.mjs, sage's own text, kept byte for byte, T162) are left out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SELF = 'test/t97-sage-word.test.js';

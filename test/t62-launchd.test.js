@@ -4,10 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stableNode } from '../src/launchd.js';
+import { spawnSync } from './bridge-setup.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 // The example's project folder is made up; launchd.mjs refuses a folder that does not exist, so the sample names this repository.

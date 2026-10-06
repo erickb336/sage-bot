@@ -8,11 +8,11 @@
 // the Keychain or runs launchctl. Every code block names its language, one of LANGUAGES.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SAGE, spawnSync } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = ['README.md', 'docs/reference.md'];
@@ -22,6 +22,8 @@ const NOT_HERE = { 'npm ci': 'the test runs inside the installed tree: npm ci wo
 const IN_HOME = { 'npm run demo': (home) => `npm run demo -- --out ${join(home, 'demo.html')}`, 'node scripts/preview.mjs': (home) => `node scripts/preview.mjs --out ${join(home, 'preview', 'index.html')}` };
 // The languages a code block may name. The test runs only sh blocks, so a block of another shell language would never run.
 const LANGUAGES = new Set(['sh', 'json', 'js', 'text']);
+/** Runs one command of a document as the owner types it, in the scratch home. spawnSync (test/bridge-setup.js) adds SAGE_TOOL. */
+const sh = (command, home) => spawnSync('/bin/sh', ['-c', command], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp') } });
 
 /** The language of each code block of a document (the word after its opening fence): { line, language }. */
 function fences(text) {
@@ -98,7 +100,7 @@ for (const doc of DOCS) {
           if (NOT_HERE[command]) { t.diagnostic(`skipped: ${command} (${NOT_HERE[command]})`); continue; }
           assert.doesNotMatch(command, /<[a-z][a-z ]*>/, `${doc}:${line}: a runnable command holds a placeholder: ${command}`);
           const run = IN_HOME[command]?.(home) ?? command;
-          const r = spawnSync('/bin/sh', ['-c', run], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp') } });
+          const r = sh(run, home);
           assert.equal(r.status, exit, `${doc}:${line}: ${run} exited ${r.status}, not ${exit}\n${r.stdout}\n${r.stderr}`);
           output += r.stdout + r.stderr;
           t.diagnostic(`ran: ${run} (exit ${r.status})`);
@@ -167,3 +169,14 @@ test('the mark parser finds an unmarked block and reads a skip reason (the parse
   assert.deepEqual(fences('```sh\nls\n```\n  ```bash\n  ls\n  ```\n```\nx\n```\n```json\n{}\n```\n').map((f) => f.language), ['sh', 'bash', '', 'json']);
 });
 
+
+test('F-T162-2: a README command finds the tests\' sage state tool, as npm run demo does (scripts/demo.mjs sagePath), not the owner\'s plugin cache', () => {
+  const home = scratchHome();
+  try {
+    const r = sh(`node --input-type=module -e "import { sagePath } from './scripts/sage-path.mjs'; console.log(sagePath())"`, home);
+    assert.equal(r.stderr, '');
+    assert.equal(r.stdout, `${SAGE}\n`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

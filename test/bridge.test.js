@@ -2,12 +2,11 @@
 // The sage state tool runs with HOME and SAGE_HOME in a scratch folder, so no test touches a real logbook.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
-import { BOT, CONFIG, APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, SAM, setup, T0 } from './bridge-setup.js';
+import { APPRENTICE, BOT, CONFIG, execFileSync, JON, LEADR, MAYA, MEMBERS, OWNER, SAM, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { card as cardOf } from '../src/cards.js';
 import { peopleOf } from '../src/handle.js';

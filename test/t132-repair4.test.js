@@ -4,7 +4,6 @@
 // the fake Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
@@ -12,7 +11,7 @@ import { card } from '../src/cards.js';
 import { prepare } from '../src/discord.js';
 import { sageTool } from '../src/sage.js';
 import { openGate } from '../src/vote.js';
-import { CONFIG, OWNER, SAGE, setup, T0 } from './bridge-setup.js';
+import { CONFIG, execFileSync, OWNER, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const S1 = 'eeeeeeee-0000-4000-8000-000000000134';

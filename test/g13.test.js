@@ -2,12 +2,11 @@
 // Through the fake Discord layer and a scratch sage logbook. SAMPLE DATA ONLY: every id, name and question is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadVotes, migrateMarks, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
-import { MAYA, SAGE, setAt, setup } from './bridge-setup.js';
+import { MAYA, SAGE, setAt, setup, spawnSync } from './bridge-setup.js';
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
 const titles = (b) => b.discord.posts.filter((p) => p.embeds).map((p) => p.embeds[0].title);

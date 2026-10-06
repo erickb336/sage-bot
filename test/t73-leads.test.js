@@ -4,14 +4,13 @@
 // SAMPLE DATA ONLY: every id, name and question is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs, { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { load, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
 import { SETTLE } from '../src/bridge.js';
-import { APPRENTICE, CHANNEL, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
 
 const LEAD = '300000000000000002';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;

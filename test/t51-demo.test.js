@@ -3,11 +3,10 @@
 // SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SAGE } from './bridge-setup.js';
+import { execFileSync, SAGE, spawnSync } from './bridge-setup.js';
 
 const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
 function demo() {
