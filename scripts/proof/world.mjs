@@ -4,10 +4,15 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { leadPolicy } from '../../src/lead-policy.js';
+import { claudeDirOf, sagePlugin, sageToolIn } from '../../src/sage.js';
 
 /** The session of the proof, and the version folder of the dummy sage plugin. */
 export const SESSION = 's1';
 const VERSION = 'proof1';
+
+/** The lead policy of a world: the one resolver of its paths (src/lead-policy.js), with the world's home and temp folders. */
+export const policyOf = (w) => leadPolicy({ statePath: w.statePath }, SESSION, { env: { PATH: process.env.PATH }, home: w.home, tmp: w.hostTmp, userTemp: w.userTemp, shortTmp: w.shortTmp });
 /** The variables that a session must never show to a command: GitHub (F-T134-1) and the model (F-T157-4). */
 export const SAMPLE_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 /** The obviously fake value of a sample variable or file. */
@@ -21,22 +26,14 @@ export const sample = (name, tag) => `sample-fake-${name.replace(/[^\w.-]/g, '_'
 export function buildWorld(root, tag) {
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
-  const home = join(root, 'home'), claudeConfig = join(home, '.claude'), state = join(root, 'state');
-  const statePath = join(state, 'gates.json');
-  const cache = join(claudeConfig, 'plugins', 'cache', 'sage');
+  const home = join(root, 'home'), claudeConfig = claudeDirOf({ env: {}, home }), statePath = join(root, 'state', 'gates.json');
+  const { cache, marketplace } = sagePlugin(claudeConfig);
   const sageRoot = join(claudeConfig, 'sage');
-  const sessionFolder = join(home, '.local', 'share', 'sage-bot', 'leads', 'sessions', SESSION);
   const w = {
-    root, tag, session: SESSION, home, claudeConfig, statePath, cache,
-    config: join(home, '.config', 'sage-bot', 'config.json'),
-    tool: join(cache, 'sage', VERSION, 'skills', 'sage', 'sage.mjs'),
-    marketplace: join(claudeConfig, 'plugins', 'marketplaces', 'sage'),
-    sageRoot,
+    root, tag, session: SESSION, home, claudeConfig, statePath, cache, marketplace, sageRoot,
+    tool: sageToolIn(cache, VERSION),
     logbook: join(sageRoot, 'proof-000000', 'tasks.tsv'),
-    hooksState: join(state, 'lead-hooks', SESSION),
     hostTmp: join(root, 'tmp'), userTemp: join(root, 'utmp'), shortTmp: join(root, 'st'),
-    sessionFolder,
-    sessionTmp: join(root, 'st', `sage-lead-${SESSION}`),
     marker: join(root, 'marker-session-start'),
     credentials: {
       ssh: join(home, '.ssh', 'id_ed25519'), aws: join(home, '.aws', 'credentials'), netrc: join(home, '.netrc'),
@@ -44,6 +41,16 @@ export function buildWorld(root, tag) {
     },
   };
   const file = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
+  file(w.tool, "console.log('lead-sessions 1');\n"); // the dummy sage plugin (F-T134-6): its state tool prints the capability line
+  // The rest from the policy: the bridge's config file, the session's folders, and sage's hook-state folders (the denied paths in the
+  // two temp folders and in sage's root).
+  const policy = policyOf(w);
+  Object.assign(w, {
+    config: join(policy.denied.find((d) => dirname(d) === join(home, '.config')), 'config.json'),
+    sessionFolder: policy.folder, sessionTmp: policy.tmp, hooksState: policy.hooksState,
+    hookDirs: policy.denied.filter((d) => [w.hostTmp, w.userTemp, sageRoot].includes(dirname(d))),
+  });
+  const sessionFolder = w.sessionFolder;
   // The bridge's files (F-T134-2): sample config, gate file, lead log, kill flag, spool and votes.
   file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
   file(statePath, '{"gates":[]}\n');
@@ -52,11 +59,9 @@ export function buildWorld(root, tag) {
   file(join(`${statePath}.sessions`, 'sample.json'), '{}\n');
   file(`${statePath}.votes`, '{}\n');
   file(`${statePath}.votes.leads`, '{}\n');
-  // The dummy sage plugin (F-T134-6): its state tool prints the capability line, as sage T127 will.
-  file(w.tool, "console.log('lead-sessions 1');\n");
   file(join(w.marketplace, 'README.md'), 'sample marketplace copy\n');
   file(w.logbook, 'id\ttitle\nT1\tsample task\n');
-  mkdirSync(join(sageRoot, '.hooks'), { recursive: true });
+  for (const d of w.hookDirs.filter((d) => dirname(d) === sageRoot)) mkdirSync(d, { recursive: true });
   // The credential files (F-T134-15a), with fake values.
   file(w.credentials.ssh, `${sample('ssh', tag)}\n`);
   file(w.credentials.aws, `[default]\naws_secret_access_key = ${sample('aws', tag)}\n`);

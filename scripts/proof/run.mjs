@@ -9,10 +9,10 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchOf, leadPolicy, preflight, settingsOf } from '../../src/lead-policy.js';
+import { launchOf, preflight, settingsOf } from '../../src/lead-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { keychainPlan, printable } from './keychain.mjs';
-import { SAMPLE_ENV, buildWorld, sample } from './world.mjs';
+import { SAMPLE_ENV, buildWorld, policyOf, sample } from './world.mjs';
 
 const PROBE = fileURLToPath(new URL('probe.mjs', import.meta.url));
 const LIVE = 'live: T165';
@@ -32,7 +32,7 @@ export const ROWS = [
   ['F-T134-3', 'L1', 'git control files and a nested repository refused; a normal commit works'],
   ['F-T134-4', 'L1', '.claude settings and .mcp.json, also by a relative path or a glob'],
   ['F-T134-6', 'L1', 'the state tool: read by any spelling, run any way, copied, changed; logbook and hook state'],
-  ['F-T134-7', 'L1', 'sage-hooks in the temp folders, .hooks in sage\'s root'],
+  ['F-T134-7', 'L1', 'sage\'s hook state folders in the temp folders and in sage\'s root'],
   ['F-T134-10', 'L1', 'the project settings\' SessionStart hook does not run'],
   ['F-T134-12', 'L1', 'sage\'s root and the plugin\'s marketplace copy'],
   ['F-T134-13', 'L1', 'no write to /tmp/claude-<uid>; $TMPDIR is the session\'s own'],
@@ -96,7 +96,7 @@ export async function prove(root) {
   });
   const controls = new Map(r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((p) => [p.id, p]));
   const env = { PATH: process.env.PATH };
-  const policy = leadPolicy({ statePath: live.statePath }, live.session, { env, home: live.home, tmp: live.hostTmp, userTemp: live.userTemp, shortTmp: live.shortTmp });
+  const policy = policyOf(live);
   const now = await nowRows(live, policy, env);
   const rows = ROWS.map((row) => {
     if (row.group === 'now') { const [status, why] = now[row.row]; return { ...row, status, why }; }
@@ -113,7 +113,7 @@ export async function prove(root) {
     counts: Object.fromEntries(['PASS', 'FAIL', 'INVALID', 'SKIPPED'].map((s) => [s, count(s)])),
     probeErrors: r.status === 0 ? null : (r.stderr || r.error?.message || '').split('\n')[0],
     rows,
-    keychain: { run: false, why: 'needs the chief\'s approval before its first run (standing order 11)', commands: printable(keychainPlan(join(root, 'keychain'))) },
+    keychain: { run: false, why: 'needs the owner\'s approval before its first run (standing order 11)', commands: printable(keychainPlan(join(root, 'keychain'))) },
   };
   const probesAll = rows.flatMap((x) => x.probes ?? []);
   const summary = [
@@ -123,7 +123,7 @@ export async function prove(root) {
     ...rows.map((x) => `${x.status.padEnd(8)} ${x.row.padEnd(11)} ${x.title}${x.status === 'PASS' ? '' : ` (${x.why.slice(0, 120)})`}`),
     `${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('INVALID')} INVALID, ${count('SKIPPED')} SKIPPED (${LIVE}).`,
     `Controls: ${probesAll.filter((p) => p.control.did === true).length} of ${probesAll.length} probes work outside the sandbox.`,
-    `Keychain fixture: not run (needs the chief's approval); its ${report.keychain.commands.length} commands are in the report.`,
+    `Keychain fixture: not run (needs the owner's approval); its ${report.keychain.commands.length} commands are in the report.`,
   ].join('\n');
   const text = JSON.stringify(report);
   if (text.includes(tag) || summary.includes(tag)) throw new Error('the report holds a sample value: nothing was written.');

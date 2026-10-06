@@ -1,5 +1,5 @@
 // The scratch keychain of the proof, for the Keychain probes of T165 (F-T165-2). WARNING: it changes the owner's keychain search list
-// while it runs, so it runs only with the chief's approval (standing order 11); `npm run proof` never runs it and only prints its
+// while it runs, so it runs only with the owner's approval (standing order 11); `npm run proof` never runs it and only prints its
 // commands. It makes a keychain file in a scratch folder with one sample generic password, under a service name that no real item uses,
 // and every probe names that keychain by its path. `security create-keychain` adds the new keychain to the user's search list and
 // `delete-keychain` changes it again, so it saves the list first and puts it back after, also on a failure (F-T157-9).

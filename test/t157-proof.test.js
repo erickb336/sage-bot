@@ -6,11 +6,11 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { launchOf, leadPolicy, settingsOf } from '../src/lead-policy.js';
+import { launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes } from '../scripts/proof/probe.mjs';
 import { ROWS, statusOf, verdict } from '../scripts/proof/run.mjs';
-import { buildWorld } from '../scripts/proof/world.mjs';
+import { buildWorld, policyOf } from '../scripts/proof/world.mjs';
 import { spawnSync } from './bridge-setup.js';
 
 const PROBE = new URL('../scripts/proof/probe.mjs', import.meta.url).pathname;
@@ -22,10 +22,11 @@ test('the world: every state file, plugin file and credential file that a probe 
   const root = scratch();
   try {
     const w = buildWorld(join(root, 'w'), TAG);
-    const policy = leadPolicy({ statePath: w.statePath }, w.session, { env: {}, home: w.home, tmp: w.hostTmp, userTemp: w.userTemp, shortTmp: w.shortTmp });
+    const policy = policyOf(w);
     assert.equal(policy.folder, w.sessionFolder);
     assert.equal(policy.tmp, w.sessionTmp);
     assert.equal(policy.sageTool, w.tool); // the dummy state tool is the one that the policy finds
+    assert.equal(w.hookDirs.length, 3); // sage-hooks in the two temp folders, .hooks in sage's root
     const { denyRead, allowRead } = settingsOf(policy).sandbox.filesystem;
     const targets = [w.statePath, `${w.statePath}.leads.jsonl`, `${w.statePath}.leads-off`, `${w.statePath}.votes`, w.config, w.tool, w.logbook, w.marketplace, ...Object.values(w.credentials)];
     for (const path of targets) {
@@ -88,14 +89,14 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
   try {
     const w = buildWorld(join(root, 'w'), TAG);
     const f = w.sessionFolder;
-    const deny = [w.home, join(root, 'w', 'state'), join(w.hostTmp, 'sage-hooks'), join(w.userTemp, 'sage-hooks'), w.marker];
+    const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker];
     const denyWrite = ['config', 'hooks', 'commondir', 'info/attributes'].map((p) => join(f, '.git', p)).concat([join(f, 'sub'), join(f, '.claude'), join(f, '.mcp.json'), `/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}/sage-bot-proof-s1`]);
     const profile = ['(version 1)', '(allow default)', '(deny network*)',
       ...deny.map((d) => `(deny file-read* file-write* (subpath ${sb(d)}))`),
       `(allow file-read* file-write* (subpath ${sb(f)}))`,
       ...denyWrite.map((d) => `(deny file-write* (subpath ${sb(d)}))`)].join('\n');
     writeFileSync(join(root, 'lead.sb'), profile);
-    const policy = leadPolicy({ statePath: w.statePath }, w.session, { env: {}, home: w.home, tmp: w.hostTmp, userTemp: w.userTemp, shortTmp: w.shortTmp });
+    const policy = policyOf(w);
     const r = spawnSync('sandbox-exec', ['-f', join(root, 'lead.sb'), process.execPath, PROBE, join(f, 'world.json')],
       { cwd: f, encoding: 'utf8', env: launchOf(policy, {}).env }); // the session's environment
     assert.equal(r.status, 0, r.stderr);

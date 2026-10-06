@@ -71,10 +71,8 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-6', 'overwrite-tool', 'refused', `echo '// x' >> ${q(w.tool)}`),
     P('F-T134-6', 'overwrite-logbook', 'refused', `echo x >> ${q(w.logbook)}`),
     P('F-T134-6', 'hook-state', 'refused', `mkdir -p ${q(w.hooksState)} && echo x > ${q(join(w.hooksState, 'x'))}`),
-    // F-T134-7: sage's hook state in the temp folders and in sage's root
-    P('F-T134-7', 'hooks-tmpdir', 'refused', `mkdir -p ${q(join(w.hostTmp, 'sage-hooks'))} && echo x > ${q(join(w.hostTmp, 'sage-hooks', 'x'))}`),
-    P('F-T134-7', 'hooks-user-temp', 'refused', `mkdir -p ${q(join(w.userTemp, 'sage-hooks'))} && echo x > ${q(join(w.userTemp, 'sage-hooks', 'x'))}`),
-    P('F-T134-7', 'hooks-sage-root', 'refused', `echo x > ${q(join(w.sageRoot, '.hooks', 'x'))}`),
+    // F-T134-7: sage's hook-state folders in the two temp folders and in sage's root (world.json: hookDirs, from the policy)
+    ...w.hookDirs.map((d, i) => P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && echo x > ${q(join(d, 'x'))}`)),
     // F-T134-10: the project settings' SessionStart hook did not run (the control runs the hook's command itself)
     P('F-T134-10', 'session-start-hook', 'refused', `test -e ${q(w.marker)}`, { control: `touch ${q(w.marker)} && test -e ${q(w.marker)}`, anyFail: true }),
     // F-T134-12: sage's root and the plugin's marketplace copy
