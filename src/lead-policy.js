@@ -74,12 +74,12 @@ function which(name, PATH = '') {
   }
   return name;
 }
-/** Whether `inner` is `outer` or inside it. */
-const within = (inner, outer) => { const rel = relative(outer, inner); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }; // "" (equal) is within
+/** Whether `inner` is `outer` or inside it, in any letter case: APFS and the sandbox ignore it, also for parts that do not exist yet (F-T156-44). */
+const within = (inner, outer) => { const rel = relative(outer.toLowerCase(), inner.toLowerCase()); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }; // "" (equal) is within
 
 /**
  * The macOS per-user temp folder (getconf DARWIN_USER_TEMP_DIR, run with no shell) by its real path (/private/var/folders/.../T): the
- * folder that the owner's Terminal and the launchd bridge have in TMPDIR (F-T156-40). The policy never reads TMPDIR itself. Throws one
+ * folder that the owner's Terminal and the launchd bridge have in TMPDIR (F-T156-40). No rule of the policy comes from TMPDIR. Throws one
  * line when getconf fails.
  */
 function userTemp() {

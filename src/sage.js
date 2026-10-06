@@ -53,7 +53,8 @@ const PART = /^[A-Za-z0-9._-]+( [A-Za-z0-9._-]+)*$/;
 const DATA = '/System/Volumes/Data';
 /**
  * The one rule for a path that the config or the environment gives (G48 A): a canonical path. It is absolute; each part has only the
- * characters of PART (no glob character, "~", non-ASCII or control character, no space at either end: F-T156-37) and is not empty, "." or ".."; it is not
+ * characters of PART (no glob character, "~", non-ASCII or control character, no space at either end: F-T156-37) and is not empty, "." or "..";
+ * its first part does not start with "." (the kernel resolves /.nofollow, /.resolve and /.vol, which the sandbox does not: F-T156-43); it is not
  * in the Data volume (F-T156-39); and the deepest part of it that exists is its own real path (`realpathSync.native`), so no part is a
  * link and the letter case is the disk's. The path then names one file by its text, and every rule made from it (a deny, an allow,
  * an overlap) is about that file. Links of the system are written in their real form: /private/tmp, not /tmp. The reader of the path
@@ -62,11 +63,11 @@ const DATA = '/System/Volumes/Data';
 export function canonicalPath(what, path) {
   const parts = typeof path === 'string' ? path.split('/') : [];
   let real = path;
-  if (parts.length > 1 && parts[0] === '' && parts.slice(1).every((p) => PART.test(p) && p !== '.' && p !== '..') && path !== DATA && !path.startsWith(`${DATA}/`)) {
+  if (parts.length > 1 && parts[0] === '' && !parts[1].startsWith('.') && parts.slice(1).every((p) => PART.test(p) && p !== '.' && p !== '..') && path !== DATA && !path.startsWith(`${DATA}/`)) {
     real = realOfDeepest(path);
     if (real === path) return path;
   }
-  throw new TypeError(`${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${typeof real === 'string' && real !== path ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`);
+  throw new TypeError(`${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no "." at the start of the first part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${typeof real === 'string' && real !== path ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`);
 }
 /** `path` with its deepest part that exists replaced by that part's real path; null when that part has no real path (a link to nothing, a loop) or cannot be read. */
 function realOfDeepest(path) {

@@ -102,6 +102,9 @@ const SHAPES = {
   'non-ascii': (t) => `${dirname(t)}/é${leaf(t)}`,
   'control-character': (t) => `${dirname(t)}/\u0001${leaf(t)}`,
   'data-volume': (t) => `/System/Volumes/Data${t}`,
+  'kernel-nofollow': (t) => `/.nofollow${t}`, // F-T156-43: the kernel resolves these three prefixes, the sandbox does not
+  'kernel-resolve': (t) => `/.resolve${t}`,
+  'kernel-vol': (t) => `/.vol${t}`,
   'system-link': (t) => (t.startsWith('/private/') ? t.slice('/private'.length) : undefined),
 };
 /** The probes of a key: each a file that the bridge or sage writes through the path `p`, and the policy's folders that must hold it. */
@@ -230,6 +233,10 @@ const PAIRS = {
   'denied-in-sessions': (p) => ({ statePath: join(p.sessions, 's1', 'state', 'gates.json'), state: join(p.sessions, 's1', 'state') }),
   'temp-root-in-denied': (p) => ({ temps: join(p.state, 'sage-lead') }),
   'denied-in-temp-root': (p) => ({ userTemp: join(p.temps, 'x') }),
+  // F-T156-44: the same pairs with absent parts in other letter case; APFS and the sandbox ignore the case
+  'sessions-in-denied-case-variant': (p) => ({ leads: join(dirname(p.state), 'STATE', 'l') }),
+  'denied-in-sessions-case-variant': (p) => ({ statePath: join(dirname(p.sessions), 'SESSIONS', 's1', 'state', 'gates.json'), state: join(dirname(p.sessions), 'SESSIONS', 's1', 'state') }),
+  'temp-root-in-denied-case-variant': (p) => ({ temps: join(dirname(p.state), 'STATE', 'sage-lead') }),
 };
 test('every pair row has its maker', () => assert.deepEqual(CORPUS.pairs.map((r) => r.id).sort(), Object.keys(PAIRS).sort()));
 
