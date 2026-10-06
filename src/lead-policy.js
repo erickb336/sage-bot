@@ -8,7 +8,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { auditPathOf, killPathOf } from './audit.js';
-import { claudeDirOf, sagePath, sagePlugin } from './sage.js';
+import { claudeDirOf, sagePath, sagePlugin, sageToolIn } from './sage.js';
 import { sessionsPathOf } from './sessions.js';
 import { leadsPathOf, votesPathOf } from './state.js';
 
@@ -101,8 +101,8 @@ export function leadPolicy(config, session, host = {}) {
   const cache = real(plugin.cache);
   const tool = (() => { try { return sagePath({ env, home }); } catch { return null; } })();
   const sageTool = tool && real(tool);
-  const version = sageTool && relative(cache, sageTool).split(sep); // sage, <version>, skills, sage, sage.mjs
-  if (sageTool && !(within(sageTool, cache) && version.length > 2)) throw new Error(`the sage state tool ${sageTool} is not in a version folder of the sage plugin's cache ${cache}, the only folder that a lead session loads sage from. Unset SAGE_TOOL, or set it to a sage.mjs in that cache. Nothing was started.`);
+  const version = sageTool && (relative(cache, sageTool).split(sep)[1] ?? ''); // F-T156-24: exactly sage/<version>/skills/sage/sage.mjs
+  if (sageTool && sageTool !== sageToolIn(cache, version)) throw new Error(`the sage state tool ${sageTool} is not ${sageToolIn(cache, '<version>')}, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.`);
   const sageRoot = real(env.SAGE_HOME ?? join(claudeConfig, 'sage'));
   const temps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()].filter(Boolean);
   const claudeDir = join(leads, 'claude');
@@ -127,7 +127,7 @@ export function leadPolicy(config, session, host = {}) {
     maxUsd: MAX_USD,
     claude: which(claude, env.PATH),
     sageTool,
-    pluginDir: sageTool && join(cache, version[0], version[1]), // F-T156-14: the version folder of the denied cache, sage's one identity
+    pluginDir: sageTool && join(cache, 'sage', version), // F-T156-14: the version folder of the denied cache, sage's one identity
   };
   for (const [what, path] of [['session folder', policy.folder], ['temp folder', policy.tmp]]) {
     const clash = denied.find((d) => within(d, path) || within(path, d));
@@ -215,16 +215,18 @@ export function launchOf(policy, env = process.env) {
  *   reports strictMode true exactly when a settings source sets sandbox.allowUnsandboxedCommands to false; strictModeSource "policy"
  *   means that the key is in --settings (or managed settings), whatever its value (F-T156-7);
  * - else "ready". Sessions still need Erick's switch at the terminal (G50 a): sage-bot never turns them on by itself.
- * Each command gets `timeout` ms, then SIGKILL: a command that ignores SIGTERM cannot hold the preflight.
- * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment @param {number} [timeout]
+ * Each command gets its own timeout in ms (`tool` for the state tool, `claude` for claude; 30 s each), then SIGKILL: a command that
+ * ignores SIGTERM cannot hold the preflight. The two are apart so that a test can give one command a short timeout (F-T156-25).
+ * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
+ * @param {{ tool?: number, claude?: number }} [timeouts]
  * @returns {Promise<{ state: 'ready' | 'waiting for sage T127' | 'no sandbox', why: string }>}
  */
-export async function preflight(policy, env = process.env, timeout = 30_000) {
-  const out = async (file, args, o = {}) => (await run(file, args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL', ...o })).stdout;
+export async function preflight(policy, env = process.env, { tool = 30_000, claude = 30_000 } = {}) {
+  const out = async (file, args, o) => (await run(file, args, { encoding: 'utf8', killSignal: 'SIGKILL', ...o })).stdout;
   const short = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0];
   if (!policy.sageTool) return { state: 'waiting for sage T127', why: 'the sage state tool is not installed' };
   try {
-    const lines = (await out(process.execPath, [policy.sageTool, ...CAPABILITY_ARGS], { env })).split(/\r?\n/);
+    const lines = (await out(process.execPath, [policy.sageTool, ...CAPABILITY_ARGS], { env, timeout: tool })).split(/\r?\n/);
     if (!lines.includes(CAPABILITY_LINE)) return { state: 'waiting for sage T127', why: `the state tool does not print "${CAPABILITY_LINE}"` };
   } catch (e) {
     return { state: 'waiting for sage T127', why: `the state tool's ${CAPABILITY_ARGS.join(' ')} failed: ${short(e)}` };
@@ -232,7 +234,7 @@ export async function preflight(policy, env = process.env, timeout = 30_000) {
   const launch = launchOf(policy, env);
   let status;
   try {
-    status = JSON.parse(await out(launch.command, ['--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', 'sandbox', 'status'], { env: launch.env }));
+    status = JSON.parse(await out(launch.command, ['--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', 'sandbox', 'status'], { env: launch.env, timeout: claude }));
   } catch (e) {
     return { state: 'no sandbox', why: `claude sandbox status failed: ${short(e)}` };
   }

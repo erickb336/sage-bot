@@ -60,6 +60,9 @@ export const sagePlugin = (claudeDir) => ({
   marketplace: join(claudeDir, 'plugins', 'marketplaces', 'sage'),
 });
 
+/** The state tool of one version in the sage plugin's cache (sagePlugin(...).cache): the sage plugin of the sage marketplace. */
+export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skills', 'sage', 'sage.mjs');
+
 /**
  * Where the sage state tool is, for the demo, the bridge tests and the lead policy (src/lead-policy.js). In this order:
  * 1. SAGE_TOOL, when it is set;
@@ -73,12 +76,13 @@ export function sagePath({ env = process.env, home = userInfo().homedir } = {}) 
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);
   }
-  const cache = join(sagePlugin(claudeDirOf({ env, home })).cache, 'sage');
-  const found = (existsSync(cache) ? readdirSync(cache) : [])
-    .map((v) => join(cache, v, 'skills', 'sage', 'sage.mjs'))
+  const { cache } = sagePlugin(claudeDirOf({ env, home }));
+  const versions = join(cache, 'sage');
+  const found = (existsSync(versions) ? readdirSync(versions) : [])
+    .map((v) => sageToolIn(cache, v))
     .filter((p) => existsSync(p))
     .map((p) => ({ p, at: statSync(p).mtimeMs }))
     .sort((a, b) => b.at - a.at || (a.p < b.p ? -1 : 1));
   if (found.length) return found[0].p;
-  throw new Error(`The sage state tool is not in the sage plugin's cache (${cache}). Install the sage plugin, or set SAGE_TOOL to its sage.mjs.`);
+  throw new Error(`The sage state tool is not in the sage plugin's cache (${versions}). Install the sage plugin, or set SAGE_TOOL to its sage.mjs.`);
 }

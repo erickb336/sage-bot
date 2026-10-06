@@ -809,7 +809,7 @@ What stays open, so the rule above stays: a session can turn its folder into a b
 
 Each of these is refused with one line too:
 
-- a state tool that is not in a version folder of the sage plugin's cache, for example `SAGE_TOOL` set to a copy in a scratch folder: the session would load that folder as its plugin, and plugin hooks run outside the sandbox (F-T156-14);
+- a state tool that is not exactly `plugins/cache/sage/sage/<version>/skills/sage/sage.mjs` (`sageToolIn`), the sage plugin of the sage marketplace, in the Claude Code config folder, for example `SAGE_TOOL` set to a copy in a scratch folder or another plugin's folder: the session would load that folder as its plugin, and plugin hooks run outside the sandbox (F-T156-14, F-T156-24);
 - a path of the policy that is a link to a path that does not exist yet, for example `sessions` linked to a folder that is not made yet in the state folder (F-T156-17);
 - a relative `CLAUDE_CONFIG_DIR`. An empty one counts as not set (F-T156-17);
 - a config file that is not JSON: the line names the file (F-T156-17).
@@ -817,7 +817,7 @@ Each of these is refused with one line too:
 **The preflight.** It fails closed, in this order:
 
 1. "waiting for sage T127": the state tool (`sagePath`) runs `capabilities` outside the sandbox and must print the line `lead-sessions 1` (G59). A missing tool, a missing line or a failing command means waiting.
-2. "no sandbox": `claude --settings <the settings> --setting-sources "" sandbox status` must print `supported`, `enabled` and `strictMode` as true, with no `unavailableReason`. Each command has 30 seconds, then SIGKILL. Claude Code 2.1.289 prints `strictMode` true exactly when a settings source sets `sandbox.allowUnsandboxedCommands` to `false`; `strictModeSource` "policy" only says that `--settings` has the key, whatever its value (F-T156-7). A test runs the real `claude`, when it is installed, in a scratch `HOME` and expects "ready".
+2. "no sandbox": `claude --settings <the settings> --setting-sources "" sandbox status` must print `supported`, `enabled` and `strictMode` as true, with no `unavailableReason`. Each command has 30 seconds, then SIGKILL (`preflight` takes the two timeouts apart, so that a test can shorten one: F-T156-25). Claude Code 2.1.289 prints `strictMode` true exactly when a settings source sets `sandbox.allowUnsandboxedCommands` to `false`; `strictModeSource` "policy" only says that `--settings` has the key, whatever its value (F-T156-7). A test runs the real `claude`, when it is installed, in a scratch `HOME` and expects "ready".
 3. Else "ready". A session still needs Erick's switch at the terminal (G50 a, a later step): sage-bot never turns sessions on by itself.
 
 <!-- check: run -->
@@ -831,11 +831,11 @@ node scripts/lead-policy.mjs --session s21 settings
 node scripts/lead-policy.mjs preflight             # lead sessions: ready, waiting for sage T127, or no sandbox; exit 1 unless ready
 ```
 
-**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (118 mutations: each setting, each denied path and allowed path, each variable of the environment, each refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` or `test/t156-git-control.test.js` fails for each. It changes a copy in a new temp folder, never the worktree, so a run of `lead-policy.mjs` at the same time sees the real policy.
+**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (MUTATIONS mutations: each setting, each denied path and allowed path, each variable of the environment, each refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` or `test/t156-git-control.test.js` fails for each. A mutation counts as killed only when a test fails and every test file loads; a mutation that breaks the syntax or makes a test file crash prints INVALID and fails the run (F-T156-23). It changes a copy in a new temp folder, never the worktree, so a run of `lead-policy.mjs` at the same time sees the real policy.
 
 <!-- check: skip, it runs the tests once for each mutation and takes a few minutes -->
 ```sh
-node scripts/lead-policy-mutations.mjs             # KILLED or SURVIVED for each mutation; exit 1 when one survives
+node scripts/lead-policy-mutations.mjs             # KILLED, SURVIVED or INVALID for each mutation; exit 1 unless all are killed
 ```
 
 ## Run the checks

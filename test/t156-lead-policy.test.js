@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from './bridge-setup.js';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { LEAD_PATH, MODEL_KEY, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -126,7 +126,7 @@ test('the launch: claude -p with the settings, sage-bot\'s settings only, strict
   assert.ok(!launchOf({ ...policy, pluginDir: null }, env).args.includes('--plugin-dir')); // no state tool: no plugin
 });
 
-test('sage, the only plugin: --plugin-dir is the version folder of the denied plugin cache; a state tool outside that cache is refused (F-T156-14)', () => {
+test('sage, the only plugin: --plugin-dir is the version folder of the denied plugin cache; a state tool outside that cache, or not at sage/<version>/skills/sage/sage.mjs in it, is refused (F-T156-14, F-T156-24)', () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
   try {
     const tool = pluginCache(root), config = join(root, 'claude-config'), cache = join(config, 'plugins', 'cache', 'sage');
@@ -140,9 +140,11 @@ test('sage, the only plugin: --plugin-dir is the version folder of the denied pl
     mkdirSync(join(root, 'scratch'));
     writeFileSync(join(root, 'scratch', 'sage.mjs'), '');
     symlinkSync(join(root, 'scratch'), join(cache, 'sage', 'v2'));
-    writeFileSync(join(cache, 'sage.mjs'), '');
-    for (const [bad, real] of [[join(root, 'scratch', 'sage.mjs')], [join(cache, 'sage', 'v2', 'sage.mjs'), join(root, 'scratch', 'sage.mjs')], [join(cache, 'sage.mjs')]]) {
-      assert.throws(() => leadPolicy(CONFIG, 's1', h({ SAGE_TOOL: bad })), { message: `the sage state tool ${real ?? bad} is not in a version folder of the sage plugin's cache ${cache}, the only folder that a lead session loads sage from. Unset SAGE_TOOL, or set it to a sage.mjs in that cache. Nothing was started.` });
+    // F-T156-24: anything but exactly sage/<version>/skills/sage/sage.mjs in the cache, with sage.mjs files at the other places.
+    const other = ['sage.mjs', 'sage/v1/sage.mjs', 'sage/v1/x/y/sage.mjs', 'other/v1/skills/sage/sage.mjs', 'x/sage/v1/skills/sage/sage.mjs', 'sage/v1/skills/other/sage.mjs', 'sage/v1/skills/sage/other.mjs'];
+    for (const f of other) { mkdirSync(dirname(join(cache, f)), { recursive: true }); writeFileSync(join(cache, f), ''); }
+    for (const [bad, real] of [[join(root, 'scratch', 'sage.mjs')], [join(cache, 'sage', 'v2', 'sage.mjs'), join(root, 'scratch', 'sage.mjs')], ...other.map((f) => [join(cache, f)])]) {
+      assert.throws(() => leadPolicy(CONFIG, 's1', h({ SAGE_TOOL: bad })), { message: `the sage state tool ${real ?? bad} is not ${cache}/sage/<version>/skills/sage/sage.mjs, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.` });
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -349,8 +351,18 @@ test('preflight: a claude that ignores SIGTERM is killed at the timeout, and the
   try {
     writeFileSync(h.policy.claude, "#!/bin/sh\ntrap '' TERM\nexec sleep 5\n");
     const start = Date.now();
-    const r = await preflight(h.policy, h.env, 300);
+    const r = await preflight(h.policy, h.env, { claude: 300 }); // F-T156-25: the state tool keeps its normal timeout under load
     assert.equal(r.state, 'no sandbox');
+    assert.ok(Date.now() - start < 3000, `took ${Date.now() - start} ms`);
+  } finally { h.done(); }
+});
+
+test('preflight: a state tool that ignores SIGTERM is killed at its own timeout, and the state is "waiting for sage T127" (F-T156-25)', async () => {
+  const h = host({ tool: "process.on('SIGTERM', () => {}); setTimeout(() => {}, 5000);" });
+  try {
+    const start = Date.now();
+    const r = await preflight(h.policy, h.env, { tool: 300 });
+    assert.deepEqual(r, { state: 'waiting for sage T127', why: "the state tool's capabilities failed: Command failed: " + `${process.execPath} ${h.policy.sageTool} capabilities` });
     assert.ok(Date.now() - start < 3000, `took ${Date.now() - start} ms`);
   } finally { h.done(); }
 });
