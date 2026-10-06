@@ -2,11 +2,11 @@
 // SAMPLE DATA: every gate id and file text here is a made-up sample.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load, loadVotes, readOwn } from '../src/state.js';
+import { spawn, spawnSync } from './bridge-setup.js';
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
 const scratch = (name) => realpathSync.native(mkdtempSync(join(tmpdir(), `sage-bot-t47-${name}-`))); // the real path, as loadProjects names a project

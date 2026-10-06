@@ -4,12 +4,11 @@
 process.env.TZ = 'UTC'; // the title of a thread has the host's date: 2026-10-04 is a Sunday in UTC
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectOf, record } from '../src/sessions.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { CHANNEL, APPRENTICE, JON, LEADR, MAYA, setAt, setup } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, JON, LEADR, MAYA, setAt, setup, spawnSync } from './bridge-setup.js';
 
 const S1 = 'aaaaaaaa-0000-4000-8000-000000000001';
 const spoolDir = (b) => `${b.statePath}.sessions`;

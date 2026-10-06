@@ -3,10 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as launchdModule from '../src/launchd.js';
+import { spawnSync } from './bridge-setup.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const SCRIPT = join(ROOT, 'scripts/launchd.mjs');

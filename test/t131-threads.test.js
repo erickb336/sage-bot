@@ -2,7 +2,6 @@
 // A dry run: no sage session starts. SAMPLE DATA ONLY: every id, name and text is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -16,7 +15,7 @@ import { ChannelType } from 'discord.js';
 import { inForum, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { DRY_RUN, LINK_OFF, threadsPathOf } from '../src/threads.js';
-import { APPRENTICE, CONFIG, JON, LEADR, MAYA, OWNER, SAGE, SAM, setup, T0 } from './bridge-setup.js';
+import { APPRENTICE, CONFIG, JON, LEADR, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // a registered channel (the old #ask-sage)

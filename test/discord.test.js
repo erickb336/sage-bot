@@ -3,7 +3,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
@@ -14,6 +13,7 @@ import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { peopleOf } from '../src/handle.js';
 import { save } from '../src/state.js';
 import { openGate, step } from '../src/vote.js';
+import { execFileSync } from './bridge-setup.js';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'sage-bot-discord-'));
 const [OWNER, MAYA, APPRENTICE, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];

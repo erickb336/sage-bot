@@ -6,12 +6,12 @@
 // SAMPLE DATA ONLY. No real `claude`, gh or git command runs, and no settings file changes.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decideText } from '../src/guard.js';
+import { spawn, spawnSync } from './bridge-setup.js';
 
 const HOOK = fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url));
 const CORPUS = JSON.parse(readFileSync(new URL('./guard-corpus.json', import.meta.url), 'utf8'));
@@ -65,6 +65,9 @@ const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead 
 const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.';
 const BROKER = 'sage can do this instead: the sage-bot broker tools of the session (fetch, open a pull request, upload your branch).';
+const ASCII_HINT = 'sage can do this instead: write such text to a file in the scratch folder with the Write tool and pass the file (git commit -F <file>), and give files names in printable ASCII.';
+const NODE_HINT = 'sage can do this instead: write the code to a .mjs file in the scratch folder with the Write tool, then node <file>.mjs.';
+const SETTINGS = '(a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
 
 test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}), of wildcards (${CORPUS.wildcard.length}) and of pattern characters (${CORPUS.pattern.length}), each once`, () => {
   assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.pattern.length >= 15 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
@@ -117,7 +120,7 @@ test('F-T133-64: sed and awk stay refused, with the hint to head, tail or the Re
 
 test('F-T133-65: git takes a bare git stash with an option as git stash push, so the guard checks it by the options of push', () => {
   for (const c of ['git stash -m wip', 'git stash --message wip', 'git stash -q']) assert.equal(guard(bash(c)).decision, 'allow', c);
-  for (const opt of ['--include-untracked', '-u', '--keep-index']) assert.match(guard(bash(`git stash ${opt}`)).reason, new RegExp(`^sage-bot guard: git stash with the option ${opt} is refused`));
+  for (const opt of ['--all', '-a', '--keep-index']) assert.match(guard(bash(`git stash ${opt}`)).reason, new RegExp(`^sage-bot guard: git stash with the option ${opt} is refused`));
 });
 
 test('T133: the sage state tool is refused in every form, with the stop ending (G30 A): its path, sage.mjs in any case or quoting, a variable in front, env, --, a wildcard, a copy, a script that imports it', () => {
@@ -157,7 +160,7 @@ test('T133 (G47 A, F-T133-51): any other pattern character than [ in a git or no
   const PATTERN = /^sage-bot guard: the character .+ in the operand .+ \(git and node --test can read it as a pattern\) is refused in a lead session\. This needs Erick; tell the sage-lead and stop this action\.$/;
   assert.deepEqual(CORPUS.pattern.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !PATTERN.test(why)), []);
   assert.equal(guard(bash('git add src/c++.js')).reason, `sage-bot guard: the character + in the operand src/c++.js (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
-  assert.equal(guard(bash("git stash pop 'stash@{0}'")).reason, `sage-bot guard: the character @ in the operand stash@{0} (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash("git show 'HEAD@{1}'")).reason, `sage-bot guard: the character @ in the operand HEAD@{1} (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
   // The same characters in a word that is no pattern operand pass.
   for (const c of ["git commit -m 'c++ and @types'", 'cat src/@types/x.d.ts', 'git stash pop']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
@@ -189,7 +192,7 @@ test('T133 (F-T133-50): a file tool input nested 30,000 deep, or 64 KB of any sh
   ];
   for (const name of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
     for (const make of shapes) {
-      const input = fit((d) => make(d).replace('"Write"', `"${name}"`));
+      const input = fit((d) => make(d).replace('"Write"', `"${name}"`).replace('"file_path"', name === 'NotebookEdit' ? '"notebook_path"' : '"file_path"'));
       assert.ok(Buffer.byteLength(input) > 60 * 1024 && Buffer.byteLength(input) <= 64 * 1024, `${Buffer.byteLength(input)}`);
       assert.equal(guard(input).decision, 'allow', `${name} ${input.slice(0, 80)}`);
     }
@@ -198,13 +201,14 @@ test('T133 (F-T133-50): a file tool input nested 30,000 deep, or 64 KB of any sh
 
 test('T133 (G46 A, F-T133-47): when one part of a pipeline runs or writes, every part of it is checked', () => {
   assert.equal(guard(bash('cat ./sag?.mjs | head -n 99999 > ./x.mjs && node ./x.mjs')).reason, `sage-bot guard: the wildcard ./sag?.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(guard(bash('cat "./café.txt" | head > ./x.txt')).reason, `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash('cat "./café.txt" | head > ./x.txt')).reason, `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${ASCII_HINT}`);
   // A pipeline that only reads, and a read before a && that writes, run nothing.
   for (const c of ['ls ./s* | head -5', 'cat ./sag?.mjs && npm test', 'npm run check 2>&1 | tail -20']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
 test('T133 (G44 A): in a part that runs or writes, and in a file tool path, a character that is not printable ASCII is refused with the stop ending', () => {
-  const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${STOP}`;
+  // F-T144-L1: the text goes to a file, and git commit -F takes it.
+  const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${ASCII_HINT}`;
   for (const c of ['cp "{SCRATCH}/caf\u00e9.txt" {SCRATCH}/x.txt', 'node "{SCRATCH}/x\u200b.mjs"', 'echo x > "{SCRATCH}/\u00e9.txt"', 'ls | tee "{SCRATCH}/\u00e9.txt"', 'git commit -m "x\ty"', 'git commit -m "a\nb"']) {
     assert.equal(guard(bash(c)).reason, ascii, c);
   }
@@ -237,7 +241,7 @@ test('T133 (G44 A): node never reads its script from stdin or a device, and a br
   assert.equal(guard(bash('node --test -')).reason, stdin);
   assert.equal(guard(bash('node {SCRATCH}/x.mjs -')).decision, 'allow');
   // F-T133-48 (G46 A): nor from a device, a script path under /dev/ in any spelling; node --test checks each of its files.
-  const dev = (p) => `sage-bot guard: node with the script ${p} (a device under /dev/, such as stdin) is refused in a lead session. ${STOP}`;
+  const dev = (p) => `sage-bot guard: node with the script ${p} (a script file ends in .js, .mjs or .cjs) is refused in a lead session. ${NODE_HINT}`;
   for (const p of ['/dev/stdin', '/dev/fd/0', '//dev/./stdin', '../../../dev/stdin', '/x/../dev/fd/3']) assert.equal(guard(bash(`node ${p} < {SCRATCH}/x.mjs`)).reason, dev(p));
   assert.equal(guard(bash('node --test test/a.test.js /dev/stdin')).reason, dev('/dev/stdin'));
   for (const c of ['node {SCRATCH}/x.mjs /dev/null', 'node test/dev/x.mjs', 'node --test test/dev/x.test.js']) assert.equal(guard(bash(c)).decision, 'allow', c);
@@ -292,13 +296,13 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   // The usual commit form, a heredoc in $( ), stays refused, and the message says how to give the text instead.
   assert.match(why("git commit -m \"$(cat <<'EOF'\nT133\nEOF\n)\""), /cannot read \(a \$ inside double quotes\) is refused .* sage can do this instead: .*put long or special text in a file in the scratch folder and pass it with git commit -F <file>\.$/s);
   assert.equal(why('HOME={SCRATCH} git status'), 'sage-bot guard: a variable in front of git (git reads its config from HOME) is refused in a lead session. sage can do this instead: run git with no variable in front of it.');
-  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a lead session. sage can do this instead: set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command.');
   // Each option must be an entry of the command's table by its full spelling; the message lists the entries.
-  assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a lead session. sage can do this instead: give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
+  assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a lead session. sage can do this instead: rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
   assert.equal(why('pwd -L'), 'sage-bot guard: pwd with the option -L is refused in a lead session. sage can do this instead: give pwd no option.');
   assert.equal(why('node --test-reporter=x.mjs --test'), 'sage-bot guard: node --test-reporter x.mjs (only spec, tap, dot, junit) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(why('head -n'), 'sage-bot guard: head -n with no value is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C and --no-pager) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(why('git -C'), 'sage-bot guard: git -C with no folder is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(why('git stash clear'), 'sage-bot guard: git stash clear is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
   assert.equal(why('git worktree remove x'), 'sage-bot guard: git worktree remove is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
@@ -472,12 +476,12 @@ test('F-T133-71: npm --version and npm -v alone are allowed; npm version (it can
   assert.equal(why('npm version'), hint);
   assert.equal(why('npm version patch'), hint);
   // The version alone: anything after it is checked by the option table, and refused.
-  assert.match(why('npm --version x'), /^sage-bot guard: npm with the option --version is refused/);
+  assert.match(why('npm --version x'), /^sage-bot guard: npm x \(only ci, test, run, ls and outdated\) is refused/);
   assert.match(why('node --version x'), /^sage-bot guard: node with the option --version is refused/);
 });
 
 test('F-T133-72: a write under a .claude folder is refused with the stop ending, as a second layer (T134 holds it: F-T134-4, F-T134-20); a read there is allowed', () => {
-  const end = '(a .claude folder holds the settings, skills, agents and commands that Claude Code loads) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
+  const end = SETTINGS;
   assert.equal(guard(tool('Write', { file_path: '{WT}/.claude/skills/x/SKILL.md', content: 'x' })).reason, `sage-bot guard: a write to /sample/repo/wt/.claude/skills/x/SKILL.md ${end}`);
   assert.equal(guard(tool('Edit', { file_path: '.claude/settings.local.json', old_string: 'a', new_string: 'b' })).reason, `sage-bot guard: a write to .claude/settings.local.json ${end}`);
   assert.equal(guard(tool('NotebookEdit', { notebook_path: '{WT}/.claude/commands/n.ipynb', new_source: 'x' })).reason, `sage-bot guard: a write to /sample/repo/wt/.claude/commands/n.ipynb ${end}`);
@@ -495,4 +499,200 @@ test('F-T133-72: a write under a .claude folder is refused with the stop ending,
   assert.equal(guard(tool('Write', { file_path: '{SCRATCH}/notes.claude/a.md', content: 'x' })).reason, undefined);
   // Only the path is checked: a text that names a .claude path is no write there.
   assert.equal(guard(tool('Write', { file_path: '{SCRATCH}/notes.md', content: 'see {WT}/.claude/settings.json' })).reason, undefined);
+});
+
+// ---- T144: the follow-ups before lead sessions start (T134) ---------------------------------------------------------------
+
+const refused = (why, end = STOP) => `sage-bot guard: ${why} is refused in a lead session. ${end}`;
+const hint = (why, safe) => refused(why, `sage can do this instead: ${safe}.`);
+const reasons = (cases, at = (c) => guard(bash(c)).reason) => Object.fromEntries(cases.map((c) => [c, at(c) ?? 'allow']));
+
+test('F-T134-5: a stdin that never closes gets a whole deny within the 5 s deadline, and the hook exits 0', async () => {
+  // Claude Code closes the hook's stdin; here it stays open, with a part of a tool call in it.
+  const child = spawn(process.execPath, [HOOK], { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: process.env.PATH, ...LEAD } });
+  // A hook that never answers is killed after 15 s (status null), so the test fails instead of waiting forever.
+  const kill = setTimeout(() => child.kill(), 15_000);
+  child.stdin.write('{"tool_name":"Bash","tool_input":{"command":"git st');
+  const parts = [];
+  child.stdout.on('data', (d) => parts.push(d));
+  const t = Date.now();
+  const status = await new Promise((done) => child.on('close', done));
+  const ms = Date.now() - t;
+  clearTimeout(kill);
+  child.stdin.destroy();
+  assert.equal(deny({ status, stdout: Buffer.concat(parts).toString() }), refused('a tool call that the guard did not decide in 5 s'));
+  assert.ok(ms >= 4500 && ms < 8000, `${ms} ms`);
+});
+
+test('F-T144-M1 (G63 b): each Keychain front end is refused by name, with any path, as a second layer', () => {
+  const front = (name) => refused(`the Keychain front end ${name} (G63 b: a lead session reads no Keychain item)`);
+  assert.deepEqual(reasons(['security find-generic-password -s x -w', '/usr/bin/security dump-keychain', 'osascript -e x', 'NO_COLOR=1 osacompile x']), {
+    'security find-generic-password -s x -w': front('security'),
+    '/usr/bin/security dump-keychain': front('/usr/bin/security'),
+    'osascript -e x': front('osascript'),
+    'NO_COLOR=1 osacompile x': front('osacompile'),
+  });
+  // Only a command is one: a word that names it is not.
+  assert.equal(guard(bash('rg -n security src')).decision, 'allow');
+});
+
+test('F-T144-5: a Bash call with the field dangerouslyDisableSandbox is refused like an isolation field, with any value', () => {
+  for (const value of [true, false, 'yes']) {
+    assert.equal(guard(tool('Bash', { command: 'git status', dangerouslyDisableSandbox: value })).reason, refused('a Bash call with the field dangerouslyDisableSandbox (it asks to run outside the sandbox)'));
+  }
+  assert.equal(guard(tool('Bash', { command: 'git status', description: 'x' })).decision, 'allow');
+});
+
+test('F-T144-5, F-T144-L7, F-T144-L8, F-T144-L9, F-T144-L10: git: the network and config forms are refused, and the read forms have a safe form or pass', () => {
+  assert.deepEqual(reasons(['git remote show origin', 'git branch -u origin/x', 'git branch --set-upstream-to origin/x', 'git reset HEAD a.js', 'git grep foo', 'git log --pretty "%h (%s)"', 'git stash pop stash@{0}']), {
+    'git remote show origin': hint('git remote show (it asks the remote over the network)', 'git remote -v'),
+    'git branch -u origin/x': hint('git branch with the option -u', 'give git branch only the options -a --all -r --remotes -v -vv --list --show-current --contains, each one spelled in full and alone'),
+    'git branch --set-upstream-to origin/x': hint('git branch with the option --set-upstream-to', 'give git branch only the options -a --all -r --remotes -v -vv --list --show-current --contains, each one spelled in full and alone'),
+    'git reset HEAD a.js': hint('git reset', 'git restore --staged <file> to unstage a file, or git restore <file> to undo its changes'),
+    'git grep foo': hint('git grep', 'rg -n <pattern> <folder>'),
+    'git log --pretty "%h (%s)"': hint('git log --pretty with its value in the next word', '--pretty=<value> as one word, for example --pretty="%h %s"'),
+    'git stash pop stash@{0}': hint('a command the guard cannot read (the character "{" outside quotes)', "quote the stash name: git stash pop 'stash@{0}'"),
+  });
+  const allowed = ['git --version', 'git --no-pager log -n 3', 'git -C /x --no-pager diff', 'git rev-list --count HEAD', 'git merge-base HEAD origin/main', 'git shortlog -sn', 'git worktree list --porcelain', 'git stash -u', "git stash pop 'stash@{0}'", 'git remote -v', 'git diff -U0', 'git diff --word-diff', 'git log --all --oneline'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+  // --version takes nothing after it, and --no-pager is no way past the subcommand list.
+  assert.match(guard(bash('git --version x')).reason, /^sage-bot guard: git --version \(only the listed subcommands/);
+  assert.match(guard(bash('git --no-pager merge x')).reason, /^sage-bot guard: git merge \(only the listed subcommands/);
+});
+
+test('F-T144-6: a short option takes its value joined too (-A5, -n5, -U0), but a flag takes none', () => {
+  const allowed = ['grep -A5 x src/a.js', 'git log -n5', 'cut -d, -f1 a.csv', 'head -n20 a.txt', 'rg -m1 -v -o -S --hidden --no-heading x src', 'node --test --test-concurrency=1 --test-only test/a.test.js', 'find . -size +1M'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+  assert.match(guard(bash('git commit -amx')).reason, /^sage-bot guard: git commit with the option -amx is refused/);
+  assert.match(guard(bash('ls -lx')).reason, /^sage-bot guard: ls with the option -lx is refused/);
+  assert.equal(guard(bash('node --test-reporter=x.mjs --test')).reason, refused('node --test-reporter x.mjs (only spec, tap, dot, junit)'));
+});
+
+test('F-T144-L2, F-T144-L3, F-T144-L4: node runs only a script file that ends in .js, .mjs or .cjs, also through npm test --', () => {
+  const script = (p) => hint(`node with the script ${p} (a script file ends in .js, .mjs or .cjs)`, 'write the code to a .mjs file in the scratch folder with the Write tool, then node <file>.mjs');
+  assert.deepEqual(reasons(['cd /dev && node stdin', 'node /DEV/stdin', 'node x.txt', 'node --test test/', 'npm test -- /dev/stdin', 'npm run check -- /dev/stdin', "npm test -- 'sag*'", 'npm test -- -e x']), {
+    'cd /dev && node stdin': script('stdin'),
+    'node /DEV/stdin': script('/DEV/stdin'),
+    'node x.txt': script('x.txt'),
+    'node --test test/': script('test/'),
+    'npm test -- /dev/stdin': script('/dev/stdin'),
+    'npm run check -- /dev/stdin': script('/dev/stdin'),
+    "npm test -- 'sag*'": hint('the wildcard sag* (it can match the sage state tool)', WILDCARD.replace('sage can do this instead: ', '').replace(/\.$/, '')),
+    'npm test -- -e x': hint('node with the option -e', 'give node only the options --test --check --no-warnings --test-reporter --test-name-pattern --experimental-test-coverage --test-concurrency --test-only, each one spelled in full and alone'),
+  });
+  assert.equal(guard(bash('node a.mjs.txt')).reason, script('a.mjs.txt'));
+  const allowed = ['node x.cjs', 'node scripts/a.mjs /dev/stdin', 'npm test -- test/a.test.js', 'npm test -- --test-name-pattern=corpus', 'npm run check'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-L7, F-T144-L10, F-T144-L13: npm, npx, grep and the variables in front: the refusal names the subcommand or the safe form', () => {
+  assert.deepEqual(reasons(['npm i -D x', 'npm help', 'npx eslint', 'grep -r x src', 'FOO=1 npm test', 'PATH=/x ls', 'jq -n env', "jq -n '$ENV.HOME'"]), {
+    'npm i -D x': refused('npm i (only ci, test, run, ls and outdated)'),
+    'npm help': hint('npm help', 'WebFetch of https://docs.npmjs.com/cli, the documentation of npm'),
+    'npx eslint': hint('npx (it runs any package)', 'npm run <script>, a script of package.json'),
+    'grep -r x src': hint('grep with the option -r', 'rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone'),
+    'FOO=1 npm test': hint('setting FOO in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command'),
+    'PATH=/x ls': hint('setting PATH in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command'),
+    'jq -n env': refused('jq with env or $ENV (it prints the environment, which can hold secrets)'),
+    "jq -n '$ENV.HOME'": refused('jq with env or $ENV (it prints the environment, which can hold secrets)'),
+  });
+  const allowed = ['NODE_ENV=test CI=1 NO_COLOR=1 FORCE_COLOR=0 HOME=/x TMPDIR=/y npm test', 'jq . .env', 'jq .env package.json'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-L5: a git pathspec * also matches a /, so a git wildcard that can end a path in the state tool is refused; a shell wildcard stays in its folder', () => {
+  const wild = (w) => hint(`the wildcard ${w} (it can match the sage state tool)`, WILDCARD.replace('sage can do this instead: ', '').replace(/\.$/, ''));
+  assert.deepEqual(reasons(["git add 'src*'", "git rm --cached 'a*b/sag?.mjs'", "git add 'x/s*e.m?s'"]), { "git add 'src*'": wild('src*'), "git rm --cached 'a*b/sag?.mjs'": wild('a*b/sag?.mjs'), "git add 'x/s*e.m?s'": wild('x/s*e.m?s') });
+  const allowed = ["git log -- '*.js'", "git add 'test/*.test.js'", 'cp ./src* /sample/out'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-5, F-T144-L8, F-T144-L13: the parser refuses what zsh and bash read in another way: =word, <n-m>, a two-digit fd, a redirect to a device', () => {
+  const unread = (why) => hint(`a command the guard cannot read (${why})`, 'one command per call, or commands joined only by && (a | only into head, tail, wc, sort or grep), with no ;, ||, $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file>');
+  assert.deepEqual(reasons(['ls =ls', 'cp a =.claude/x', '[ a = b ]', 'cat <1-10>', 'git commit -m x 10> y', 'echo x > /dev/tcp/1.2.3.4/80', 'ls 2> ../../dev/stdout', 'ls >&2x']), {
+    'ls =ls': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
+    'cp a =.claude/x': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
+    '[ a = b ]': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
+    'cat <1-10>': unread('a zsh number range <n-m>'),
+    'git commit -m x 10> y': unread('the number 10 before a redirect'),
+    'echo x > /dev/tcp/1.2.3.4/80': refused('a redirect to /dev/tcp/1.2.3.4/80 (under /dev/ only /dev/null)'),
+    'ls 2> ../../dev/stdout': refused('a redirect to ../../dev/stdout (under /dev/ only /dev/null)'),
+    'ls >&2x': unread('the operator & (only && joins parts)'),
+  });
+  // A device in any spelling: the case is folded and the path normalized.
+  assert.equal(guard(bash('echo x > /DEV/tcp/1.2.3.4/80')).reason, refused('a redirect to /DEV/tcp/1.2.3.4/80 (under /dev/ only /dev/null)'));
+  assert.equal(guard(bash('echo x > //dev/./tcp/1.2.3.4/80')).reason, refused('a redirect to //dev/./tcp/1.2.3.4/80 (under /dev/ only /dev/null)'));
+  const allowed = ['ls 2> /dev/null', 'ls >/DEV/null', 'ls >&2', 'git log --format==%h -n 1', "echo '='"];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-L10, F-T144-L13, F-T144-L17: uniq writes its second file, so it is a part that writes; so is a command after the variables in front', () => {
+  assert.equal(guard(bash('uniq ./s* /sample/out')).reason, hint('the wildcard ./s* (it can match the sage state tool)', WILDCARD.replace('sage can do this instead: ', '').replace(/\.$/, '')));
+  assert.equal(guard(bash('CI=1 cp ./s* /sample/out')).reason, hint('the wildcard ./s* (it can match the sage state tool)', WILDCARD.replace('sage can do this instead: ', '').replace(/\.$/, '')));
+  assert.equal(guard(bash('uniq a.txt .claude/x')).reason, refused(`a write to .claude/x ${SETTINGS.split(' is refused')[0]}`));
+  assert.equal(guard(bash('uniq a.txt')).decision, 'allow');
+});
+
+test('F-T144-L10: a write to a settings file or folder by name (.claude, .mcp.json, .git, .npmrc) is refused, as a second layer; a read is allowed', () => {
+  const write = (p) => `sage-bot guard: a write to ${p} ${SETTINGS}`;
+  assert.deepEqual(reasons(['cp x .mcp.json', 'cp x .git/config', 'echo x > .git/hooks/pre-commit', 'mv x {WT}/.npmrc', 'rm -rf ./.c*', 'touch a/.G?T/config']), {
+    'cp x .mcp.json': write('.mcp.json'), 'cp x .git/config': write('.git/config'), 'echo x > .git/hooks/pre-commit': write('.git/hooks/pre-commit'),
+    'mv x {WT}/.npmrc': write('/sample/repo/wt/.npmrc'), 'rm -rf ./.c*': write('./.c*'), 'touch a/.G?T/config': write('a/.G?T/config'),
+  });
+  assert.equal(guard(tool('Write', { file_path: '{WT}/.mcp.json', content: '{}' })).reason, write('/sample/repo/wt/.mcp.json'));
+  assert.equal(guard(tool('Edit', { file_path: '{REPO}/.git/config', old_string: 'a', new_string: 'b' })).reason, write('/sample/repo/.git/config'));
+  // A path after an = (an option's value) is a path too.
+  assert.equal(guard(bash('node a.mjs --out=.claude/x')).reason, write('--out=.claude/x'));
+  const allowed = ['cat .git/config', 'cp .gitignore /sample/out', 'cp x {WT}/notes.mcp.json', 'rm -rf ./tmp/*.log', 'git add .gitignore'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-L14, F-T144-L15: the settings rule sees a cd folder and a wildcard; a read of .claude, also by git or in a pipeline, is allowed', () => {
+  const write = (p) => `sage-bot guard: a write to ${p} ${SETTINGS}`;
+  assert.deepEqual(reasons(['cd .claude && rm x', 'cd .cl?ude && rm x', 'cd {WT}/.claude/skills && echo x > SKILL.md', 'git add .claude/settings.json']), {
+    'cd .claude && rm x': write('.claude'), 'cd .cl?ude && rm x': write('.cl?ude'), 'cd {WT}/.claude/skills && echo x > SKILL.md': write('/sample/repo/wt/.claude/skills'), 'git add .claude/settings.json': write('.claude/settings.json'),
+  });
+  const allowed = ['cd .claude && ls', 'git log -- .claude', 'git diff -- .claude/settings.json', 'git show HEAD:.claude/settings.json', 'cat .claude/settings.json | head > /sample/out.txt'];
+  assert.deepEqual(reasons(allowed), Object.fromEntries(allowed.map((c) => [c, 'allow'])));
+});
+
+test('F-T144-L15, F-T144-L16: a worktree under .claude/worktrees/<name> is a work folder; the session folder counts like a cd', () => {
+  const at = (cwd, name, input) => guard({ ...tool(name, input), cwd });
+  const write = (p) => `sage-bot guard: a write to ${p} ${SETTINGS}`;
+  const wt = '/sample/repo/.claude/worktrees/t200';
+  assert.equal(at(wt, 'Write', { file_path: `${wt}/src/a.js`, content: 'x' }).decision, 'allow');
+  assert.equal(at(wt, 'Write', { file_path: 'src/a.js', content: 'x' }).decision, 'allow');
+  assert.equal(at(wt, 'Bash', { command: 'npm run check > /sample/out.txt' }).decision, 'allow');
+  assert.equal(at(wt, 'Bash', { command: 'git worktree add .claude/worktrees/t201 -b t201' }).decision, 'allow');
+  // Its own .claude, and the worktrees folder itself, count again.
+  assert.equal(at(wt, 'Write', { file_path: `${wt}/.claude/settings.json`, content: 'x' }).reason, write(`${wt}/.claude/settings.json`));
+  assert.equal(at(wt, 'Bash', { command: 'rm -rf /sample/repo/.claude/worktrees' }).reason, write('/sample/repo/.claude/worktrees'));
+  // A .. out of the worktree is resolved first.
+  assert.equal(at(wt, 'Write', { file_path: `${wt}/../../settings.json`, content: 'x' }).reason, write(`${wt}/../../settings.json`));
+  // A session folder under .claude: a relative write lands there.
+  assert.equal(at('/sample/repo/.claude', 'Write', { file_path: 'settings.json', content: 'x' }).reason, write('settings.json'));
+  assert.equal(at('/sample/repo/.claude', 'Bash', { command: 'echo x > a.txt' }).reason, write('/sample/repo/.claude'));
+  assert.equal(at('/sample/repo/.claude', 'Bash', { command: 'ls' }).decision, 'allow');
+});
+
+test('F-T144-L7, F-T144-L15, F-T144-L16: a file tool must name its file in its text path key', () => {
+  for (const [name, input, key] of [['Write', {}, 'file_path'], ['Write', { file_path: ['a'], content: 'x' }, 'file_path'], ['Edit', { file_path: 42, old_string: 'a', new_string: 'b' }, 'file_path'], ['MultiEdit', { file_path: null, edits: [] }, 'file_path'], ['Write', { file_path: '', content: 'x' }, 'file_path'], ['NotebookEdit', { file_path: '/x/a.ipynb', new_source: 'x' }, 'notebook_path']]) {
+    assert.equal(guard(tool(name, input)).reason, refused(`a file tool call with no text ${key}`), `${name} ${JSON.stringify(input)}`);
+  }
+  assert.equal(guard(tool('NotebookEdit', { notebook_path: '{WT}/a.ipynb', new_source: 'x' })).decision, 'allow');
+});
+
+test('F-T144-L13: EnterWorktree takes a plain name or none; WebFetch takes a text URL', () => {
+  const name = (n) => hint(`a worktree with the name ${n}`, 'EnterWorktree with a plain name of letters, digits, ., _ and -');
+  assert.equal(guard(tool('EnterWorktree', { name: '../../.claude/x' })).reason, name('"../../.claude/x"'));
+  assert.equal(guard(tool('EnterWorktree', { name: '.hidden' })).reason, name('".hidden"'));
+  assert.equal(guard(tool('EnterWorktree', { name: 42 })).reason, name('42'));
+  for (const input of [{ name: 't200' }, { name: 'claude.t-2_0' }, {}]) assert.equal(guard(tool('EnterWorktree', input)).decision, 'allow', JSON.stringify(input));
+  for (const url of [['http://127.0.0.1/'], ['https://example.com/'], 42]) assert.equal(guard(tool('WebFetch', { url, prompt: 'x' })).reason, refused('a fetch with no text URL'));
+});
+
+test('F-T144-L17: an echoed word shows each character that is not printable ASCII as its \\u escape, so a U+0001 cannot cut the ending', () => {
+  assert.equal(guard(tool('Tool\u0001x', {})).reason, refused('the tool Tool\\u0001x'));
+  assert.equal(guard(bash("ls '-\u00e9x'")).reason, hint('ls with the option -\\u00e9x', 'give ls only the options -l -a -la -al -A -1 -h -lh -lah -d -t -F, each one spelled in full and alone'));
+  assert.equal(guard(bash("'café-tool'")).reason, refused('the command caf\\u00e9-tool'));
 });

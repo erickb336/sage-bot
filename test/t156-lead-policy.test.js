@@ -3,7 +3,7 @@
 // are made up, the state tool and `claude` are dummies, and no model session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from './bridge-setup.js';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -288,7 +288,8 @@ test('the script prints the settings of a sample config, and the preflight state
   try {
     const config = join(root, 'config.json');
     writeFileSync(config, JSON.stringify({ statePath: join(root, 'state', 'gates.json') }));
-    const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), GH_TOKEN: 'sample-secret' };
+    // A state tool in the scratch plugin cache that prints no capability line: the tests' spawnSync gives every child SAGE_TOOL (T162).
+    const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), GH_TOKEN: 'sample-secret', CLAUDE_CONFIG_DIR: join(root, 'claude-config'), SAGE_TOOL: pluginCache(root, '') };
     const run = (...a) => spawnSync(process.execPath, ['scripts/lead-policy.mjs', '--config', config, ...a], { cwd: ROOT, encoding: 'utf8', env });
     const s = run('--session', 's7', 'settings');
     assert.equal(s.status, 0, s.stderr);
@@ -300,9 +301,10 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.deepEqual(out.settings.sandbox.filesystem.allowRead, [out.policy.folder, out.policy.tmp]);
     assert.equal(out.settings.sandbox.filesystem.denyRead[0], join(root, 'home'));
     assert.ok(!s.stdout.includes('sample-secret'));
-    const p = run('preflight'); // no sage plugin in the scratch HOME
+    assert.equal(out.policy.pluginDir, join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1'));
+    const p = run('preflight');
     assert.equal(p.status, 1);
-    assert.equal(p.stdout, 'lead sessions: waiting for sage T127 (the sage state tool is not installed)\n');
+    assert.equal(p.stdout, 'lead sessions: waiting for sage T127 (the state tool does not print "lead-sessions 1")\n');
     const usage = 'usage: settings or preflight, with --config <config.json> and --session <s1> when needed';
     assert.equal(run('start').stderr, `sage-bot lead-policy: ${usage}\n`);
     const bare = (...a) => spawnSync(process.execPath, ['scripts/lead-policy.mjs', ...a], { cwd: ROOT, encoding: 'utf8', env });

@@ -3,7 +3,6 @@
 // channel's project. SAMPLE DATA ONLY: every id, name and project is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +13,7 @@ import { createBridge } from '../src/bridge.js';
 import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } from '../src/channels.js';
 import { enter, prepare, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
-import { APPRENTICE, CHANNEL, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // the old #ask-sage

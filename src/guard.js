@@ -44,8 +44,9 @@ export const refusal = (why) => {
 };
 
 // A word of the call as a refusal shows it: at most 200 characters, then an ellipsis (F-T133-57). A refusal can echo a word
-// twice, and the hook's whole output must stay far below the 64 KB that a pipe holds.
-const say = (text) => (text.length > 200 ? `${text.slice(0, 200)}…` : text);
+// twice, and the hook's whole output must stay far below the 64 KB that a pipe holds. The session's model reads it: every
+// character that is not printable ASCII is shown as its \u escape (an allow-list), so an echoed MARK cannot cut the ending.
+const say = (text) => text.slice(0, 200).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`) + (text.length > 200 ? '…' : '');
 
 const BROKER = 'the sage-bot broker tools of the session (fetch, open a pull request, upload your branch)';
 // sed and awk stay refused (F-T133-64); a read of some lines of a file has a safe form.
@@ -107,6 +108,10 @@ export function parse(command) {
       else if (c === '|' && !/^\|[|&]/.test(rest)) { endSegment(true); i++; }
       else if (c === ';' || c === '&' || c === '|') throw `the operator ${rest.match(/^(;+|\|\||\|&|&)/)[0]} (only && joins parts)`;
       else if (c === '>' || c === '<') {
+        // zsh reads <1-10> as a wildcard of numbers, not as two redirects.
+        if (/^<\d*-\d*>/.test(command.slice(i, i + 42))) throw 'a zsh number range <n-m>';
+        // bash reads 10> as a redirect of file descriptor 10, zsh as the word 10 and a redirect.
+        if (word && /^\d\d+$/.test(word.text)) throw `the number ${say(word.text)} before a redirect`;
         const fd = word && /^\d$/.test(word.text) ? word.text : '';
         if (word && !fd) endWord();
         word = null;
@@ -114,7 +119,8 @@ export function parse(command) {
         if (!m || /^(<<|<>|<&|>\||<\()/.test(rest)) throw `the redirect ${rest.slice(0, 2)}`;
         if (!m[1].startsWith('>&')) pendingRedirect = true;
         i += m[1].length;
-      } else if (/[a-zA-Z0-9_\-./=:,+@%^~\]]/.test(c)) { add(c); i++; }
+      } else if (c === '=' && word === null) throw 'a = at the start of a word (zsh reads =name as the path of a program)';
+      else if (/[a-zA-Z0-9_\-./=:,+@%^~\]]/.test(c)) { add(c); i++; }
       else if (c === '*' || c === '?' || c === '[') { add(c, true); i++; }
       else throw c === '\n' || c === '\r' ? 'a newline outside quotes' : `the character ${JSON.stringify(c)} outside quotes`;
     }
@@ -138,7 +144,7 @@ const NUM = '-<number>';
  * The operands of `args` by the option table of the command `name`, or a string: why it is refused. Each option must be an
  * entry of the table by its full spelling: an abbreviation, an unknown option, a cluster of short options that is not an
  * entry, and a value given in another form are refused. A long option with a value takes it as --opt=value or --opt value,
- * a short one as -o value. `--` ends the options when the table has it. `posix`: the options end at the first operand
+ * a short one as -o value or -ovalue (-n5, -A5, -U0). `--` ends the options when the table has it. `posix`: the options end at the first operand
  * (node: the rest belongs to the script). `safe`: the rephrase of a refusal.
  */
 function options(name, args, table, { posix = false, safe } = {}) {
@@ -148,6 +154,8 @@ function options(name, args, table, { posix = false, safe } = {}) {
     if (a === '--' && Object.hasOwn(table, '--')) { ops.push(...args.slice(i + 1)); break; }
     if (!a.startsWith('-') || a === '-' || (posix && ops.length)) { ops.push(a); continue; }
     if (/^-\d+$/.test(a) && Object.hasOwn(table, NUM)) continue;
+    // A short option with a text value joined to it (-n5, -U0): every value is allowed, so it needs no more check.
+    if (a.length > 2 && table[a.slice(0, 2)] === TEXT) continue;
     const eq = a.startsWith('--') ? a.indexOf('=') : -1;
     const opt = eq < 0 ? a : a.slice(0, eq);
     const kind = Object.hasOwn(table, opt) ? table[opt] : undefined;
@@ -155,6 +163,8 @@ function options(name, args, table, { posix = false, safe } = {}) {
       const list = Object.keys(table).join(' ');
       return how(`${name} with the option ${say(a)}`, safe ?? (list ? `give ${name} only the options ${list}, each one spelled in full and alone` : `give ${name} no option`));
     }
+    // git --pretty "%h %s": the next word is an operand, not the value (F-T144-L8); the value goes after an =.
+    if (kind === EQ && eq < 0 && args[i + 1]?.includes('%')) return how(`${name} ${opt} with its value in the next word`, `${opt}=<value> as one word, for example ${opt}="%h %s"`);
     if (kind === FLAG || (kind === EQ && eq < 0)) continue;
     const value = eq < 0 ? args[++i] : a.slice(eq + 1);
     if (value === undefined) return `${name} ${opt} with no value`;
@@ -169,6 +179,7 @@ const cmd = (table, rule = () => null, safe = undefined) => (args, env, name) =>
   return typeof ops === 'string' ? ops : rule(ops, env) ?? ops;
 };
 
+const GREP = { '-n': FLAG, '-i': FLAG, '-in': FLAG, '-l': FLAG, '-c': FLAG, '-v': FLAG, '-w': FLAG, '-o': FLAG, '-h': FLAG, '-H': FLAG, '-E': FLAG, '-F': FLAG, '-q': FLAG, '-s': FLAG, '-x': FLAG, '-e': TEXT, '-A': TEXT, '-B': TEXT, '-C': TEXT, '-m': TEXT, '--': FLAG };
 const TEST = { '-f': FLAG, '-d': FLAG, '-e': FLAG, '-s': FLAG, '-r': FLAG, '-w': FLAG, '-x': FLAG, '-n': FLAG, '-z': FLAG, '-L': FLAG };
 const none = cmd({});
 const NPM_RUN = new Set(['ci', 'test', 't', 'run', 'run-script', 'ls', 'outdated']);
@@ -184,14 +195,15 @@ const COMMANDS = {
   wc: cmd({ '-l': FLAG, '-w': FLAG, '-c': FLAG, '-m': FLAG }),
   diff: cmd({ '-u': FLAG, '-q': FLAG }),
   cut: cmd({ '-d': TEXT, '-f': TEXT, '-c': TEXT }),
-  jq: cmd({ '-r': FLAG, '-c': FLAG, '-e': FLAG, '-S': FLAG, '-n': FLAG }),
+  // jq: no program that reads the environment (env, $ENV), which can hold secrets.
+  jq: cmd({ '-r': FLAG, '-c': FLAG, '-e': FLAG, '-S': FLAG, '-n': FLAG }, (ops) => (/(^|[^.\w$])env\b|\$ENV\b/.test(ops[0] ?? '') ? 'jq with env or $ENV (it prints the environment, which can hold secrets)' : null)),
   // sort: no option that writes a file (-o) or runs a program is in the table.
   sort: cmd({ '-n': FLAG, '-r': FLAG, '-u': FLAG, '-nr': FLAG, '-rn': FLAG, '-k': TEXT, '-t': TEXT }),
   uniq: cmd({ '-c': FLAG, '-d': FLAG, '-u': FLAG }),
-  // grep is never recursive (no option for it is in the table): rg is the search.
-  grep: cmd({ '-n': FLAG, '-i': FLAG, '-in': FLAG, '-l': FLAG, '-c': FLAG, '-v': FLAG, '-w': FLAG, '-o': FLAG, '-h': FLAG, '-H': FLAG, '-E': FLAG, '-F': FLAG, '-q': FLAG, '-s': FLAG, '-x': FLAG, '-e': TEXT, '-A': TEXT, '-B': TEXT, '-C': TEXT, '-m': TEXT, '--': FLAG }),
+  // grep is never recursive (no option for it is in the table): rg is the search, and the hint names it.
+  grep: cmd(GREP, undefined, `rg -n <pattern> <folder> to search a folder, or give grep only the options ${Object.keys(GREP).join(' ')}, each one spelled in full and alone`),
   // rg: no option that runs a program (--pre) or follows links out (-L) is in the table.
-  rg: cmd({ '-n': FLAG, '-i': FLAG, '-l': FLAG, '-c': FLAG, '-w': FLAG, '-F': FLAG, '-e': TEXT, '-g': TEXT, '--glob': TEXT, '-t': TEXT, '--type': TEXT, '-A': TEXT, '-B': TEXT, '-C': TEXT, '--files': FLAG, '--': FLAG }),
+  rg: cmd({ '-n': FLAG, '-i': FLAG, '-l': FLAG, '-c': FLAG, '-w': FLAG, '-F': FLAG, '-v': FLAG, '-o': FLAG, '-S': FLAG, '--hidden': FLAG, '--no-heading': FLAG, '-m': TEXT, '-e': TEXT, '-g': TEXT, '--glob': TEXT, '-t': TEXT, '--type': TEXT, '-A': TEXT, '-B': TEXT, '-C': TEXT, '--files': FLAG, '--': FLAG }),
   tr: cmd({ '-d': FLAG, '-s': FLAG }),
   file: none, stat: none, du: cmd({ '-s': FLAG, '-h': FLAG, '-sh': FLAG }), realpath: none,
   basename: none, dirname: none, pwd: none, printf: none, true: none, false: none, sleep: none, which: none,
@@ -201,46 +213,73 @@ const COMMANDS = {
   cp: cmd({ '-r': FLAG, '-R': FLAG, '-p': FLAG }), mv: none,
   rm: cmd({ '-r': FLAG, '-f': FLAG, '-rf': FLAG, '-fr': FLAG, '-R': FLAG, '-Rf': FLAG, '--': FLAG }),
   // find: names and tests only; no option that runs a command, deletes or writes a file is in the table.
-  find: cmd({ '-name': TEXT, '-iname': TEXT, '-type': TEXT, '-path': TEXT, '-maxdepth': TEXT, '-mindepth': TEXT, '-newer': TEXT, '-not': FLAG, '-print': FLAG, '-o': FLAG, '-a': FLAG, '-empty': FLAG }),
+  find: cmd({ '-name': TEXT, '-iname': TEXT, '-type': TEXT, '-path': TEXT, '-maxdepth': TEXT, '-mindepth': TEXT, '-newer': TEXT, '-size': TEXT, '-not': FLAG, '-print': FLAG, '-o': FLAG, '-a': FLAG, '-empty': FLAG }),
   git, node,
   gh: () => how('gh', BROKER),
+  npx: () => how('npx (it runs any package)', 'npm run <script>, a script of package.json'),
   sed: () => how('sed', LINES),
   awk: () => how('awk', LINES),
-  // npm: no option that changes its config, its prefix or its shell is in the table. npm version can change package.json.
-  npm: (args, env, name) => (version(args) ? null : cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
-    if (sub === 'version') return how('npm version (it can change package.json)', 'npm --version, to print the version of npm');
-    if (!NPM_RUN.has(sub)) return `npm ${say(sub ?? '')} (only ci, test, run, ls and outdated)`.trim();
-    return /deploy|release|publish/i.test(script ?? '') ? `npm ${sub} ${say(script)} (a deploy)` : null;
-  })(args, env, name)),
+  npm,
 };
+// npm: no option that changes its config, its prefix or its shell is in the table.
+const NPM = { '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG };
+/**
+ * npm: the subcommand first, so that its refusal names it (npm i -D x). The words after -- go to node --test (npm test --
+ * <file>), so they are checked as node --test's (F-T144-L4).
+ */
+function npm(args, env) {
+  if (version(args)) return null;
+  const k = args.indexOf('--');
+  const own = k < 0 ? args : args.slice(0, k);
+  const [sub, script] = own.filter((a) => !a.startsWith('-'));
+  // npm version can change package.json.
+  if (sub === 'version') return how('npm version (it can change package.json)', 'npm --version, to print the version of npm');
+  if (sub === 'help') return how('npm help', 'WebFetch of https://docs.npmjs.com/cli, the documentation of npm');
+  if (!NPM_RUN.has(sub)) return `npm ${say(sub ?? '')} (only ci, test, run, ls and outdated)`.trim();
+  const ops = options('npm', own, NPM);
+  if (typeof ops === 'string') return ops;
+  if (/deploy|release|publish/i.test(script ?? '')) return `npm ${sub} ${say(script)} (a deploy)`;
+  return k < 0 ? null : node(['--test', ...args.slice(k + 1)], env);
+}
 // The commands that may read the output of the part before them through a |: read-only filters, never a shell.
 const PIPE = new Set(['head', 'tail', 'wc', 'sort', 'grep']);
+// The Keychain front ends (G63 b), refused by name as a second layer: a lead session reads no Keychain item.
+const KEYCHAIN = new Set(['security', 'osascript', 'osacompile']);
 // The commands of the list that read a file operand: the hint of a | into one of them names that form (cat x | jq -> jq <options> x).
 const READERS = new Set(['cat', 'jq', 'cut', 'uniq', 'rg']);
 
 // ---- Bash: git and node -------------------------------------------------------------------------------------------------
 
-/** git: the global option -C <folder> only; each subcommand on the allow-list with its option table. */
-function git(args, env) {
+/** git's subcommand and its arguments, after the global options -C <folder> and --no-pager; null: -C with no folder. */
+function gitArgs(args) {
   let a = args;
-  while (a[0] === '-C') {
-    if (!a[1]) return 'git -C with no folder';
-    a = a.slice(2);
+  while (a[0] === '-C' || a[0] === '--no-pager') {
+    if (a[0] === '-C' && !a[1]) return null;
+    a = a.slice(a[0] === '-C' ? 2 : 1);
   }
+  return a;
+}
+/** git: the global options -C <folder> and --no-pager only; each subcommand on the allow-list with its option table. */
+function git(args, env) {
+  if (version(args)) return null;
+  const a = gitArgs(args);
+  if (!a) return 'git -C with no folder';
   const [sub, ...rest] = a;
   if (sub === 'push' || sub === 'fetch') return how(`git ${sub}`, BROKER);
   // Object.hasOwn: a plain lookup finds Object.prototype's functions (git hasOwnProperty), which refuse only by a crash.
   const rule = Object.hasOwn(GIT, sub ?? '') ? GIT[sub] : null;
-  if (!rule) return `git ${say(sub ?? '')} (only the listed subcommands; no global option but -C)`.trim();
-  return rule(rest, env, `git ${sub}`);
+  if (!rule) return `git ${say(sub ?? '')} (only the listed subcommands; no global option but -C and --no-pager)`.trim();
+  const ops = rule(rest, env, `git ${sub}`);
+  // git expands a pattern in an operand itself (a pathspec), also a quoted one (F-T133-46).
+  return typeof ops === 'string' ? ops : patterns(ops ?? [], env, true);
 }
 
 const gitCmd = (table) => cmd({ ...table, '--': FLAG });
-const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG });
+const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG });
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
-  diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG }),
-  log: gitCmd({ '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': EQ, '--pretty': EQ, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
+  diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': TEXT, '--unified': TEXT, '--word-diff': FLAG }),
+  log: gitCmd({ '--all': FLAG, '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': EQ, '--pretty': EQ, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
   show: gitCmd({ '--stat': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--oneline': FLAG, '-s': FLAG, '--format': EQ, '--pretty': EQ }),
   'rev-parse': gitCmd({ '--show-toplevel': FLAG, '--abbrev-ref': FLAG, '--short': FLAG, '--verify': FLAG, '--is-inside-work-tree': FLAG }),
   'ls-files': gitCmd({ '-o': FLAG, '--others': FLAG, '--exclude-standard': FLAG, '-m': FLAG, '--modified': FLAG }),
@@ -252,29 +291,41 @@ const GIT = {
   commit: cmd({ '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG }),
   switch: cmd({ '-c': TEXT, '--create': TEXT }),
   checkout: cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>'),
-  branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '-u': TEXT, '--set-upstream-to': TEXT, '--contains': TEXT }),
+  // branch: no option that writes the config (-u, --set-upstream-to).
+  branch: cmd({ '-a': FLAG, '--all': FLAG, '-r': FLAG, '--remotes': FLAG, '-v': FLAG, '-vv': FLAG, '--list': FLAG, '--show-current': FLAG, '--contains': TEXT }),
+  'rev-list': gitCmd({ '--count': FLAG, '-n': TEXT, '--max-count': TEXT, [NUM]: FLAG, '--first-parent': FLAG }),
+  'merge-base': gitCmd({ '--is-ancestor': FLAG }),
+  shortlog: gitCmd({ '-s': FLAG, '-n': FLAG, '-sn': FLAG, '-e': FLAG }),
+  grep: () => how('git grep', 'rg -n <pattern> <folder>'),
+  reset: () => how('git reset', 'git restore --staged <file> to unstage a file, or git restore <file> to undo its changes'),
   // git takes a bare git stash with an option as git stash push (git stash -m wip): its options are checked as push's (F-T133-65).
   stash: (args, env, name) => (args[0]?.startsWith('-') ? STASH(args, env, name) : ['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0]) ? STASH(args.slice(1), env, name) : `git stash ${say(args[0])}`),
-  remote: (args) => (args.every((x) => x === '-v' || x === 'show' || x === 'origin' || x === 'get-url') ? null : 'git remote: a change of a remote'),
-  worktree: (args, env, name) => (args[0] === 'list' && args.length === 1 ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${say(args[0] ?? '')}`.trim()),
+  // git remote show <name> asks the remote over the network.
+  remote: (args) => (args.every((x) => x === '-v' || x === 'origin' || x === 'get-url') ? null : args[0] === 'show' ? how('git remote show (it asks the remote over the network)', 'git remote -v') : 'git remote: a change of a remote'),
+  worktree: (args, env, name) => (args[0] === 'list' && (args.length === 1 || (args.length === 2 && args[1] === '--porcelain')) ? null : args[0] === 'add' ? cmd({ '-b': TEXT })(args.slice(1), env, name) : `git worktree ${say(args[0] ?? '')}`.trim()),
 };
 
-const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG };
+const NODE = { '--test': FLAG, '--check': FLAG, '--no-warnings': FLAG, '--test-reporter': ['spec', 'tap', 'dot', 'junit'], '--test-name-pattern': TEXT, '--experimental-test-coverage': FLAG, '--test-concurrency': TEXT, '--test-only': FLAG };
 
-// A path under /dev/ as text (/dev/stdin, //dev/fd/0, ../../dev/stdin): a device, never a script file.
-const DEV = /^(\/|(\.\.\/)+)dev(\/|$)/;
 /**
- * node: a script file, never code from an option, from stdin (no script, or the script -) or from a device (a path under
- * /dev/: stdin, a file descriptor). node --test finds its own files, or takes files and patterns, each checked like a script.
+ * node: a script file, never code from an option or from stdin (no script, or the script -). A script's name ends in .js,
+ * .mjs or .cjs (an allow-list: /dev/stdin, stdin after a cd /dev, /DEV/stdin are no script file: F-T144-L2, F-T144-L3).
+ * node --test finds its own files, or takes files and patterns, each checked like a script, and each a pattern (F-T133-46).
  */
-function node(args) {
+function node(args, env) {
   if (version(args)) return null;
   const ops = options('node', args, NODE, { posix: true });
   if (typeof ops === 'string') return ops;
   if (ops[0] === '-' || (!ops[0] && !args.includes('--test'))) return 'node with no script file (code from stdin)';
-  const dev = (args.includes('--test') ? ops : ops.slice(0, 1)).find((p) => DEV.test(posix.normalize(p)));
-  return dev ? `node with the script ${say(dev)} (a device under /dev/, such as stdin)` : ops;
+  const test = args.includes('--test');
+  const why = test ? patterns(ops, env, false) : null;
+  if (typeof why === 'string') return why;
+  const odd = (test ? ops : ops.slice(0, 1)).find((p) => !/\.[cm]?js$/.test(p));
+  return odd === undefined ? ops : how(`node with the script ${say(odd)} (a script file ends in .js, .mjs or .cjs)`, 'write the code to a .mjs file in the scratch folder with the Write tool, then node <file>.mjs');
 }
+
+// A path under /dev/ as text (/dev/tcp/..., //dev/./stdin, ../../dev/fd/0): a device. A redirect may name only /dev/null there.
+const DEV = /^(\/|(\.\.\/)+)dev(\/|$)/;
 
 // ---- The sage state tool ------------------------------------------------------------------------------------------------
 
@@ -291,48 +342,73 @@ function namesStateTool(texts, env) {
   return texts.some((t) => named.test(fold(t)));
 }
 /**
- * Whether a wildcard word (only * and ?: a [ is refused before) can match the state tool's name in its last part.
- * A greedy match that returns only to the last * (F-T133-62): its steps are at most the word's length times the name's, so
- * 64 KB of stars decides in milliseconds. A regex with .* for each * backtracked, and 48 stars took 84 s.
+ * Whether the wildcard `g` (only * and ?) matches the whole of `name`. A greedy match that returns only to the last *
+ * (F-T133-62): its steps are at most the pattern's length times the name's, so 64 KB of stars decides in milliseconds. A
+ * regex with .* for each * backtracked, and 48 stars took 84 s.
  */
-function mayMatchStateTool(glob, env) {
-  const g = basename(fold(glob));
-  return stateNames(env).some((name) => {
-    let i = 0;
-    let n = 0;
-    let star = -1;
-    let from = 0;
-    while (n < name.length) {
-      if (g[i] === '*') { star = i++; from = n; } else if (g[i] === '?' || g[i] === name[n]) { i++; n++; } else if (star >= 0) { i = star + 1; n = ++from; } else return false;
-    }
-    while (g[i] === '*') i++;
-    return i === g.length;
-  });
+function matches(g, name) {
+  let i = 0;
+  let n = 0;
+  let star = -1;
+  let from = 0;
+  while (n < name.length) {
+    if (g[i] === '*') { star = i++; from = n; } else if (g[i] === '?' || g[i] === name[n]) { i++; n++; } else if (star >= 0) { i = star + 1; n = ++from; } else return false;
+  }
+  while (g[i] === '*') i++;
+  return i === g.length;
+}
+/**
+ * Whether a wildcard word (only * and ?: a [ is refused before) can match the state tool's name. In the shell a * or ? stays
+ * in one folder, so the word's last part must match the name. In a git pathspec they also match a / (F-T144-L5), so the
+ * word can match a path that ends in the name when its text after the last * can end such a path.
+ */
+function mayMatchStateTool(glob, env, pathspec) {
+  const g = fold(glob);
+  return stateNames(env).some((name) => (pathspec ? matches(`*${g.slice(g.lastIndexOf('*') + 1).slice(-name.length)}`, name) : matches(basename(g), name)));
 }
 // The commands that run a script or write a file. With the parts that have a redirect, they are the parts that run or write.
-const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee']);
+const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee', 'uniq']);
 // The commands that change files but copy and run nothing, so no wildcard of theirs makes a copy of the state tool.
 const CHANGES = new Set(['touch', 'mkdir', 'rm', 'rmdir']);
+// The git subcommands that write no file of the work tree.
+const GIT_READS = new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'ls-files', 'blame', 'remote', 'rev-list', 'merge-base', 'shortlog']);
 const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
 const ASCII = /^[\x20-\x7e]*$/;
-// A .claude folder holds what Claude Code loads: settings, and the skills, agents and commands, whose hooks never pass this
-// hook. The sandbox and the permission rules of T134 hold it (F-T134-4, F-T134-20); this refusal of a write there is a second
-// layer, by the path text, folded as the disk compares it (.CLAUDE is the same folder).
-const CLAUDE_DIR = /(^|\/)\.claude(\/|$)/;
-const claudeDir = (text) => CLAUDE_DIR.test(fold(text));
-const CLAUDE = (path) => `a write to ${say(path)} (a .claude folder holds the settings, skills, agents and commands that Claude Code loads)`;
+const ASCII_SAFE = 'write such text to a file in the scratch folder with the Write tool and pass the file (git commit -F <file>), and give files names in printable ASCII';
+// The files and folders that Claude Code, git and npm load as settings: a .claude folder (the settings, and the skills,
+// agents and commands, whose hooks never pass this hook), .mcp.json, a .git folder (its config and hooks run programs) and
+// .npmrc. The sandbox and the permission rules of T134 hold them (F-T134-4, F-T134-20); this refusal of a write there is a
+// second layer, by the path text, folded as the disk compares it (.CLAUDE is the same folder). A worktree under
+// .claude/worktrees/<name> (EnterWorktree makes them) is a work folder: inside it, these names count again (F-T144-L15).
+const CONFIG_NAMES = ['.claude', '.git', '.mcp.json', '.npmrc'];
+const WORKTREE = /(^|\/)\.claude\/worktrees\/[^/]+/g;
+/** Whether a path, as text, names a settings file or folder: a part of it (between / or =) is one of CONFIG_NAMES, or is a wildcard that starts with . and can match one. */
+function configPath(text) {
+  const parts = posix.normalize(fold(text)).replace(WORKTREE, '$1w').split(/[/=]/);
+  return parts.some((p) => CONFIG_NAMES.some((name) => (/[*?]/.test(p) && p.startsWith('.') ? matches(p, name) : p === name)));
+}
+const CONFIG = (path) => `a write to ${say(path)} (a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc)`;
 const WILDCARD = 'name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>';
 
 /**
  * Why a wildcard is refused, or null: a [ (or, in a `pattern` operand, any pattern character but * and ?), or a * or ? that
- * can match the state tool. `chars`: the word's wildcard characters.
+ * can match the state tool. `chars`: the word's wildcard characters. `pathspec`: a git operand, whose * matches a / too.
  */
-function wildcard(text, chars, env, pattern = false) {
+function wildcard(text, chars, env, pattern = false, pathspec = false) {
   const odd = pattern ? text.match(/[^A-Za-z0-9 _\-./,:=%~^*?]/) : chars.includes('[') && ['['];
   // Any other character than [ in a pattern operand (@, +, (, {, \) has no safe form: a file or revision may hold it (F-T133-51).
   if (odd && odd[0] !== '[') return `the character ${odd[0]} in the operand ${say(text)} (git and node --test can read it as a pattern)`;
   if (odd) return how(`the wildcard ${odd[0]} in ${say(text)} (in a part that runs or writes)`, WILDCARD);
-  return /[*?]/.test(chars) && mayMatchStateTool(text, env) ? how(`the wildcard ${say(text)} (it can match the sage state tool)`, WILDCARD) : null;
+  return /[*?]/.test(chars) && mayMatchStateTool(text, env, pathspec) ? how(`the wildcard ${say(text)} (it can match the sage state tool)`, WILDCARD) : null;
+}
+/** The operands that git and node --test expand as patterns themselves, also quoted ones (F-T133-46), or why one is refused. A stash name (stash@{0}) is no pattern. */
+function patterns(ops, env, pathspec) {
+  for (const op of ops) {
+    if (/^stash@\{\d+\}$/.test(op)) continue;
+    const why = wildcard(op, op, env, true, pathspec);
+    if (why) return why;
+  }
+  return ops;
 }
 
 // ---- Bash: parts and chains ---------------------------------------------------------------------------------------------
@@ -344,6 +420,11 @@ const VAR = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** The command name and its arguments after the variables in front of it. */
 const commandOf = (texts) => texts.slice(texts.findIndex((t) => !VAR.test(t)));
+/** Whether a part's command writes files: a command of WRITES or CHANGES, but not a git subcommand that only reads. */
+function writes(seg) {
+  const [name, ...args] = commandOf(seg.words.map((w) => w.text));
+  return (WRITES.has(name) || CHANGES.has(name)) && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]));
+}
 
 /** Why the simple command is refused, or null. */
 function simple({ words }, env) {
@@ -351,37 +432,33 @@ function simple({ words }, env) {
   let i = 0;
   for (; i < texts.length && VAR.test(texts[i]); i++) {
     const name = texts[i].slice(0, texts[i].indexOf('='));
-    if (!ENV.has(name)) return `setting ${say(name)} in front of a command`;
+    if (!ENV.has(name)) return how(`setting ${say(name)} in front of a command`, `set only ${[...ENV].join(', ')} in front of a command`);
   }
   const [name, ...args] = texts.slice(i);
   if (!name) return 'a part with no command';
   if (i > 0 && name === 'git') return how('a variable in front of git (git reads its config from HOME)', 'run git with no variable in front of it');
+  if (KEYCHAIN.has(basename(fold(name)))) return `the Keychain front end ${say(name)} (G63 b: a lead session reads no Keychain item)`;
   // A word that starts with a wildcard can expand to a file name that starts with -, an option that no table checked. The
   // command's own name is looked up as it is (a wildcard in it names no command; `[` is the test command).
   const glob = words.slice(i + 1).find((w) => w.glob && /^[*?[]/.test(w.text));
   if (glob) return how(`the word ${say(glob.text)} (a wildcard at its start can expand to an option)`, `start the word with a folder, for example ./${say(glob.text)}`);
   if (!Object.hasOwn(COMMANDS, name)) return `the command ${say(name)}`;
   const ops = COMMANDS[name](args, env, name);
-  if (typeof ops === 'string') return ops;
-  // git (a pathspec) and node --test (a test file) expand a pattern in an operand themselves, also a quoted one; the only
-  // pattern characters they may get are * and ?, which must not match the state tool.
-  if (name !== 'git' && !(name === 'node' && args.includes('--test'))) return null;
-  for (const op of ops ?? []) {
-    const why = wildcard(op, op, env, true);
-    if (why) return why;
-  }
-  return null;
+  return typeof ops === 'string' ? ops : null;
 }
 
 const REPHRASE = 'one command per call, or commands joined only by && (a | only into head, tail, wc, sort or grep), with no ;, ||, $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file>';
 
-/** Why the Bash command is refused, or null. */
-export function bashRefusal(command, env) {
+/** Why the Bash command is refused, or null. `cwd`: the session's folder, as the hook input gives it. */
+export function bashRefusal(command, env, cwd) {
   if (typeof command !== 'string') return 'a Bash call with no command text';
   if (namesStateTool([command], env)) return STATE_TOOL;
   const parsed = parse(command);
-  if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, REPHRASE);
+  if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, /(^|\s)stash@\{/.test(command) ? "quote the stash name: git stash pop 'stash@{0}'" : REPHRASE);
   if (namesStateTool(parsed.flatMap((seg) => [...seg.words, ...seg.redirects]).map((w) => w.text), env)) return STATE_TOOL;
+  // A redirect under /dev/ names a device (bash opens /dev/tcp/<host>/<port> as a connection); only /dev/null is allowed there.
+  const dev = parsed.flatMap((seg) => seg.redirects).find((w) => DEV.test(posix.normalize(fold(w.text))) && posix.normalize(fold(w.text)) !== '/dev/null');
+  if (dev) return `a redirect to ${say(dev.text)} (under /dev/ only /dev/null)`;
   // A pipeline is the parts joined by |. It runs or writes as a whole when one of its parts runs a script or writes a file (a
   // renamed copy): cat x | head > y writes what cat reads. Its words are then checked with their redirect targets. A read
   // (ls dir/*, cat é.txt) runs nothing.
@@ -389,13 +466,17 @@ export function bashRefusal(command, env) {
   for (const seg of parsed) (seg.pipe ? pipelines.at(-1) : pipelines[pipelines.push([]) - 1]).push(seg);
   const rw = pipelines.filter((p) => p.some((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length))
     .flat().flatMap((seg) => [...seg.words, ...seg.redirects]);
-  if (rw.some((w) => !ASCII.test(w.text))) return 'a character that is not printable ASCII in a part that runs or writes';
+  if (rw.some((w) => !ASCII.test(w.text))) return how('a character that is not printable ASCII in a part that runs or writes', ASCII_SAFE);
   for (const w of rw) {
     const why = wildcard(w.text, w.glob, env);
     if (why) return why;
   }
-  const dir = [...rw, ...parsed.filter((seg) => CHANGES.has(commandOf(seg.words.map((w) => w.text))[0])).flatMap((seg) => seg.words)].find((w) => claudeDir(w.text));
-  if (dir) return CLAUDE(dir.text);
+  // A write to a settings path: each redirect target, and each word of a part that writes. A cd folder and the session's
+  // folder start each relative path after them, so they count when the command writes (F-T144-L14, F-T144-L16).
+  const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap((seg) => seg.words)];
+  if (targets.length) targets.push(...parsed.filter((seg) => seg.words[0]?.text === 'cd').flatMap((seg) => seg.words.slice(1)), { text: String(cwd ?? '') });
+  const dir = targets.find((w) => configPath(w.text));
+  if (dir) return CONFIG(dir.text);
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
     const into = commandOf(texts)[0];
@@ -418,8 +499,9 @@ export function bashRefusal(command, env) {
 const allow = () => null;
 // Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules of step 6 hold their paths (Edit and Write only in
 // the session folder and its scratch folder, Read and Glob denied on every denied path: F-T134-16; secret files: F-T134-15). A file
-// tool may not write under a .claude folder (a second layer: F-T134-4, F-T134-20), and may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
-// input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
+// tool must name its file in its text path key (`key`); it may not write to a settings path (a second layer: F-T134-4,
+// F-T134-20), and may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string
+// of its input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
 /** Each string of a tool input with its key. An explicit stack: a recursive walk overflowed at a nesting of about 3000 (F-T133-50). */
 function strings(input) {
   const all = [];
@@ -431,22 +513,27 @@ function strings(input) {
   }
   return all;
 }
-function file(i, env) {
+const file = (key) => (i, env, cwd) => {
+  if (typeof i[key] !== 'string' || !i[key]) return `a file tool call with no text ${key}`;
   const all = strings(i);
   if (all.some(([k, v]) => k.endsWith('path') && !ASCII.test(v))) return 'a file path with a character that is not printable ASCII';
-  const dir = all.find(([k, v]) => k.endsWith('path') && claudeDir(v));
-  if (dir) return CLAUDE(dir[1]);
-  return namesStateTool(all.map(([, v]) => v), env) ? STATE_TOOL : null;
-}
-// An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox.
+  if (namesStateTool(all.map(([, v]) => v), env)) return STATE_TOOL;
+  // A relative path starts in the session's folder.
+  const dir = all.find(([k, v]) => k.endsWith('path') && configPath(v.startsWith('/') ? v : `${cwd ?? ''}/${v}`));
+  return dir ? CONFIG(dir[1]) : null;
+};
+// An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox; a Bash
+// call with dangerouslyDisableSandbox asks to run out of the sandbox.
 const agent = (i) => (Object.hasOwn(i, 'isolation') ? `an agent with the isolation ${say(String(JSON.stringify(i.isolation)))}` : null);
 const TOOLS = {
-  Bash: (i, env) => bashRefusal(i.command, env),
+  Bash: (i, env, cwd) => (Object.hasOwn(i, 'dangerouslyDisableSandbox') ? 'a Bash call with the field dangerouslyDisableSandbox (it asks to run outside the sandbox)' : bashRefusal(i.command, env, cwd)),
   Grep: () => how('the Grep tool (the sandbox does not cover it)', 'search with rg in Bash, for example rg -n <pattern> <folder>'),
-  WebFetch: (i) => webRefusal(i.url),
-  Read: allow, Write: file, Edit: file, MultiEdit: file, NotebookEdit: file, Glob: allow,
+  WebFetch: (i) => (typeof i.url === 'string' ? webRefusal(i.url) : 'a fetch with no text URL'),
+  Read: allow, Write: file('file_path'), Edit: file('file_path'), MultiEdit: file('file_path'), NotebookEdit: file('notebook_path'), Glob: allow,
   WebSearch: allow, TodoWrite: allow, Task: agent, Agent: agent, ToolSearch: allow, SendMessage: allow,
-  TaskCreate: allow, TaskGet: allow, TaskList: allow, TaskUpdate: allow, EnterWorktree: allow, ExitWorktree: allow,
+  TaskCreate: allow, TaskGet: allow, TaskList: allow, TaskUpdate: allow, ExitWorktree: allow,
+  // EnterWorktree makes .claude/worktrees/<name>: a plain name, or none.
+  EnterWorktree: (i) => (i.name === undefined || (typeof i.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(i.name)) ? null : how(`a worktree with the name ${say(String(JSON.stringify(i.name)))}`, 'EnterWorktree with a plain name of letters, digits, ., _ and -')),
   // A skill's tools come through this hook, but its SKILL.md can register hook commands that Claude Code runs for the rest of
   // the session, and those never pass this hook. T134 holds that (F-T134-20): --disable-slash-commands, and no write to
   // .claude/skills, .claude/agents or .claude/commands; the refusal of a write under .claude above is a second layer.
@@ -494,7 +581,7 @@ export function decide(input, env) {
   }
   const rule = Object.hasOwn(TOOLS, input.tool_name) ? TOOLS[input.tool_name] : null;
   if (!rule) return refusal(`the tool ${say(input.tool_name)}`);
-  const why = rule(input.tool_input, env);
+  const why = rule(input.tool_input, env, input.cwd);
   return why ? refusal(why) : null;
 }
 

@@ -2,14 +2,13 @@
 // and a scratch sage logbook. SAMPLE DATA ONLY: every id, name and question is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { askedTogether, MERGE } from '../src/bridge.js';
 import { lock, load, save } from '../src/state.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { APPRENTICE, JON, LEADR, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
+import { APPRENTICE, execFileSync, JON, LEADR, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
 
 /** The members with the owner in no role: the owner's terminal answer must count all the same (G10). */
 const noRoles = () => MEMBERS.map((m) => (m.id === OWNER ? { ...m, roles: [] } : { ...m }));

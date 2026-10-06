@@ -2,10 +2,10 @@
 // It runs npm with HOME set to a scratch folder, never the real home folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from './bridge-setup.js';
 
 const PROJECT = new URL('..', import.meta.url).pathname;
 

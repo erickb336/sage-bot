@@ -1,11 +1,11 @@
 // Tests for the round-6 findings F-T1-65 to F-T1-68. SAMPLE DATA: every id here is a made-up sample.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openGate, step, parseGate, MINUTE } from '../src/vote.js';
+import { spawnSync } from './bridge-setup.js';
 
 const [ERICK, MAYA, LEA, SAM] = ['sample-erick', 'sample-maya', 'sample-lea', 'sample-sam']; // SAM is not a holder
 const HOLDERS = [ERICK, MAYA, LEA];

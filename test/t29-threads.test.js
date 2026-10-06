@@ -3,14 +3,13 @@
 process.env.TZ = 'UTC'; // the title of a thread has the host's date: 2026-10-04 is a Sunday in UTC
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { accepts } from '../src/discord.js';
 import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
-import { CHANNEL, APPRENTICE, JON, LEADR, MAYA, OWNER, SAGE, setAt, setup, T0 } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, JON, LEADR, MAYA, OWNER, SAGE, setAt, setup, spawnSync, T0 } from './bridge-setup.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;

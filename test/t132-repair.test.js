@@ -4,7 +4,6 @@
 // answers of a project that left the config are not sent (F-T132-6). SAMPLE DATA ONLY: scratch logbooks, made-up ids, the fake Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
@@ -13,7 +12,7 @@ import { sageTool } from '../src/sage.js';
 import { loadProjects, pickProject } from '../src/projects.js';
 import { record } from '../src/sessions.js';
 import { openGate } from '../src/vote.js';
-import { CHANNEL, CONFIG, MAYA, SAGE, setup, T0 } from './bridge-setup.js';
+import { CHANNEL, CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';

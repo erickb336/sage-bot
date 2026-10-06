@@ -8,11 +8,11 @@
 // the Keychain or runs launchctl. Every code block names its language, one of LANGUAGES.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SAGE, spawnSync } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DOCS = ['README.md', 'docs/reference.md'];
@@ -22,6 +22,12 @@ const NOT_HERE = { 'npm ci': 'the test runs inside the installed tree: npm ci wo
 const IN_HOME = { 'npm run demo': (home) => `npm run demo -- --out ${join(home, 'demo.html')}`, 'node scripts/preview.mjs': (home) => `node scripts/preview.mjs --out ${join(home, 'preview', 'index.html')}` };
 // The languages a code block may name. The test runs only sh blocks, so a block of another shell language would never run.
 const LANGUAGES = new Set(['sh', 'json', 'js', 'text']);
+/** Runs one command of a document as the owner types it, in the scratch home. spawnSync (test/bridge-setup.js) adds SAGE_TOOL. */
+const sh = (command, home, env = {}) => spawnSync('/bin/sh', ['-c', command], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp'), ...env } });
+/** The scratch home's Claude Code config folder, with a copy of the tests' state tool in the sage plugin's cache, as the owner's install has it. */
+const claudeConfig = (home) => ({ CLAUDE_CONFIG_DIR: join(home, '.claude'), SAGE_TOOL: join(home, '.claude', 'plugins', 'cache', 'sage', 'sage', 'test', 'skills', 'sage', 'sage.mjs') });
+// The lead policy refuses a state tool outside the sage plugin's cache (F-T156-14), so its commands run with that copy.
+const envOf = (command, home) => (/^node scripts\/lead-policy\.mjs\b/.test(command) ? claudeConfig(home) : {});
 
 /** The language of each code block of a document (the word after its opening fence): { line, language }. */
 function fences(text) {
@@ -73,6 +79,8 @@ function scratchHome() {
   mkdirSync(join(home, 'tmp'));
   mkdirSync(config.project); // the owner's project folder exists (F-T132-14)
   writeFileSync(join(home, '.config', 'sage-bot', 'config.json'), JSON.stringify(config));
+  mkdirSync(dirname(claudeConfig(home).SAGE_TOOL), { recursive: true });
+  copyFileSync(SAGE, claudeConfig(home).SAGE_TOOL);
   return home;
 }
 
@@ -98,7 +106,7 @@ for (const doc of DOCS) {
           if (NOT_HERE[command]) { t.diagnostic(`skipped: ${command} (${NOT_HERE[command]})`); continue; }
           assert.doesNotMatch(command, /<[a-z][a-z ]*>/, `${doc}:${line}: a runnable command holds a placeholder: ${command}`);
           const run = IN_HOME[command]?.(home) ?? command;
-          const r = spawnSync('/bin/sh', ['-c', run], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp') } });
+          const r = sh(run, home, envOf(command, home));
           assert.equal(r.status, exit, `${doc}:${line}: ${run} exited ${r.status}, not ${exit}\n${r.stdout}\n${r.stderr}`);
           output += r.stdout + r.stderr;
           t.diagnostic(`ran: ${run} (exit ${r.status})`);
@@ -167,3 +175,14 @@ test('the mark parser finds an unmarked block and reads a skip reason (the parse
   assert.deepEqual(fences('```sh\nls\n```\n  ```bash\n  ls\n  ```\n```\nx\n```\n```json\n{}\n```\n').map((f) => f.language), ['sh', 'bash', '', 'json']);
 });
 
+
+test('F-T162-2: a README command finds the tests\' sage state tool, as npm run demo does (scripts/demo.mjs sagePath), not the owner\'s plugin cache', () => {
+  const home = scratchHome();
+  try {
+    const r = sh(`node --input-type=module -e "import { sagePath } from './src/sage.js'; console.log(sagePath())"`, home);
+    assert.equal(r.stderr, '');
+    assert.equal(r.stdout, `${SAGE}\n`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
