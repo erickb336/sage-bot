@@ -102,7 +102,7 @@ const M = [
   ['no HOME', 'HOME: policy.home, ', ''],
   ['no TMPDIR', 'HOME: policy.home, TMPDIR: policy.tmp, ', 'HOME: policy.home, '],
   ['git reads the system config', "GIT_CONFIG_NOSYSTEM: '1', ", ''],
-  ['no subprocess scrub (F-T156-21)', "\n      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',", ''],
+  ['subprocess scrub back (F-T156-22)', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',\n", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',\n"],
   ['nonessential traffic on', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',", ''],
   ['no model credential', 'k === MODEL_KEY || ', ''],
   ['no LANG', "k === 'LANG' || ", ''],
