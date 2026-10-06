@@ -45,13 +45,22 @@ export function sageTool({ sagePath, project, env = process.env }) {
 }
 
 /**
+ * The one rule for a path that the config or the environment gives: an absolute path with no empty, "." or ".." part. Such a path names
+ * one file by its text, so no step that reads it as text (resolve, join, dirname) can move it away from the file that the OS opens: a
+ * ".." after a link (F-T156-28), a relative path (F-T156-10, F-T156-30) or "~" is refused, never guessed. Returns the path, else throws
+ * one line that names `what`.
+ */
+export function exactPath(what, path) {
+  if (typeof path === 'string' && isAbsolute(path) && path.slice(1).split('/').every((part) => part !== '' && part !== '.' && part !== '..')) return path;
+  throw new TypeError(`${what} must be an absolute path with no empty, "." or ".." part, not ${JSON.stringify(path ?? null)}. Nothing was started.`);
+}
+
+/**
  * The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. An empty CLAUDE_CONFIG_DIR
- * counts as not set; a relative one throws, because it would resolve against the working folder (F-T156-17).
+ * counts as not set; any other must pass exactPath (F-T156-17, F-T156-28).
  */
 export function claudeDirOf({ env = process.env, home = userInfo().homedir } = {}) {
-  const dir = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
-  if (!isAbsolute(dir)) throw new TypeError(`CLAUDE_CONFIG_DIR must be an absolute path, not ${JSON.stringify(dir)}.`);
-  return dir;
+  return env.CLAUDE_CONFIG_DIR ? exactPath('CLAUDE_CONFIG_DIR', env.CLAUDE_CONFIG_DIR) : join(home, '.claude');
 }
 
 /** The sage plugin's two folders in a Claude Code config folder (claudeDirOf): its cache (each version) and its marketplace copy. */
