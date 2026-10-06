@@ -288,7 +288,27 @@
     "git stash --keep-index",
     "sed -n 1,40p src/a.js",
     "awk \"NR<40\" src/a.js",
-    "sage-bot-github pr create"
+    "sage-bot-github pr create",
+    "git worktree add .claude/worktrees/t9 -b claude/t9",
+    "echo '{}' > ~/.claude/settings.json",
+    "echo x > .claude/settings.local.json",
+    "cp x {WT}/.claude/settings.json",
+    "npm version",
+    "npm version patch",
+    "npm --version x",
+    "npm -v -s",
+    "echo x > .claude/agents/a.md",
+    "echo x >> {WT}/.claude/commands/c.md",
+    "cp a.md {WT}/.claude/skills/x/SKILL.md",
+    "cp a.md .CLAUDE/commands/x.md",
+    "mv {SCRATCH}/evil {WT}/.claude",
+    "touch .claude/skills/x/SKILL.md",
+    "mkdir -p .claude/skills/x",
+    "rmdir .claude/agents",
+    "rm -rf {WT}/.claude",
+    "cd {WT} && cp {SCRATCH}/hooks.json ./.claude/settings.local.json",
+    "cat a.md > {HOME}/.claude/skills/x/SKILL.md",
+    "node scripts/x.mjs .claude/agents/a.md"
   ],
   "broker": [
     "gh pr merge 12",
@@ -406,7 +426,6 @@
     "git stash list",
     "git remote -v",
     "git -C {WT} status",
-    "git worktree add .claude/worktrees/t9 -b claude/t9",
     "npm ci",
     "npm test",
     "npm run check",
@@ -511,7 +530,13 @@
     "git stash -m wip",
     "git stash --message wip",
     "git stash -q",
-    "tail -n +20 src/a.js | head -n 20"
+    "tail -n +20 src/a.js | head -n 20",
+    "npm --version",
+    "npm -v",
+    "cat .claude/settings.json",
+    "ls .claude/skills",
+    "cp x {SCRATCH}/notes.claude/a.md",
+    "mkdir -p {SCRATCH}/my.claude"
   ],
   "sandbox": [
     "git -C {HOME} status",
@@ -536,9 +561,6 @@
     "rm -rf {REPO}",
     "rm -rf .*",
     "rm -rf {WT}/../../../..",
-    "echo '{}' > ~/.claude/settings.json",
-    "echo x > .claude/settings.local.json",
-    "cp x {WT}/.claude/settings.json",
     "echo x > {HOME}/.config/sage-bot/lead.log",
     "touch {HOME}/.config/sage-bot/stop",
     "cp evil.mjs {REPO}/scripts/guard.mjs",
@@ -1294,6 +1316,61 @@
           "notebook_path": "{WT}/é.ipynb",
           "new_source": "x"
         }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{HOME}/.claude/settings.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.claude/settings.local.json",
+          "content": "{}"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{WT}/.claude/skills/x/SKILL.md",
+          "content": "---\nhooks: {}\n---"
+        }
+      ],
+      [
+        "Edit",
+        {
+          "file_path": ".claude/settings.local.json",
+          "old_string": "a",
+          "new_string": "b"
+        }
+      ],
+      [
+        "MultiEdit",
+        {
+          "file_path": "{WT}/.claude/agents/a.md",
+          "edits": [
+            {
+              "old_string": "a",
+              "new_string": "b"
+            }
+          ]
+        }
+      ],
+      [
+        "NotebookEdit",
+        {
+          "notebook_path": "{WT}/.claude/commands/n.ipynb",
+          "new_source": "x"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{HOME}/.CLAUDE/skills/x/SKILL.md",
+          "content": "x"
+        }
       ]
     ],
     "allow": [
@@ -1628,6 +1705,19 @@
         {
           "file_path": "{WT}/café.md"
         }
+      ],
+      [
+        "Read",
+        {
+          "file_path": "{WT}/.claude/settings.json"
+        }
+      ],
+      [
+        "Write",
+        {
+          "file_path": "{SCRATCH}/notes.claude/a.md",
+          "content": "x"
+        }
       ]
     ],
     "sandbox": [
@@ -1707,20 +1797,6 @@
         {
           "file_path": "{REPO}/README.md",
           "content": "x"
-        }
-      ],
-      [
-        "Write",
-        {
-          "file_path": "{HOME}/.claude/settings.json",
-          "content": "{}"
-        }
-      ],
-      [
-        "Write",
-        {
-          "file_path": "{WT}/.claude/settings.local.json",
-          "content": "{}"
         }
       ],
       [

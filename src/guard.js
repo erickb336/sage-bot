@@ -19,6 +19,8 @@
 //   redirect target is a word like any other; node runs no script from stdin (-) or from a path under /dev/ (a device); an
 //   operand that git or node --test expands as a pattern is a wildcard also inside quotes; a file tool's strings are
 //   checked one by one, and its paths are printable ASCII.
+// - A write under a .claude folder (a Write, Edit, MultiEdit or NotebookEdit path, or a word of a Bash part that runs or
+//   writes) is refused with the stop ending, as a second layer: T134 holds those folders (F-T134-4, F-T134-20).
 // - The Grep tool, and an Agent or Task call with an isolation field, are refused. Any tool that is not in TOOLS is refused.
 // - WebFetch is checked by the host text in the URL, as a second layer: a name that resolves to a local address passes;
 //   T134 adds the WebFetch permission rule (T156).
@@ -170,6 +172,8 @@ const cmd = (table, rule = () => null, safe = undefined) => (args, env, name) =>
 const TEST = { '-f': FLAG, '-d': FLAG, '-e': FLAG, '-s': FLAG, '-r': FLAG, '-w': FLAG, '-x': FLAG, '-n': FLAG, '-z': FLAG, '-L': FLAG };
 const none = cmd({});
 const NPM_RUN = new Set(['ci', 'test', 't', 'run', 'run-script', 'ls', 'outdated']);
+/** node --version, npm -v: the version alone, with nothing after it (F-T133-71). */
+const version = (args) => args.length === 1 && ['--version', '-v'].includes(args[0]);
 
 // The allow-list of commands, each with its option table. A rule gives the reason of a refusal, or null or its operands.
 const COMMANDS = {
@@ -202,11 +206,12 @@ const COMMANDS = {
   gh: () => how('gh', BROKER),
   sed: () => how('sed', LINES),
   awk: () => how('awk', LINES),
-  // npm: no option that changes its config, its prefix or its shell is in the table.
-  npm: cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
+  // npm: no option that changes its config, its prefix or its shell is in the table. npm version can change package.json.
+  npm: (args, env, name) => (version(args) ? null : cmd({ '--silent': FLAG, '-s': FLAG, '--ignore-scripts': FLAG, '--no-audit': FLAG, '--no-fund': FLAG, '--prefer-offline': FLAG, '--': FLAG }, ([sub, script]) => {
+    if (sub === 'version') return how('npm version (it can change package.json)', 'npm --version, to print the version of npm');
     if (!NPM_RUN.has(sub)) return `npm ${say(sub ?? '')} (only ci, test, run, ls and outdated)`.trim();
     return /deploy|release|publish/i.test(script ?? '') ? `npm ${sub} ${say(script)} (a deploy)` : null;
-  }),
+  })(args, env, name)),
 };
 // The commands that may read the output of the part before them through a |: read-only filters, never a shell.
 const PIPE = new Set(['head', 'tail', 'wc', 'sort', 'grep']);
@@ -261,7 +266,7 @@ const DEV = /^(\/|(\.\.\/)+)dev(\/|$)/;
  * /dev/: stdin, a file descriptor). node --test finds its own files, or takes files and patterns, each checked like a script.
  */
 function node(args) {
-  if (args.length === 1 && ['--version', '-v'].includes(args[0])) return null;
+  if (version(args)) return null;
   const ops = options('node', args, NODE, { posix: true });
   if (typeof ops === 'string') return ops;
   if (ops[0] === '-' || (!ops[0] && !args.includes('--test'))) return 'node with no script file (code from stdin)';
@@ -304,8 +309,16 @@ function mayMatchStateTool(glob, env) {
 }
 // The commands that run a script or write a file. With the parts that have a redirect, they are the parts that run or write.
 const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee']);
+// The commands that change files but copy and run nothing, so no wildcard of theirs makes a copy of the state tool.
+const CHANGES = new Set(['touch', 'mkdir', 'rm', 'rmdir']);
 const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
 const ASCII = /^[\x20-\x7e]*$/;
+// A .claude folder holds what Claude Code loads: settings, and the skills, agents and commands, whose hooks never pass this
+// hook. The sandbox and the permission rules of T134 hold it (F-T134-4, F-T134-20); this refusal of a write there is a second
+// layer, by the path text, folded as the disk compares it (.CLAUDE is the same folder).
+const CLAUDE_DIR = /(^|\/)\.claude(\/|$)/;
+const claudeDir = (text) => CLAUDE_DIR.test(fold(text));
+const CLAUDE = (path) => `a write to ${say(path)} (a .claude folder holds the settings, skills, agents and commands that Claude Code loads)`;
 const WILDCARD = 'name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>';
 
 /**
@@ -379,6 +392,8 @@ export function bashRefusal(command, env) {
     const why = wildcard(w.text, w.glob, env);
     if (why) return why;
   }
+  const dir = [...rw, ...parsed.filter((seg) => CHANGES.has(commandOf(seg.words.map((w) => w.text))[0])).flatMap((seg) => seg.words)].find((w) => claudeDir(w.text));
+  if (dir) return CLAUDE(dir.text);
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
     if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${say(commandOf(texts)[0] ?? 'nothing')}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
@@ -400,7 +415,7 @@ export function bashRefusal(command, env) {
 const allow = () => null;
 // Read, Write, Edit, MultiEdit, NotebookEdit and Glob: the permission rules of step 6 hold their paths (Edit and Write only in
 // the session folder and its scratch folder, Read and Glob denied on every denied path: F-T134-16; secret files: F-T134-15). A file
-// tool may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
+// tool may not write under a .claude folder (a second layer: F-T134-4, F-T134-20), and may not name the state tool: a script that imports it, or a copy of it, is written through one. Each string of its
 // input is checked on its own (in JSON text, a tab is \t and hides the name), and each path is printable ASCII.
 /** Each string of a tool input with its key. An explicit stack: a recursive walk overflowed at a nesting of about 3000 (F-T133-50). */
 function strings(input) {
@@ -416,6 +431,8 @@ function strings(input) {
 function file(i, env) {
   const all = strings(i);
   if (all.some(([k, v]) => k.endsWith('path') && !ASCII.test(v))) return 'a file path with a character that is not printable ASCII';
+  const dir = all.find(([k, v]) => k.endsWith('path') && claudeDir(v));
+  if (dir) return CLAUDE(dir[1]);
   return namesStateTool(all.map(([, v]) => v), env) ? STATE_TOOL : null;
 }
 // An isolation field moves the agent's work into another worktree or off this Mac, out of this hook and the sandbox.
@@ -427,7 +444,9 @@ const TOOLS = {
   Read: allow, Write: file, Edit: file, MultiEdit: file, NotebookEdit: file, Glob: allow,
   WebSearch: allow, TodoWrite: allow, Task: agent, Agent: agent, ToolSearch: allow, SendMessage: allow,
   TaskCreate: allow, TaskGet: allow, TaskList: allow, TaskUpdate: allow, EnterWorktree: allow, ExitWorktree: allow,
-  // A skill only loads instructions: the tools it then uses come through this hook too.
+  // A skill's tools come through this hook, but its SKILL.md can register hook commands that Claude Code runs for the rest of
+  // the session, and those never pass this hook. T134 holds that (F-T134-20): --disable-slash-commands, and no write to
+  // .claude/skills, .claude/agents or .claude/commands; the refusal of a write under .claude above is a second layer.
   Skill: allow, ExitPlanMode: allow, BashOutput: allow, TaskOutput: allow, KillShell: allow, KillBash: allow, TaskStop: allow,
 };
 

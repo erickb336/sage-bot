@@ -463,3 +463,35 @@ test('F-T133-57: the hook writes a deny of any length whole before it exits, wit
     assert.equal(deny(await piped(join(dir, 'scripts', 'guard.mjs'), '{}', LEAD, wait)), `${'x'.repeat(300_000)}end`);
   }
 });
+
+test('F-T133-71: npm --version and npm -v alone are allowed; npm version (it can change package.json) gets the hint to npm --version', () => {
+  const why = (c) => guard(bash(c)).reason;
+  for (const c of ['npm --version', 'npm -v', 'node --version', 'node -v']) assert.equal(why(c), undefined, c);
+  const hint = 'sage-bot guard: npm version (it can change package.json) is refused in a lead session. sage can do this instead: npm --version, to print the version of npm.';
+  assert.equal(why('npm version'), hint);
+  assert.equal(why('npm version patch'), hint);
+  // The version alone: anything after it is checked by the option table, and refused.
+  assert.match(why('npm --version x'), /^sage-bot guard: npm with the option --version is refused/);
+  assert.match(why('node --version x'), /^sage-bot guard: node with the option --version is refused/);
+});
+
+test('F-T133-72: a write under a .claude folder is refused with the stop ending, as a second layer (T134 holds it: F-T134-4, F-T134-20); a read there is allowed', () => {
+  const end = '(a .claude folder holds the settings, skills, agents and commands that Claude Code loads) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
+  assert.equal(guard(tool('Write', { file_path: '{WT}/.claude/skills/x/SKILL.md', content: 'x' })).reason, `sage-bot guard: a write to /sample/repo/wt/.claude/skills/x/SKILL.md ${end}`);
+  assert.equal(guard(tool('Edit', { file_path: '.claude/settings.local.json', old_string: 'a', new_string: 'b' })).reason, `sage-bot guard: a write to .claude/settings.local.json ${end}`);
+  assert.equal(guard(tool('NotebookEdit', { notebook_path: '{WT}/.claude/commands/n.ipynb', new_source: 'x' })).reason, `sage-bot guard: a write to /sample/repo/wt/.claude/commands/n.ipynb ${end}`);
+  assert.equal(guard(tool('Write', { file_path: '{HOME}/.CLAUDE/skills/x/SKILL.md', content: 'x' })).reason, `sage-bot guard: a write to /sample/home/.CLAUDE/skills/x/SKILL.md ${end}`);
+  const why = (c) => guard(bash(c)).reason;
+  assert.equal(why('echo x > .claude/agents/a.md'), `sage-bot guard: a write to .claude/agents/a.md ${end}`);
+  assert.equal(why('cp a.md .CLAUDE/commands/x.md'), `sage-bot guard: a write to .CLAUDE/commands/x.md ${end}`);
+  assert.equal(why('rm -rf {WT}/.claude'), `sage-bot guard: a write to /sample/repo/wt/.claude ${end}`);
+  for (const [c, path] of [['touch .claude/skills/x/SKILL.md', '.claude/skills/x/SKILL.md'], ['mkdir -p .claude/skills/x', '.claude/skills/x'], ['rmdir .claude/agents', '.claude/agents'], ['mv {SCRATCH}/evil {WT}/.claude', '/sample/repo/wt/.claude']]) {
+    assert.equal(why(c), `sage-bot guard: a write to ${path} ${end}`, c);
+  }
+  // A read there, and a folder whose name only ends in .claude, are allowed.
+  for (const c of ['cat .claude/settings.json', 'ls .claude/skills', 'cp x {SCRATCH}/notes.claude/a.md']) assert.equal(why(c), undefined, c);
+  assert.equal(guard(tool('Read', { file_path: '{WT}/.claude/settings.json' })).reason, undefined);
+  assert.equal(guard(tool('Write', { file_path: '{SCRATCH}/notes.claude/a.md', content: 'x' })).reason, undefined);
+  // Only the path is checked: a text that names a .claude path is no write there.
+  assert.equal(guard(tool('Write', { file_path: '{SCRATCH}/notes.md', content: 'see {WT}/.claude/settings.json' })).reason, undefined);
+});
