@@ -215,6 +215,8 @@ const COMMANDS = {
 };
 // The commands that may read the output of the part before them through a |: read-only filters, never a shell.
 const PIPE = new Set(['head', 'tail', 'wc', 'sort', 'grep']);
+// The commands of the list that read a file operand: the hint of a | into one of them names that form (cat x | jq -> jq <options> x).
+const READERS = new Set(['cat', 'jq', 'cut', 'uniq', 'rg']);
 
 // ---- Bash: git and node -------------------------------------------------------------------------------------------------
 
@@ -396,7 +398,8 @@ export function bashRefusal(command, env) {
   if (dir) return CLAUDE(dir.text);
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
-    if (seg.pipe && !PIPE.has(commandOf(texts)[0])) return how(`a | into ${say(commandOf(texts)[0] ?? 'nothing')}`, 'pipe only into head, tail, wc, sort or grep, or run the commands one by one');
+    const into = commandOf(texts)[0];
+    if (seg.pipe && !PIPE.has(into)) return how(`a | into ${say(into ?? 'nothing')}`, `pipe only into head, tail, wc, sort or grep${READERS.has(into) ? `, or give ${into} the file (${into} <options> <file>)` : ''}, or run the commands one by one`);
     // cd only as the first part of a chain: the shell of the Bash tool keeps its folder, so a cd of its own moves the session.
     if (texts[0] === 'cd') {
       if (k !== 0 || parsed.length < 2 || parsed[1].pipe || texts.length !== 2 || texts[1].startsWith('-') || seg.redirects.length) {

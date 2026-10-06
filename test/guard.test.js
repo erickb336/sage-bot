@@ -310,6 +310,7 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   assert.equal(why('cd src'), 'sage-bot guard: cd other than as the first part of cd <folder> && <command> is refused in a lead session. sage can do this instead: cd <folder> && <command>, or name the full path in the command.');
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
   assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
+  assert.equal(why('cat package.json | jq .scripts'), 'sage-bot guard: a | into jq is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or give jq the file (jq <options> <file>), or run the commands one by one.');
   assert.equal(why('rm -rf *'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
   // In a part that runs or writes, a wildcard that can match the state tool gets the hint to name the files first.
   assert.equal(why('cp * {SCRATCH}'), `sage-bot guard: the wildcard * (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
