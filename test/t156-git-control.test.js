@@ -35,7 +35,9 @@ const POLICY = leadPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: 
 const F = POLICY.folder, TEMPLATE = join(ROOT, 'template'), MARK = join(ROOT, 'pwned');
 const DENY_WRITE = settingsOf(POLICY).sandbox.filesystem.denyWrite;
 const ENV = { PATH: process.env.PATH, HOME: ROOT, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't',
-  GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', MARK };
+  GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', MARK,
+  // No detached auto maintenance after a commit: it wrote and removed .git/objects/maintenance.lock while snapshot() read the folder.
+  GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false' };
 const sh = (script, wrap = []) => spawnSync(wrap[0] ?? 'sh', [...wrap.slice(1), ...(wrap.length ? ['sh'] : []), '-c', script], { cwd: F, env: ENV, encoding: 'utf8' });
 const ok = (script) => { const r = sh(script); assert.equal(r.status, 0, `${script}\n${r.stderr}`); return r.stdout; };
 
