@@ -1,5 +1,5 @@
 {
-  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'wildcard' (a wildcard in a pipeline that runs or writes that may match the state tool, or any [ there, and in an operand that git or node --test expands as a pattern, a quoted one too: refused with the hint to name the files), 'pattern' (any other character than letters, digits, a space and _ - . / , : = % ~ ^ * ? in such an operand, such as @, +, (, { or \\: refused with the stop ending, F-T133-51), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'session' is a realistic sage session in order: every call must be allowed.",
+  "about": "The corpus of the guard hook (T133). Bash commands of a lead session: 'refuse' (not on the allow-list), 'broker' (GitHub: refused with the hint to sage-bot-github), 'state' (the sage state tool in any form: refused with the stop ending), 'wildcard' (a wildcard in a pipeline that runs or writes that may match the state tool, or any [ there, and in an operand that git or node --test expands as a pattern, a quoted one too: refused with the hint to name the files), 'pattern' (any other character than letters, digits, a space and _ - . / , : = % ~ ^ * ? in such an operand, such as @, +, (, { or \\: refused with the stop ending, F-T133-51), 'allow' (normal developer commands), 'sandbox' (allowed by the hook; the Claude Code sandbox and the permission rules of step 6 hold their files and hosts). 'tools' are calls of the other tools as [tool, input]. 'slow' (F-T133-62) are forms of a wildcard word that a backtracking match took minutes to decide: the test fills {STARS} with 48 stars and with 64 KB of wildcard shapes, and each must decide in under 1 s. 'session' is a realistic sage session in order: every call must be allowed.",
   "refuse": [
     "/opt/homebrew/bin/gh pr merge 12",
     "git merge feature",
@@ -2147,7 +2147,8 @@
     "node --test \"{SCRATCH}/[s]age.mjs\"",
     "git add -- \"{SCRATCH}/[s]age.mjs\"",
     "git add 'app/[id]/page.tsx'",
-    "node --test 'test/[a].test.js'"
+    "node --test 'test/[a].test.js'",
+    "cp ./sta*te.mjs* {SCRATCH}/out"
   ],
   "pattern": [
     "git log --pretty \"%h (%s)\"",
@@ -2166,5 +2167,11 @@
     "git show 'HEAD:docs/a+b.md'",
     "git stash pop 'stash@{0}'",
     "git log --oneline 'HEAD@{1}'"
+  ],
+  "slow": [
+    "node ./{STARS}q && python3 -c 'print(1)'",
+    "ls > ./{STARS}q && python3 -c 'print(1)'",
+    "git add './{STARS}q' && python3 -c 'print(1)'",
+    "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"
   ]
 }

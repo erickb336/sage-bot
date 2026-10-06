@@ -6,7 +6,7 @@
 // Bash call may name. It reads no file and resolves no path. Where a program may read or write files, and which hosts it
 // may reach, is the job of the Claude Code sandbox and the permission rules that step 6 (T134) sets (F-T134-1, F-T134-6,
 // F-T134-15, F-T134-16): docs/reference.md.
-// - An input over 64 KB is refused before it is parsed, so the hook always decides well inside its timeout.
+// - An input over 64 KB is refused before it is parsed. scripts/guard.mjs refuses when the rules do not decide in 5 s (F-T133-62).
 // - Bash: a strict parser takes the command apart into simple commands joined only by && (or a | into a read-only filter).
 //   Anything it does not parse (;, ||, a $, a backtick, parentheses, braces, a backslash, a newline outside quotes, a
 //   heredoc, a non-ASCII character outside quotes) is refused. Each simple command must be on the allow-list (COMMANDS), and
@@ -35,7 +35,7 @@ const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 // A rule can give the safe way to do the same thing (how) after this mark; that text replaces STOP.
 const MARK = '\u0001';
 const how = (why, safe) => `${why}${MARK}sage can do this instead: ${safe}.`;
-const refusal = (why) => {
+export const refusal = (why) => {
   const k = why.lastIndexOf(MARK);
   return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? STOP : why.slice(k + 1)}`;
 };
@@ -277,10 +277,24 @@ function namesStateTool(texts, env) {
   const named = new RegExp(`(^|[^a-z0-9_.-])(${stateNames(env).map(escape).join('|')})`);
   return texts.some((t) => named.test(fold(t)));
 }
-/** Whether a wildcard word (only * and ?: a [ is refused before) can match the state tool's name in its last part. */
+/**
+ * Whether a wildcard word (only * and ?: a [ is refused before) can match the state tool's name in its last part.
+ * A greedy match that returns only to the last * (F-T133-62): its steps are at most the word's length times the name's, so
+ * 64 KB of stars decides in milliseconds. A regex with .* for each * backtracked, and 48 stars took 84 s.
+ */
 function mayMatchStateTool(glob, env) {
-  const pattern = new RegExp(`^${basename(fold(glob)).split(/([*?])/).map((p) => (p === '*' ? '.*' : p === '?' ? '.' : escape(p))).join('')}$`);
-  return stateNames(env).some((n) => pattern.test(n));
+  const g = basename(fold(glob));
+  return stateNames(env).some((name) => {
+    let i = 0;
+    let n = 0;
+    let star = -1;
+    let from = 0;
+    while (n < name.length) {
+      if (g[i] === '*') { star = i++; from = n; } else if (g[i] === '?' || g[i] === name[n]) { i++; n++; } else if (star >= 0) { i = star + 1; n = ++from; } else return false;
+    }
+    while (g[i] === '*') i++;
+    return i === g.length;
+  });
 }
 // The commands that run a script or write a file. With the parts that have a redirect, they are the parts that run or write.
 const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee']);

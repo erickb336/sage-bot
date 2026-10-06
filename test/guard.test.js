@@ -33,7 +33,8 @@ function run(file, stdin, env) {
   const path = join(base, `stdin-${n++}`);
   writeFileSync(path, stdin);
   const fd = openSync(path, 'r');
-  try { return spawnSync(process.execPath, [file], { stdio: [fd, 'pipe', 'pipe'], env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' }); } finally { closeSync(fd); }
+  // A hook that does not end in 20 s is killed (status null), so a test of it fails instead of waiting forever.
+  try { return spawnSync(process.execPath, [file], { stdio: [fd, 'pipe', 'pipe'], env: { PATH: process.env.PATH, ...env }, encoding: 'utf8', timeout: 20_000 }); } finally { closeSync(fd); }
 }
 
 /** The guard's decision for one stdin, as the hook gives it: a throw is a crash, and the hook refuses then (exit code 2). */
@@ -323,6 +324,48 @@ test('T133: an input over 64 KB is refused before it is parsed, quickly; a large
   const ok = JSON.stringify(bash('git status'));
   assert.equal(guard(`${ok}${' '.repeat(64 * 1024 - ok.length)}`).decision, 'allow');
   assert.equal(guard(`${ok}${' '.repeat(64 * 1024 - ok.length + 1)}`).decision, 'deny');
+});
+
+// F-T133-62: a regex with .* for each * backtracked, and node ./ + 48 stars + q && … took 84 s, past the 30 s hook timeout.
+test('F-T133-62: a wildcard word of many stars decides in under 1 s in each form (a run, a redirect, a quoted operand, a copy), up to 64 KB', () => {
+  const PYTHON = `sage-bot guard: the command python3 is refused in a lead session. ${STOP}`;
+  const fill64 = (form, unit) => {
+    const b = Buffer.byteLength(JSON.stringify(bash(form.replace('{STARS}', ''))));
+    return form.replace('{STARS}', unit.repeat(Math.floor((64 * 1024 - b - 10) / unit.length)));
+  };
+  const timed = (command) => {
+    const input = JSON.stringify(bash(command));
+    assert.ok(Buffer.byteLength(input) <= 64 * 1024, `${Buffer.byteLength(input)}`);
+    const t = performance.now();
+    const { reason } = guard(input);
+    const ms = performance.now() - t;
+    assert.ok(ms < 1000, `${Math.round(ms)} ms: ${command.slice(0, 60)}`);
+    return reason;
+  };
+  for (const form of CORPUS.slow) {
+    for (const command of [form.replace('{STARS}', '*'.repeat(48)), ...['*', '*?', '?*', '*s', '*sage.mj', '*state.mj'].map((u) => fill64(form, u))]) {
+      assert.equal(timed(command), PYTHON, command.slice(0, 60));
+    }
+  }
+  // A word of many stars that can match the name is still found.
+  for (const command of [`node ./${'*'.repeat(48)}`, fill64('node ./{STARS}', '*'), fill64('cp ./{STARS}s?ge.m*s {SCRATCH}/out', '*')]) {
+    assert.ok(timed(command).endsWith(WILDCARD), command.slice(0, 60));
+  }
+});
+
+test('F-T133-62: when the rules do not decide in 5 s, the hook writes a whole deny and exits 0, well before the 30 s timeout', () => {
+  // A copy of the hook next to the real rules, with a decision that never ends.
+  const dir = mkdtempSync(join(base, 'slow-'));
+  mkdirSync(join(dir, 'scripts')); mkdirSync(join(dir, 'src'));
+  writeFileSync(join(dir, 'scripts', 'guard.mjs'), readFileSync(HOOK));
+  const rules = readFileSync(new URL('../src/guard.js', import.meta.url), 'utf8');
+  writeFileSync(join(dir, 'src', 'guard.js'), rules.replace('export function decideText(text, env) {', '$& for (;;);'));
+  const t = Date.now();
+  const r = run(join(dir, 'scripts', 'guard.mjs'), JSON.stringify(bash('git status')), LEAD);
+  const ms = Date.now() - t;
+  assert.equal(r.status, 0, `status ${r.status} after ${ms} ms`);
+  assert.deepEqual(JSON.parse(r.stdout), { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `sage-bot guard: a tool call that the guard did not decide in 5 s is refused in a lead session. ${STOP}` } });
+  assert.ok(ms >= 5000 && ms < 8000, `${ms} ms`);
 });
 
 test('T133: a crash of the hook refuses in a lead session (exit code 2)', () => {
