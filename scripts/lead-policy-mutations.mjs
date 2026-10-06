@@ -2,11 +2,36 @@
 // src/sage.js or scripts/lead-policy.mjs), and the tests of
 // test/t156-lead-policy.test.js and test/t156-git-control.test.js must fail for each. It mutates a copy of src, scripts and test in
 // a new temp folder, never the worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
-//   node scripts/lead-policy-mutations.mjs     prints KILLED or SURVIVED for each mutation; exits 1 when one survives
+// A mutation is KILLED only when the mutated file still parses and at least one test fails. A mutation that breaks the syntax, or a
+// run that fails with no failing test (a test file or the runner crashed, and nothing else failed), is INVALID: it proves nothing
+// about the tests (F-T156-23). A test file that crashes at load because the policy changed is not a test that failed.
+//   node scripts/lead-policy-mutations.mjs     prints KILLED, SURVIVED or INVALID for each mutation; exits 1 unless all are killed
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js'];
+
+/**
+ * The verdict of one mutation from its run of `node --test --test-reporter=tap` on test files. A failure named after a test file is
+ * that file not loading, not a failing test. INVALID when the mutated file does not parse, or the run failed with no failing test;
+ * else KILLED when a test fails, SURVIVED when none does.
+ * @param {{ status: number | null, stdout: string }} run @param {string[]} files @param {boolean} parses  whether `node --check` passes
+ * @returns {{ verdict: string, failed: number }}  failed: the failing tests
+ */
+export function verdictOf({ status, stdout }, files, parses) {
+  const failed = [...stdout.matchAll(/^not ok \d+ - (.*)$/gm)].map((m) => m[1]).filter((name) => !files.includes(name)).length;
+  if (!parses || (status !== 0 && !failed)) return { verdict: 'INVALID', failed };
+  return { verdict: failed ? 'KILLED' : 'SURVIVED', failed };
+}
+
+/** Whether a source file parses (`node --check`). @param {string} file */
+export const parses = (file) => spawnSync(process.execPath, ['--check', file]).status === 0;
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) main();
+
+function main() {
 const ROOT = join(import.meta.dirname, '..'), W = mkdtempSync(join(tmpdir(), 'sage-bot-mutations-'));
 for (const d of ['src', 'scripts', 'test', 'package.json']) cpSync(join(ROOT, d), join(W, d), { recursive: true });
 symlinkSync(join(ROOT, 'node_modules'), join(W, 'node_modules'));
@@ -64,6 +89,8 @@ const M = [
   ['temp folder link not resolved', 'tmp: real(join(shortTmp, `sage-lead-${session}`)),', 'tmp: join(real(shortTmp), `sage-lead-${session}`),'],
   ['git reads the global config', "GIT_CONFIG_GLOBAL: '/dev/null', ", ''],
   ['preflight timeout without SIGKILL', "killSignal: 'SIGKILL', ", ''],
+  ['the state tool without its timeout (F-T156-25)', '{ env, timeout: tool }', '{ env }'],
+  ['claude without its timeout (F-T156-25)', '{ env: launch.env, timeout: claude }', '{ env: launch.env }'],
   ['config folder not denied', '    dirname(defaultConfigPath(home)), // F-T134-2\n', ''],
   ['plugin cache not denied', 'cache, plugin.marketplace, sageRoot,', 'plugin.marketplace, sageRoot,'],
   ['plugin marketplace not denied', 'cache, plugin.marketplace, sageRoot,', 'cache, sageRoot,'],
@@ -88,10 +115,11 @@ const M = [
   ['no strict MCP', "'--setting-sources', '', '--strict-mcp-config',", "'--setting-sources', '',"],
   ['no plugin dir', "...(policy.pluginDir ? ['--plugin-dir'", "...(false ? ['--plugin-dir'"],
   // F-T156-14: sage's one identity is the version folder of the denied plugin cache
-  ['a state tool outside the plugin cache not refused', 'if (sageTool && !(within(sageTool, cache)', 'if (false && !(within(sageTool, cache)'],
-  ['a state tool outside a version folder not refused', ' && version.length > 2))', '))'],
+  ['a state tool outside the plugin layout not refused', 'if (sageTool && sageTool !== sageToolIn(cache, version))', 'if (false)'],
+  ['the layout without the sage plugin folder (F-T156-24)', "(cache, version) => join(cache, 'sage', version,", "(cache, version) => join(cache, version,", SAGE],
+  ['the layout without skills/sage (F-T156-24)', "join(cache, 'sage', version, 'skills', 'sage', 'sage.mjs')", "join(cache, 'sage', version, 'sage.mjs')", SAGE],
   ['the state tool by its path, not its real path', 'const sageTool = tool && real(tool);', 'const sageTool = tool;'],
-  ['plugin dir not the version folder', 'join(cache, version[0], version[1])', 'join(cache, version[0])'],
+  ['plugin dir not the version folder', "pluginDir: sageTool && join(cache, 'sage', version),", "pluginDir: sageTool && join(cache, 'sage'),"],
   // F-T156-15: git's global files and the Claude config folder, which blockReadsOutsideWorkingDirectories re-opens
   ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.config/git']"],
   ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.gitconfig']"],
@@ -126,7 +154,7 @@ const M = [
   ['T127 failure counts as ready', "return { state: 'waiting for sage T127', why: `the state tool's", "if (false) return { state: 'waiting for sage T127', why: `the state tool's"],
   ['missing tool counts as ready', "if (!policy.sageTool) return", 'if (false) return'],
   ['preflight without the settings', "['--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', 'sandbox', 'status']", "['sandbox', 'status']"],
-  ['preflight with the owner config dir', '{ env: launch.env }', '{ env }'],
+  ['preflight with the owner config dir', '{ env: launch.env, timeout', '{ env, timeout'],
   ['supported not checked', 'status?.supported === true && ', ''],
   ['enabled not checked', 'status.enabled === true && ', ''],
   ['strictMode not checked', 'status.strictMode === true && ', ''],
@@ -139,13 +167,15 @@ try {
     const F = join(W, file), orig = readFileSync(F, 'utf8');
     if (orig.split(a).length !== 2) { rows.push(`NOT APPLIED  ${name}`); continue; } // the text must be there exactly once
     writeFileSync(F, orig.replace(a, b));
-    const r = spawnSync(process.execPath, ['--test', 'test/t156-lead-policy.test.js', 'test/t156-git-control.test.js'], { cwd: W, encoding: 'utf8' });
+    const ok = parses(F);
+    const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...FILES], { cwd: W, encoding: 'utf8' });
     writeFileSync(F, orig);
-    const failed = (/ℹ fail (\d+)/.exec(r.stdout) ?? [])[1];
-    rows.push(`${r.status !== 0 ? 'KILLED' : 'SURVIVED'}  ${name}  (failing tests: ${failed ?? '?'})`);
+    const { verdict, failed } = verdictOf(r, FILES, ok);
+    rows.push(`${verdict}  ${name}  (failing tests: ${failed})`);
   }
 } finally { rmSync(W, { recursive: true, force: true }); }
 console.log(rows.join('\n'));
-const killed = rows.filter((r) => r.startsWith('KILLED')).length;
-console.log(`${killed} of ${M.length} killed`);
-if (killed !== M.length) process.exitCode = 1;
+const count = (v) => rows.filter((r) => r.startsWith(v)).length;
+console.log(`${count('KILLED')} of ${M.length} killed, ${count('INVALID')} invalid`);
+if (count('KILLED') !== M.length) process.exitCode = 1;
+}
