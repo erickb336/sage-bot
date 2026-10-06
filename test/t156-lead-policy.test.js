@@ -80,7 +80,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: [] },
+      network: { allowedDomains: [], strictAllowlist: true },
       filesystem: {
         denyRead: ['/h', ...DENIED],
         allowRead: ['/h/.local/share/sage-bot/leads/sessions/s21', '/st/sage-lead-s21'],

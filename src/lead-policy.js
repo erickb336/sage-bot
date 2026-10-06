@@ -16,7 +16,11 @@ const run = promisify(execFile);
 
 /** The most a lead session may spend on the model, in USD (G60). */
 export const MAX_USD = 5;
-/** The strict host list of a lead session, for the sandbox and WebFetch: no GitHub host. Empty: a session reaches no host. */
+/**
+ * The strict host list of a lead session, for the sandbox and WebFetch: no GitHub host. The sandbox proxy refuses every other host
+ * only with both settings: `allowedDomains` (this list) and `strictAllowlist: true`; without it, Claude Code decides an unlisted host
+ * by the permission mode (F-T156-20). Empty, with dontAsk, a sandboxed command reaches no host; T157 proves it (F-T134-1).
+ */
 export const LEAD_HOSTS = [];
 /**
  * The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5), and
@@ -165,7 +169,7 @@ export function settingsOf(policy) {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: policy.hosts },
+      network: { allowedDomains: policy.hosts, strictAllowlist: true }, // F-T156-20
       filesystem: {
         denyRead: [policy.home, ...policy.denied], // F-T156-5: the whole home folder; the narrower allowRead below re-opens
         allowRead: [policy.folder, policy.tmp], // only the session's own folders
