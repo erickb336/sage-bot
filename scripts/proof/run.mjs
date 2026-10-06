@@ -2,6 +2,7 @@
 // It builds two scratch worlds (scripts/proof/world.mjs), runs every probe outside the sandbox in the control world as its control,
 // runs the rows that need no model against the real `claude` (sandbox status and the preflight; never `claude -p`), and reports the
 // rows that need a session as SKIPPED ("live: T165"). It writes report.json in the scratch folder and prints a one-screen summary.
+// Each world also has a short temp root in /private/tmp (scripts/proof/world.mjs); the summary names both.
 // SAMPLE DATA ONLY. It never prints a sample value: it refuses to write a report that holds the world's tag. Exit 1 on FAIL or INVALID.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -63,7 +64,7 @@ const out = (file, args, o) => { const r = spawnSync(file, args, { encoding: 'ut
 /** The rows that need no model. Each returns [status, why]. */
 async function nowRows(w, policy, env) {
   const settings = settingsOf(policy);
-  const owner = realpathSync.native(ownerHome());
+  const owner = ownerHome(); // canonical: the policy refuses it otherwise
   const denied = settings.sandbox.credentials.envVars.filter((v) => v.mode === 'deny').map((v) => v.name);
   const refusesTwo = (() => { try { launchOf(policy, {}, { CLAUDE_CODE_OAUTH_TOKEN: 'sample', ANTHROPIC_API_KEY: 'sample' }); return false; } catch { return true; } })();
   const one = launchOf(policy, { ANTHROPIC_API_KEY: 'sample-host', CLAUDE_CODE_OAUTH_TOKEN: 'sample-host' }, { ANTHROPIC_API_KEY: 'sample-caller' }).env;
@@ -108,7 +109,7 @@ export async function prove(root) {
   });
   const count = (s) => rows.filter((x) => x.status === s).length;
   const report = {
-    proof: 'T157 (T134 PR 2a), no key', at: new Date().toISOString(), root,
+    proof: 'T157 (T134 PR 2a), no key', at: new Date().toISOString(), root, tempRoots: [control.tempRoot, live.tempRoot],
     platform: now['F-T157-3'][1].split(':')[0], claude: out(policy.claude, ['--version'], { env: launchOf(policy, env).env, cwd: root })?.split(' ')[0] ?? null,
     counts: Object.fromEntries(['PASS', 'FAIL', 'INVALID', 'SKIPPED'].map((s) => [s, count(s)])),
     probeErrors: r.status === 0 ? null : (r.stderr || r.error?.message || '').split('\n')[0],
@@ -120,6 +121,7 @@ export async function prove(root) {
     `sage-bot proof (T157, no key): ${report.platform}, Claude Code ${report.claude ?? '(not found)'}`,
     `scratch folder: ${root}`,
     `report: ${join(root, 'report.json')}`,
+    `temp roots: ${report.tempRoots.join(', ')} (the policy's 44-byte limit keeps them out of the scratch folder; remove them with it)`,
     ...rows.map((x) => `${x.status.padEnd(8)} ${x.row.padEnd(11)} ${x.title}${x.status === 'PASS' ? '' : ` (${x.why.slice(0, 120)})`}`),
     `${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('INVALID')} INVALID, ${count('SKIPPED')} SKIPPED (${LIVE}).`,
     `Controls: ${probesAll.filter((p) => p.control.did === true).length} of ${probesAll.length} probes work outside the sandbox.`,

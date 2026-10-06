@@ -3,7 +3,7 @@
 // `security`. SAMPLE DATA ONLY: no model session, no network, and no real keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { launchOf, settingsOf } from '../src/lead-policy.js';
@@ -16,17 +16,23 @@ import { spawnSync } from './bridge-setup.js';
 const PROBE = new URL('../scripts/proof/probe.mjs', import.meta.url).pathname;
 const TAG = 'f00dfeedf00dfeed';
 const scratch = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t157-')));
+/** A world in a new scratch folder, and the removal of both its folder and its temp root. */
+function world() {
+  const root = scratch(), w = buildWorld(join(root, 'w'), TAG);
+  return { root, w, done: () => { rmSync(root, { recursive: true, force: true }); rmSync(w.tempRoot, { recursive: true, force: true }); } };
+}
 const inside = (path, dir) => !relative(dir, path).startsWith('..');
 
 test('the world: every state file, plugin file and credential file that a probe refuses is in a denied path of the policy, never re-opened', () => {
-  const root = scratch();
+  const { w, done } = world();
   try {
-    const w = buildWorld(join(root, 'w'), TAG);
     const policy = policyOf(w);
     assert.equal(policy.folder, w.sessionFolder);
     assert.equal(policy.tmp, w.sessionTmp);
     assert.equal(policy.sageTool, w.tool); // the dummy state tool is the one that the policy finds
-    assert.equal(w.hookDirs.length, 3); // sage-hooks in the two temp folders, .hooks in sage's root
+    assert.deepEqual(w.hookDirs, [join(w.userTemp, 'sage-hooks'), '/private/tmp/sage-hooks', join(w.sageRoot, '.hooks')]); // F-T156-40: never TMPDIR
+    assert.match(w.tempRoot, /^\/private\/tmp\/sbp-[A-Za-z0-9]{6}$/); // short and canonical (F-T156-35), never /private/tmp/sage-lead
+    assert.equal(lstatSync(w.tempRoot).mode & 0o777, 0o700);
     const { denyRead, allowRead } = settingsOf(policy).sandbox.filesystem;
     const targets = [w.statePath, `${w.statePath}.leads.jsonl`, `${w.statePath}.leads-off`, `${w.statePath}.votes`, w.config, w.tool, w.logbook, w.marketplace, ...Object.values(w.credentials)];
     for (const path of targets) {
@@ -38,7 +44,7 @@ test('the world: every state file, plugin file and credential file that a probe 
     assert.ok(!readFileSync(join(w.sessionFolder, 'world.json'), 'utf8').includes('sample-fake-'));
     assert.match(readFileSync(w.credentials.ssh, 'utf8'), /^sample-fake-ssh-f00dfeedf00dfeed\n$/);
     assert.equal(spawnSync('git', ['log', '--format=%s'], { cwd: w.sessionFolder, encoding: 'utf8' }).stdout, 'sample\n');
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { done(); }
 });
 
 test('didOf: worked, refused (EPERM, or any failure for a network call or a test), or cannot tell', () => {
@@ -68,9 +74,8 @@ test('verdict: INVALID without a working control, SKIPPED with no live result, e
 });
 
 test('the rows: each L1 row has probes and each probe has an L1 row; L2 and L3 rows carry what T165 asks the session', () => {
-  const root = scratch();
-  const w = buildWorld(join(root, 'w'), TAG);
-  rmSync(root, { recursive: true, force: true });
+  const { w, done } = world();
+  done();
   const L1 = ROWS.filter((r) => r.group === 'L1').map((r) => r.row);
   const probed = [...new Set(probes(w).map((p) => p.row))];
   assert.deepEqual(probed.toSorted(), L1.toSorted());
@@ -85,9 +90,8 @@ test('the rows: each L1 row has probes and each probe has an L1 row; L2 and L3 r
 const sb = (s) => JSON.stringify(s);
 const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 'true']).status === 0;
 test('seatbelt: each probe sees a refusal as refused, not as an error, and the allowed ones work', { skip: !seatbelt && 'sandbox-exec is not available here' }, () => {
-  const root = scratch();
+  const { root, w, done } = world();
   try {
-    const w = buildWorld(join(root, 'w'), TAG);
     const f = w.sessionFolder;
     const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker];
     const denyWrite = ['config', 'hooks', 'commondir', 'info/attributes'].map((p) => join(f, '.git', p)).concat([join(f, 'sub'), join(f, '.claude'), join(f, '.mcp.json'), `/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}/sage-bot-proof-s1`]);
@@ -105,7 +109,7 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
     assert.deepEqual(wrong, []);
     assert.ok(results.length >= 40);
     assert.ok(!r.stdout.includes(TAG) && !r.stdout.includes('sample-fake-'));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { done(); }
 });
 
 /**

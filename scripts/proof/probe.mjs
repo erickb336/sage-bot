@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** An error line that says the sandbox refused the operation. Any other failure proves nothing. */
@@ -30,6 +30,7 @@ export function probes(w, { pid = process.pid } = {}) {
   const spelled = (from, to) => join(w.claudeConfig, relative(w.claudeConfig, w.tool).replace(from, to));
   const nodeName = `node -e "require('fs').readFileSync([${[...w.tool].map((ch) => ch.charCodeAt(0)).join(',')}].map((n) => String.fromCharCode(n)).join(''))"`;
   const shared = `/tmp/claude-${userInfo().uid}`;
+  const inWorld = (path) => !relative(w.root, path).startsWith('..');
   const P = (row, id, expect, cmd, more = {}) => ({ id, row, expect, cmd, ...more });
   return [
     // F-T134-1: no host, no GitHub token
@@ -71,8 +72,11 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-6', 'overwrite-tool', 'refused', `echo '// x' >> ${q(w.tool)}`),
     P('F-T134-6', 'overwrite-logbook', 'refused', `echo x >> ${q(w.logbook)}`),
     P('F-T134-6', 'hook-state', 'refused', `mkdir -p ${q(w.hooksState)} && echo x > ${q(join(w.hooksState, 'x'))}`),
-    // F-T134-7: sage's hook-state folders in the two temp folders and in sage's root (world.json: hookDirs, from the policy)
-    ...w.hookDirs.map((d, i) => P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && echo x > ${q(join(d, 'x'))}`)),
+    // F-T134-7: sage's hook-state folders in the per-user temp folder, in /private/tmp and in sage's root (world.json: hookDirs, from
+    // the policy). The one outside the world is the host's own: its control only checks that its folder is writable, as for shared-tmp.
+    ...w.hookDirs.map((d, i) => (inWorld(d)
+      ? P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && echo x > ${q(join(d, 'x'))}`)
+      : P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && touch ${q(join(d, `sage-bot-proof-${w.session}`))} && rm ${q(join(d, `sage-bot-proof-${w.session}`))}`, { control: `test -w ${q(dirname(d))}` }))),
     // F-T134-10: the project settings' SessionStart hook did not run (the control runs the hook's command itself)
     P('F-T134-10', 'session-start-hook', 'refused', `test -e ${q(w.marker)}`, { control: `touch ${q(w.marker)} && test -e ${q(w.marker)}`, anyFail: true }),
     // F-T134-12: sage's root and the plugin's marketplace copy
