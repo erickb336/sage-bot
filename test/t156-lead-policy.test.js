@@ -24,6 +24,12 @@ const DENIED = [
   '/h/.local/share/sage-bot/leads/claude', // the lead sessions' Claude Code config folder (F-T134-10)
 ];
 const fileRules = (tool) => DENIED.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
+// The git control paths of session s21 (F-T156-13): literal paths in its own .git, and every other .git below it, whole.
+const S21 = '/h/.local/share/sage-bot/leads/sessions/s21';
+const GIT_CONTROL = [
+  `${S21}/.git/config`, `${S21}/.git/config.worktree`, `${S21}/.git/hooks`, `${S21}/.git/commondir`, `${S21}/.git/modules`,
+  `${S21}/.git/info/attributes`, `${S21}/.git/worktrees`, `${S21}/*/**/.git`,
+];
 const CREDENTIALS = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube'].map((f) => `/h/${f}`);
 
 test('one resolver gives every path and name of a lead session', () => {
@@ -56,7 +62,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
   assert.deepEqual(settingsOf(leadPolicy(CONFIG, 's21', HOST)), {
     permissions: {
       defaultMode: 'dontAsk',
-      deny: [...fileRules('Read'), ...fileRules('Edit'), 'Edit(.claude/**)', 'Edit(.mcp.json)', 'Grep', 'WebFetch'],
+      deny: [...fileRules('Read'), ...fileRules('Edit'), ...GIT_CONTROL.flatMap((p) => [`Edit(/${p})`, `Edit(/${p}/**)`]), 'Edit(.claude/**)', 'Edit(.mcp.json)', 'Grep', 'WebFetch'],
       allow: [],
       blockReadsOutsideWorkingDirectories: true,
     },
@@ -68,7 +74,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
       filesystem: {
         denyRead: ['/h', ...DENIED],
         allowRead: ['/h/.local/share/sage-bot/leads/sessions/s21', '/st/sage-lead-s21'],
-        denyWrite: [...DENIED, '/h/.local/share/sage-bot/leads/sessions/s21/**/.git/hooks', '/h/.local/share/sage-bot/leads/sessions/s21/**/.git/config'],
+        denyWrite: [...DENIED, ...GIT_CONTROL],
       },
       credentials: { files: CREDENTIALS.map((path) => ({ path, mode: 'deny' })), envVars: [
         { name: 'GH_TOKEN', mode: 'deny' }, { name: 'GITHUB_TOKEN', mode: 'deny' },

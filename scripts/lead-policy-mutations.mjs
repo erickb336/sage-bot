@@ -1,6 +1,6 @@
 // The mutation run of the lead policy (T156): each mutation removes or weakens one rule of src/lead-policy.js, and the tests of
-// test/t156-lead-policy.test.js must fail for each. It mutates a copy of src, scripts and test in a new temp folder, never the
-// worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
+// test/t156-lead-policy.test.js and test/t156-git-control.test.js must fail for each. It mutates a copy of src, scripts and test in
+// a new temp folder, never the worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
 //   node scripts/lead-policy-mutations.mjs     prints KILLED or SURVIVED for each mutation; exits 1 when one survives
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -10,6 +10,8 @@ const ROOT = join(import.meta.dirname, '..'), W = mkdtempSync(join(tmpdir(), 'sa
 for (const d of ['src', 'scripts', 'test', 'package.json']) cpSync(join(ROOT, d), join(W, d), { recursive: true });
 symlinkSync(join(ROOT, 'node_modules'), join(W, 'node_modules'));
 const F = `${W}/src/lead-policy.js`, orig = readFileSync(F, 'utf8');
+const GIT_CONTROL = ['config', 'config.worktree', 'hooks', 'commondir', 'modules', 'info/attributes', 'worktrees'];
+const LIST = `[${GIT_CONTROL.map((n) => `'${n}'`).join(', ')}]`;
 const M = [
   ['sandbox.enabled false', 'enabled: true,', 'enabled: false,'],
   ['failIfUnavailable false', 'failIfUnavailable: true', 'failIfUnavailable: false'],
@@ -33,9 +35,12 @@ const M = [
   ['home re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.home]'],
   ['home not resolved by its real path', 'home: real(home),', 'home,'],
   ['no denyWrite of the denied paths', 'denyWrite: [...policy.denied, ', 'denyWrite: ['],
-  ['no nested .git denyWrite', ', ...nestedGit(policy.folder)]', ']'],
-  ['no nested .git/hooks', "[`${folder}/**/.git/hooks`, ", '['],
-  ['no nested .git/config', ", `${folder}/**/.git/config`]", ']'],
+  ['no git control denyWrite', ', ...gitControl(policy.folder)]', ']'],
+  ...GIT_CONTROL.map((name) => [`no .git/${name} denyWrite`, LIST, LIST.replace(`'${name}', `, '').replace(`, '${name}'`, '')]),
+  ['no nested .git denyWrite', "\n  `${folder}/*/**/.git`,\n", '\n'],
+  ['the nested .git glob takes the folder\'s own .git too', "`${folder}/*/**/.git`", "`${folder}/**/.git`"],
+  ['globs, not literal paths, in the folder\'s own .git', "(p) => `${folder}/.git/${p}`", "(p) => `${folder}/**/.git/${p}`"],
+  ['no Edit rules for the git control paths', "        ...rules('Edit', gitControl(policy.folder)),", '        //'],
   ['no credential files', "        files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),\n", ''],
   ['~/.ssh not a credential file', "['.ssh', '.aws',", "['.aws',"],
   ['~/.config/gh not a credential file', "'.aws', '.config/gh',", "'.aws',"],
@@ -97,7 +102,7 @@ try {
   for (const [name, a, b] of M) {
     if (!orig.includes(a)) { rows.push(`NOT APPLIED  ${name}`); continue; }
     writeFileSync(F, orig.replace(a, b));
-    const r = spawnSync(process.execPath, ['--test', 'test/t156-lead-policy.test.js'], { cwd: W, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, ['--test', 'test/t156-lead-policy.test.js', 'test/t156-git-control.test.js'], { cwd: W, encoding: 'utf8' });
     const failed = (/ℹ fail (\d+)/.exec(r.stdout) ?? [])[1];
     rows.push(`${r.status !== 0 ? 'KILLED' : 'SURVIVED'}  ${name}  (failing tests: ${failed ?? '?'})`);
   }

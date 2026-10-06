@@ -628,7 +628,7 @@ Status: built and tested; no session uses it yet (T134 PR 1 of 6). Lead sessions
 | Commands read nothing in the home folder but the session's own folders (F-T156-5). A script that opens a file itself is a command too, so this is the boundary for `~/.ssh`, `~/.config/gh` and other sessions' folders | `sandbox.filesystem.denyRead` starts with the home folder (its real path); `sandbox.filesystem.allowRead` re-opens only the session folder and its temp folder (the narrower rule wins) |
 | Credential files stay denied, also if the home deny is ever removed | `sandbox.credentials.files` denies `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `~/.netrc`, `~/.npmrc`, `~/.gnupg`, `~/.docker` and `~/.kube` (`CREDENTIAL_FILES`) |
 | git runs without the owner's global config, which the home deny hides | `launchOf` sets `GIT_CONFIG_GLOBAL=/dev/null` |
-| No change to git hooks or git config in any repository below the session folder (F-T134-3, F-T156-9) | `sandbox.filesystem.denyWrite`: `<session folder>/**/.git/hooks` and `<session folder>/**/.git/config` (wildcards work on macOS; on Linux Claude Code skips a wildcard write entry) |
+| No change to where git reads its config or its hooks, in any repository below the session folder (F-T134-3, F-T156-9, F-T156-13). See "Git in a session folder" below | `sandbox.filesystem.denyWrite` and `permissions.deny` `Edit`: in the session's own `.git`, the literal paths `config`, `config.worktree`, `hooks`, `commondir`, `modules`, `info/attributes` and `worktrees`; and `<session folder>/*/**/.git`, every other `.git` below the folder, whole |
 | No Grep at all: `Read` rules reach Grep only best-effort (F-T134-16, F-T156-8) | `permissions.deny`: `Grep` |
 | Anything not allowed is refused, with no question | `permissions.defaultMode: "dontAsk"` |
 | No host but the strict list (`LEAD_HOSTS`, empty today: no GitHub, no host at all) | `sandbox.network.allowedDomains`; WebFetch: `WebFetch` denied while the list is empty, else `WebFetch(domain:<host>)` allowed for each host on it |
@@ -646,6 +646,25 @@ The denied paths:
 - the lead sessions' own Claude Code config folder (F-T134-10).
 
 These paths stay denied by name also when they are in the home folder, because some can be outside it.
+
+**Git in a session folder.** Host-side git must never run in a session folder: not a sage hook, not the bridge, not the owner. A session can change files that git reads at its next start, so a git command outside the sandbox there can run the session's code (F-T134-3, F-T156-13). The broker copies commits out of the folder into a repository of its own, with hooks off (PR 3 of T134). The sandbox side, `gitControl` in `src/lead-policy.js`, is a second layer:
+
+| Denied write | What it stops |
+| --- | --- |
+| `.git/config`, `.git/config.worktree` | settings that name code: `core.hooksPath`, `core.fsmonitor`, an alias, `include.path` |
+| `.git/hooks` | a hook |
+| `.git/commondir` | a common folder of the session's choice, with its own config and hooks (R518) |
+| `.git/modules`, the whole tree | a submodule's config and hooks |
+| `.git/worktrees`, the whole tree | a linked worktree's `commondir`, `gitdir` and `config.worktree` |
+| `.git/info/attributes` | attributes that name a filter or a diff driver |
+| `<session folder>/*/**/.git`, whole | a gitlink file (`gitdir: …`) in a subfolder or a submodule, and a new repository in a subfolder |
+
+- The folder's own `.git` gets literal paths, not globs. Claude Code 2.1.289 also denies creating or removing each parent of a literal `denyWrite` path, so `.git`, `.git/info` and `.git/worktrees` cannot be renamed away, changed and renamed back. With a glob such as `**/.git/config`, that rename works.
+- A glob denies the path that it matches and everything below it. So `**/.git` would deny the whole `.git` folder, and commits with it; `*/**/.git` leaves out the folder's own `.git`.
+- Objects, refs, the index, `HEAD`, the logs and `info/exclude` stay writable, so `git add`, `git commit` and `git switch` work.
+- `test/t156-git-control.test.js` runs each attack with real git on a sample session folder: the sandbox must stop each operation of the attack's control step, and the attack must work without it. A normal add, commit and switch must make only allowed operations. On macOS it also runs the attacks under a seatbelt profile made from the generated `denyWrite`.
+
+What stays open, so the rule above stays: a session can turn its folder into a bare repository (move `.git/HEAD` away, then write `HEAD`, `objects`, `refs` and `config` in the folder), and a git command in the folder then reads that `config`. Only `safe.bareRepository=explicit` stops this. On Linux, Claude Code skips a wildcard `denyWrite` entry, so the `*/**/.git` deny is gone there.
 
 **Per session** (the session's name is `s` and a number, for example `s21`):
 

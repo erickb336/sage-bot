@@ -102,8 +102,17 @@ export function leadPolicy(config, session, host = {}) {
 
 /** The absolute form of a permission rule's path (two slashes), and the rules of one tool for a list of paths. */
 const rules = (tool, paths) => paths.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
-/** Where git keeps code that runs, or settings that name code, in any repository below a folder (F-T134-3, F-T156-9). */
-const nestedGit = (folder) => [`${folder}/**/.git/hooks`, `${folder}/**/.git/config`];
+/**
+ * Every git control path below a session folder: each file that can change where git reads its config or its hooks (F-T134-3, F-T156-9,
+ * F-T156-13). The folder's own .git gets literal paths, because Claude Code also denies creating or removing each parent of a literal
+ * denyWrite path: `.git`, `.git/info` and `.git/worktrees` cannot be renamed away, changed and renamed back. Every other .git below the
+ * folder, a gitlink file or a nested repository, is denied whole. Objects, refs, the index and HEAD stay writable, so commits work. Host
+ * git must still never run in a session folder (docs/reference.md, "Git in a session folder").
+ */
+const gitControl = (folder) => [
+  ...['config', 'config.worktree', 'hooks', 'commondir', 'modules', 'info/attributes', 'worktrees'].map((p) => `${folder}/.git/${p}`),
+  `${folder}/*/**/.git`,
+];
 
 /**
  * The Claude Code settings of a lead session (`--settings`), from the policy only.
@@ -115,6 +124,7 @@ export function settingsOf(policy) {
       defaultMode: 'dontAsk',
       deny: [
         ...['Read', 'Edit'].flatMap((tool) => rules(tool, policy.denied)), // the file tools: the sandbox covers Bash only; Edit covers Write
+        ...rules('Edit', gitControl(policy.folder)), // F-T156-13: the file tools write past the sandbox
         'Edit(.claude/**)', 'Edit(.mcp.json)', // F-T134-4
         'Grep', // F-T134-16, F-T156-8: Read rules reach Grep only best-effort
         ...(policy.hosts.length ? [] : ['WebFetch']), // no host on the list: no WebFetch at all
@@ -130,7 +140,7 @@ export function settingsOf(policy) {
       filesystem: {
         denyRead: [policy.home, ...policy.denied], // F-T156-5: the whole home folder; the narrower allowRead below re-opens
         allowRead: [policy.folder, policy.tmp], // only the session's own folders
-        denyWrite: [...policy.denied, ...nestedGit(policy.folder)],
+        denyWrite: [...policy.denied, ...gitControl(policy.folder)],
       },
       credentials: {
         files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),
