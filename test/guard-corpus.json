@@ -2235,7 +2235,8 @@
     "git add 'app/[id]/page.tsx'",
     "node --test 'test/[a].test.js'",
     "cp ./sta*te.mjs* {SCRATCH}/out",
-    "git -C {SCRATCH}/proj add -- 'conf?g/.e*'"
+    "git -C {SCRATCH}/proj add -- 'conf?g/.e*'",
+    "npm run check ./s*"
   ],
   "pattern": [
     "git -C {SCRATCH}/proj add ':(glob)**/.e*'",
