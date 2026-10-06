@@ -163,6 +163,7 @@ test('keychain fixture: it saves the search list, makes the scratch keychain, an
     let during;
     const got = await withScratchKeychain(join(root, 'kc'), (plan) => { during = fake.state(); return plan.service; }, { env: fake.env, id: 'abc123' });
     assert.equal(got, 'sage-bot-proof-sample-abc123');
+    assert.equal(readFileSync(join(root, 'kc', 'search-list-before.txt'), 'utf8'), '/Users/sample/Library/Keychains/login.keychain-db\n/Library/Keychains/System.keychain\n'); // the baseline on disk, for a crash
     assert.deepEqual(during.list, ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain', join(root, 'kc', 'proof.keychain-db')]);
     assert.deepEqual(fake.state(), { list: ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain'], keychains: [] });
     assert.deepEqual(fake.verbs(), ['list-keychains', 'create-keychain', 'add-generic-password', 'delete-keychain', 'list-keychains', 'list-keychains']);

@@ -2,9 +2,11 @@
 // while it runs, so it runs only with the owner's approval (standing order 11); `npm run proof` never runs it and only prints its
 // commands. It makes a keychain file in a scratch folder with one sample generic password, under a service name that no real item uses,
 // and every probe names that keychain by its path. `security create-keychain` adds the new keychain to the user's search list and
-// `delete-keychain` changes it again, so it saves the list first and puts it back after, also on a failure (F-T157-9).
+// `delete-keychain` changes it again, so it saves the list first (in memory, and in <dir>/search-list-before.txt for a crash that no
+// finally block sees, such as a SIGKILL) and puts it back after, also on a failure (F-T157-9).
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ACCOUNT = 'sage-bot-proof';
@@ -48,6 +50,8 @@ export async function withScratchKeychain(dir, fn, { env = process.env, id } = {
   const security = (args) => execFileSync('security', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const saved = keychainsOf(security(plan.save));
   if (!saved.length) throw new Error('the keychain search list is empty or could not be read: nothing was changed.');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'search-list-before.txt'), `${saved.join('\n')}\n`); // the baseline survives a SIGKILL: put it back by hand from here
   let created = false;
   try {
     security(plan.create);
