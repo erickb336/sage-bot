@@ -8,7 +8,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { auditPathOf, killPathOf } from './audit.js';
-import { sagePath, sagePlugin } from './sage.js';
+import { claudeDirOf, sagePath, sagePlugin } from './sage.js';
 import { sessionsPathOf } from './sessions.js';
 import { leadsPathOf, votesPathOf } from './state.js';
 
@@ -18,6 +18,8 @@ const run = promisify(execFile);
 export const MAX_USD = 5;
 /** The strict host list of a lead session, for the sandbox and WebFetch: no GitHub host. Empty: a session reaches no host. */
 export const LEAD_HOSTS = [];
+/** The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5). */
+export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube'];
 /** The GitHub credential variables that a lead session never gets. */
 export const DENIED_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
 /** The state tool's capability command (sage T127, G59), and the line that says lead sessions are possible. */
@@ -48,20 +50,25 @@ function userTemp() {
 
 /**
  * Every path and name of one lead session's containment. Throws one line when the session cannot be contained: a session name that is
- * not s and a number, a `leadsPath` that is not absolute, or a folder that the session may write that is in a denied path or holds one.
- * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadsPath
+ * not s and a number, a `statePath` or `leadSessionsPath` that is not an absolute path, or a session or temp folder that is in a denied
+ * path or holds one, by its real path (a link does not hide an overlap).
+ * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadSessionsPath
  * @param {string} session  the session's name, for example s21
  * @param {{ env?: NodeJS.ProcessEnv, home?: string, tmp?: string, userTemp?: string, shortTmp?: string, claude?: string }} [host]
  *   the host's values, for the tests; by default the real ones
  */
 export function leadPolicy(config, session, host = {}) {
   if (!SESSION.test(session ?? '')) throw new TypeError(`a lead session's name is s and a number, such as s21, not ${JSON.stringify(session)}. Nothing was started.`);
-  if (config.leadsPath !== undefined && !isAbsolute(config.leadsPath)) throw new TypeError('the config: leadsPath must be an absolute path. Nothing was started.');
+  for (const key of ['statePath', 'leadSessionsPath']) { // F-T156-10: a relative or ~ path would resolve against the cwd
+    const path = config[key];
+    if ((path !== undefined || key === 'statePath') && !(typeof path === 'string' && isAbsolute(path))) throw new TypeError(`the config: ${key} must be an absolute path, not ${JSON.stringify(path ?? null)}. Nothing was started.`);
+  }
   const { env = process.env, home = homedir(), tmp = tmpdir(), shortTmp = '/tmp', claude = 'claude' } = host;
-  const leads = real(config.leadsPath ?? join(home, '.local', 'share', 'sage-bot', 'leads'));
+  const leads = real(config.leadSessionsPath ?? join(home, '.local', 'share', 'sage-bot', 'leads'));
   const stateDir = real(dirname(config.statePath));
-  const plugin = sagePlugin(home);
-  const sageRoot = real(env.SAGE_HOME ?? join(env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), 'sage'));
+  const claudeConfig = claudeDirOf({ env, home }); // F-T156-11: the plugin and sage's root from one config folder
+  const plugin = sagePlugin(claudeConfig);
+  const sageRoot = real(env.SAGE_HOME ?? join(claudeConfig, 'sage'));
   const temps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()].filter(Boolean);
   const claudeDir = join(leads, 'claude');
   const denied = [...new Set([
@@ -73,8 +80,10 @@ export function leadPolicy(config, session, host = {}) {
   ].map(real))];
   const policy = {
     session,
-    folder: join(leads, 'sessions', session),
-    tmp: join(real(shortTmp), `sage-lead-${session}`), // F-T134-13
+    folder: real(join(leads, 'sessions', session)), // F-T156-6: a link at sessions or sessions/<name> counts by its target
+    tmp: real(join(shortTmp, `sage-lead-${session}`)), // F-T134-13, F-T156-6
+    home: real(home), // F-T156-5: sandboxed commands read nothing in it but the session's own folders
+    credentialFiles: CREDENTIAL_FILES.map((f) => join(real(home), f)),
     hooksState: join(stateDir, 'lead-hooks', session),
     claudeDir,
     denied,
@@ -86,13 +95,15 @@ export function leadPolicy(config, session, host = {}) {
   };
   for (const [what, path] of [['session folder', policy.folder], ['temp folder', policy.tmp]]) {
     const clash = denied.find((d) => within(d, path) || within(path, d));
-    if (clash) throw new Error(`the lead session's ${what} ${path} ${within(path, clash) ? 'is in' : 'holds'} the denied path ${clash}: the sandbox could not keep the session out. Change leadsPath or statePath. Nothing was started.`);
+    if (clash) throw new Error(`the lead session's ${what} ${path} ${within(path, clash) ? 'is in' : 'holds'} the denied path ${clash}: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.`);
   }
   return policy;
 }
 
 /** The absolute form of a permission rule's path (two slashes), and the rules of one tool for a list of paths. */
 const rules = (tool, paths) => paths.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
+/** Where git keeps code that runs, or settings that name code, in any repository below a folder (F-T134-3, F-T156-9). */
+const nestedGit = (folder) => [`${folder}/**/.git/hooks`, `${folder}/**/.git/config`];
 
 /**
  * The Claude Code settings of a lead session (`--settings`), from the policy only.
@@ -103,8 +114,9 @@ export function settingsOf(policy) {
     permissions: {
       defaultMode: 'dontAsk',
       deny: [
-        ...['Read', 'Edit', 'Write'].flatMap((tool) => rules(tool, policy.denied)), // the file tools: the sandbox covers Bash only
-        'Edit(.claude/**)', 'Write(.claude/**)', 'Edit(.mcp.json)', 'Write(.mcp.json)', // F-T134-4
+        ...['Read', 'Edit'].flatMap((tool) => rules(tool, policy.denied)), // the file tools: the sandbox covers Bash only; Edit covers Write
+        'Edit(.claude/**)', 'Edit(.mcp.json)', // F-T134-4
+        'Grep', // F-T134-16, F-T156-8: Read rules reach Grep only best-effort
         ...(policy.hosts.length ? [] : ['WebFetch']), // no host on the list: no WebFetch at all
       ],
       allow: policy.hosts.map((h) => `WebFetch(domain:${h})`),
@@ -115,15 +127,23 @@ export function settingsOf(policy) {
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
       network: { allowedDomains: policy.hosts },
-      filesystem: { denyRead: policy.denied, denyWrite: policy.denied },
-      credentials: { envVars: policy.deniedEnv.map((name) => ({ name, mode: 'deny' })) },
+      filesystem: {
+        denyRead: [policy.home, ...policy.denied], // F-T156-5: the whole home folder; the narrower allowRead below re-opens
+        allowRead: [policy.folder, policy.tmp], // only the session's own folders
+        denyWrite: [...policy.denied, ...nestedGit(policy.folder)],
+      },
+      credentials: {
+        files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),
+        envVars: policy.deniedEnv.map((name) => ({ name, mode: 'deny' })),
+      },
     },
   };
 }
 
 /**
  * The command of a lead session: `claude` and its arguments, its working folder and its environment, from the policy only. The
- * environment is the host's without the GitHub credential variables, with the session's own temp, config and hook-state folders.
+ * environment is the host's without the GitHub credential variables, with the session's own temp, config and hook-state folders, and
+ * no global git config (GIT_CONFIG_GLOBAL=/dev/null): git reads ~/.gitconfig at each start, and the sandbox denies the home folder.
  * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
  */
 export function launchOf(policy, env = process.env) {
@@ -134,20 +154,23 @@ export function launchOf(policy, env = process.env) {
       ...(policy.sageTool ? ['--plugin-dir', dirname(dirname(dirname(policy.sageTool)))] : []), // sage, the only plugin
       '--max-budget-usd', String(policy.maxUsd)],
     cwd: policy.folder,
-    env: { ...kept, SAGE_HOOKS_STATE: policy.hooksState, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir },
+    env: { ...kept, SAGE_HOOKS_STATE: policy.hooksState, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir, GIT_CONFIG_GLOBAL: '/dev/null' },
   };
 }
 
 /**
  * Whether a lead session can start, from the policy only. Fails closed, in this order:
  * - "waiting for sage T127": the state tool, run outside the sandbox, does not print the line CAPABILITY_LINE, or fails;
- * - "no sandbox": `claude sandbox status` with the session's settings does not say supported, enabled and strict;
+ * - "no sandbox": `claude sandbox status` with the session's settings does not say supported, enabled and strict. Claude Code 2.1.289
+ *   reports strictMode true exactly when a settings source sets sandbox.allowUnsandboxedCommands to false; strictModeSource "policy"
+ *   means that the key is in --settings (or managed settings), whatever its value (F-T156-7);
  * - else "ready". Sessions still need Erick's switch at the terminal (G50 a): sage-bot never turns them on by itself.
- * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
+ * Each command gets `timeout` ms, then SIGKILL: a command that ignores SIGTERM cannot hold the preflight.
+ * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment @param {number} [timeout]
  * @returns {Promise<{ state: 'ready' | 'waiting for sage T127' | 'no sandbox', why: string }>}
  */
-export async function preflight(policy, env = process.env) {
-  const out = async (file, args, o = {}) => (await run(file, args, { encoding: 'utf8', timeout: 30_000, ...o })).stdout;
+export async function preflight(policy, env = process.env, timeout = 30_000) {
+  const out = async (file, args, o = {}) => (await run(file, args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL', ...o })).stdout;
   const short = (e) => String(e?.stderr || e?.message || e).trim().split('\n')[0];
   if (!policy.sageTool) return { state: 'waiting for sage T127', why: 'the sage state tool is not installed' };
   try {

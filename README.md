@@ -402,7 +402,7 @@ node scripts/leads.mjs verify    # check the hash chain of the lead log; exits 1
 node scripts/leads.mjs read 20   # print the last 20 lines of the lead log; a line from a break on starts with UNVERIFIED
 ```
 
-**The lead policy (not on yet).** Sessions from Discord stay off. `src/lead-policy.js` is the one place that names every folder and file that a lead session must not reach, and it makes the Claude Code sandbox and permission settings of a session from that list. `node scripts/lead-policy.mjs settings` prints them; `node scripts/lead-policy.mjs preflight` says whether a session could start: "waiting for sage T127" until sage's state tool says that it supports lead sessions, "no sandbox" when the sandbox is not on and strict, else "ready". Even then no session starts until you turn sessions on at the terminal (a later step). The [reference](docs/reference.md#the-lead-policy) lists each setting.
+**The lead policy (not on yet).** Sessions from Discord stay off. `src/lead-policy.js` is the one place that names every folder and file that a lead session must not reach, and it makes the Claude Code sandbox and permission settings of a session from that list. The commands of a session read nothing in your home folder but the session's own folder and temp folder. `node scripts/lead-policy.mjs settings` prints them; `node scripts/lead-policy.mjs preflight` says whether a session could start: "waiting for sage T127" until sage's state tool says that it supports lead sessions, "no sandbox" when the sandbox is not on and strict, else "ready". Even then no session starts until you turn sessions on at the terminal (a later step). The [reference](docs/reference.md#the-lead-policy) lists each setting.
 
 ## FAQ
 

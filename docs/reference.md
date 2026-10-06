@@ -625,39 +625,46 @@ Status: built and tested; no session uses it yet (T134 PR 1 of 6). Lead sessions
 | --- | --- |
 | No command runs outside the sandbox, and no sandbox means no session | `sandbox.enabled`, `sandbox.failIfUnavailable`, `sandbox.allowUnsandboxedCommands: false` |
 | The file tools read only in the working folder | `permissions.blockReadsOutsideWorkingDirectories` |
+| Commands read nothing in the home folder but the session's own folders (F-T156-5). A script that opens a file itself is a command too, so this is the boundary for `~/.ssh`, `~/.config/gh` and other sessions' folders | `sandbox.filesystem.denyRead` starts with the home folder (its real path); `sandbox.filesystem.allowRead` re-opens only the session folder and its temp folder (the narrower rule wins) |
+| Credential files stay denied, also if the home deny is ever removed | `sandbox.credentials.files` denies `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.git-credentials`, `~/.netrc`, `~/.npmrc`, `~/.gnupg`, `~/.docker` and `~/.kube` (`CREDENTIAL_FILES`) |
+| git runs without the owner's global config, which the home deny hides | `launchOf` sets `GIT_CONFIG_GLOBAL=/dev/null` |
+| No change to git hooks or git config in any repository below the session folder (F-T134-3, F-T156-9) | `sandbox.filesystem.denyWrite`: `<session folder>/**/.git/hooks` and `<session folder>/**/.git/config` (wildcards work on macOS; on Linux Claude Code skips a wildcard write entry) |
+| No Grep at all: `Read` rules reach Grep only best-effort (F-T134-16, F-T156-8) | `permissions.deny`: `Grep` |
 | Anything not allowed is refused, with no question | `permissions.defaultMode: "dontAsk"` |
 | No host but the strict list (`LEAD_HOSTS`, empty today: no GitHub, no host at all) | `sandbox.network.allowedDomains`; WebFetch: `WebFetch` denied while the list is empty, else `WebFetch(domain:<host>)` allowed for each host on it |
 | No GitHub token | `sandbox.credentials.envVars` denies `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`; `launchOf` also leaves them out of the session's environment |
 | The denied paths, for commands | `sandbox.filesystem.denyRead` and `denyWrite` |
-| The denied paths, for the file tools (the sandbox covers Bash only) | `permissions.deny`: `Read`, `Edit` and `Write` on each denied path and everything in it |
-| No change to the session's Claude Code settings or MCP servers (F-T134-4) | `permissions.deny`: `Edit(.claude/**)`, `Write(.claude/**)`, `Edit(.mcp.json)`, `Write(.mcp.json)` |
+| The denied paths, for the file tools (the sandbox covers Bash only) | `permissions.deny`: `Read` and `Edit` on each denied path and everything in it. `Edit` rules cover Write too; Claude Code never consults a `Write(<path>)` rule |
+| No change to the session's Claude Code settings or MCP servers (F-T134-4) | `permissions.deny`: `Edit(.claude/**)`, `Edit(.mcp.json)` |
 
 The denied paths:
 
 - the folder of `statePath` (the gate file, the thread and channel files and the lock), the lead log, the kill-switch flag, the spool and the vote files, also where the config moves them (F-T134-2);
 - `~/.config/sage-bot`, the bridge's config folder (F-T134-2);
-- the sage plugin's folders `~/.claude/plugins/cache/sage` and `~/.claude/plugins/marketplaces/sage`, and sage's root (`SAGE_HOME`, else `$CLAUDE_CONFIG_DIR/sage`, else `~/.claude/sage`), with every logbook (F-T134-6, F-T134-12);
+- the sage plugin's folders `plugins/cache/sage` and `plugins/marketplaces/sage`, and sage's root (`SAGE_HOME`, else `sage`), with every logbook, all in the Claude Code config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`; `claudeDirOf` in `src/sage.js` resolves it once) (F-T134-6, F-T134-12, F-T156-11);
 - sage's hook state: `sage-hooks` in the temp folder (`TMPDIR`, and on macOS also `getconf DARWIN_USER_TEMP_DIR`), and `.hooks` in sage's root (F-T134-7, F-T134-12);
 - the lead sessions' own Claude Code config folder (F-T134-10).
+
+These paths stay denied by name also when they are in the home folder, because some can be outside it.
 
 **Per session** (the session's name is `s` and a number, for example `s21`):
 
 | Value | Where |
 | --- | --- |
-| The session folder, the working folder of `claude -p` | `<leadsPath>/sessions/<name>`; `leadsPath` in the config, else `~/.local/share/sage-bot/leads` |
-| `CLAUDE_CONFIG_DIR`, one for all lead sessions, not the owner's (F-T134-10) | `<leadsPath>/claude` (denied) |
-| `CLAUDE_CODE_TMPDIR`, short and of this session only, not the shared `/tmp/claude-<uid>` (F-T134-13) | `/tmp/sage-lead-<name>` (on macOS `/private/tmp/…`) |
+| The session folder, the working folder of `claude -p` | `<leadSessionsPath>/sessions/<name>`, by its real path; `leadSessionsPath` in the config (an absolute path), else `~/.local/share/sage-bot/leads` |
+| `CLAUDE_CONFIG_DIR`, one for all lead sessions, not the owner's (F-T134-10) | `<leadSessionsPath>/claude` (denied) |
+| `CLAUDE_CODE_TMPDIR`, short and of this session only, not the shared `/tmp/claude-<uid>` (F-T134-13) | `/tmp/sage-lead-<name>`, by its real path (on macOS `/private/tmp/…`) |
 | `SAGE_HOOKS_STATE`, sage's hook state for this session | `<folder of statePath>/lead-hooks/<name>` (in a denied path) |
 | Setting sources | sage-bot's settings only: `--settings` and `--setting-sources ""` |
 | Plugins and MCP | sage only (`--plugin-dir`, the version of `sagePath`), `--strict-mcp-config` with no server |
 | The most one session spends | `--max-budget-usd 5` (`MAX_USD`, G60) |
 
-**The refusal.** When the session folder or its temp folder is in a denied path, or holds one, the policy throws one line and starts nothing, for example: "the lead session's session folder /s/state/leads/sessions/s1 is in the denied path /s/state: the sandbox could not keep the session out. Change leadsPath or statePath. Nothing was started." It compares real paths, so a link does not hide an overlap.
+**The refusal.** When the session folder or its temp folder is in a denied path, or holds one, the policy throws one line and starts nothing, for example: "the lead session's session folder /s/state/leads/sessions/s1 is in the denied path /s/state: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started." It compares real paths, so a link at the leads folder, at `sessions`, at `sessions/<name>` or at the temp folder does not hide an overlap (F-T156-6). A `statePath` or `leadSessionsPath` that is not an absolute path (for example `~/state/gates.json`, or `null`) is refused with one line too: "the config: statePath must be an absolute path, not "~/state/gates.json". Nothing was started." (F-T156-10)
 
 **The preflight.** It fails closed, in this order:
 
 1. "waiting for sage T127": the state tool (`sagePath`) runs `capabilities` outside the sandbox and must print the line `lead-sessions 1` (G59). A missing tool, a missing line or a failing command means waiting.
-2. "no sandbox": `claude --settings <the settings> --setting-sources "" sandbox status` must print `supported`, `enabled` and `strictMode` as true, with no `unavailableReason`.
+2. "no sandbox": `claude --settings <the settings> --setting-sources "" sandbox status` must print `supported`, `enabled` and `strictMode` as true, with no `unavailableReason`. Each command has 30 seconds, then SIGKILL. Claude Code 2.1.289 prints `strictMode` true exactly when a settings source sets `sandbox.allowUnsandboxedCommands` to `false`; `strictModeSource` "policy" only says that `--settings` has the key, whatever its value (F-T156-7). A test runs the real `claude`, when it is installed, in a scratch `HOME` and expects "ready".
 3. Else "ready". A session still needs Erick's switch at the terminal (G50 a, a later step): sage-bot never turns sessions on by itself.
 
 <!-- check: run -->
@@ -671,9 +678,9 @@ node scripts/lead-policy.mjs --session s21 settings
 node scripts/lead-policy.mjs preflight             # lead sessions: ready, waiting for sage T127, or no sandbox; exit 1 unless ready
 ```
 
-**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (59 mutations: each setting, each denied path, the refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` fails for each.
+**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (80 mutations: each setting, each denied path and allowed path, the refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` fails for each. It changes a copy in a new temp folder, never the worktree, so a run of `lead-policy.mjs` at the same time sees the real policy.
 
-<!-- check: skip, it changes src/lead-policy.js while it runs and takes about a minute -->
+<!-- check: skip, it runs the tests once for each mutation and takes a few minutes -->
 ```sh
 node scripts/lead-policy-mutations.mjs             # KILLED or SURVIVED for each mutation; exit 1 when one survives
 ```
@@ -687,4 +694,4 @@ You need Node 22 or later, and `npm ci` once (discord.js and playwright-core, bo
 npm run check
 ```
 
-The check runs `node --check` on every source file, then the tests in `test/`. A test runs the example above and checks that this page holds it. Another test (`test/readme.test.js`) runs the shell commands of the README and of this page in a scratch HOME, and checks every relative link. The tests use sample ids only. The bridge tests run the sage state tool (`SAGE_TOOL`, by default the sage plugin's `sage.mjs`) with `HOME` and `SAGE_HOME` in a new scratch folder, so they never touch a real logbook, and they use the fake Discord layer, so they never connect to Discord. One test runs npm itself from another folder with `HOME` set to a scratch folder, to prove the `.npmrc`: npm writes and deletes no log file anywhere (`logs-dir=/dev/null`, `logs-max=0`). For a debug log of one command: `npm --logs-dir=/tmp/npm-logs --logs-max=5 <command>`.
+The check runs `node --check` on every source file, then the tests in `test/`. A test runs the example above and checks that this page holds it. Another test (`test/readme.test.js`) runs the shell commands of the README and of this page in a scratch HOME, and checks every relative link. The tests use sample ids only. The bridge tests run the sage state tool (`SAGE_TOOL`, by default the sage plugin's `sage.mjs` in the Claude Code config folder: `CLAUDE_CONFIG_DIR`, else `~/.claude`; when you set `CLAUDE_CONFIG_DIR` to a scratch folder, set `SAGE_TOOL` too) with `HOME` and `SAGE_HOME` in a new scratch folder, so they never touch a real logbook, and they use the fake Discord layer, so they never connect to Discord. One test runs npm itself from another folder with `HOME` set to a scratch folder, to prove the `.npmrc`: npm writes and deletes no log file anywhere (`logs-dir=/dev/null`, `logs-max=0`). For a debug log of one command: `npm --logs-dir=/tmp/npm-logs --logs-max=5 <command>`.

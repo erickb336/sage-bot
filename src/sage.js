@@ -44,16 +44,19 @@ export function sageTool({ sagePath, project, env = process.env }) {
   };
 }
 
-/** The sage plugin's two folders under a home folder: its cache (each version) and its marketplace copy. */
-export const sagePlugin = (home) => ({
-  cache: join(home, '.claude', 'plugins', 'cache', 'sage'),
-  marketplace: join(home, '.claude', 'plugins', 'marketplaces', 'sage'),
+/** The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. */
+export const claudeDirOf = ({ env = process.env, home = userInfo().homedir } = {}) => env.CLAUDE_CONFIG_DIR ?? join(home, '.claude');
+
+/** The sage plugin's two folders in a Claude Code config folder (claudeDirOf): its cache (each version) and its marketplace copy. */
+export const sagePlugin = (claudeDir) => ({
+  cache: join(claudeDir, 'plugins', 'cache', 'sage'),
+  marketplace: join(claudeDir, 'plugins', 'marketplaces', 'sage'),
 });
 
 /**
  * Where the sage state tool is, for the demo, the bridge tests and the lead policy (src/lead-policy.js). In this order:
  * 1. SAGE_TOOL, when it is set;
- * 2. the newest sage.mjs (by modification time) in the sage plugin's cache, <cache>/sage/<version>/skills/sage/;
+ * 2. the newest sage.mjs (by modification time) in the sage plugin's cache, <cache>/sage/<version>/skills/sage/, in claudeDirOf;
  * 3. else an error that names SAGE_TOOL.
  * HOME is the real home folder from the user database (os.userInfo), not $HOME: the demo and the tests run with HOME set to a scratch folder.
  * @param {{ env?: NodeJS.ProcessEnv, home?: string }} [o] @returns {string} the path of sage.mjs
@@ -63,7 +66,7 @@ export function sagePath({ env = process.env, home = userInfo().homedir } = {}) 
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);
   }
-  const cache = join(sagePlugin(home).cache, 'sage');
+  const cache = join(sagePlugin(claudeDirOf({ env, home })).cache, 'sage');
   const found = (existsSync(cache) ? readdirSync(cache) : [])
     .map((v) => join(cache, v, 'skills', 'sage', 'sage.mjs'))
     .filter((p) => existsSync(p))

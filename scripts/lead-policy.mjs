@@ -10,7 +10,14 @@ import { forTerminal } from '../src/clean.js';
 import { defaultConfigPath, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
 
 const args = process.argv.slice(2);
-const option = (name, fallback) => { const at = args.indexOf(name); return at === -1 ? fallback : args.splice(at, 2)[1]; };
+const USAGE = 'usage: settings or preflight, with --config <config.json> and --session <s1> when needed';
+const option = (name, fallback) => {
+  const at = args.indexOf(name);
+  if (at === -1) return fallback;
+  const [, value] = args.splice(at, 2);
+  if (value === undefined || value.startsWith('--')) throw new TypeError(`${name} needs a value. ${USAGE}`); // F-T156-11
+  return value;
+};
 try {
   const path = option('--config', defaultConfigPath());
   const session = option('--session', 's1');
@@ -23,7 +30,7 @@ try {
     const { state, why } = await preflight(policy);
     console.log(forTerminal(`lead sessions: ${state} (${why})`));
     if (state !== 'ready') process.exitCode = 1;
-  } else throw new TypeError('usage: settings or preflight, with --config <config.json> and --session <s1> when needed');
+  } else throw new TypeError(USAGE);
 } catch (e) {
   console.error(`sage-bot lead-policy: ${forTerminal(e?.message ?? e)}`);
   process.exit(1);
