@@ -831,7 +831,7 @@ node scripts/lead-policy.mjs --session s21 settings
 node scripts/lead-policy.mjs preflight             # lead sessions: ready, waiting for sage T127, or no sandbox; exit 1 unless ready
 ```
 
-**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (MUTATIONS mutations: each setting, each denied path and allowed path, each variable of the environment, each refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` or `test/t156-git-control.test.js` fails for each. A mutation counts as killed only when a test fails and every test file loads; a mutation that breaks the syntax or makes a test file crash prints INVALID and fails the run (F-T156-23). It changes a copy in a new temp folder, never the worktree, so a run of `lead-policy.mjs` at the same time sees the real policy.
+**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (123 mutations: each setting, each denied path and allowed path, each variable of the environment, each refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` or `test/t156-git-control.test.js` fails for each. A mutation counts as killed only when a test fails and every test file loads; a mutation that breaks the syntax or makes a test file crash prints INVALID and fails the run (F-T156-23). It changes a copy in a new temp folder, never the worktree, so a run of `lead-policy.mjs` at the same time sees the real policy.
 
 <!-- check: skip, it runs the tests once for each mutation and takes a few minutes -->
 ```sh
