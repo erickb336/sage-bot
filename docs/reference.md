@@ -856,7 +856,7 @@ It prints one screen: a line for each row (PASS, FAIL, INVALID or SKIPPED), the 
 
 | Group | Where it runs | Rows |
 | --- | --- | --- |
-| now | here, no model | F-T157-8 and F-T157-7 (the two policy fixes), F-T157-1 (`sandbox status` with the generated settings: supported, enabled, strict, `autoAllowBashIfSandboxed`; and the preflight with the real `claude` says ready), F-T157-3 (the platform: every claim is for macOS). F-T134-15c is SKIPPED: on macOS, Claude Code 2.1.289 reports the sandbox unavailable only off a managed `sandbox.enabledPlatforms` list, a system file |
+| now | here, no model | F-T157-8 and F-T157-7 (the two policy fixes), F-T157-1 (`sandbox status` with the generated settings: supported, enabled, strict, `autoAllowBashIfSandboxed`; and the preflight with the real `claude` says ready), F-T157-3 (the platform: every claim is for macOS). F-T134-15c is SKIPPED: Claude Code 2.1.289 reports the sandbox unavailable only on an unsupported platform, off a managed `sandbox.enabledPlatforms` list (a system file), or with a dependency missing (its ripgrep, which it carries), so no setting of a scratch folder makes it unavailable on macOS; the refusal of an unavailable status is unit-tested with a dummy `claude` |
 | L1 | `node probe.mjs world.json` in a session | F-T134-1, -2, -3, -4, -6 (with T133's classes B1 to B9), -7, -10, -12, -13, -15a, F-T157-4 |
 | L2 | file-tool calls in a session | F-T134-16 (Grep), F-T134-15 (Read), the widened Edit rule, Write to `.claude/settings.json` and `.mcp.json` |
 | L3 | escapes and a subagent in a session | `dangerouslyDisableSandbox`, a subagent's commands, F-T157-5 (`command -v rg`) |
