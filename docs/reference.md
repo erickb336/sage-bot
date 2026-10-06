@@ -613,6 +613,71 @@ The hook never blocks or fails a session: it always exits 0 and prints nothing o
 node scripts/session.mjs thread aaaaaaaa-0000-4000-8000-000000000052
 ```
 
+## The lead policy
+
+Status: built and tested; no session uses it yet (T134 PR 1 of 6). Lead sessions stay off (G48 A).
+
+`src/lead-policy.js` resolves, in one place, every path and name that the containment of one lead session depends on (`leadPolicy(config, session)`). Everything else takes only its output: `settingsOf` makes the Claude Code settings (`--settings`), `launchOf` the command `claude -p` with its folder and environment, and `preflight` the state. When the bridge already resolves a path (the lead log `auditPathOf`, the kill switch `killPathOf`, the spool, the vote files, the state tool `sagePath`, the plugin folders `sagePlugin`, the config file `defaultConfigPath`), the policy calls that same function.
+
+**The guarantee is the sandbox** (standing order 14). Each line below names the setting that the policy makes. These are claims from the Claude Code documentation of version 2.1.289: PR 2 of T134 proves each one in a scratch `HOME`, and until then none of them is proven. The guard hook (T133) is a second layer.
+
+| Boundary | The generated setting |
+| --- | --- |
+| No command runs outside the sandbox, and no sandbox means no session | `sandbox.enabled`, `sandbox.failIfUnavailable`, `sandbox.allowUnsandboxedCommands: false` |
+| The file tools read only in the working folder | `permissions.blockReadsOutsideWorkingDirectories` |
+| Anything not allowed is refused, with no question | `permissions.defaultMode: "dontAsk"` |
+| No host but the strict list (`LEAD_HOSTS`, empty today: no GitHub, no host at all) | `sandbox.network.allowedDomains`; WebFetch: `WebFetch` denied while the list is empty, else `WebFetch(domain:<host>)` allowed for each host on it |
+| No GitHub token | `sandbox.credentials.envVars` denies `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`; `launchOf` also leaves them out of the session's environment |
+| The denied paths, for commands | `sandbox.filesystem.denyRead` and `denyWrite` |
+| The denied paths, for the file tools (the sandbox covers Bash only) | `permissions.deny`: `Read`, `Edit` and `Write` on each denied path and everything in it |
+| No change to the session's Claude Code settings or MCP servers (F-T134-4) | `permissions.deny`: `Edit(.claude/**)`, `Write(.claude/**)`, `Edit(.mcp.json)`, `Write(.mcp.json)` |
+
+The denied paths:
+
+- the folder of `statePath` (the gate file, the thread and channel files and the lock), the lead log, the kill-switch flag, the spool and the vote files, also where the config moves them (F-T134-2);
+- `~/.config/sage-bot`, the bridge's config folder (F-T134-2);
+- the sage plugin's folders `~/.claude/plugins/cache/sage` and `~/.claude/plugins/marketplaces/sage`, and sage's root (`SAGE_HOME`, else `$CLAUDE_CONFIG_DIR/sage`, else `~/.claude/sage`), with every logbook (F-T134-6, F-T134-12);
+- sage's hook state: `sage-hooks` in the temp folder (`TMPDIR`, and on macOS also `getconf DARWIN_USER_TEMP_DIR`), and `.hooks` in sage's root (F-T134-7, F-T134-12);
+- the lead sessions' own Claude Code config folder (F-T134-10).
+
+**Per session** (the session's name is `s` and a number, for example `s21`):
+
+| Value | Where |
+| --- | --- |
+| The session folder, the working folder of `claude -p` | `<leadsPath>/sessions/<name>`; `leadsPath` in the config, else `~/.local/share/sage-bot/leads` |
+| `CLAUDE_CONFIG_DIR`, one for all lead sessions, not the owner's (F-T134-10) | `<leadsPath>/claude` (denied) |
+| `CLAUDE_CODE_TMPDIR`, short and of this session only, not the shared `/tmp/claude-<uid>` (F-T134-13) | `/tmp/sage-lead-<name>` (on macOS `/private/tmp/…`) |
+| `SAGE_HOOKS_STATE`, sage's hook state for this session | `<folder of statePath>/lead-hooks/<name>` (in a denied path) |
+| Setting sources | sage-bot's settings only: `--settings` and `--setting-sources ""` |
+| Plugins and MCP | sage only (`--plugin-dir`, the version of `sagePath`), `--strict-mcp-config` with no server |
+| The most one session spends | `--max-budget-usd 5` (`MAX_USD`, G60) |
+
+**The refusal.** When the session folder or its temp folder is in a denied path, or holds one, the policy throws one line and starts nothing, for example: "the lead session's session folder /s/state/leads/sessions/s1 is in the denied path /s/state: the sandbox could not keep the session out. Change leadsPath or statePath. Nothing was started." It compares real paths, so a link does not hide an overlap.
+
+**The preflight.** It fails closed, in this order:
+
+1. "waiting for sage T127": the state tool (`sagePath`) runs `capabilities` outside the sandbox and must print the line `lead-sessions 1` (G59). A missing tool, a missing line or a failing command means waiting.
+2. "no sandbox": `claude --settings <the settings> --setting-sources "" sandbox status` must print `supported`, `enabled` and `strictMode` as true, with no `unavailableReason`.
+3. Else "ready". A session still needs Erick's switch at the terminal (G50 a, a later step): sage-bot never turns sessions on by itself.
+
+<!-- check: run -->
+```sh
+node scripts/lead-policy.mjs settings              # the policy's paths, the settings and the launch of session s1, as JSON
+node scripts/lead-policy.mjs --session s21 settings
+```
+
+<!-- check: skip, runs the sage state tool and, once sage T127 is in, the claude CLI -->
+```sh
+node scripts/lead-policy.mjs preflight             # lead sessions: ready, waiting for sage T127, or no sandbox; exit 1 unless ready
+```
+
+**The mutation run.** `scripts/lead-policy-mutations.mjs` removes or weakens each rule of the policy in turn (59 mutations: each setting, each denied path, the refusal, each check of the preflight) and checks that a test of `test/t156-lead-policy.test.js` fails for each.
+
+<!-- check: skip, it changes src/lead-policy.js while it runs and takes about a minute -->
+```sh
+node scripts/lead-policy-mutations.mjs             # KILLED or SURVIVED for each mutation; exit 1 when one survives
+```
+
 ## Run the checks
 
 You need Node 22 or later, and `npm ci` once (discord.js and playwright-core, both pinned to one exact version).
