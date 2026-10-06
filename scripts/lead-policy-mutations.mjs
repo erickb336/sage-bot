@@ -135,9 +135,9 @@ const M = [
   // F-T156-15: git's global files and the Claude config folder, which blockReadsOutsideWorkingDirectories re-opens
   ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.config/git']"],
   ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.gitconfig']"],
-  ['Claude config folder not a credential file', '[...CREDENTIAL_FILES.map((f) => join(real(home), f)), real(claudeConfig)]', 'CREDENTIAL_FILES.map((f) => join(real(home), f))'],
+  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), real(claudeConfig)]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
   // F-T156-16: the environment is an allow-list
-  ['the host environment kept', '...kept, PATH', '...env, PATH'],
+  ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],
   ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],
   ['no HOME', 'HOME: policy.home, ', ''],
   ['no TMPDIR', 'HOME: policy.home, TMPDIR: policy.tmp, ', 'HOME: policy.home, '],
