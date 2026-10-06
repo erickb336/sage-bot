@@ -1,6 +1,6 @@
 // The mutation run of the lead policy (T156): each mutation removes or weakens one rule of src/lead-policy.js (or, where it says so, of
 // src/sage.js or scripts/lead-policy.mjs), and the tests of
-// test/t156-lead-policy.test.js, test/t156-git-control.test.js and test/t156-path-shapes.test.js must fail for each. It mutates a copy of src, scripts and test in
+// test/t156-lead-policy.test.js, test/t156-git-control.test.js, test/t156-path-shapes.test.js and test/t157-lead-policy.test.js must fail for each. It mutates a copy of src, scripts and test in
 // new temp folders (one for each of WORKERS runs at the same time), never the worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
 // A mutation is KILLED only when the mutated file still parses and at least one test fails. A mutation that breaks the syntax, or a
 // run that fails with no failing test (a test file or the runner crashed, and nothing else failed), is INVALID: it proves nothing
@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /** How many mutations run at the same time, each in its own copy: half the CPUs, 2 to 6. */
 const WORKERS = Math.min(6, Math.max(2, Math.floor(availableParallelism() / 2)));
-const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js', 'test/t156-path-shapes.test.js'];
+const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js', 'test/t156-path-shapes.test.js', 'test/t157-lead-policy.test.js'];
 
 /**
  * The verdict of one mutation from its run of `node --test --test-reporter=tap` on test files. A failure named after a test file is
@@ -65,7 +65,7 @@ const M = [
   ['strictAllowlist removed', 'allowedDomains: policy.hosts, strictAllowlist: true }', 'allowedDomains: policy.hosts }'],
   ['strictAllowlist false', 'strictAllowlist: true }', 'strictAllowlist: false }'],
   ['no denyRead of the denied paths', 'policy.tempRoot, ...policy.denied]', 'policy.tempRoot]'],
-  ['home not denied for reads', 'denyRead: [policy.home, policy.sessions', 'denyRead: [policy.sessions'],
+  ['home not denied for reads', 'denyRead: [...policy.homes, policy.sessions', 'denyRead: [policy.sessions'],
   ['session folder not re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.tmp]'],
   ['temp folder not re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.folder]'],
   ['home re-opened', 'allowRead: [policy.folder, policy.tmp]', 'allowRead: [policy.home]'],
@@ -79,8 +79,21 @@ const M = [
   ['no credential files', "        files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),\n", ''],
   ['~/.ssh not a credential file', "['.ssh', '.aws',", "['.aws',"],
   ['~/.config/gh not a credential file', "'.aws', '.config/gh',", "'.aws',"],
-  ['no credential variables', "        envVars: [...policy.deniedEnv, MODEL_KEY].map((name) => ({ name, mode: 'deny' })),", '        //'],
-  ['model credential not denied to commands (F-T156-21)', '[...policy.deniedEnv, MODEL_KEY].map', 'policy.deniedEnv.map'],
+  ['no credential variables', "        envVars: [...policy.deniedEnv, ...MODEL_KEYS].map((name) => ({ name, mode: 'deny' })),", '        //'],
+  ['model credentials not denied to commands (F-T156-21)', '[...policy.deniedEnv, ...MODEL_KEYS].map', 'policy.deniedEnv.map'],
+  // F-T157-8: both model variables denied to commands; a launch takes at most one, from its caller
+  ['ANTHROPIC_API_KEY not denied to commands', '[...policy.deniedEnv, ...MODEL_KEYS].map', '[...policy.deniedEnv, MODEL_KEYS[0]].map'],
+  ['CLAUDE_CODE_OAUTH_TOKEN not denied to commands', '[...policy.deniedEnv, ...MODEL_KEYS].map', '[...policy.deniedEnv, MODEL_KEYS[1]].map'],
+  ['two model variables accepted', 'if (names.length > 1 || names.some', 'if (names.some'],
+  ['any variable accepted as the model credential', ' || names.some((n) => !MODEL_KEYS.includes(n))) throw', ') throw'],
+  ['the model credential from the host by name', "filter(([k]) => k === 'LANG' ||", "filter(([k]) => MODEL_KEYS.includes(k) || k === 'LANG' ||"],
+  ['the caller\'s model credential dropped', '...kept, ...model, PATH', '...kept, PATH'],
+  // F-T157-7: the owner's real home folder stays denied with a scratch HOME
+  ['owner home not denied', 'const homes = [...new Set([home, owner])];', 'const homes = [home];'],
+  ['owner home from $HOME', 'export const ownerHome = () => userInfo().homedir;', 'export const ownerHome = () => process.env.HOME;', SAGE],
+  ['credential files only in $HOME', 'homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f)))', 'CREDENTIAL_FILES.map((f) => join(home, f))'],
+  ['the session HOME is the owner home', '    home, // the session', '    home: owner, // the session'],
+  ['owner home not checked', "  canonicalPath('the owner\\'s home folder', owner); // F-T157-7\n", ''],
   ['GitHub on the host list', 'export const LEAD_HOSTS = [];', "export const LEAD_HOSTS = ['github.com'];"],
   ['GH_TOKEN not denied', "['GH_TOKEN', 'GITHUB_TOKEN',", "['GITHUB_TOKEN',"],
   ['budget 10', 'export const MAX_USD = 5;', 'export const MAX_USD = 10;'],
@@ -108,8 +121,8 @@ const M = [
   ['group write allowed', 's.mode & 0o022', 's.mode & 0o002'],
   ['the uid of the host ignored', "uid = process.getuid() } = host;", "} = host; const uid = process.getuid();"],
   // F-T156-31: every session's folders denied for reads; the session's own re-opened
-  ['the sessions folder not denied for reads (F-T156-31)', 'denyRead: [policy.home, policy.sessions, policy.tempRoot, ', 'denyRead: [policy.home, policy.tempRoot, '],
-  ['the temp folders not denied for reads (F-T156-31)', 'denyRead: [policy.home, policy.sessions, policy.tempRoot, ', 'denyRead: [policy.home, policy.sessions, '],
+  ['the sessions folder not denied for reads (F-T156-31)', 'denyRead: [...policy.homes, policy.sessions, policy.tempRoot, ', 'denyRead: [...policy.homes, policy.tempRoot, '],
+  ['the temp folders not denied for reads (F-T156-31)', 'denyRead: [...policy.homes, policy.sessions, policy.tempRoot, ', 'denyRead: [...policy.homes, policy.sessions, '],
   ['leadsPath key back', 'config.leadSessionsPath ??', 'config.leadsPath ??'],
   ['plugin from the home folder, not the config folder', 'const plugin = sagePlugin(claudeConfig);', "const plugin = sagePlugin(join(home, '.claude'));"],
   ['the sessions folder not checked (F-T156-34)', "const sessions = own('sessions folder', join(leads, 'sessions')),", "const sessions = join(leads, 'sessions'),"],
@@ -149,18 +162,18 @@ const M = [
   ['the state tool not canonical', "const sageTool = tool && canonicalPath('the sage state tool', tool);", 'const sageTool = tool;'],
   ['plugin dir not the version folder', "pluginDir: sageTool && join(plugin.cache, 'sage', version),", "pluginDir: sageTool && join(plugin.cache, 'sage'),"],
   // F-T156-15: git's global files and the Claude config folder, which blockReadsOutsideWorkingDirectories re-opens
-  ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.config/git']"],
-  ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.gitconfig']"],
-  ['Claude config folder not a credential file', '[...CREDENTIAL_FILES.map((f) => join(home, f)), claudeConfig]', 'CREDENTIAL_FILES.map((f) => join(home, f))'],
+  ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.config/git', '.claude.json']"],
+  ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.claude.json']"],
+  ['~/.claude.json not a credential file (F-T157-11)', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.config/git']"],
+  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), claudeConfig]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
   // F-T156-16: the environment is an allow-list
-  ['the host environment kept', '...kept, PATH', '...env, PATH'],
+  ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],
   ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],
   ['no HOME', 'HOME: policy.home, ', ''],
   ['no TMPDIR', 'HOME: policy.home, TMPDIR: policy.tmp, ', 'HOME: policy.home, '],
   ['git reads the system config', "GIT_CONFIG_NOSYSTEM: '1', ", ''],
   ['subprocess scrub back (F-T156-22)', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',\n", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',\n"],
   ['nonessential traffic on', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',", ''],
-  ['no model credential', 'k === MODEL_KEY || ', ''],
   ['no LANG', "k === 'LANG' || ", ''],
   ['no TERM', "k === 'TERM' || ", ''],
   ['no LC_*', ' || /^LC_[A-Z]+$/.test(k)', ''],

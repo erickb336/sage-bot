@@ -19,7 +19,7 @@ const TEMPS = '/st/sage-lead';
 function inputs(root, set = {}) {
   const config = { statePath: join(root, 's', 'state', 'gates.json') };
   const env = { CLAUDE_CONFIG_DIR: join(root, 'cc') };
-  const host = { env, home: join(root, 'h'), userTemp: join(root, 't'), tempRoot: TEMPS, uid: process.getuid() };
+  const host = { env, home: join(root, 'h'), owner: join(root, 'o'), userTemp: join(root, 't'), tempRoot: TEMPS, uid: process.getuid() };
   for (const [key, value] of Object.entries(set)) {
     const { in: where } = CORPUS.keys.find((k) => k.key === key);
     (where === 'config' ? config : where === 'env' ? env : host)[key] = value;
@@ -37,7 +37,7 @@ test('the corpus covers every key that leadPolicy reads: each is a path key with
   try {
     const all = { statePath: join(root, 's', 'gates.json'), auditPath: join(root, 'a'), killPath: join(root, 'k'), sessionsPath: join(root, 'sp'), votesPath: join(root, 'v'), leadSessionsPath: join(root, 'l') };
     const env = spy('env', { CLAUDE_CONFIG_DIR: join(root, 'cc'), SAGE_HOME: join(root, 'sh'), PATH: '/bin' });
-    leadPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), userTemp: join(root, 't'), tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
+    leadPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), owner: join(root, 'o'), userTemp: join(root, 't'), tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
   } finally { rmSync(root, { recursive: true, force: true }); }
   for (const where of ['config', 'env', 'host']) {
     const keys = CORPUS.keys.filter((k) => k.in === where).map((k) => k.key);
@@ -118,6 +118,7 @@ const PROBES = {
   SAGE_HOME: (p, q) => [[join(p, 'probe'), q.denied], [join(p, '.hooks', 'probe'), q.denied]],
   CLAUDE_CONFIG_DIR: (p, q) => [[join(p, 'sage', 'probe'), q.denied], [join(p, 'plugins', 'cache', 'sage', 'probe'), q.denied], [join(p, 'plugins', 'marketplaces', 'sage', 'probe'), q.denied], [join(p, 'probe'), q.credentialFiles]],
   home: (p, q) => [[join(p, 'probe'), [q.home]], [join(p, '.config', 'sage-bot', 'probe'), q.denied], [join(p, '.ssh', 'probe'), q.credentialFiles]],
+  owner: (p, q) => [[join(p, 'probe'), q.homes], [join(p, '.ssh', 'probe'), q.credentialFiles]], // F-T157-7
   userTemp: (p, q) => [[join(p, 'sage-hooks', 'probe'), q.denied]],
 };
 

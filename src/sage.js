@@ -44,6 +44,10 @@ export function sageTool({ sagePath, project, env = process.env }) {
   };
 }
 
+/** The owner's home folder from the user database (os.userInfo), not $HOME: the demo, the tests and the proof run with HOME set to a
+ * scratch folder. The one place that reads it (F-T157-7). */
+export const ownerHome = () => userInfo().homedir;
+
 /**
  * A part of a canonical path: only these characters (an allow-list, standing order 12), and never "." or "..". A space only between two
  * of them, as in the example config's "Application Support": a permission rule, like a gitignore pattern, drops a space at its end.
@@ -82,7 +86,7 @@ function realOfDeepest(path) {
  * The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. An empty CLAUDE_CONFIG_DIR
  * counts as not set; any other must be canonicalPath (F-T156-17, F-T156-28).
  */
-export function claudeDirOf({ env = process.env, home = userInfo().homedir } = {}) {
+export function claudeDirOf({ env = process.env, home = ownerHome() } = {}) {
   return env.CLAUDE_CONFIG_DIR ? canonicalPath('CLAUDE_CONFIG_DIR', env.CLAUDE_CONFIG_DIR) : join(home, '.claude');
 }
 
@@ -103,7 +107,7 @@ export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skil
  * HOME is the real home folder from the user database (os.userInfo), not $HOME: the demo and the tests run with HOME set to a scratch folder.
  * @param {{ env?: NodeJS.ProcessEnv, home?: string }} [o] @returns {string} the path of sage.mjs
  */
-export function sagePath({ env = process.env, home = userInfo().homedir } = {}) {
+export function sagePath({ env = process.env, home = ownerHome() } = {}) {
   if (env.SAGE_TOOL) {
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);

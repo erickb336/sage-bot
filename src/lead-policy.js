@@ -7,7 +7,7 @@ import { accessSync, constants, lstatSync, mkdtempSync, realpathSync, rmSync, st
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { auditPathOf, killPathOf } from './audit.js';
-import { canonicalPath, claudeDirOf, sagePath, sagePlugin, sageToolIn } from './sage.js';
+import { canonicalPath, claudeDirOf, ownerHome, sagePath, sagePlugin, sageToolIn } from './sage.js';
 import { sessionsPathOf } from './sessions.js';
 import { leadsPathOf, votesPathOf } from './state.js';
 
@@ -22,16 +22,18 @@ export const LEAD_HOSTS = [];
 /**
  * The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5), and
  * also where blockReadsOutsideWorkingDirectories re-opens git's global files to commands (F-T156-15): ~/.gitconfig and the whole
- * ~/.config/git. The session's environment has no XDG_CONFIG_HOME, so ~/.config/git is the one git and Claude Code use there.
+ * ~/.config/git. The session's environment has no XDG_CONFIG_HOME, so ~/.config/git is the one git and Claude Code use there. Also
+ * ~/.claude.json, the owner's Claude Code state file (MCP server configs, account data), which is outside the config folder (F-T157-11).
  */
-export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git'];
+export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'];
 /** The GitHub credential variables that sandboxed commands never read; launchOf leaves them out of the environment too. */
 export const DENIED_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
-/** The variable of the model credential that Claude Code needs: the one value besides the locale and TERM that a session takes from the host.
- * Sandboxed commands never read it (F-T156-21): sandbox.credentials.envVars denies it, the one mechanism. The environment never sets
- * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: Claude Code 2.1.289 then forces the permission mode to default (no dontAsk) and strips CLAUDE_CONFIG_DIR
- * from hooks (F-T156-22). */
-export const MODEL_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
+/** The variables of the model credential that Claude Code reads. Sandboxed commands never read either (F-T156-21, F-T157-8):
+ * sandbox.credentials.envVars denies both, the one mechanism. A launch takes at most one, which its caller names and gives (launchOf):
+ * production CLAUDE_CODE_OAUTH_TOKEN, the proof runner ANTHROPIC_API_KEY. ANTHROPIC_API_KEY outranks the OAuth token, so both at once
+ * would change the billing without a word. The environment never sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: Claude Code 2.1.289 then forces
+ * the permission mode to default (no dontAsk) and strips CLAUDE_CONFIG_DIR from hooks (F-T156-22). */
+export const MODEL_KEYS = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 /** The PATH of a lead session: fixed system and Homebrew folders, never the host's (F-T156-16). */
 export const LEAD_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
 /** The state tool's capability command (sage T127, G59), and the line that says lead sessions are possible. */
@@ -93,7 +95,7 @@ function userTemp() {
  * its text names. Throws one line when the session cannot be contained:
  * - a session name that is not s and a number;
  * - getconf DARWIN_USER_TEMP_DIR that fails;
- * - a path of the config (CONFIG_PATHS), HOME, DARWIN_USER_TEMP_DIR (its real path), SAGE_HOME, SAGE_TOOL or CLAUDE_CONFIG_DIR that is not canonical (an empty variable
+ * - a path of the config (CONFIG_PATHS), HOME, the owner's home folder, DARWIN_USER_TEMP_DIR (its real path), SAGE_HOME, SAGE_TOOL or CLAUDE_CONFIG_DIR that is not canonical (an empty variable
  *   counts as not set), or a denied path or a state tool that is not (for example a link at the state file);
  * - a folder that the lead sessions use (ownFolder: the two roots, this session's folder and its temp folder; other entries of the
  *   roots are not looked at, F-T156-41) that is a link, not a folder, not the user's, or writable by others (F-T156-29);
@@ -102,15 +104,18 @@ function userTemp() {
  * - a state tool (SAGE_TOOL) that is not in the sage plugin's cache, the one folder that the session loads sage from (F-T156-14).
  * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadSessionsPath
  * @param {string} session  the session's name, for example s21
- * @param {{ env?: NodeJS.ProcessEnv, home?: string, userTemp?: string, tempRoot?: string, claude?: string, uid?: number }} [host]
+ * @param {{ env?: NodeJS.ProcessEnv, home?: string, owner?: string, userTemp?: string, tempRoot?: string, claude?: string, uid?: number }} [host]
  *   the host's values, for the tests; by default the real ones. `tempRoot` is TEMP_ROOT, which the tests move to a scratch folder.
+ *   `home` is $HOME, the session's HOME; `owner` the owner's home folder from the user database (ownerHome). Commands read neither:
+ *   with a scratch HOME, the owner's real home folder stays denied too (F-T157-7).
  *   `claude` is found in the host's PATH: the session's PATH is fixed.
  */
 export function leadPolicy(config, session, host = {}) {
   if (!SESSION.test(session ?? '')) throw new TypeError(`a lead session's name is s and a number, such as s21, not ${JSON.stringify(session)}. Nothing was started.`);
   for (const key of CONFIG_PATHS) if (config[key] !== undefined || key === 'statePath') canonicalPath(`the config: ${key}`, config[key]);
-  const { env = process.env, home = homedir(), tempRoot = TEMP_ROOT, claude = 'claude', uid = process.getuid() } = host;
+  const { env = process.env, home = homedir(), owner = ownerHome(), tempRoot = TEMP_ROOT, claude = 'claude', uid = process.getuid() } = host;
   canonicalPath('HOME', home);
+  canonicalPath('the owner\'s home folder', owner); // F-T157-7
   const userTempDir = canonicalPath('DARWIN_USER_TEMP_DIR', 'userTemp' in host ? host.userTemp : userTemp()); // F-T156-40: never TMPDIR
   for (const key of ['SAGE_HOME', 'SAGE_TOOL']) if (env[key]) canonicalPath(key, env[key]); // CLAUDE_CONFIG_DIR: claudeDirOf
   const own = (what, path) => ownFolder(what, path, uid);
@@ -144,13 +149,15 @@ export function leadPolicy(config, session, host = {}) {
   }
   const tmpOwn = join(temps, session), perUser = join(tmpOwn, `claude-${uid}`);
   if (Buffer.byteLength(perUser) > CLAUDE_TMP_MAX) throw new Error(`the lead session's per-user temp folder ${perUser} is longer than ${CLAUDE_TMP_MAX} bytes: Claude Code would give its commands the shared /tmp/claude-${uid} (F-T156-35). Nothing was started.`);
+  const homes = [...new Set([home, owner])]; // F-T157-7
   return {
     session,
     folder: join(sessions, session), // F-T156-6, F-T156-29
     tmp: tmpOwn, // F-T134-13, F-T156-29
     sessions, tempRoot: temps, // F-T156-31: every session's folder and every session's temp folder, denied to the others
-    home, // F-T156-5: sandboxed commands read nothing in it but the session's own folders
-    credentialFiles: [...CREDENTIAL_FILES.map((f) => join(home, f)), claudeConfig], // F-T156-15: the owner's Claude config folder
+    home, // the session's HOME
+    homes, // F-T156-5, F-T157-7: $HOME and the owner's home folder; sandboxed commands read nothing in them but the session's own folders
+    credentialFiles: [...homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f))), claudeConfig], // F-T156-15: the owner's Claude config folder
     hooksState: join(stateDir, 'lead-hooks', session),
     claudeDir,
     denied,
@@ -201,13 +208,13 @@ export function settingsOf(policy) {
       allowUnsandboxedCommands: false,
       network: { allowedDomains: policy.hosts, strictAllowlist: true }, // F-T156-20
       filesystem: {
-        denyRead: [policy.home, policy.sessions, policy.tempRoot, ...policy.denied], // F-T156-5, F-T156-31; the narrower allowRead re-opens
+        denyRead: [...policy.homes, policy.sessions, policy.tempRoot, ...policy.denied], // F-T156-5, F-T156-31, F-T157-7; the narrower allowRead re-opens
         allowRead: [policy.folder, policy.tmp], // only the session's own folders
         denyWrite: [...policy.denied, ...gitControl(policy.folder)],
       },
       credentials: {
         files: policy.credentialFiles.map((path) => ({ path, mode: 'deny' })),
-        envVars: [...policy.deniedEnv, MODEL_KEY].map((name) => ({ name, mode: 'deny' })), // F-T156-21: Claude Code keeps MODEL_KEY for its own calls
+        envVars: [...policy.deniedEnv, ...MODEL_KEYS].map((name) => ({ name, mode: 'deny' })), // F-T156-21, F-T157-8: Claude Code keeps the model key for its own calls
       },
     },
   };
@@ -215,13 +222,18 @@ export function settingsOf(policy) {
 
 /**
  * The command of a lead session: `claude` and its arguments, its working folder and its environment, from the policy only. The
- * environment is an allow-list (F-T156-16): from the host only MODEL_KEY, LANG, LC_* and TERM; the rest is fixed: LEAD_PATH, the real
- * HOME (its reads stay denied), the session's own temp, config and hook-state folders, no global or system git config, and no
- * nonessential traffic. Every other variable of the host, a secret or not, stays out; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB too (F-T156-22).
+ * environment is an allow-list (F-T156-16): from the host only LANG, LC_* and TERM; the model credential only from the caller, at most one
+ * variable of MODEL_KEYS (F-T157-8); the rest is fixed: LEAD_PATH, HOME (its reads stay denied), the session's own temp, config and
+ * hook-state folders, no global or system git config, and no nonessential traffic. Every other variable of the host, a secret or not,
+ * stays out; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB too (F-T156-22).
  * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
+ * @param {Record<string, string>} [model]  the model credential, for example { CLAUDE_CODE_OAUTH_TOKEN: token }; none for a command
+ *   that calls no model, such as `sandbox status`. Throws for two variables, or for a name that is not in MODEL_KEYS.
  */
-export function launchOf(policy, env = process.env) {
-  const kept = Object.fromEntries(Object.entries(env).filter(([k]) => k === MODEL_KEY || k === 'LANG' || k === 'TERM' || /^LC_[A-Z]+$/.test(k)));
+export function launchOf(policy, env = process.env, model = {}) {
+  const names = Object.keys(model);
+  if (names.length > 1 || names.some((n) => !MODEL_KEYS.includes(n))) throw new TypeError(`a lead session takes one model credential variable, ${MODEL_KEYS.join(' or ')}, not ${names.join(' and ')}: ANTHROPIC_API_KEY outranks the OAuth token and would change the billing. Nothing was started.`);
+  const kept = Object.fromEntries(Object.entries(env).filter(([k]) => k === 'LANG' || k === 'TERM' || /^LC_[A-Z]+$/.test(k)));
   return {
     command: policy.claude,
     args: ['-p', '--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', '--strict-mcp-config',
@@ -229,7 +241,7 @@ export function launchOf(policy, env = process.env) {
       '--max-budget-usd', String(policy.maxUsd)],
     cwd: policy.folder,
     env: {
-      ...kept, PATH: LEAD_PATH, HOME: policy.home, TMPDIR: policy.tmp, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir,
+      ...kept, ...model, PATH: LEAD_PATH, HOME: policy.home, TMPDIR: policy.tmp, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir,
       SAGE_HOOKS_STATE: policy.hooksState, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     },
   };
