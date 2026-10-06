@@ -2,18 +2,19 @@
 // It builds two scratch worlds (scripts/proof/world.mjs), runs every probe outside the sandbox in the control world as its control,
 // runs the rows that need no model against the real `claude` (sandbox status and the preflight; never `claude -p`), and reports the
 // rows that need a session as SKIPPED ("live: T165"). It writes report.json in the scratch folder and prints a one-screen summary.
-// Each world also has a short temp root in /private/tmp (scripts/proof/world.mjs); the summary names both.
+// Each world also has a short temp root in /private/tmp (scripts/proof/world.mjs); the run removes both at its end, also when it fails
+// or is stopped with SIGINT, SIGHUP or SIGTERM (F-T157-10).
 // SAMPLE DATA ONLY. It never prints a sample value: it refuses to write a report that holds the world's tag. Exit 1 on FAIL or INVALID.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { platform, tmpdir } from 'node:os';
+import { constants, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchOf, preflight, settingsOf } from '../../src/lead-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { keychainPlan, printable } from './keychain.mjs';
-import { SAMPLE_ENV, buildWorld, policyOf, sample } from './world.mjs';
+import { SAMPLE_ENV, buildWorld, policyOf, removeTempRoots, sample } from './world.mjs';
 
 const PROBE = fileURLToPath(new URL('probe.mjs', import.meta.url));
 const LIVE = 'live: T165';
@@ -85,8 +86,11 @@ async function nowRows(w, policy, env) {
   };
 }
 
-/** Runs the proof in `root`. @param {string} root @returns {Promise<{ report: object, summary: string }>} */
+/** Runs the proof in `root`, and removes the worlds' temp roots after, also on a failure. @param {string} root @returns {Promise<{ report: object, summary: string }>} */
 export async function prove(root) {
+  try { return await proveIn(root); } finally { removeTempRoots(); }
+}
+async function proveIn(root) {
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
   const tag = randomBytes(8).toString('hex');
@@ -121,7 +125,7 @@ export async function prove(root) {
     `sage-bot proof (T157, no key): ${report.platform}, Claude Code ${report.claude ?? '(not found)'}`,
     `scratch folder: ${root}`,
     `report: ${join(root, 'report.json')}`,
-    `temp roots: ${report.tempRoots.join(', ')} (the policy's 44-byte limit keeps them out of the scratch folder; remove them with it)`,
+    `temp roots: ${report.tempRoots.join(', ')} (the policy's 44-byte limit keeps them out of the scratch folder; removed at the end of the run)`,
     ...rows.map((x) => `${x.status.padEnd(8)} ${x.row.padEnd(11)} ${x.title}${x.status === 'PASS' ? '' : ` (${x.why.slice(0, 120)})`}`),
     `${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('INVALID')} INVALID, ${count('SKIPPED')} SKIPPED (${LIVE}).`,
     `Controls: ${probesAll.filter((p) => p.control.did === true).length} of ${probesAll.length} probes work outside the sandbox.`,
@@ -138,6 +142,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const at = args.indexOf('--out');
   if ((at !== -1 && !args[at + 1]) || args.length !== (at === -1 ? 0 : 2)) { console.error('usage: npm run proof [-- --out <a new scratch folder>]'); process.exit(2); }
   const root = at === -1 ? mkdtempSync(join(tmpdir(), 'sage-bot-proof-')) : args[at + 1];
+  for (const signal of ['SIGINT', 'SIGHUP', 'SIGTERM']) process.once(signal, () => { removeTempRoots(); process.exit(128 + constants.signals[signal]); }); // F-T157-10
   const { report, summary } = await prove(root);
   console.log(summary);
   if (report.counts.FAIL || report.counts.INVALID) process.exitCode = 1;

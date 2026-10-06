@@ -1,6 +1,6 @@
 // T157 (T134 PR 2a): the two lead-policy fixes. F-T157-8: the settings deny both model credential variables to commands, and a launch
 // takes at most one, from its caller. F-T157-7: with HOME set to a scratch folder, commands still read nothing in the owner's real home
-// folder. SAMPLE DATA ONLY: the values are made up, and no session starts.
+// folder. F-T157-11: the owner's ~/.claude.json is a credential file. SAMPLE DATA ONLY: the values are made up, and no session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -49,4 +49,10 @@ test('F-T157-7: with HOME set to a scratch folder, commands still read nothing i
     process.env.HOME = saved;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('F-T157-11: the owner\'s ~/.claude.json (MCP configs, account data) is a credential file, in $HOME and in the owner\'s home folder', () => {
+  const policy = leadPolicy(CONFIG, 's1', { ...HOST, owner: '/o' });
+  const files = settingsOf(policy).sandbox.credentials.files;
+  assert.deepEqual(files.filter((f) => f.path.endsWith('/.claude.json')), [{ path: '/h/.claude.json', mode: 'deny' }, { path: '/o/.claude.json', mode: 'deny' }]);
 });

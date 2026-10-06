@@ -162,8 +162,9 @@ const M = [
   ['the state tool not canonical', "const sageTool = tool && canonicalPath('the sage state tool', tool);", 'const sageTool = tool;'],
   ['plugin dir not the version folder', "pluginDir: sageTool && join(plugin.cache, 'sage', version),", "pluginDir: sageTool && join(plugin.cache, 'sage'),"],
   // F-T156-15: git's global files and the Claude config folder, which blockReadsOutsideWorkingDirectories re-opens
-  ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.config/git']"],
-  ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.gitconfig']"],
+  ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.config/git', '.claude.json']"],
+  ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.claude.json']"],
+  ['~/.claude.json not a credential file (F-T157-11)', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.config/git']"],
   ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), claudeConfig]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
   // F-T156-16: the environment is an allow-list
   ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],

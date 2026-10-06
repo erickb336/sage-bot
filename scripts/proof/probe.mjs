@@ -92,6 +92,7 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-15a', 'cred-claude-jq', 'refused', `jq . ${q(c.claude)} >/dev/null`),
     P('F-T134-15a', 'cred-gitconfig-diff', 'refused', `diff ${q(c.gitconfig)} /dev/null >/dev/null; [ $? -eq 1 ]`),
     P('F-T134-15a', 'cred-git-xdg-cat', 'refused', `cat ${q(c.gitXdg)} >/dev/null`),
+    P('F-T134-15a', 'cred-claude-json-node', 'refused', `node -e "require('fs').readFileSync(process.argv[1])" ${q(c.claudeJson)}`), // F-T157-11
     // F-T157-4: no model credential in any command's view of the environment
     ...[['env', names('env')], ['printenv', names('printenv')], ['node', `node -e "for (const k of Object.keys(process.env)) console.log(k + '=')"`],
       ['ps-E', `ps -E -ww -o command= -p ${pid}`], ['ps-eww', `ps eww -o command= -p ${pid}`]]

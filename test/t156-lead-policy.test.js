@@ -34,7 +34,7 @@ const GIT_CONTROL = [
 ];
 // The credential files (F-T156-5), git's global files that blockReadsOutsideWorkingDirectories re-opens, and the owner's Claude Code
 // config folder (F-T156-15).
-const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git'].map((f) => `/h/${f}`), '/h/.claude'];
+const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'].map((f) => `/h/${f}`), '/h/.claude'];
 /** A sage plugin cache with one version, v1, in a new Claude Code config folder below `root`; the state tool's path. */
 function pluginCache(root, tool = "console.log('lead-sessions 1')") {
   const at = join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1', 'skills', 'sage');

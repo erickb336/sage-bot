@@ -3,14 +3,14 @@
 // `security`. SAMPLE DATA ONLY: no model session, no network, and no real keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes } from '../scripts/proof/probe.mjs';
 import { ROWS, statusOf, verdict } from '../scripts/proof/run.mjs';
-import { buildWorld, policyOf } from '../scripts/proof/world.mjs';
+import { buildWorld, policyOf, removeTempRoots } from '../scripts/proof/world.mjs';
 import { spawnSync } from './bridge-setup.js';
 
 const PROBE = new URL('../scripts/proof/probe.mjs', import.meta.url).pathname;
@@ -45,6 +45,23 @@ test('the world: every state file, plugin file and credential file that a probe 
     assert.match(readFileSync(w.credentials.ssh, 'utf8'), /^sample-fake-ssh-f00dfeedf00dfeed\n$/);
     assert.equal(spawnSync('git', ['log', '--format=%s'], { cwd: w.sessionFolder, encoding: 'utf8' }).stdout, 'sample\n');
   } finally { done(); }
+});
+
+test('F-T157-10: the temp roots in /private/tmp go at the end of a run, also when the world cannot be built', () => {
+  const sbp = () => new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
+  const root = scratch();
+  try {
+    const before = sbp();
+    const w = buildWorld(join(root, 'w'), TAG);
+    assert.ok(existsSync(w.tempRoot));
+    removeTempRoots();
+    assert.ok(!existsSync(w.tempRoot), `${w.tempRoot} is removed`);
+    // A build that fails after it made its temp root (the folder is read-only, so the first file cannot be written) leaves none.
+    mkdirSync(join(root, 'ro'), { mode: 0o500 });
+    assert.throws(() => buildWorld(join(root, 'ro'), TAG), { code: 'EACCES' });
+    const left = [...sbp()].filter((n) => !before.has(n));
+    assert.deepEqual(left, [], `no new temp root stays: ${left.join(', ')}`);
+  } finally { chmodSync(join(root, 'ro'), 0o700); rmSync(root, { recursive: true, force: true }); }
 });
 
 test('didOf: worked, refused (EPERM, or any failure for a network call or a test), or cannot tell', () => {

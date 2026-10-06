@@ -1,8 +1,9 @@
 // The scratch world of the proof (T157): one lead session's home folder, state files, sage plugin and session folder, all below one
 // scratch folder, and its temp root, a short new folder in /private/tmp (the policy's 44-byte limit, F-T156-35). SAMPLE DATA ONLY: every credential file and variable holds an obviously fake value that ends in the world's tag, so a
-// probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root.
+// probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root, and
+// every temp root is recorded, so that the run removes it at its end (removeTempRoots), also when it fails or is stopped (F-T157-10).
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { leadPolicy } from '../../src/lead-policy.js';
 import { claudeDirOf, sagePlugin, sageToolIn } from '../../src/sage.js';
@@ -16,6 +17,12 @@ const VERSION = 'proof1';
  * CLAUDE_TMP_MAX bytes (F-T156-35), which no folder below a scratch TMPDIR does. Never TEMP_ROOT, the real sessions' one.
  */
 const SHORT_TMP = '/private/tmp/sbp-';
+/** The temp roots that this process made and has not removed yet. */
+const tempRoots = new Set();
+/** Removes every temp root that this process made (F-T157-10). Safe to call twice, and after a world was removed by hand. */
+export function removeTempRoots() {
+  for (const d of tempRoots) { rmSync(d, { recursive: true, force: true }); tempRoots.delete(d); }
+}
 /** The lead policy of a world: the one resolver of its paths (src/lead-policy.js), with the world's home and temp folders. The
  * owner's home folder is the real one (ownerHome): the proof checks that it stays denied with the world's HOME (F-T157-7). */
 export const policyOf = (w) => leadPolicy({ statePath: w.statePath }, SESSION, { env: { PATH: process.env.PATH }, home: w.home, userTemp: w.userTemp, tempRoot: w.tempRoot });
@@ -25,13 +32,19 @@ export const SAMPLE_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLA
 export const sample = (name, tag) => `sample-fake-${name.replace(/[^\w.-]/g, '_')}-${tag}`;
 
 /**
- * Builds the world below `root` (a new folder) and a new temp root (w.tempRoot; the caller removes both), and returns its description, also written to <session folder>/world.json, where a
- * probe in the session can read it. The description holds paths and the tag, never a sample value.
+ * Builds the world below `root` (a new folder) and a new temp root (w.tempRoot, recorded for removeTempRoots; a failure here removes
+ * it at once), and returns its description, also written to <session folder>/world.json, where a probe in the session can read it. The
+ * description holds paths and the tag, never a sample value.
  * @param {string} root @param {string} tag  random letters and digits; every sample value ends in it
  */
 export function buildWorld(root, tag) {
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
+  const tempRoot = mkdtempSync(SHORT_TMP); // mkdtemp: the user's own folder, 0700 (F-T156-29)
+  tempRoots.add(tempRoot);
+  try { return fill(root, tag, tempRoot); } catch (e) { rmSync(tempRoot, { recursive: true, force: true }); tempRoots.delete(tempRoot); throw e; }
+}
+function fill(root, tag, tempRoot) {
   const home = join(root, 'home'), claudeConfig = claudeDirOf({ env: {}, home }), statePath = join(root, 'state', 'gates.json');
   const { cache, marketplace } = sagePlugin(claudeConfig);
   const sageRoot = join(claudeConfig, 'sage');
@@ -39,11 +52,12 @@ export function buildWorld(root, tag) {
     root, tag, session: SESSION, home, claudeConfig, statePath, cache, marketplace, sageRoot,
     tool: sageToolIn(cache, VERSION),
     logbook: join(sageRoot, 'proof-000000', 'tasks.tsv'),
-    userTemp: join(root, 'utmp'), tempRoot: mkdtempSync(SHORT_TMP), // mkdtemp: the user's own folder, 0700 (F-T156-29)
+    userTemp: join(root, 'utmp'), tempRoot,
     marker: join(root, 'marker-session-start'),
     credentials: {
       ssh: join(home, '.ssh', 'id_ed25519'), aws: join(home, '.aws', 'credentials'), netrc: join(home, '.netrc'),
       gitconfig: join(home, '.gitconfig'), gitXdg: join(home, '.config', 'git', 'config'), claude: join(claudeConfig, 'settings.json'),
+      claudeJson: join(home, '.claude.json'), // F-T157-11: the owner's Claude Code state file, outside the config folder
     },
   };
   const file = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
@@ -77,6 +91,7 @@ export function buildWorld(root, tag) {
   file(w.credentials.gitconfig, `[user]\n\tname = sample\n[sample]\n\tvalue = ${sample('gitconfig', tag)}\n`);
   file(w.credentials.gitXdg, `[sample]\n\tvalue = ${sample('git-xdg', tag)}\n`);
   file(w.credentials.claude, `${JSON.stringify({ sample: sample('claude', tag) })}\n`);
+  file(w.credentials.claudeJson, `${JSON.stringify({ mcpServers: { sample: { env: { SAMPLE: sample('claude-json', tag) } } } })}\n`);
   mkdirSync(w.userTemp, { recursive: true });
   // The session folder: a git repository with one commit, and project settings that must not apply (F-T134-10): a SessionStart hook
   // that makes the marker file, and an Edit rule that would open everything.

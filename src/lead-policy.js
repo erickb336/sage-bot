@@ -22,9 +22,10 @@ export const LEAD_HOSTS = [];
 /**
  * The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5), and
  * also where blockReadsOutsideWorkingDirectories re-opens git's global files to commands (F-T156-15): ~/.gitconfig and the whole
- * ~/.config/git. The session's environment has no XDG_CONFIG_HOME, so ~/.config/git is the one git and Claude Code use there.
+ * ~/.config/git. The session's environment has no XDG_CONFIG_HOME, so ~/.config/git is the one git and Claude Code use there. Also
+ * ~/.claude.json, the owner's Claude Code state file (MCP server configs, account data), which is outside the config folder (F-T157-11).
  */
-export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git'];
+export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'];
 /** The GitHub credential variables that sandboxed commands never read; launchOf leaves them out of the environment too. */
 export const DENIED_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
 /** The variables of the model credential that Claude Code reads. Sandboxed commands never read either (F-T156-21, F-T157-8):
