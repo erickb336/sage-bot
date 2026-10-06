@@ -31,7 +31,7 @@ test('the pinned copy runs in a scratch HOME and SAGE_HOME and writes its logboo
 
 test('SAGE_TOOL in the owner\'s real ~/.claude, such as the sage plugin cache, is refused; a copy elsewhere is used', () => {
   const owner = join(realpathSync.native(userInfo().homedir), '.claude');
-  const cached = join(owner, 'plugins', 'cache', 'sage', 'sage', '39e9bf767a1f', 'skills', 'sage', 'sage.mjs');
+  const cached = join(owner, 'plugins', 'cache', 'sage', 'sage', 'no-such-version', 'skills', 'sage', 'sage.mjs');
   assert.throws(() => testSage({ SAGE_TOOL: cached }), {
     message: `SAGE_TOOL is ${cached}, in the owner's ${owner}/: the tests use the pinned copy ${FIXTURE}, or a copy outside it.` });
   const copy = join(mkdtempSync(join(tmpdir(), 'sage-bot-t162-tool-')), 'sage.mjs');

@@ -20,9 +20,11 @@ export const FIXTURE = new URL('fixtures/sage/39e9bf767a1f/sage.mjs', import.met
  */
 export function testSage(env = process.env) {
   const path = resolve(env.SAGE_TOOL || FIXTURE);
-  const real = existsSync(path) ? realpathSync.native(path) : path;
   const owner = join(realpathSync.native(userInfo().homedir), '.claude') + sep;
-  if (real.startsWith(owner)) throw new Error(`SAGE_TOOL is ${path}, in the owner's ${owner}: the tests use the pinned copy ${FIXTURE}, or a copy outside it.`);
+  // The path as given first, so that a path in ~/.claude is refused before any read; then through its links.
+  if (path.startsWith(owner) || (existsSync(path) && realpathSync.native(path).startsWith(owner))) {
+    throw new Error(`SAGE_TOOL is ${path}, in the owner's ${owner}: the tests use the pinned copy ${FIXTURE}, or a copy outside it.`);
+  }
   return sagePath({ env: { SAGE_TOOL: path } });
 }
 export const SAGE = testSage();
