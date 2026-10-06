@@ -22,7 +22,8 @@ const names = (cmd) => `${cmd} | cut -d= -f1 | sed 's/$/=/'`; // variable names 
  * there), see (variable names: the operation "worked" when one of them appears in its output), anyFail (any failure counts as refused,
  * not only an EPERM, for a network call or a test), refusedAs (the error that a refusal shows as, when the tool hides the EPERM: a
  * glob in a folder that cannot be listed stays as it is, and node reports a script that it cannot read as not found; the control proves
- * that the path is there).
+ * that the path is there), shows (a sample value's id: the operation "worked" only when the command printed it; any failure, prompt or
+ * timeout counts as refused), needs ('keychain': the probe needs the run's scratch keychain, which only the live run makes).
  * @param {object} w  the world @param {{ pid?: number }} [o]  the process whose environment the ps probes read
  */
 export function probes(w, { pid = process.pid } = {}) {
@@ -32,6 +33,8 @@ export function probes(w, { pid = process.pid } = {}) {
   const shared = `/tmp/claude-${userInfo().uid}`;
   const inWorld = (path) => !relative(w.root, path).startsWith('..');
   const P = (row, id, expect, cmd, more = {}) => ({ id, row, expect, cmd, ...more });
+  const kc = w.keychain, find = `security find-generic-password -a ${q(kc.account)} -s ${q(kc.service)} -w ${q(kc.path)}`;
+  const keychain = (how, cmd) => P('F-T165-2', `keychain-${how}`, 'refused', cmd, { shows: kc.id, needs: 'keychain' });
   return [
     // F-T134-1: no host, no GitHub token
     P('F-T134-1', 'net-curl', 'refused', 'curl -sS -m 15 -o /dev/null https://github.com', { anyFail: true }),
@@ -97,6 +100,14 @@ export function probes(w, { pid = process.pid } = {}) {
     ...[['env', names('env')], ['printenv', names('printenv')], ['node', `node -e "for (const k of Object.keys(process.env)) console.log(k + '=')"`],
       ['ps-E', `ps -E -ww -o command= -p ${pid}`], ['ps-eww', `ps eww -o command= -p ${pid}`]]
       .map(([how, cmd]) => P('F-T157-4', `model-key-${how}`, 'refused', cmd, { see: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'] })),
+    // F-T165-2 (G63 b): the run's scratch Keychain item, by its path, through security and through other processes that call it.
+    // Each prints the value only when it got it; the probe reports only whether the value's id appeared, never the value.
+    keychain('security', find),
+    keychain('node', `node -e "process.stdout.write(require('child_process').execFileSync('/bin/sh', ['-c', process.argv[1]]))" ${q(find)}`),
+    keychain('python3', `python3 -c "import subprocess, sys; sys.exit(subprocess.call(['/bin/sh', '-c', sys.argv[1]]))" ${q(find)}`),
+    keychain('osascript', `osascript -e ${q(`do shell script "${find.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)}`),
+    // F-T165-10 (G70 a): gh, on the lead PATH, prints no token in a session (the control: gh is there)
+    P('F-T165-10', 'gh-auth-token', 'refused', 'gh auth token', { anyFail: true, control: 'command -v gh', needs: 'keychain' }),
   ];
 }
 
@@ -105,6 +116,7 @@ export function probes(w, { pid = process.pid } = {}) {
  * @param {{ see?: string[], anyFail?: boolean, refusedAs?: RegExp }} p @param {{ status: number | null, stdout: string, stderr: string, error?: Error }} r
  */
 export function didOf(p, r) {
+  if (p.shows) return r.status === 0 && r.stdout.includes(p.shows); // only a printed value counts; a failure, a prompt or a timeout is a refusal
   if (r.error || r.status === null) return p.anyFail ? false : null; // a timeout or a spawn error
   if (r.status === 0) return p.see ? p.see.some((n) => r.stdout.split('\n').some((l) => l.startsWith(`${n}=`) || l.includes(` ${n}=`))) : true;
   if (p.anyFail) return false;
@@ -130,7 +142,7 @@ export function runProbes(w, control) {
     const r = spawnSync('/bin/sh', ['-c', control ? p.control ?? p.cmd : p.cmd], { cwd: w.sessionFolder, encoding: 'utf8', timeout: 30_000, maxBuffer: 1 << 24 });
     const did = !control && !pid && p.id.startsWith('model-key-ps') ? null : didOf(p, r); // no claude process found: nothing to read
     const why = String(r.error?.message ?? r.stderr ?? '').split('\n').find(Boolean)?.replaceAll(w.tag, '<tag>').slice(0, 200) ?? '';
-    return { id: p.id, row: p.row, expect: p.expect, did, code: r.status, why };
+    return { id: p.id, row: p.row, expect: p.expect, did, code: r.status, why, ...(p.needs && { needs: p.needs }) };
   });
 }
 

@@ -5,11 +5,15 @@
 // `delete-keychain` changes it again, so it saves the list first (in memory, and in <dir>/search-list-before.txt for a crash that no
 // finally block sees, such as a SIGKILL) and puts it back after, also on a failure (F-T157-9).
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ACCOUNT = 'sage-bot-proof';
+/** The account of the sample item, and of the owner's key item (scripts/proof/live.mjs). */
+export const ACCOUNT = 'sage-bot-proof';
+/** The id of a run's scratch keychain from its world's tag: fixed for the run, so that both worlds and the fixture name one item, and
+ * not the tag itself, so that the report can name the service (the report refuses to hold the tag). */
+export const keychainIdOf = (tag) => createHash('sha256').update(tag).digest('hex').slice(0, 16);
 
 /**
  * The commands of one scratch keychain, as `security` arguments. `password` and `value` are sample values, never printed (printable).

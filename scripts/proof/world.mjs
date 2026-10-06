@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { dirname, join } from 'node:path';
 import { leadPolicy } from '../../src/lead-policy.js';
 import { claudeDirOf, sagePlugin, sageToolIn } from '../../src/sage.js';
+import { ACCOUNT, keychainIdOf, keychainPlan } from './keychain.mjs';
 
 /** The session of the proof, and the version folder of the dummy sage plugin. */
 export const SESSION = 's1';
@@ -35,6 +36,8 @@ export const sample = (name, tag) => `sample-fake-${name.replace(/[^\w.-]/g, '_'
  * Builds the world below `root` (a new folder) and a new temp root (w.tempRoot, recorded for removeTempRoots; a failure here removes
  * it at once), and returns its description, also written to <session folder>/world.json, where a probe in the session can read it. The
  * description holds paths and the tag, never a sample value.
+ * The world also names the run's scratch keychain (scripts/proof/keychain.mjs): `<the folder above root>/keychain/proof.keychain-db`,
+ * one for both worlds of a run, with its service name and account; the live run makes it, and the Keychain probes name it by that path.
  * @param {string} root @param {string} tag  random letters and digits; every sample value ends in it
  */
 export function buildWorld(root, tag) {
@@ -48,8 +51,10 @@ function fill(root, tag, tempRoot) {
   const home = join(root, 'home'), claudeConfig = claudeDirOf({ env: {}, home }), statePath = join(root, 'state', 'gates.json');
   const { cache, marketplace } = sagePlugin(claudeConfig);
   const sageRoot = join(claudeConfig, 'sage');
+  const kc = keychainPlan(join(dirname(root), 'keychain'), keychainIdOf(tag));
   const w = {
     root, tag, session: SESSION, home, claudeConfig, statePath, cache, marketplace, sageRoot,
+    keychain: { path: kc.path, service: kc.service, account: ACCOUNT, id: keychainIdOf(tag) }, // F-T165-2, F-T165-10
     tool: sageToolIn(cache, VERSION),
     logbook: join(sageRoot, 'proof-000000', 'tasks.tsv'),
     userTemp: join(root, 'utmp'), tempRoot,
@@ -62,6 +67,7 @@ function fill(root, tag, tempRoot) {
   };
   const file = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
   file(w.tool, "console.log('lead-sessions 1');\n"); // the dummy sage plugin (F-T134-6): its state tool prints the capability line
+  file(join(cache, 'sage', VERSION, '.claude-plugin', 'plugin.json'), '{"name":"sage"}\n'); // a plugin that --plugin-dir loads (T165)
   // The rest from the policy: the bridge's config file, the session's folders, and sage's hook-state folders (the denied paths in the
   // per-user temp folder, in /private/tmp and in sage's root; the one in /private/tmp is the host's own, and only a probe's control reads it).
   const policy = policyOf(w);
