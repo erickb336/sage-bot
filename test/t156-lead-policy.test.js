@@ -15,7 +15,7 @@ const HOST = { env: {}, home: '/h', owner: '/h', tmp: '/t', userTemp: '/u', shor
 const CONFIG = { statePath: '/s/state/gates.json' };
 
 const DENIED = [
-  '/s/state', // the state folder (F-T134-2)
+  '/s/state', '/s/state/gates.json', // the state folder (F-T134-2), and the state file by its real path (a link at it counts by its target)
   '/s/state/gates.json.leads.jsonl', '/s/state/gates.json.leads-off', // the lead log and the kill switch (F-T134-2)
   '/s/state/gates.json.sessions', '/s/state/gates.json.votes', '/s/state/gates.json.votes.leads', // the spool and the vote files
   '/h/.config/sage-bot', // the bridge's config folder (F-T134-2)
@@ -45,7 +45,9 @@ test('one resolver gives every path and name of a lead session', () => {
   assert.deepEqual(leadPolicy(CONFIG, 's21', HOST), {
     session: 's21',
     folder: '/h/.local/share/sage-bot/leads/sessions/s21',
-    tmp: '/st/sage-lead-s21',
+    tmp: '/st/sage-lead/s21',
+    sessions: '/h/.local/share/sage-bot/leads/sessions',
+    tempRoot: '/st/sage-lead',
     home: '/h',
     homes: ['/h'],
     credentialFiles: CREDENTIALS,
@@ -74,7 +76,7 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
     permissions: {
       defaultMode: 'dontAsk',
       deny: [...fileRules('Read'), ...fileRules('Edit'), ...GIT_CONTROL.flatMap((p) => [`Edit(/${p})`, `Edit(/${p}/**)`]), 'Edit(.claude/**)', 'Edit(.mcp.json)', 'Grep', 'WebFetch'],
-      allow: ['Edit(//h/.local/share/sage-bot/leads/sessions/s21)', 'Edit(//h/.local/share/sage-bot/leads/sessions/s21/**)', 'Edit(//st/sage-lead-s21)', 'Edit(//st/sage-lead-s21/**)'],
+      allow: ['Edit(//h/.local/share/sage-bot/leads/sessions/s21)', 'Edit(//h/.local/share/sage-bot/leads/sessions/s21/**)', 'Edit(//st/sage-lead/s21)', 'Edit(//st/sage-lead/s21/**)'],
       blockReadsOutsideWorkingDirectories: true,
     },
     sandbox: {
@@ -83,8 +85,8 @@ test('the settings snapshot: the sandbox, the file-tool rules, the host list, We
       allowUnsandboxedCommands: false,
       network: { allowedDomains: [], strictAllowlist: true },
       filesystem: {
-        denyRead: ['/h', ...DENIED],
-        allowRead: ['/h/.local/share/sage-bot/leads/sessions/s21', '/st/sage-lead-s21'],
+        denyRead: ['/h', '/h/.local/share/sage-bot/leads/sessions', '/st/sage-lead', ...DENIED], // F-T156-31: every session's folders
+        allowRead: ['/h/.local/share/sage-bot/leads/sessions/s21', '/st/sage-lead/s21'],
         denyWrite: [...DENIED, ...GIT_CONTROL],
       },
       credentials: { files: CREDENTIALS.map((path) => ({ path, mode: 'deny' })), envVars: [
@@ -116,7 +118,7 @@ test('the launch: claude -p with the settings, sage-bot\'s settings only, strict
       '--plugin-dir', '/h/.claude/plugins/cache/sage/sage/v1', '--max-budget-usd', '5'],
     cwd: '/h/.local/share/sage-bot/leads/sessions/s21',
     env: { LANG: 'C', LC_ALL: 'C', LC_CTYPE: 'UTF-8', TERM: 'xterm', CLAUDE_CODE_OAUTH_TOKEN: 'sample-from-the-caller',
-      PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: '/h', TMPDIR: '/st/sage-lead-s21', CLAUDE_CODE_TMPDIR: '/st/sage-lead-s21',
+      PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', HOME: '/h', TMPDIR: '/st/sage-lead/s21', CLAUDE_CODE_TMPDIR: '/st/sage-lead/s21',
       CLAUDE_CONFIG_DIR: '/h/.local/share/sage-bot/leads/claude', SAGE_HOOKS_STATE: '/s/state/lead-hooks/s21',
       GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
   });
@@ -167,8 +169,8 @@ test('the claude command is found in the host\'s PATH, because the session\'s PA
 
 test('CLAUDE_CONFIG_DIR: empty counts as not set; a relative one is refused (F-T156-17)', () => {
   assert.ok(leadPolicy(CONFIG, 's1', { ...HOST, env: { CLAUDE_CONFIG_DIR: '' } }).denied.includes('/h/.claude/plugins/cache/sage'));
-  for (const bad of ['claude', './c', '~/.claude']) {
-    assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, env: { CLAUDE_CONFIG_DIR: bad } }), { message: `CLAUDE_CONFIG_DIR must be an absolute path, not ${JSON.stringify(bad)}.` });
+  for (const bad of ['claude', './c', '~/.claude', '/c/../d']) {
+    assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, env: { CLAUDE_CONFIG_DIR: bad } }), { message: `CLAUDE_CONFIG_DIR must be an absolute path with no empty, "." or ".." part, not ${JSON.stringify(bad)}. Nothing was started.` });
   }
 });
 
@@ -177,12 +179,13 @@ test('refusal: a link to a path that is not made yet, at sessions or at the temp
   try {
     const state = join(root, 'state'), c = { statePath: join(state, 'gates.json') };
     for (const d of [state, join(root, 'l'), join(root, 'st'), join(root, 'ok')]) mkdirSync(d);
+    mkdirSync(join(root, 'st', 'sage-lead'), { mode: 0o700 });
     const h = { ...HOST, home: join(root, 'h'), shortTmp: join(root, 'st') };
     const message = (at) => `${at} is a link to a path that does not exist (or a loop), so its real path is unknown: the sandbox could not keep the session out. Nothing was started.`;
     symlinkSync(join(state, 'later'), join(root, 'l', 'sessions')); // into the denied state folder, not made yet
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l') }, 's1', h), { message: message(join(root, 'l', 'sessions')) });
-    symlinkSync(join(state, 'later-tmp'), join(root, 'st', 'sage-lead-s1'));
-    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'ok') }, 's1', h), { message: message(join(root, 'st', 'sage-lead-s1')) });
+    symlinkSync(join(state, 'later-tmp'), join(root, 'st', 'sage-lead', 's1')); // F-T156-29: any link at the temp folder is refused
+    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'ok') }, 's1', h), { message: `the lead session's temp folder ${join(root, 'st', 'sage-lead', 's1')} is a link: a session could reach another folder through it. Remove it. Nothing was started.` });
     assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'ok') }, 's2', h).folder, join(root, 'ok', 'sessions', 's2')); // no link: fine
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -192,11 +195,11 @@ test('refusal: a session folder in a denied path, or a denied path in the sessio
     { message: 'the lead session\'s session folder /s/state/leads/sessions/s1 is in the denied path /s/state: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.' });
   assert.throws(() => leadPolicy({ statePath: '/l/sessions/s1/state/gates.json', leadSessionsPath: '/l' }, 's1', HOST),
     { message: 'the lead session\'s session folder /l/sessions/s1 holds the denied path /l/sessions/s1/state: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.' });
-  assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, shortTmp: '/s/state' }), { message: /temp folder \/s\/state\/sage-lead-s1 is in the denied path \/s\/state:/ });
+  assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, shortTmp: '/s/state' }), { message: /temp folder \/s\/state\/sage-lead\/s1 is in the denied path \/s\/state:/ });
   assert.equal(leadPolicy(CONFIG, 's1', HOST).folder, '/h/.local/share/sage-bot/leads/sessions/s1'); // the same config without the overlap is fine
 });
 
-test('refusal: a link at the leads folder, at sessions, at sessions/<name> or at the temp folder is seen by its real path (F-T156-6)', () => {
+test('refusal: a link at the leads folder or at sessions is seen by its real path (F-T156-6); a link at sessions/<name> or at the temp folder is refused (F-T156-29)', () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
   try {
     const state = join(root, 'state'), home = join(root, 'home'), config = join(home, '.config', 'sage-bot');
@@ -208,11 +211,12 @@ test('refusal: a link at the leads folder, at sessions, at sessions/<name> or at
     symlinkSync(state, join(root, 'l3', 'sessions', 's1')); // sessions/s1
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l1', 'leads') }, 's1', h), { message: `the lead session's session folder ${state}/leads/sessions/s1 is in the denied path ${state}: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.` });
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l2') }, 's1', h), { message: `the lead session's session folder ${config}/s1 is in the denied path ${config}: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.` });
-    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's1', h), { message: `the lead session's session folder ${state} is in the denied path ${state}: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.` });
+    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's1', h), { message: `the lead session's session folder ${join(root, 'l3', 'sessions', 's1')} is a link: a session could reach another folder through it. Remove it. Nothing was started.` });
     assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's2', h).folder, join(root, 'l3', 'sessions', 's2')); // s2 is no link
-    symlinkSync(state, join(root, 'st', 'sage-lead-s1')); // the temp folder
-    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'leads') }, 's1', h), { message: `the lead session's temp folder ${state} is in the denied path ${state}: the sandbox could not keep the session out. Change leadSessionsPath or statePath. Nothing was started.` });
-    assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'leads') }, 's2', h).tmp, join(root, 'st', 'sage-lead-s2'));
+    mkdirSync(join(root, 'st', 'sage-lead'), { mode: 0o700 });
+    symlinkSync(state, join(root, 'st', 'sage-lead', 's1')); // the temp folder
+    assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'leads') }, 's1', h), { message: `the lead session's temp folder ${join(root, 'st', 'sage-lead', 's1')} is a link: a session could reach another folder through it. Remove it. Nothing was started.` });
+    assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'leads') }, 's2', h).tmp, join(root, 'st', 'sage-lead', 's2'));
     symlinkSync(home, join(root, 'home-link')); // the home folder that the sandbox denies is the real one
     assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'leads') }, 's2', { ...h, home: join(root, 'home-link') }).home, home);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -220,9 +224,9 @@ test('refusal: a link at the leads folder, at sessions, at sessions/<name> or at
 
 test('refusal: a session name that is not s and a number, and a statePath or leadSessionsPath that is not absolute (F-T156-10)', () => {
   for (const bad of ['../x', 's0', 'S1', 's1/..', '', undefined]) assert.throws(() => leadPolicy(CONFIG, bad, HOST), { message: /a lead session's name is s and a number/ });
-  assert.throws(() => leadPolicy({ ...CONFIG, leadSessionsPath: 'leads' }, 's1', HOST), { message: 'the config: leadSessionsPath must be an absolute path, not "leads". Nothing was started.' });
+  assert.throws(() => leadPolicy({ ...CONFIG, leadSessionsPath: 'leads' }, 's1', HOST), { message: 'the config: leadSessionsPath must be an absolute path with no empty, "." or ".." part, not "leads". Nothing was started.' });
   for (const [bad, shown] of [['~/state/gates.json', '"~/state/gates.json"'], ['state/gates.json', '"state/gates.json"'], [null, 'null'], [undefined, 'null'], [7, '7']]) {
-    assert.throws(() => leadPolicy({ statePath: bad }, 's1', HOST), { message: `the config: statePath must be an absolute path, not ${shown}. Nothing was started.` });
+    assert.throws(() => leadPolicy({ statePath: bad }, 's1', HOST), { message: `the config: statePath must be an absolute path with no empty, "." or ".." part, not ${shown}. Nothing was started.` });
   }
 });
 
@@ -299,7 +303,8 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.equal(s.status, 0, s.stderr);
     const out = JSON.parse(s.stdout);
     assert.equal(out.policy.folder, join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's7'));
-    assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(1, 4), [realpathSync.native(userInfo().homedir), join(root, 'state'), join(root, 'state', 'gates.json.leads.jsonl')]); // F-T157-7
+    assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(1, 2), [realpathSync.native(userInfo().homedir)]); // F-T157-7
+    assert.deepEqual(out.settings.sandbox.filesystem.denyRead.slice(4, 7), [join(root, 'state'), join(root, 'state', 'gates.json'), join(root, 'state', 'gates.json.leads.jsonl')]);
     assert.ok(out.settings.sandbox.filesystem.denyRead.includes(join(root, 'home', '.config', 'sage-bot')));
     assert.deepEqual(Object.keys(out.launch.env), ['PATH', 'HOME', 'TMPDIR', 'CLAUDE_CODE_TMPDIR', 'CLAUDE_CONFIG_DIR', 'SAGE_HOOKS_STATE', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']); // no value of the host's environment
     assert.deepEqual(out.settings.sandbox.filesystem.allowRead, [out.policy.folder, out.policy.tmp]);
@@ -315,7 +320,7 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.equal(bare('settings', '--config').stderr, `sage-bot lead-policy: --config needs a value. ${usage}\n`); // F-T156-11
     assert.equal(bare('--config', '--session', 's1', 'settings').stderr, `sage-bot lead-policy: --config needs a value. ${usage}\n`);
     writeFileSync(config, JSON.stringify({ statePath: null }));
-    assert.equal(run('settings').stderr, 'sage-bot lead-policy: the config: statePath must be an absolute path, not null. Nothing was started.\n');
+    assert.equal(run('settings').stderr, 'sage-bot lead-policy: the config: statePath must be an absolute path with no empty, "." or ".." part, not null. Nothing was started.\n');
     writeFileSync(config, '{ "statePath": '); // F-T156-17: a parse error names the file
     assert.match(run('settings').stderr, new RegExp(`^sage-bot lead-policy: the config ${config}: .*JSON.*\n$`));
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -367,4 +372,64 @@ test('preflight: a state tool that ignores SIGTERM is killed at its own timeout,
     assert.deepEqual(r, { state: 'waiting for sage T127', why: "the state tool's capabilities failed: Command failed: " + `${process.execPath} ${h.policy.sageTool} capabilities` });
     assert.ok(Date.now() - start < 3000, `took ${Date.now() - start} ms`);
   } finally { h.done(); }
+});
+
+test('F-T156-28: a ".." after a link is refused in every configured and environment path, because the OS follows the link first', () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  try {
+    const h = join(root, 'h'), other = join(root, 'p', 'other', 'a');
+    for (const d of [h, other]) mkdirSync(d, { recursive: true });
+    symlinkSync(other, join(h, 'lnk2'));
+    const path = join(h, 'lnk2') + '/../state.json';
+    writeFileSync(path, 'x'); // what the bridge would do: the OS writes p/other/state.json, not h/state.json
+    assert.equal(readFileSync(join(root, 'p', 'other', 'state.json'), 'utf8'), 'x');
+    const why = (what) => ({ message: `${what} must be an absolute path with no empty, "." or ".." part, not ${JSON.stringify(path)}. Nothing was started.` });
+    for (const key of ['statePath', 'auditPath', 'killPath', 'sessionsPath', 'votesPath', 'leadSessionsPath']) {
+      assert.throws(() => leadPolicy({ ...CONFIG, [key]: path }, 's1', HOST), why(`the config: ${key}`));
+    }
+    for (const key of ['SAGE_HOME', 'CLAUDE_CONFIG_DIR', 'SAGE_TOOL']) assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, env: { [key]: path } }), why(key));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T156-29: a link at the session folder or at a temp folder is refused, and so is a temp folder of another user or open to other users', () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  try {
+    const documents = join(root, 'Documents'), c = { ...CONFIG, leadSessionsPath: join(root, 'l') }, h = { ...HOST, shortTmp: join(root, 'st') };
+    for (const d of [documents, join(root, 'l', 'sessions'), join(root, 'st')]) mkdirSync(d, { recursive: true });
+    const refused = (what, path, why) => ({ message: `the lead session's ${what} ${path} is ${why}: a session could reach another folder through it. Remove it. Nothing was started.` });
+    symlinkSync(documents, join(root, 'l', 'sessions', 's1')); // a session replaced its own folder with a link to ~/Documents
+    assert.throws(() => leadPolicy(c, 's1', h), refused('session folder', join(root, 'l', 'sessions', 's1'), 'a link'));
+    symlinkSync(documents, join(root, 'st', 'sage-lead')); // another user made /tmp/sage-lead a link
+    assert.throws(() => leadPolicy(c, 's2', h), refused('folder of all temp folders', join(root, 'st', 'sage-lead'), 'a link'));
+    rmSync(join(root, 'st', 'sage-lead'));
+    mkdirSync(join(root, 'st', 'sage-lead'), { mode: 0o700 });
+    assert.throws(() => leadPolicy(c, 's2', { ...h, uid: process.getuid() + 1 }), refused('folder of all temp folders', join(root, 'st', 'sage-lead'), `owned by the user ${process.getuid()}, not ${process.getuid() + 1}`));
+    chmodSync(join(root, 'st', 'sage-lead'), 0o1777);
+    assert.throws(() => leadPolicy(c, 's2', h), refused('folder of all temp folders', join(root, 'st', 'sage-lead'), 'writable by other users'));
+    chmodSync(join(root, 'st', 'sage-lead'), 0o700);
+    symlinkSync(documents, join(root, 'st', 'sage-lead', 's2'));
+    assert.throws(() => leadPolicy(c, 's2', h), refused('temp folder', join(root, 'st', 'sage-lead', 's2'), 'a link'));
+    assert.equal(leadPolicy(c, 's3', h).tmp, join(root, 'st', 'sage-lead', 's3')); // the user's own folders: fine
+    symlinkSync(join(root, 'st'), join(root, 'st-link')); // /tmp is a link (to /private/tmp on macOS): the owner's parent counts by its target
+    assert.equal(leadPolicy(c, 's3', { ...h, shortTmp: join(root, 'st-link') }).tmp, join(root, 'st', 'sage-lead', 's3'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T156-30: a relative auditPath, killPath, sessionsPath or votesPath is refused, as statePath is', () => {
+  for (const key of ['auditPath', 'killPath', 'sessionsPath', 'votesPath']) {
+    for (const bad of ['leads.jsonl', './off', '~/votes', '']) {
+      assert.throws(() => leadPolicy({ ...CONFIG, [key]: bad }, 's1', HOST), { message: `the config: ${key} must be an absolute path with no empty, "." or ".." part, not ${JSON.stringify(bad)}. Nothing was started.` });
+    }
+  }
+});
+
+test('F-T156-31: with the leads folder outside the home folder, commands of one session read no other session\'s folder or temp folder', () => {
+  const s1 = settingsOf(leadPolicy({ ...CONFIG, leadSessionsPath: '/l' }, 's1', HOST)).sandbox.filesystem;
+  assert.deepEqual(s1.denyRead.slice(0, 3), ['/h', '/l/sessions', '/st/sage-lead']);
+  assert.deepEqual(s1.allowRead, ['/l/sessions/s1', '/st/sage-lead/s1']);
+  // s2's folders: in a denied path, and in no path that s1 re-opens
+  for (const other of ['/l/sessions/s2', '/st/sage-lead/s2']) {
+    assert.ok(s1.denyRead.some((d) => other.startsWith(`${d}/`)), other);
+    assert.ok(!s1.allowRead.some((a) => other === a || other.startsWith(`${a}/`)), other);
+  }
 });

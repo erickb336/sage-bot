@@ -41,7 +41,7 @@ test('F-T157-7: with HOME set to a scratch folder, commands still read nothing i
     assert.match(owner, /^\/(Users|home)\/[^/]+$/);
     const { denyRead, allowRead } = settingsOf(policy).sandbox.filesystem;
     assert.deepEqual(denyRead.slice(0, 2), [join(root, 'home'), owner]);
-    assert.deepEqual(allowRead, [join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's1'), join(root, 'sage-lead-s1')]);
+    assert.deepEqual(allowRead, [join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's1'), join(root, 'sage-lead', 's1')]);
     const files = settingsOf(policy).sandbox.credentials.files.map((f) => f.path);
     for (const home of [join(root, 'home'), owner]) for (const f of ['.ssh', '.gitconfig', '.config/git']) assert.ok(files.includes(join(home, f)), join(home, f));
     assert.equal(launchOf(policy, {}).env.HOME, join(root, 'home')); // the session's HOME is $HOME

@@ -5,10 +5,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
 import { homedir, platform, tmpdir } from 'node:os';
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { auditPathOf, killPathOf } from './audit.js';
-import { claudeDirOf, ownerHome, sagePath, sagePlugin, sageToolIn } from './sage.js';
+import { claudeDirOf, exactPath, ownerHome, sagePath, sagePlugin, sageToolIn } from './sage.js';
 import { sessionsPathOf } from './sessions.js';
 import { leadsPathOf, votesPathOf } from './state.js';
 
@@ -43,23 +43,38 @@ export const CAPABILITY_ARGS = ['capabilities'];
 export const CAPABILITY_LINE = 'lead-sessions 1';
 /** A lead session's name, as the design shows it: s and its number (branch sage-lead/s21). */
 const SESSION = /^s[1-9]\d{0,5}$/;
+/** The paths of the config that the policy reads; each must pass exactPath when it is set, statePath always (F-T156-10, F-T156-30). */
+const CONFIG_PATHS = ['statePath', 'auditPath', 'killPath', 'sessionsPath', 'votesPath', 'leadSessionsPath'];
 
 /** The bridge's config file: ~/.config/sage-bot/config.json. Every script reads its default config path here. */
 export const defaultConfigPath = (home = homedir()) => join(home, '.config', 'sage-bot', 'config.json');
 
 /**
- * The real path of `path`: the links of its deepest folder that exists resolved, the rest as written. Throws when a part of it exists
- * but has no real path, such as a link to a path that is not made yet: that path could be made later in a denied path (F-T156-17).
+ * The real path of `path`, an absolute path with no "." or ".." part (exactPath checks each source): the links of its deepest folder
+ * that exists resolved by the OS, the rest as written. It never reads the path as text first, so a ".." cannot skip a link (F-T156-28).
+ * Throws when a part of it exists but has no real path, such as a link to a path that is not made yet: that path could be made later in
+ * a denied path (F-T156-17).
  */
 function real(path) {
   const rest = [];
-  for (let at = resolve(path); ; at = dirname(at)) {
+  for (let at = path; ; at = dirname(at)) {
     try { return join(realpathSync.native(at), ...rest.reverse()); } catch {
       if (lstatSync(at, { throwIfNoEntry: false })) throw new Error(`${at} is a link to a path that does not exist (or a loop), so its real path is unknown: the sandbox could not keep the session out. Nothing was started.`);
-      if (at === dirname(at)) return resolve(path);
+      if (at === dirname(at)) return path;
     }
     rest.push(basename(at));
   }
+}
+/**
+ * `path`, a folder that one session gets as its own, or the folder of all its temp folders. Refused when it is there and is a link, not
+ * a folder, not the user's, or writable by other users: the session, or another user of the Mac, could point it at any folder, and
+ * the next session would read and write there (F-T156-29). Not there yet is fine; the launcher makes it.
+ */
+function ownFolder(what, path, uid) {
+  const s = lstatSync(path, { throwIfNoEntry: false });
+  const why = !s ? '' : s.isSymbolicLink() ? 'a link' : !s.isDirectory() ? 'not a folder' : s.uid !== uid ? `owned by the user ${s.uid}, not ${uid}` : s.mode & 0o022 ? 'writable by other users' : '';
+  if (why) throw new Error(`the lead session's ${what} ${path} is ${why}: a session could reach another folder through it. Remove it. Nothing was started.`);
+  return path;
 }
 /** The command `name` by its absolute path: the first executable file of that name in `PATH`, else `name` as it is. */
 function which(name, PATH = '') {
@@ -80,38 +95,40 @@ function userTemp() {
 
 /**
  * Every path and name of one lead session's containment. Throws one line when the session cannot be contained: a session name that is
- * not s and a number, a `statePath`, `leadSessionsPath` or CLAUDE_CONFIG_DIR that is not an absolute path, a path that is a link to
- * nothing, a session or temp folder that is in a denied path or holds one, by its real path (a link does not hide an overlap), or a
- * state tool (SAGE_TOOL) that is not in the sage plugin's cache, the one folder that the session loads sage from (F-T156-14).
+ * not s and a number; a path of the config (CONFIG_PATHS), HOME, the owner's home folder, TMPDIR, SAGE_HOME, SAGE_TOOL or CLAUDE_CONFIG_DIR that fails exactPath
+ * (an empty variable counts as not set); a path that is a link to nothing; a session folder, temp folder or folder of all temp folders
+ * that is a link or not the user's own (F-T156-29); a session or temp folder that is in a denied path or holds one, by its real path (a
+ * link in a parent does not hide an overlap); or a state tool (SAGE_TOOL) that is not in the sage plugin's cache, the one folder that
+ * the session loads sage from (F-T156-14).
  * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadSessionsPath
  * @param {string} session  the session's name, for example s21
- * @param {{ env?: NodeJS.ProcessEnv, home?: string, owner?: string, tmp?: string, userTemp?: string, shortTmp?: string, claude?: string }} [host]
+ * @param {{ env?: NodeJS.ProcessEnv, home?: string, owner?: string, tmp?: string, userTemp?: string, shortTmp?: string, claude?: string, uid?: number }} [host]
  *   the host's values, for the tests; by default the real ones. `claude` is found in the host's PATH: the session's PATH is fixed.
  *   `home` is $HOME, the session's HOME; `owner` the owner's home folder from the user database (ownerHome). Commands read neither:
  *   with a scratch HOME, the owner's real home folder stays denied too (F-T157-7).
  */
 export function leadPolicy(config, session, host = {}) {
   if (!SESSION.test(session ?? '')) throw new TypeError(`a lead session's name is s and a number, such as s21, not ${JSON.stringify(session)}. Nothing was started.`);
-  for (const key of ['statePath', 'leadSessionsPath']) { // F-T156-10: a relative or ~ path would resolve against the cwd
-    const path = config[key];
-    if ((path !== undefined || key === 'statePath') && !(typeof path === 'string' && isAbsolute(path))) throw new TypeError(`the config: ${key} must be an absolute path, not ${JSON.stringify(path ?? null)}. Nothing was started.`);
-  }
-  const { env = process.env, home = homedir(), owner = ownerHome(), tmp = tmpdir(), shortTmp = '/tmp', claude = 'claude' } = host;
+  for (const key of CONFIG_PATHS) if (config[key] !== undefined || key === 'statePath') exactPath(`the config: ${key}`, config[key]);
+  const { env = process.env, home = homedir(), owner = ownerHome(), tmp = tmpdir(), shortTmp = '/tmp', claude = 'claude', uid = process.getuid() } = host;
+  exactPath('HOME', home); exactPath('the owner\'s home folder', owner); exactPath('TMPDIR', tmp); // homedir() and tmpdir() are $HOME and $TMPDIR when they are set
+  for (const key of ['SAGE_HOME', 'SAGE_TOOL']) if (env[key]) exactPath(key, env[key]); // CLAUDE_CONFIG_DIR: claudeDirOf
   const leads = real(config.leadSessionsPath ?? join(home, '.local', 'share', 'sage-bot', 'leads'));
   const stateDir = real(dirname(config.statePath));
   const claudeConfig = claudeDirOf({ env, home }); // F-T156-11: the plugin and sage's root from one config folder
   const plugin = sagePlugin(claudeConfig);
   const cache = real(plugin.cache);
-  const tool = (() => { try { return sagePath({ env, home }); } catch { return null; } })();
+  const tool = (() => { try { return sagePath({ env, home }); } catch (e) { if (env.SAGE_TOOL) throw e; return null; } })(); // a SAGE_TOOL that is no file is refused
   const sageTool = tool && real(tool);
   const version = sageTool && (relative(cache, sageTool).split(sep)[1] ?? ''); // F-T156-24: exactly sage/<version>/skills/sage/sage.mjs
   if (sageTool && sageTool !== sageToolIn(cache, version)) throw new Error(`the sage state tool ${sageTool} is not ${sageToolIn(cache, '<version>')}, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.`);
-  const sageRoot = real(env.SAGE_HOME ?? join(claudeConfig, 'sage'));
+  const sageRoot = real(env.SAGE_HOME || join(claudeConfig, 'sage'));
   const temps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()].filter(Boolean);
   const claudeDir = join(leads, 'claude');
   const homes = [...new Set([real(home), real(owner)])]; // F-T157-7
+  const sessions = real(join(leads, 'sessions')), tempRoot = ownFolder('folder of all temp folders', join(real(shortTmp), 'sage-lead'), uid);
   const denied = [...new Set([
-    stateDir, ...[auditPathOf, killPathOf, sessionsPathOf, votesPathOf, leadsPathOf].map((of) => of(config)), // F-T134-2
+    stateDir, real(config.statePath), ...[auditPathOf, killPathOf, sessionsPathOf, votesPathOf, leadsPathOf].map((of) => of(config)), // F-T134-2
     dirname(defaultConfigPath(home)), // F-T134-2
     cache, plugin.marketplace, sageRoot, // F-T134-6, F-T134-12
     ...temps.map((t) => join(t, 'sage-hooks')), join(sageRoot, '.hooks'), // F-T134-7, F-T134-12
@@ -119,8 +136,9 @@ export function leadPolicy(config, session, host = {}) {
   ].map(real))];
   const policy = {
     session,
-    folder: real(join(leads, 'sessions', session)), // F-T156-6: a link at sessions or sessions/<name> counts by its target
-    tmp: real(join(shortTmp, `sage-lead-${session}`)), // F-T134-13, F-T156-6
+    folder: ownFolder('session folder', join(sessions, session), uid), // F-T156-6: a link at sessions counts by its target; F-T156-29
+    tmp: ownFolder('temp folder', join(tempRoot, session), uid), // F-T134-13, F-T156-29
+    sessions, tempRoot, // F-T156-31: every session's folder and every session's temp folder, denied to the others
     home: homes[0], // the session's HOME
     homes, // F-T156-5, F-T157-7: $HOME and the owner's home folder; sandboxed commands read nothing in them but the session's own folders
     credentialFiles: [...homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f))), real(claudeConfig)], // F-T156-15: the owner's Claude config folder
@@ -179,7 +197,7 @@ export function settingsOf(policy) {
       allowUnsandboxedCommands: false,
       network: { allowedDomains: policy.hosts, strictAllowlist: true }, // F-T156-20
       filesystem: {
-        denyRead: [...policy.homes, ...policy.denied], // F-T156-5, F-T157-7: the whole home folders; the narrower allowRead below re-opens
+        denyRead: [...policy.homes, policy.sessions, policy.tempRoot, ...policy.denied], // F-T156-5, F-T156-31, F-T157-7; the narrower allowRead re-opens
         allowRead: [policy.folder, policy.tmp], // only the session's own folders
         denyWrite: [...policy.denied, ...gitControl(policy.folder)],
       },

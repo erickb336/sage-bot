@@ -51,6 +51,8 @@ export function buildWorld(root, tag) {
     hookDirs: policy.denied.filter((d) => [w.hostTmp, w.userTemp, sageRoot].includes(dirname(d))),
   });
   const sessionFolder = w.sessionFolder;
+  // The session's folders as the user's own, writable by no other user, which the policy requires (F-T156-29), whatever the umask.
+  for (const d of [sessionFolder, policy.tempRoot, w.sessionTmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
   // The bridge's files (F-T134-2): sample config, gate file, lead log, kill flag, spool and votes.
   file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
   file(statePath, '{"gates":[]}\n');
@@ -69,7 +71,7 @@ export function buildWorld(root, tag) {
   file(w.credentials.gitconfig, `[user]\n\tname = sample\n[sample]\n\tvalue = ${sample('gitconfig', tag)}\n`);
   file(w.credentials.gitXdg, `[sample]\n\tvalue = ${sample('git-xdg', tag)}\n`);
   file(w.credentials.claude, `${JSON.stringify({ sample: sample('claude', tag) })}\n`);
-  for (const d of [w.hostTmp, w.userTemp, w.sessionTmp]) mkdirSync(d, { recursive: true });
+  for (const d of [w.hostTmp, w.userTemp]) mkdirSync(d, { recursive: true });
   // The session folder: a git repository with one commit, and project settings that must not apply (F-T134-10): a SessionStart hook
   // that makes the marker file, and an Edit rule that would open everything.
   file(join(sessionFolder, 'README.md'), 'sample session folder\n');

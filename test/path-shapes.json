@@ -1,0 +1,61 @@
+{
+  "about": "The path-shape corpus of the lead policy (T156, standing order 16). test/t156-path-shapes.test.js applies every shape to every path key and expects the result here: refused with one line, or the policy's denied (or own) path is the path that the OS really writes, checked with a real write in a scratch folder. A key that leadPolicy reads must be in keys or in notPaths, so a new path key without its rows fails the test. Reviews block only on a shape missing from this file or a row that fails.",
+  "keys": [
+    { "key": "statePath", "in": "config", "name": "the config: statePath", "kind": "file" },
+    { "key": "auditPath", "in": "config", "name": "the config: auditPath", "kind": "file" },
+    { "key": "killPath", "in": "config", "name": "the config: killPath", "kind": "file" },
+    { "key": "sessionsPath", "in": "config", "name": "the config: sessionsPath", "kind": "folder" },
+    { "key": "votesPath", "in": "config", "name": "the config: votesPath", "kind": "file" },
+    { "key": "leadSessionsPath", "in": "config", "name": "the config: leadSessionsPath", "kind": "folder" },
+    { "key": "SAGE_HOME", "in": "env", "name": "SAGE_HOME", "kind": "folder" },
+    { "key": "CLAUDE_CONFIG_DIR", "in": "env", "name": "CLAUDE_CONFIG_DIR", "kind": "folder" },
+    { "key": "SAGE_TOOL", "in": "env", "name": "SAGE_TOOL", "kind": "file" },
+    { "key": "home", "in": "host", "name": "HOME", "kind": "folder" },
+    { "key": "owner", "in": "host", "name": "the owner's home folder", "kind": "folder" },
+    { "key": "tmp", "in": "host", "name": "TMPDIR", "kind": "folder" }
+  ],
+  "notPaths": {
+    "env": { "PATH": "a search list: only its absolute folders are searched, for the claude command, which runs outside the sandbox" },
+    "host": {
+      "env": "the environment itself; its keys are rows above",
+      "claude": "the claude command, run by the bridge outside the sandbox; no setting of the sandbox comes from it",
+      "shortTmp": "/tmp, fixed in the code; the tests move it to a scratch folder",
+      "userTemp": "getconf DARWIN_USER_TEMP_DIR, from the OS; the tests move it",
+      "uid": "the user's id, from the OS"
+    }
+  },
+  "shapes": [
+    { "id": "plain-outside-home", "about": "the target path itself, outside the home folder", "expect": "real" },
+    { "id": "plain-inside-home", "about": "the target path itself, inside the home folder", "expect": "real" },
+    { "id": "relative", "about": "a path relative to the working folder", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "tilde", "about": "~/ and a name: no shell expands it", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "dot-part", "about": "a . part", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "dotdot-part", "about": "a .. part after a folder", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "dotdot-after-link", "about": "a .. part after a link to another folder (F-T156-28)", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "trailing-slash", "about": "a / at the end", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "doubled-slash", "about": "// inside the path", "expect": "refused", "says": "must be an absolute path" },
+    { "id": "empty", "about": "the empty string: refused in the config and from the host; an empty variable counts as not set", "expect": "refused", "expectEnv": "unset", "says": "must be an absolute path" },
+    { "id": "link-at-leaf", "about": "the path is a link to the target", "expect": "real" },
+    { "id": "link-at-parent", "about": "a folder of the path is a link to the target's folder", "expect": "real" },
+    { "id": "dangling-link-at-leaf", "about": "the path is a link to nothing", "expect": "refused", "says": "is a link to a path that does not exist|there is no file there" },
+    { "id": "dangling-link-at-parent", "about": "a folder of the path is a link to nothing", "expect": "refused", "says": "is a link to a path that does not exist|there is no file there" },
+    { "id": "case-variant", "about": "a folder of the path in other letter case, on the case-insensitive volume", "expect": "real" }
+  ],
+  "folders": [
+    { "id": "session-folder-own", "folder": "session folder", "make": "own", "expect": "ok" },
+    { "id": "session-folder-link", "folder": "session folder", "make": "link", "expect": "refused", "says": "a link" },
+    { "id": "session-folder-file", "folder": "session folder", "make": "file", "expect": "refused", "says": "not a folder" },
+    { "id": "session-folder-foreign", "folder": "session folder", "make": "foreign", "expect": "refused", "says": "owned by the user" },
+    { "id": "session-folder-other-write", "folder": "session folder", "make": "other-write", "expect": "refused", "says": "writable by other users" },
+    { "id": "temp-root-own", "folder": "folder of all temp folders", "make": "own", "expect": "ok" },
+    { "id": "temp-root-link", "folder": "folder of all temp folders", "make": "link", "expect": "refused", "says": "a link" },
+    { "id": "temp-root-file", "folder": "folder of all temp folders", "make": "file", "expect": "refused", "says": "not a folder" },
+    { "id": "temp-root-foreign", "folder": "folder of all temp folders", "make": "foreign", "expect": "refused", "says": "owned by the user" },
+    { "id": "temp-root-other-write", "folder": "folder of all temp folders", "make": "other-write", "expect": "refused", "says": "writable by other users" },
+    { "id": "temp-root-group-write", "folder": "folder of all temp folders", "make": "group-write", "expect": "refused", "says": "writable by other users" },
+    { "id": "temp-folder-own", "folder": "temp folder", "make": "own", "expect": "ok" },
+    { "id": "temp-folder-link", "folder": "temp folder", "make": "link", "expect": "refused", "says": "a link" },
+    { "id": "temp-folder-file", "folder": "temp folder", "make": "file", "expect": "refused", "says": "not a folder" },
+    { "id": "temp-folder-other-write", "folder": "temp folder", "make": "other-write", "expect": "refused", "says": "writable by other users" }
+  ]
+}
