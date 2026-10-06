@@ -52,6 +52,9 @@
     {"id": "non-ascii", "about": "a non-ASCII letter in a part", "expect": "refused"},
     {"id": "control-character", "about": "a control character in a part", "expect": "refused"},
     {"id": "data-volume", "about": "the target in the form /System/Volumes/Data/... (F-T156-39)", "expect": "refused"},
+    {"id": "kernel-nofollow", "about": "the target behind /.nofollow, which the macOS kernel resolves and the sandbox does not (F-T156-43)", "expect": "refused"},
+    {"id": "kernel-resolve", "about": "the target behind /.resolve, which the macOS kernel resolves and the sandbox does not (F-T156-43)", "expect": "refused"},
+    {"id": "kernel-vol", "about": "the target behind /.vol, which the macOS kernel resolves and the sandbox does not (F-T156-43)", "expect": "refused"},
     {"id": "system-link", "about": "the target by a link of the system: /tmp/... or /var/... for /private/tmp/... or /private/var/...", "expect": "refused"}
   ],
   "folders": [
@@ -103,6 +106,9 @@
     {"id": "sessions-in-denied", "about": "leadSessionsPath in the state folder", "says": "the lead session's sessions folder {sessions} is in the denied path {state}"},
     {"id": "denied-in-sessions", "about": "statePath in a session folder", "says": "the lead session's sessions folder {sessions} holds the denied path {state}"},
     {"id": "temp-root-in-denied", "about": "the folder of all temp folders in the state folder", "says": "the lead session's folder of all temp folders {temps} is in the denied path {state}"},
-    {"id": "denied-in-temp-root", "about": "DARWIN_USER_TEMP_DIR in the folder of all temp folders: its sage-hooks is a denied path there", "says": "the lead session's folder of all temp folders {temps} holds the denied path {temps}/x/sage-hooks"}
+    {"id": "denied-in-temp-root", "about": "DARWIN_USER_TEMP_DIR in the folder of all temp folders: its sage-hooks is a denied path there", "says": "the lead session's folder of all temp folders {temps} holds the denied path {temps}/x/sage-hooks"},
+    {"id": "sessions-in-denied-case-variant", "about": "leadSessionsPath in the state folder by other letter case, both absent: <X>/STATE/l and <X>/state (F-T156-44)", "says": "the lead session's sessions folder {sessions} is in the denied path {state}"},
+    {"id": "denied-in-sessions-case-variant", "about": "statePath in a session folder by other letter case, both absent: <leads>/SESSIONS/s1/state (F-T156-44)", "says": "the lead session's sessions folder {sessions} holds the denied path {state}"},
+    {"id": "temp-root-in-denied-case-variant", "about": "the folder of all temp folders in the state folder by other letter case, both absent: <X>/STATE/sage-lead (F-T156-44)", "says": "the lead session's folder of all temp folders {temps} is in the denied path {state}"}
   ]
 }

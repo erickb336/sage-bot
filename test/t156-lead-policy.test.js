@@ -14,7 +14,7 @@ const ROOT = join(import.meta.dirname, '..');
 const HOST = { env: {}, home: '/h', owner: '/h', userTemp: '/u', tempRoot: '/st/sage-lead' };
 const CONFIG = { statePath: '/s/state/gates.json' };
 /** The one-line refusal of a path that is not canonical (canonicalPath in src/sage.js); `real` when the path's real path differs. */
-const notCanonical = (what, path, real) => `${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${real ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`;
+const notCanonical = (what, path, real) => `${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no "." at the start of the first part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${real ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`;
 
 const DENIED = [
   '/s/state', '/s/state/gates.json', // the state folder (F-T134-2), and the state file by its real path (a link at it counts by its target)
@@ -438,7 +438,7 @@ test('F-T156-31, F-T156-34: the sessions folder as a link into a temp folder, or
   assert.equal(leadPolicy({ ...CONFIG, leadSessionsPath: '/l' }, 's2', HOST).folder, '/l/sessions/s2'); // apart: fine
 });
 
-test('F-T156-40: the policy never reads TMPDIR; it denies sage-hooks in the real DARWIN_USER_TEMP_DIR and in /private/tmp', () => {
+test('F-T156-40: no rule of the policy comes from TMPDIR; it denies sage-hooks in the real DARWIN_USER_TEMP_DIR and in /private/tmp', () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
   try {
     // A stand-in of macOS's /var/folders/<x>/T, a link to /private/var/folders/<x>/T: the TMPDIR of the owner's Terminal and of launchd.
