@@ -2,10 +2,10 @@
 // Each bridge here is a child process that takes the lock with src/state.js lock(), as scripts/bridge.mjs does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync, spawn, spawnSync } from './bridge-setup.js';
 
 const state = new URL('../src/state.js', import.meta.url).href;
 const gatesIn = (dir) => { const path = join(mkdtempSync(join(tmpdir(), `sage-bot-${dir}-`)), 'state', 'gates.json'); mkdirSync(join(path, '..'), { recursive: true }); return path; };

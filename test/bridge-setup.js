@@ -1,16 +1,49 @@
 // The scratch logbook and the bridge on the fake Discord layer, for the bridge tests. SAMPLE DATA ONLY: every id and name is made up.
-// The sage state tool runs with HOME and SAGE_HOME in a scratch folder, so no test touches a real logbook.
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+// The sage state tool is the pinned copy in test/fixtures/sage/ (or SAGE_TOOL), and it runs with HOME and SAGE_HOME in a scratch
+// folder, so no test reads the owner's sage plugin or touches a real logbook.
+// This is the one test module that imports node:child_process: every test starts its child processes with spawn, spawnSync and
+// execFileSync from here, which give each child SAGE_TOOL (testEnv), so that a script that looks for sage (scripts/demo.mjs) gets the
+// tests' copy and never the owner's plugin cache (F-T162-2). t162-sage-fixture.test.js checks that no other test file imports it.
+import * as cp from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join, resolve, sep } from 'node:path';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
 import { sagePath } from '../scripts/sage-path.mjs';
 
-export const SAGE = sagePath();
+/** The pinned copy of the sage state tool (test/fixtures/sage/README.md). */
+export const FIXTURE = new URL('fixtures/sage/39e9bf767a1f/sage.mjs', import.meta.url).pathname;
+/**
+ * The sage state tool of the tests: SAGE_TOOL when it is set, else the pinned copy. It refuses a path in the owner's real
+ * ~/.claude (os.userInfo, not $HOME), for example the sage plugin's cache, so that no test depends on it.
+ * @param {NodeJS.ProcessEnv} [env] @returns {string}
+ */
+export function testSage(env = process.env) {
+  const path = resolve(env.SAGE_TOOL || FIXTURE);
+  const home = userInfo().homedir;
+  const owner = join(home, '.claude') + sep;
+  const inside = (p) => (p + sep).toLowerCase().startsWith(owner.toLowerCase()); // the Mac's disk ignores case
+  // The path as given first, with no file system call, so that a path in ~/.claude is refused before any read of it (F-T162-3);
+  // then the home folder and the path through their links.
+  const real = () => {
+    const realOwner = join(realpathSync.native(home), '.claude') + sep;
+    return [path, existsSync(path) ? realpathSync.native(path) : path].some((p) => (p + sep).toLowerCase().startsWith(realOwner.toLowerCase()));
+  };
+  if (inside(path) || real()) {
+    throw new Error(`SAGE_TOOL is ${path}, in the owner's ${owner}: the tests use the pinned copy ${FIXTURE}, or a copy outside it.`);
+  }
+  return sagePath({ env: { SAGE_TOOL: path } });
+}
+export const SAGE = testSage();
+/** The environment of each child process of the tests: `env` (default process.env) with SAGE_TOOL, unless `env` names its own. */
+export const testEnv = (env = process.env) => ({ ...env, SAGE_TOOL: env.SAGE_TOOL || SAGE });
+const withEnv = (start) => (file, args = [], options = {}) => start(file, args, { ...options, env: testEnv(options.env) });
+export const spawn = withEnv(cp.spawn);
+export const spawnSync = withEnv(cp.spawnSync);
+export const execFileSync = withEnv(cp.execFileSync);
 export const APPRENTICE = '300000000000000001';
 export const LEADR = '300000000000000002';
 export const CHANNEL = '400000000000000001';

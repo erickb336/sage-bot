@@ -3,14 +3,13 @@
 // restarts and in a locked thread (F-T132-16). SAMPLE DATA ONLY: scratch logbooks, made-up ids, the fake Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
 import { prepare } from '../src/discord.js';
 import { sageTool } from '../src/sage.js';
 import { record } from '../src/sessions.js';
-import { CONFIG, MAYA, SAGE, setup } from './bridge-setup.js';
+import { CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const GONE = 'This question\'s project is no longer served; Erick answers it at the terminal.';

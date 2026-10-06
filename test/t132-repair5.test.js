@@ -5,7 +5,6 @@
 // Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
@@ -14,7 +13,7 @@ import { loadProjects } from '../src/projects.js';
 import { sageTool } from '../src/sage.js';
 import { record, sessionOf } from '../src/sessions.js';
 import { loadVotes, saveVotes, writeWhole } from '../src/state.js';
-import { CONFIG, MAYA, SAGE, setup } from './bridge-setup.js';
+import { CONFIG, execFileSync, MAYA, SAGE, setup } from './bridge-setup.js';
 
 const NOTE = 'This question\'s project is no longer served; Erick answers it at the terminal.';
 const S1 = 'eeeeeeee-0000-4000-8000-000000000145';

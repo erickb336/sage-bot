@@ -4,14 +4,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
 import { fakeDiscord } from '../src/fake-discord.js';
 import { peopleOf } from '../src/handle.js';
 import { MINUTE } from '../src/vote.js';
-import { CHANNEL, JON, MAYA, MEMBERS, OWNER, setup } from './bridge-setup.js';
+import { CHANNEL, JON, MAYA, MEMBERS, OWNER, setup, spawnSync } from './bridge-setup.js';
 
 const [APPRENTICE, LEAD] = ['300000000000000001', '300000000000000002'];
 const OLD_CONFIG = 'the config has driverRole: sage-driver is gone. Rename driverRole to apprenticeRole and give that role id to the sage-apprentice role.';

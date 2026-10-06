@@ -6,12 +6,12 @@
 // SAMPLE DATA ONLY. No real `claude`, gh or git command runs, and no settings file changes.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decideText } from '../src/guard.js';
+import { spawn, spawnSync } from './bridge-setup.js';
 
 const HOOK = fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url));
 const CORPUS = JSON.parse(readFileSync(new URL('./guard-corpus.json', import.meta.url), 'utf8'));

@@ -3,7 +3,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, GatewayIntentBits } from 'discord.js';
@@ -12,7 +11,7 @@ import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTE
 import { loadProjects, projectsOf } from '../src/projects.js';
 import { rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
-import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, T0 } from './bridge-setup.js';
+import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000003'; // a channel that is not registered

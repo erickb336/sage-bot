@@ -1,13 +1,13 @@
 // The allow-lists for sage (a model reader) and for the terminal. SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forModel, forTerminal, reasonLines } from '../src/clean.js';
 import { openGate, step } from '../src/vote.js';
 import { save } from '../src/state.js';
+import { spawnSync } from './bridge-setup.js';
 
 /** Every code point, as a string; a surrogate code point is a lone surrogate. */
 const ALL = Array.from({ length: 0x110000 }, (_, cp) => (cp >= 0xd800 && cp <= 0xdfff ? String.fromCharCode(cp) : String.fromCodePoint(cp)));
