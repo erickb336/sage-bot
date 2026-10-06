@@ -3,9 +3,9 @@
 // the arguments and environment of `claude -p`, and preflight says whether a session can start. Only the sandbox guarantees a file or
 // network boundary (standing order 14); the guard hook (T133) is a second layer. PR 2 of T134 proves each setting in a scratch HOME.
 import { execFile, execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
 import { homedir, platform, tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { auditPathOf, killPathOf } from './audit.js';
 import { claudeDirOf, sagePath, sagePlugin } from './sage.js';
@@ -18,10 +18,18 @@ const run = promisify(execFile);
 export const MAX_USD = 5;
 /** The strict host list of a lead session, for the sandbox and WebFetch: no GitHub host. Empty: a session reaches no host. */
 export const LEAD_HOSTS = [];
-/** The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5). */
-export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube'];
-/** The GitHub credential variables that a lead session never gets. */
+/**
+ * The credential files and folders in the home folder that sandboxed commands never read, also if the home deny goes (F-T156-5), and
+ * also where blockReadsOutsideWorkingDirectories re-opens git's global files to commands (F-T156-15): ~/.gitconfig and the whole
+ * ~/.config/git. The session's environment has no XDG_CONFIG_HOME, so ~/.config/git is the one git and Claude Code use there.
+ */
+export const CREDENTIAL_FILES = ['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git'];
+/** The GitHub credential variables that sandboxed commands never read; launchOf leaves them out of the environment too. */
 export const DENIED_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+/** The variable of the model credential that Claude Code needs: the one value besides the locale and TERM that a session takes from the host. */
+export const MODEL_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
+/** The PATH of a lead session: fixed system and Homebrew folders, never the host's (F-T156-16). */
+export const LEAD_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
 /** The state tool's capability command (sage T127, G59), and the line that says lead sessions are possible. */
 export const CAPABILITY_ARGS = ['capabilities'];
 export const CAPABILITY_LINE = 'lead-sessions 1';
@@ -31,13 +39,27 @@ const SESSION = /^s[1-9]\d{0,5}$/;
 /** The bridge's config file: ~/.config/sage-bot/config.json. Every script reads its default config path here. */
 export const defaultConfigPath = (home = homedir()) => join(home, '.config', 'sage-bot', 'config.json');
 
-/** The real path of `path`: the links of its deepest folder that exists resolved, the rest as written. */
+/**
+ * The real path of `path`: the links of its deepest folder that exists resolved, the rest as written. Throws when a part of it exists
+ * but has no real path, such as a link to a path that is not made yet: that path could be made later in a denied path (F-T156-17).
+ */
 function real(path) {
   const rest = [];
   for (let at = resolve(path); ; at = dirname(at)) {
-    try { return join(realpathSync.native(at), ...rest.reverse()); } catch { if (at === dirname(at)) return resolve(path); }
+    try { return join(realpathSync.native(at), ...rest.reverse()); } catch {
+      if (lstatSync(at, { throwIfNoEntry: false })) throw new Error(`${at} is a link to a path that does not exist (or a loop), so its real path is unknown: the sandbox could not keep the session out. Nothing was started.`);
+      if (at === dirname(at)) return resolve(path);
+    }
     rest.push(basename(at));
   }
+}
+/** The command `name` by its absolute path: the first executable file of that name in `PATH`, else `name` as it is. */
+function which(name, PATH = '') {
+  if (isAbsolute(name)) return name;
+  for (const dir of PATH.split(delimiter).filter(isAbsolute)) {
+    try { accessSync(join(dir, name), constants.X_OK); if (statSync(join(dir, name)).isFile()) return join(dir, name); } catch { /* not here */ }
+  }
+  return name;
 }
 /** Whether `inner` is `outer` or inside it. */
 const within = (inner, outer) => { const rel = relative(outer, inner); return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)); };
@@ -50,12 +72,13 @@ function userTemp() {
 
 /**
  * Every path and name of one lead session's containment. Throws one line when the session cannot be contained: a session name that is
- * not s and a number, a `statePath` or `leadSessionsPath` that is not an absolute path, or a session or temp folder that is in a denied
- * path or holds one, by its real path (a link does not hide an overlap).
+ * not s and a number, a `statePath`, `leadSessionsPath` or CLAUDE_CONFIG_DIR that is not an absolute path, a path that is a link to
+ * nothing, a session or temp folder that is in a denied path or holds one, by its real path (a link does not hide an overlap), or a
+ * state tool (SAGE_TOOL) that is not in the sage plugin's cache, the one folder that the session loads sage from (F-T156-14).
  * @param {object} config  the bridge's config: statePath, and optionally auditPath, killPath, sessionsPath, votesPath, leadSessionsPath
  * @param {string} session  the session's name, for example s21
  * @param {{ env?: NodeJS.ProcessEnv, home?: string, tmp?: string, userTemp?: string, shortTmp?: string, claude?: string }} [host]
- *   the host's values, for the tests; by default the real ones
+ *   the host's values, for the tests; by default the real ones. `claude` is found in the host's PATH: the session's PATH is fixed.
  */
 export function leadPolicy(config, session, host = {}) {
   if (!SESSION.test(session ?? '')) throw new TypeError(`a lead session's name is s and a number, such as s21, not ${JSON.stringify(session)}. Nothing was started.`);
@@ -68,13 +91,18 @@ export function leadPolicy(config, session, host = {}) {
   const stateDir = real(dirname(config.statePath));
   const claudeConfig = claudeDirOf({ env, home }); // F-T156-11: the plugin and sage's root from one config folder
   const plugin = sagePlugin(claudeConfig);
+  const cache = real(plugin.cache);
+  const tool = (() => { try { return sagePath({ env, home }); } catch { return null; } })();
+  const sageTool = tool && real(tool);
+  const version = sageTool && relative(cache, sageTool).split(sep); // sage, <version>, skills, sage, sage.mjs
+  if (sageTool && !(within(sageTool, cache) && version.length > 2)) throw new Error(`the sage state tool ${sageTool} is not in a version folder of the sage plugin's cache ${cache}, the only folder that a lead session loads sage from. Unset SAGE_TOOL, or set it to a sage.mjs in that cache. Nothing was started.`);
   const sageRoot = real(env.SAGE_HOME ?? join(claudeConfig, 'sage'));
   const temps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()].filter(Boolean);
   const claudeDir = join(leads, 'claude');
   const denied = [...new Set([
     stateDir, ...[auditPathOf, killPathOf, sessionsPathOf, votesPathOf, leadsPathOf].map((of) => of(config)), // F-T134-2
     dirname(defaultConfigPath(home)), // F-T134-2
-    plugin.cache, plugin.marketplace, sageRoot, // F-T134-6, F-T134-12
+    cache, plugin.marketplace, sageRoot, // F-T134-6, F-T134-12
     ...temps.map((t) => join(t, 'sage-hooks')), join(sageRoot, '.hooks'), // F-T134-7, F-T134-12
     claudeDir, // F-T134-10
   ].map(real))];
@@ -83,15 +111,16 @@ export function leadPolicy(config, session, host = {}) {
     folder: real(join(leads, 'sessions', session)), // F-T156-6: a link at sessions or sessions/<name> counts by its target
     tmp: real(join(shortTmp, `sage-lead-${session}`)), // F-T134-13, F-T156-6
     home: real(home), // F-T156-5: sandboxed commands read nothing in it but the session's own folders
-    credentialFiles: CREDENTIAL_FILES.map((f) => join(real(home), f)),
+    credentialFiles: [...CREDENTIAL_FILES.map((f) => join(real(home), f)), real(claudeConfig)], // F-T156-15: the owner's Claude config folder
     hooksState: join(stateDir, 'lead-hooks', session),
     claudeDir,
     denied,
     hosts: LEAD_HOSTS,
     deniedEnv: DENIED_ENV,
     maxUsd: MAX_USD,
-    claude,
-    sageTool: (() => { try { return sagePath({ env, home }); } catch { return null; } })(),
+    claude: which(claude, env.PATH),
+    sageTool,
+    pluginDir: sageTool && join(cache, version[0], version[1]), // F-T156-14: the version folder of the denied cache, sage's one identity
   };
   for (const [what, path] of [['session folder', policy.folder], ['temp folder', policy.tmp]]) {
     const clash = denied.find((d) => within(d, path) || within(path, d));
@@ -129,7 +158,7 @@ export function settingsOf(policy) {
         'Grep', // F-T134-16, F-T156-8: Read rules reach Grep only best-effort
         ...(policy.hosts.length ? [] : ['WebFetch']), // no host on the list: no WebFetch at all
       ],
-      allow: policy.hosts.map((h) => `WebFetch(domain:${h})`),
+      allow: [...rules('Edit', [policy.folder, policy.tmp]), ...policy.hosts.map((h) => `WebFetch(domain:${h})`)], // F-T156-17: also the sandbox's allowWrite
       blockReadsOutsideWorkingDirectories: true,
     },
     sandbox: {
@@ -152,19 +181,23 @@ export function settingsOf(policy) {
 
 /**
  * The command of a lead session: `claude` and its arguments, its working folder and its environment, from the policy only. The
- * environment is the host's without the GitHub credential variables, with the session's own temp, config and hook-state folders, and
- * no global git config (GIT_CONFIG_GLOBAL=/dev/null): git reads ~/.gitconfig at each start, and the sandbox denies the home folder.
+ * environment is an allow-list (F-T156-16): from the host only MODEL_KEY, LANG, LC_* and TERM; the rest is fixed: LEAD_PATH, the real
+ * HOME (its reads stay denied), the session's own temp, config and hook-state folders, no global or system git config, and no
+ * nonessential traffic. Every other variable of the host, a secret or not, stays out.
  * @param {ReturnType<typeof leadPolicy>} policy @param {NodeJS.ProcessEnv} [env]  the host's environment
  */
 export function launchOf(policy, env = process.env) {
-  const kept = Object.fromEntries(Object.entries(env).filter(([k]) => !policy.deniedEnv.includes(k)));
+  const kept = Object.fromEntries(Object.entries(env).filter(([k]) => k === MODEL_KEY || k === 'LANG' || k === 'TERM' || /^LC_[A-Z]+$/.test(k)));
   return {
     command: policy.claude,
     args: ['-p', '--settings', JSON.stringify(settingsOf(policy)), '--setting-sources', '', '--strict-mcp-config',
-      ...(policy.sageTool ? ['--plugin-dir', dirname(dirname(dirname(policy.sageTool)))] : []), // sage, the only plugin
+      ...(policy.pluginDir ? ['--plugin-dir', policy.pluginDir] : []), // sage, the only plugin
       '--max-budget-usd', String(policy.maxUsd)],
     cwd: policy.folder,
-    env: { ...kept, SAGE_HOOKS_STATE: policy.hooksState, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir, GIT_CONFIG_GLOBAL: '/dev/null' },
+    env: {
+      ...kept, PATH: LEAD_PATH, HOME: policy.home, TMPDIR: policy.tmp, CLAUDE_CODE_TMPDIR: policy.tmp, CLAUDE_CONFIG_DIR: policy.claudeDir,
+      SAGE_HOOKS_STATE: policy.hooksState, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    },
   };
 }
 

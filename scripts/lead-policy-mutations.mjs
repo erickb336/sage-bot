@@ -1,4 +1,5 @@
-// The mutation run of the lead policy (T156): each mutation removes or weakens one rule of src/lead-policy.js, and the tests of
+// The mutation run of the lead policy (T156): each mutation removes or weakens one rule of src/lead-policy.js (or, where it says so, of
+// src/sage.js or scripts/lead-policy.mjs), and the tests of
 // test/t156-lead-policy.test.js and test/t156-git-control.test.js must fail for each. It mutates a copy of src, scripts and test in
 // a new temp folder, never the worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
 //   node scripts/lead-policy-mutations.mjs     prints KILLED or SURVIVED for each mutation; exits 1 when one survives
@@ -9,7 +10,7 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dirname, '..'), W = mkdtempSync(join(tmpdir(), 'sage-bot-mutations-'));
 for (const d of ['src', 'scripts', 'test', 'package.json']) cpSync(join(ROOT, d), join(W, d), { recursive: true });
 symlinkSync(join(ROOT, 'node_modules'), join(W, 'node_modules'));
-const F = `${W}/src/lead-policy.js`, orig = readFileSync(F, 'utf8');
+const POLICY = 'src/lead-policy.js', SAGE = 'src/sage.js', SCRIPT = 'scripts/lead-policy.mjs';
 const GIT_CONTROL = ['config', 'config.worktree', 'hooks', 'commondir', 'modules', 'info/attributes', 'worktrees'];
 const LIST = `[${GIT_CONTROL.map((n) => `'${n}'`).join(', ')}]`;
 const M = [
@@ -58,12 +59,12 @@ const M = [
   ['plugin from the home folder, not the config folder', 'const plugin = sagePlugin(claudeConfig);', "const plugin = sagePlugin(join(home, '.claude'));"],
   ['session folder link not resolved', "folder: real(join(leads, 'sessions', session)),", "folder: join(leads, 'sessions', session),"],
   ['temp folder link not resolved', 'tmp: real(join(shortTmp, `sage-lead-${session}`)),', 'tmp: join(real(shortTmp), `sage-lead-${session}`),'],
-  ['git reads the global config', ", GIT_CONFIG_GLOBAL: '/dev/null' }", ' }'],
+  ['git reads the global config', "GIT_CONFIG_GLOBAL: '/dev/null', ", ''],
   ['preflight timeout without SIGKILL', "killSignal: 'SIGKILL', ", ''],
   ['config folder not denied', '    dirname(defaultConfigPath(home)), // F-T134-2\n', ''],
-  ['plugin cache not denied', 'plugin.cache, plugin.marketplace, sageRoot,', 'plugin.marketplace, sageRoot,'],
-  ['plugin marketplace not denied', 'plugin.cache, plugin.marketplace, sageRoot,', 'plugin.cache, sageRoot,'],
-  ['sage root not denied', 'plugin.cache, plugin.marketplace, sageRoot,', 'plugin.cache, plugin.marketplace,'],
+  ['plugin cache not denied', 'cache, plugin.marketplace, sageRoot,', 'plugin.marketplace, sageRoot,'],
+  ['plugin marketplace not denied', 'cache, plugin.marketplace, sageRoot,', 'cache, sageRoot,'],
+  ['sage root not denied', 'cache, plugin.marketplace, sageRoot,', 'cache, plugin.marketplace,'],
   ['SAGE_HOME ignored', 'env.SAGE_HOME ?? ', ''],
   ['TMPDIR sage-hooks not denied', '...temps.map((t) => join(t, \'sage-hooks\')), ', ''],
   ['DARWIN_USER_TEMP_DIR not used', "const temps = [tmp, 'userTemp' in host ? host.userTemp : userTemp()]", 'const temps = [tmp]'],
@@ -77,13 +78,44 @@ const M = [
   ['session name not checked', "if (!SESSION.test(session ?? ''))", 'if (false)'],
   ['hook state outside the denied area', "hooksState: join(stateDir, 'lead-hooks', session)", "hooksState: join(leads, 'lead-hooks', session)"],
   ['shared temp folder', 'tmp: real(join(shortTmp, `sage-lead-${session}`))', 'tmp: real(shortTmp)'],
-  ['credential vars kept in the env', '.filter(([k]) => !policy.deniedEnv.includes(k))', ''],
   ['no SAGE_HOOKS_STATE', 'SAGE_HOOKS_STATE: policy.hooksState, ', ''],
   ['no CLAUDE_CODE_TMPDIR', 'CLAUDE_CODE_TMPDIR: policy.tmp, ', ''],
   ['owner CLAUDE_CONFIG_DIR', ', CLAUDE_CONFIG_DIR: policy.claudeDir,', ','],
   ['all setting sources', "'--setting-sources', '', '--strict-mcp-config',", "'--strict-mcp-config',"],
   ['no strict MCP', "'--setting-sources', '', '--strict-mcp-config',", "'--setting-sources', '',"],
-  ['no plugin dir', "...(policy.sageTool ? ['--plugin-dir'", "...(false ? ['--plugin-dir'"],
+  ['no plugin dir', "...(policy.pluginDir ? ['--plugin-dir'", "...(false ? ['--plugin-dir'"],
+  // F-T156-14: sage's one identity is the version folder of the denied plugin cache
+  ['a state tool outside the plugin cache not refused', 'if (sageTool && !(within(sageTool, cache)', 'if (false && !(within(sageTool, cache)'],
+  ['a state tool outside a version folder not refused', ' && version.length > 2))', '))'],
+  ['the state tool by its path, not its real path', 'const sageTool = tool && real(tool);', 'const sageTool = tool;'],
+  ['plugin dir not the version folder', 'join(cache, version[0], version[1])', 'join(cache, version[0])'],
+  // F-T156-15: git's global files and the Claude config folder, which blockReadsOutsideWorkingDirectories re-opens
+  ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.config/git']"],
+  ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git']", "'.kube', '.gitconfig']"],
+  ['Claude config folder not a credential file', '[...CREDENTIAL_FILES.map((f) => join(real(home), f)), real(claudeConfig)]', 'CREDENTIAL_FILES.map((f) => join(real(home), f))'],
+  // F-T156-16: the environment is an allow-list
+  ['the host environment kept', '...kept, PATH', '...env, PATH'],
+  ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],
+  ['no HOME', 'HOME: policy.home, ', ''],
+  ['no TMPDIR', 'HOME: policy.home, TMPDIR: policy.tmp, ', 'HOME: policy.home, '],
+  ['git reads the system config', "GIT_CONFIG_NOSYSTEM: '1', ", ''],
+  ['nonessential traffic on', "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',", ''],
+  ['no model credential', 'k === MODEL_KEY || ', ''],
+  ['no LANG', "k === 'LANG' || ", ''],
+  ['no TERM', "k === 'TERM' || ", ''],
+  ['no LC_*', ' || /^LC_[A-Z]+$/.test(k)', ''],
+  ['any LC_ name', '/^LC_[A-Z]+$/', '/^LC_/'],
+  ['claude not found in the host PATH', 'claude: which(claude, env.PATH),', 'claude,'],
+  ['claude: a file that is not executable', 'accessSync(join(dir, name), constants.X_OK); ', ''],
+  ['claude: a folder', 'if (statSync(join(dir, name)).isFile()) return', 'return'],
+  ['claude: a relative PATH folder', 'PATH.split(delimiter).filter(isAbsolute)', 'PATH.split(delimiter)'],
+  // F-T156-17
+  ['no Edit allow for the session folder', "rules('Edit', [policy.folder, policy.tmp])", "rules('Edit', [policy.tmp])"],
+  ['no Edit allow for the temp folder', "rules('Edit', [policy.folder, policy.tmp])", "rules('Edit', [policy.folder])"],
+  ['a link to nothing not refused', 'if (lstatSync(at, { throwIfNoEntry: false })) throw', 'if (false) throw'],
+  ['empty CLAUDE_CONFIG_DIR kept', 'env.CLAUDE_CONFIG_DIR || join', 'env.CLAUDE_CONFIG_DIR ?? join', SAGE],
+  ['relative CLAUDE_CONFIG_DIR not refused', 'if (!isAbsolute(dir)) throw', 'if (false) throw', SAGE],
+  ['config parse error without the file name', 'throw new Error(`the config ${path}: ${e.message}`);', 'throw e;', SCRIPT],
   ['no budget', "      '--max-budget-usd', String(policy.maxUsd)],", '      ],'],
   ['T127 line not checked', 'if (!lines.includes(CAPABILITY_LINE))', 'if (false)'],
   ['T127 line by substring', 'if (!lines.includes(CAPABILITY_LINE))', "if (!lines.join('\\n').includes(CAPABILITY_LINE))"],
@@ -99,10 +131,12 @@ const M = [
 ];
 const rows = [];
 try {
-  for (const [name, a, b] of M) {
-    if (!orig.includes(a)) { rows.push(`NOT APPLIED  ${name}`); continue; }
+  for (const [name, a, b, file = POLICY] of M) {
+    const F = join(W, file), orig = readFileSync(F, 'utf8');
+    if (orig.split(a).length !== 2) { rows.push(`NOT APPLIED  ${name}`); continue; } // the text must be there exactly once
     writeFileSync(F, orig.replace(a, b));
     const r = spawnSync(process.execPath, ['--test', 'test/t156-lead-policy.test.js', 'test/t156-git-control.test.js'], { cwd: W, encoding: 'utf8' });
+    writeFileSync(F, orig);
     const failed = (/ℹ fail (\d+)/.exec(r.stdout) ?? [])[1];
     rows.push(`${r.status !== 0 ? 'KILLED' : 'SURVIVED'}  ${name}  (failing tests: ${failed ?? '?'})`);
   }

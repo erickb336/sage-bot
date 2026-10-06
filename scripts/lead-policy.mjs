@@ -3,8 +3,8 @@
 //                                                                                   and the arguments of `claude -p`, as JSON
 //   node scripts/lead-policy.mjs [--config <config.json>] [--session s1] preflight   prints the state: ready, waiting for sage T127, or
 //                                                                                   no sandbox; it runs the state tool and `claude sandbox status`
-// The config is the bridge's (default ~/.config/sage-bot/config.json). It prints no value of the environment except the three that
-// the policy sets.
+// The config is the bridge's (default ~/.config/sage-bot/config.json). It prints no value of the host's environment: the launch's
+// environment shows only the values that the policy sets.
 import { readFileSync } from 'node:fs';
 import { forTerminal } from '../src/clean.js';
 import { defaultConfigPath, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
@@ -21,7 +21,8 @@ const option = (name, fallback) => {
 try {
   const path = option('--config', defaultConfigPath());
   const session = option('--session', 's1');
-  const policy = leadPolicy(JSON.parse(readFileSync(path, 'utf8')), session);
+  const config = (() => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch (e) { throw new Error(`the config ${path}: ${e.message}`); } })(); // F-T156-17
+  const policy = leadPolicy(config, session);
   if (args[0] === 'settings' && args.length === 1) {
     const { command, args: argv, cwd, env } = launchOf(policy, {});
     const { hosts, deniedEnv, maxUsd, ...paths } = policy;

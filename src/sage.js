@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -44,8 +44,15 @@ export function sageTool({ sagePath, project, env = process.env }) {
   };
 }
 
-/** The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. */
-export const claudeDirOf = ({ env = process.env, home = userInfo().homedir } = {}) => env.CLAUDE_CONFIG_DIR ?? join(home, '.claude');
+/**
+ * The Claude Code config folder: CLAUDE_CONFIG_DIR, else ~/.claude. The sage plugin and sage's root are in it. An empty CLAUDE_CONFIG_DIR
+ * counts as not set; a relative one throws, because it would resolve against the working folder (F-T156-17).
+ */
+export function claudeDirOf({ env = process.env, home = userInfo().homedir } = {}) {
+  const dir = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
+  if (!isAbsolute(dir)) throw new TypeError(`CLAUDE_CONFIG_DIR must be an absolute path, not ${JSON.stringify(dir)}.`);
+  return dir;
+}
 
 /** The sage plugin's two folders in a Claude Code config folder (claudeDirOf): its cache (each version) and its marketplace copy. */
 export const sagePlugin = (claudeDir) => ({
