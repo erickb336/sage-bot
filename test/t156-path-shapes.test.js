@@ -46,13 +46,21 @@ test('the corpus covers every key that leadPolicy reads: each is a path key with
   }
 });
 
-test('F-T156-37, standing order 12: a sweep of every Unicode code point; only A-Z, a-z, 0-9, ".", "_", "-" (and "/", between parts) pass the path rule', () => {
+test('F-T156-37, standing order 12: a sweep of every Unicode code point; only A-Z, a-z, 0-9, ".", "_", "-", a space (and "/", between parts) pass the path rule', () => {
   const passed = [];
   for (let cp = 0; cp <= 0x10ffff; cp++) {
     const ch = String.fromCodePoint(cp);
     try { canonicalPath('the sweep', `/sage-bot-t156-no-such-folder/a${ch}b`); passed.push(ch); } catch { /* refused */ }
   }
-  assert.equal(passed.join(''), '-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz');
+  assert.equal(passed.join(''), ' -./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz');
+});
+
+test('the path rule refuses each non-canonical form also where nothing of the path exists', () => {
+  const none = '/sage-bot-t156-no-such-folder';
+  for (const bad of ['', '/', 'a/b', `${none}/a `, `${none}/ a`, `${none}/a  b`, `${none}/`, `${none}//b`, `${none}/./b`, `${none}/../b`, '/System/Volumes/Data', '/System/Volumes/Data/private/tmp', undefined, 7]) {
+    assert.throws(() => canonicalPath('the path', bad), (e) => e.message.startsWith(`the path ${CORPUS.says} (`) && e.message.endsWith(`), not ${JSON.stringify(bad ?? null)}. Nothing was started.`));
+  }
+  assert.equal(canonicalPath('the path', `${none}/a.b_c-1`), `${none}/a.b_c-1`);
 });
 
 /** The target of a key below `base`, made: a file, or a folder; for SAGE_TOOL the state tool in a sage plugin cache. */
@@ -87,7 +95,10 @@ const SHAPES = {
   'glob-star': (t) => `${dirname(t)}/*`,
   'glob-question': (t) => `${dirname(t)}/${leaf(t).slice(0, -1)}?`,
   'glob-bracket': (t) => `${dirname(t)}/[${leaf(t)}]`,
-  space: (t) => `${dirname(t)}/a ${leaf(t)}`,
+  'canonical-with-space': (t) => t, // the target is in a folder "Application Support"
+  'space-at-end': (t) => `${t} `,
+  'space-at-start': (t) => `${dirname(t)}/ ${leaf(t)}`,
+  'space-doubled': (t) => `${dirname(t)}/a  ${leaf(t)}`,
   'non-ascii': (t) => `${dirname(t)}/é${leaf(t)}`,
   'control-character': (t) => `${dirname(t)}/\u0001${leaf(t)}`,
   'data-volume': (t) => `/System/Volumes/Data${t}`,
@@ -118,7 +129,7 @@ for (const { key, in: where, name, kind } of CORPUS.keys) {
     test(`${key}, ${shape.id}: ${expect}`, (t) => {
       const root = scratch();
       try {
-        const base = join(root, shape.id === 'canonical-inside-home' ? 'h' : 'out');
+        const base = join(root, { 'canonical-inside-home': 'h', 'canonical-with-space': 'Application Support' }[shape.id] ?? 'out');
         const at = target(key, kind, base);
         const x = join(base, 'shape');
         mkdirSync(x, { recursive: true });

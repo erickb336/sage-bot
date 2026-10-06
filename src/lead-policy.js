@@ -77,7 +77,7 @@ function which(name, PATH = '') {
   return name;
 }
 /** Whether `inner` is `outer` or inside it. */
-const within = (inner, outer) => { const rel = relative(outer, inner); return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)); };
+const within = (inner, outer) => { const rel = relative(outer, inner); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); }; // "" (equal) is within
 
 /** The macOS per-user temp folder (getconf DARWIN_USER_TEMP_DIR), the one that os.tmpdir() gives when TMPDIR is not set, by its real path (/private/var/...). */
 function userTemp() {

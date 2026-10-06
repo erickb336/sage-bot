@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from './bridge-setup.js';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { CLAUDE_TMP_MAX, LEAD_PATH, MODEL_KEY, TEMP_ROOT, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
@@ -14,7 +14,7 @@ const ROOT = join(import.meta.dirname, '..');
 const HOST = { env: {}, home: '/h', tmp: '/t', userTemp: '/u', tempRoot: '/st/sage-lead' };
 const CONFIG = { statePath: '/s/state/gates.json' };
 /** The one-line refusal of a path that is not canonical (canonicalPath in src/sage.js); `real` when the path's real path differs. */
-const notCanonical = (what, path, real) => `${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_" and "-"; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${real ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`;
+const notCanonical = (what, path, real) => `${what} must be a canonical path (absolute; only A-Z, a-z, 0-9, ".", "_", "-" and a space between them; no empty, "." or ".." part; no link; the letter case of the disk), not ${JSON.stringify(path ?? null)}${real ? `; its real path is ${JSON.stringify(real)}` : ''}. Nothing was started.`;
 
 const DENIED = [
   '/s/state', '/s/state/gates.json', // the state folder (F-T134-2), and the state file by its real path (a link at it counts by its target)
@@ -70,6 +70,9 @@ test('the configured paths: auditPath, killPath, leadSessionsPath, SAGE_HOME and
   for (const d of ['/a/leads.jsonl', '/k/off', '/c/sage', '/c/sage/.hooks', '/l/claude', '/c/plugins/cache/sage', '/c/plugins/marketplaces/sage']) assert.ok(p.denied.includes(d), d);
   for (const d of ['/s/state/gates.json.leads.jsonl', '/h/.claude/sage', '/h/.claude/plugins/cache/sage', '/h/.claude/plugins/marketplaces/sage']) assert.ok(!p.denied.includes(d), d);
   assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, env: { SAGE_HOME: '/sh', CLAUDE_CONFIG_DIR: '/c' } }).denied.includes('/sh/.hooks'));
+  // TMPDIR: the host's tmp, else the environment's TMPDIR, else /private/tmp (the real form of /tmp)
+  assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, tmp: undefined }).denied.includes('/private/tmp/sage-hooks'));
+  assert.ok(leadPolicy(CONFIG, 's2', { ...HOST, tmp: undefined, env: { TMPDIR: '/x' } }).denied.includes('/x/sage-hooks'));
 });
 
 test('the settings snapshot: the sandbox, the file-tool rules, the host list, WebFetch and the credential variables', () => {
@@ -141,13 +144,16 @@ test('sage, the only plugin: --plugin-dir is the version folder of the denied pl
       assert.ok(p.denied.includes(cache));
       assert.deepEqual(launchOf(p, {}).args.slice(6, 8), ['--plugin-dir', join(cache, 'sage', 'v1')]);
     }
-    mkdirSync(join(root, 'scratch'));
+    mkdirSync(join(root, 'scratch', 'skills', 'sage'), { recursive: true });
     writeFileSync(join(root, 'scratch', 'sage.mjs'), '');
+    writeFileSync(join(root, 'scratch', 'skills', 'sage', 'sage.mjs'), '');
     symlinkSync(join(root, 'scratch'), join(cache, 'sage', 'v2'));
     // F-T156-24: anything but exactly sage/<version>/skills/sage/sage.mjs in the cache, with sage.mjs files at the other places.
     const other = ['sage.mjs', 'sage/v1/sage.mjs', 'sage/v1/x/y/sage.mjs', 'other/v1/skills/sage/sage.mjs', 'x/sage/v1/skills/sage/sage.mjs', 'sage/v1/skills/other/sage.mjs', 'sage/v1/skills/sage/other.mjs'];
     for (const f of other) { mkdirSync(dirname(join(cache, f)), { recursive: true }); writeFileSync(join(cache, f), ''); }
     assert.throws(() => leadPolicy(CONFIG, 's1', h({ SAGE_TOOL: join(cache, 'sage', 'v2', 'sage.mjs') })), { message: notCanonical('SAGE_TOOL', join(cache, 'sage', 'v2', 'sage.mjs'), join(root, 'scratch', 'sage.mjs')) });
+    utimesSync(join(root, 'scratch', 'sage.mjs'), new Date(), new Date(Date.now() + 60_000)); // v2, a link, is the newest version
+    assert.throws(() => leadPolicy(CONFIG, 's1', h({})), { message: notCanonical('the sage state tool', join(cache, 'sage', 'v2', 'skills', 'sage', 'sage.mjs'), join(root, 'scratch', 'skills', 'sage', 'sage.mjs')) });
     for (const bad of [join(root, 'scratch', 'sage.mjs'), ...other.map((f) => join(cache, f))]) {
       assert.throws(() => leadPolicy(CONFIG, 's1', h({ SAGE_TOOL: bad })), { message: `the sage state tool ${bad} is not ${cache}/sage/<version>/skills/sage/sage.mjs, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.` });
     }
@@ -164,6 +170,8 @@ test('the claude command is found in the host\'s PATH, because the session\'s PA
     const PATH = [relative(process.cwd(), join(root, 'b')), join(root, 'c'), join(root, 'a'), join(root, 'b')].join(':'); // a relative folder is skipped; c/claude is a folder
     assert.equal(leadPolicy(CONFIG, 's1', { ...HOST, env: { PATH } }).claude, join(root, 'b', 'claude'));
     assert.equal(leadPolicy(CONFIG, 's1', { ...HOST, env: { PATH }, claude: '/opt/claude' }).claude, '/opt/claude');
+    // A SAGE_TOOL with no file at its canonical path is refused, not taken as "not installed".
+    assert.throws(() => leadPolicy(CONFIG, 's1', { ...HOST, env: { SAGE_TOOL: join(root, 'none.mjs') } }), { message: `SAGE_TOOL is set to ${join(root, 'none.mjs')}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.` });
     assert.ok(!LEAD_PATH.split(':').includes(join(root, 'b')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -184,6 +192,8 @@ test('refusal: a link to a path that is not made yet, at the state file or at se
     assert.throws(() => leadPolicy({ ...CONFIG, leadSessionsPath: join(root, 'l') }, 's1', HOST), { message: `the lead session's sessions folder ${join(root, 'l', 'sessions')} is a link: a session could reach another folder through it. Remove it. Nothing was started.` });
     symlinkSync(join(root, 'nothing'), join(state, 'gates.json')); // the state file: a link to nothing has no real path
     assert.throws(() => leadPolicy({ statePath: join(state, 'gates.json') }, 's1', HOST), { message: notCanonical('the config: statePath', join(state, 'gates.json')) });
+    symlinkSync(join(root, 'l'), join(state, 'g.json.leads.jsonl')); // a denied path that the config does not name: the lead log
+    assert.throws(() => leadPolicy({ statePath: join(state, 'g.json') }, 's1', HOST), { message: notCanonical('the denied path', join(state, 'g.json.leads.jsonl'), join(root, 'l')) });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -210,6 +220,8 @@ test('refusal: a link at the leads folder, at sessions, at any session folder or
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l2') }, 's1', HOST), link('sessions folder', join(root, 'l2', 'sessions')));
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l3') }, 's2', HOST), link('session folder', join(root, 'l3', 'sessions', 's1'))); // also for s2
     assert.equal(leadPolicy({ ...c, leadSessionsPath: join(root, 'l4') }, 's2', HOST).folder, join(root, 'l4', 'sessions', 's2')); // no link: fine
+    mkdirSync(join(root, 'l5', 'Sessions'), { recursive: true }); // on the case-insensitive volume, "sessions" names this folder
+    if (existsSync(join(root, 'l5', 'sessions'))) assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l5') }, 's2', HOST), { message: notCanonical('the lead session\'s sessions folder', join(root, 'l5', 'sessions'), join(root, 'l5', 'Sessions')) });
     symlinkSync(home, join(root, 'home-link'));
     assert.throws(() => leadPolicy({ ...c, leadSessionsPath: join(root, 'l4') }, 's2', { ...HOST, home: join(root, 'home-link') }), { message: notCanonical('HOME', join(root, 'home-link'), home) });
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -305,6 +317,7 @@ test('the script prints the settings of a sample config, and the preflight state
     assert.equal(out.settings.sandbox.filesystem.denyRead[0], join(root, 'home'));
     assert.ok(!s.stdout.includes('sample-secret'));
     assert.equal(out.policy.pluginDir, join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1'));
+    assert.equal(out.policy.tempRoot, '/private/tmp/sage-lead'); // the fixed temp root, in its real form
     const p = run('preflight');
     assert.equal(p.status, 1);
     assert.equal(p.stdout, 'lead sessions: waiting for sage T127 (the state tool does not print "lead-sessions 1")\n');
@@ -441,6 +454,17 @@ test('F-T156-36: at the timeout, preflight kills the whole process group of clau
     const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
     for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(alive(), false, `the grandchild ${pid} is still running`);
+  } finally { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } h.done(); }
+});
+
+test('F-T156-36: a claude that exits but leaves a process holding its output past the timeout counts as failed, and that process is killed', async () => {
+  const h = host();
+  let pid;
+  try {
+    writeFileSync(h.policy.claude, `#!/bin/sh\n/bin/sleep 30 &\necho $! > "${h.root}/pid"\necho '${JSON.stringify({ supported: true, enabled: true, strictMode: true, unavailableReason: null })}'\n`);
+    assert.deepEqual(await preflight(h.policy, h.env, { claude: 500 }), { state: 'no sandbox', why: `claude sandbox status failed: Command failed: ${h.policy.claude} --settings ${JSON.stringify(settingsOf(h.policy))} --setting-sources  sandbox status` });
+    pid = Number(readFileSync(join(h.root, 'pid'), 'utf8'));
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   } finally { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } h.done(); }
 });
 
