@@ -45,8 +45,8 @@ test('G10 a: the owner\'s answer after a loop closes the card; a later press of 
   assert.match(lastCard(b).embeds[0].description, /Answered by Erick \(terminal\) at <t:\d+:t>: A\. x\. Final\./);
   assert.equal((await b.press(JON, 'press:project/G1:0:1'))[0].content, 'Already answered by Erick at the terminal: A. x. Your press did not count.');
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'A');
-  assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → A']);
+  assert.equal(b.answerOf('G1'), 'x');
+  assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → x']);
 });
 
 test('G10 a: before each `sage gate answer` the bridge reads the row again: an owner answer between two loops is never replaced', async () => {
@@ -63,7 +63,7 @@ test('G10 a: before each `sage gate answer` the bridge reads the row again: an o
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Visible', 'ISO']);
   assert.deepEqual(decisionsOf(b, 'Which columns?'), ['Which columns? → Visible']);
-  assert.deepEqual(decisionsOf(b, 'Which format?'), ['Which format? → A. ISO']);
+  assert.deepEqual(decisionsOf(b, 'Which format?'), ['Which format? → ISO']);
   assert.equal(b.bridge.entry('project/G1+G2').ask.parts[0].final.text, 'A. Visible');
 });
 
@@ -102,11 +102,11 @@ test('G10 a: a batch whose parts the owner all answers at the terminal closes at
   b.sh('gate', 'answer', 'G2', 'skip this: the task changed');
   await b.bridge.loop();
   const fields = lastCard(b).embeds[0].fields.map((f) => f.value.split('\n').at(-1));
-  assert.deepEqual(fields.map((f) => f.replace(/<t:\d+:t>/, 'T')), ['**Answered by Erick (terminal) at T: A. x. Final.**', '**Answered by Erick (terminal) at T: skip this: the task changed. Final.**']);
+  assert.deepEqual(fields.map((f) => f.replace(/<t:\d+:t>/, 'T')), ['**Answered by Erick (terminal) at T: A. x. Final.**', '**Answered by Erick (terminal) at T: other: skip this: the task changed. Final.**']);
   assert.equal(lastCard(b).components.length, 2); // no "End vote now"
   b.now += 31 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['x', 'skip this: the task changed']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['x', 'other: skip this: the task changed']);
   assert.deepEqual(pings(b, LEADR), []);
 });
 
@@ -122,13 +122,13 @@ test('the bridge\'s own answer in sage, without its save (a crash in between), s
   await b.bridge.loop();
   assert.equal(b.bridge.entry('project/G1').ask.parts[0].final, undefined);
   assert.match(lastCard(b).embeds[0].description, /Answered by Maya at/);
-  assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → B. y']);
+  assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → y']);
 });
 
 test('F-T28-28: a question about a merge is never posted, in any form; a word that only holds "merg" is', async () => {
   for (const q of ['Merge PR 12 now?', 'Shall I keep merges small?', 'PR 12 merged with a conflict: revert?', 'Start merging the stack?', 'Which way?']) {
     const b = setup();
-    b.sh('gate', 'add', 'T1', '--question', q, '--options', q === 'Which way?' ? 'squash and merge|rebase' : 'yes|no', '--recommend', 'yes');
+    b.sh('gate', 'add', 'T1', '--question', q, '--options', q === 'Which way?' ? 'squash and merge|rebase' : 'yes|no', '--recommend', '1');
     await b.post();
     assert.equal(b.discord.posts.length, 0, q);
   }

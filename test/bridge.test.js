@@ -201,7 +201,7 @@ test('F-T28-9: a withdraw comes only from sage side; an answer at the terminal i
   assert.deepEqual(b.bridge.entry('project/G1').ask.parts[0].final, { by: OWNER, at: b.now, option: 'B', text: 'B. y' });
   assert.equal(b.answerOf('G1'), 'y');
   assert.deepEqual(b.bridge.entry('project/G2').gate.outcome, { status: 'withdrawn' });
-  assert.equal(b.answerOf('G2'), 'dropped: the task changed');
+  assert.equal(b.answerOf('G2'), 'other: dropped: the task changed');
   const [g1, g2] = b.discord.messages.keys();
   assert.match(card(b, g1).embeds[0].description, /Answered by Erick \(terminal\)/);
   assert.match(card(b, g2).embeds[0].description, /Withdrawn by Erick/);

@@ -42,7 +42,7 @@ function voteWith(b, sage, ...args) {
 async function asked({ question = QUESTION[0], options = QUESTION[1], members } = {}) {
   const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
-  b.sh('gate', 'add', 'T1', '--question', question, '--options', options, '--recommend', 'No');
+  b.sh('gate', 'add', 'T1', '--question', question, '--options', options, '--recommend', '2'); // the second option: No, or Wait
   saveVotes(`${b.statePath}.votes.leads`, new Map([['project/G1', b.project]]));
   await b.post();
   return b;
@@ -96,11 +96,11 @@ test('T73: a lead\'s press records the answer in sage, posts the recommendation 
   b.now += MINUTE;
   const replies = await b.press(JON, 'press:project/G1:0:0');
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'Yes (sage-leads recommend; the owner decides)'); // never the owner's plain "A. Yes" (F-T73-1)
+  assert.equal(b.answerOf('G1'), 'other: A. Yes (sage-leads recommend; the owner decides)'); // never the owner's plain "A. Yes" (F-T73-1)
   assert.deepEqual(b.discord.posts.at(-1), { content: 'Recommendation recorded: Jon recommends Yes. Erick decides at the terminal.', allowedMentions: { parse: [] } });
   assert.deepEqual(b.lines.filter((l) => l.includes('G1')), ['sage gate project/G1 answered: other: A. Yes (sage-leads recommend; the owner decides)',
     'project/G1: sage-leads recommend Yes. If you agree, switch the mode yourself at the terminal.']);
-  assert.deepEqual((await b.sage.decisions()).map((d) => d.decision), ['Switch the automatic-merge mode on for this session? → A. Yes (sage-leads recommend; the owner decides)']);
+  assert.deepEqual((await b.sage.decisions()).map((d) => d.decision), ['Switch the automatic-merge mode on for this session? → other: A. Yes (sage-leads recommend; the owner decides)']);
   assert.match(text(b), /\*\*Recommended by Jon \(sage-lead\) at <t:\d+:t>: A\. Yes\. Erick decides at the terminal\.\*\*/);
   // Every text that the bridge and vote.mjs made: the posts and edits, the replies, the log and the output of sage's command.
   const all = JSON.stringify([[...b.discord.messages.values()], replies, b.lines, vote(b, '--list'), vote(b, '--leads', 'G1', 'G2')]);
@@ -142,7 +142,7 @@ test('T73, G10: Erick\'s answer at the terminal wins, before a lead\'s press and
   const after = await asked();
   after.now += MINUTE;
   await after.press(JON, 'press:project/G1:0:0');
-  assert.equal(after.answerOf('G1'), 'Yes (sage-leads recommend; the owner decides)');
+  assert.equal(after.answerOf('G1'), 'other: A. Yes (sage-leads recommend; the owner decides)');
   after.sh('gate', 'answer', 'G1', 'B. No');
   after.now += MINUTE;
   await after.bridge.loop();
@@ -269,7 +269,7 @@ test('F-T73-3: the terminal line after a No recommendation says to do nothing, a
   no.now += MINUTE;
   await no.press(JON, 'press:project/G1:0:1');
   await no.bridge.loop();
-  assert.equal(no.answerOf('G1'), 'No (sage-leads recommend; the owner decides)');
+  assert.equal(no.answerOf('G1'), 'other: B. No (sage-leads recommend; the owner decides)');
   assert.deepEqual(no.discord.posts.at(-1).content, 'Recommendation recorded: Jon recommends No. Erick decides at the terminal.');
   assert.deepEqual(no.lines.filter((l) => l.startsWith('project/G1:')), ['project/G1: sage-leads recommend No. If you agree, do nothing; the mode stays off.']);
   const yes = await asked();
@@ -303,14 +303,14 @@ test('F-T73-5: a press after the recommendation, also Erick\'s own, gets a note 
   assert.deepEqual((await b.press(OWNER, 'press:project/G1:0:1')).map((r) => r.content), [done]);
   assert.deepEqual((await b.press(JON, 'press:project/G1:0:1')).map((r) => r.content), [done]);
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'Yes (sage-leads recommend; the owner decides)');
+  assert.equal(b.answerOf('G1'), 'other: A. Yes (sage-leads recommend; the owner decides)');
 
   // Erick holds sage-lead too: his press in Discord is a recommendation like any lead's, never his final answer (G10).
   const own = await asked();
   own.now += MINUTE;
   await own.press(OWNER, 'press:project/G1:0:1');
   await own.bridge.loop();
-  assert.equal(own.answerOf('G1'), 'No (sage-leads recommend; the owner decides)');
+  assert.equal(own.answerOf('G1'), 'other: B. No (sage-leads recommend; the owner decides)');
   assert.match(text(own), /\*\*Recommended by Erick \(sage-lead\) at <t:\d+:t>: B\. No\. Erick decides at the terminal\.\*\*$/);
   assert.deepEqual(own.lines.filter((l) => l.startsWith('project/G1:')), ['project/G1: sage-leads recommend No. If you agree, do nothing; the mode stays off.']);
   own.now += MINUTE;

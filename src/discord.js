@@ -6,7 +6,7 @@ import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDurati
 import { apiError, createBridge, LOOP, refuseOldRoles } from './bridge.js';
 import { askCommand, createAsk, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
-import { sageTool } from './sage.js';
+import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
@@ -136,6 +136,8 @@ export async function enter(client, { config, channels, ask, log }) {
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
   const { config, channels, projects, own, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any lead log line
+  // Before the token is read: a sage tool that does not take the bridge's `gate answer` form refuses the start with one line (T176).
+  for (const sagePath of new Set(projects.map((p) => p.sagePath))) await probeTool(sagePath);
   const token = await readToken();
   // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });

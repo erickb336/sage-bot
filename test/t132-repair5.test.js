@@ -13,7 +13,7 @@ import { loadProjects } from '../src/projects.js';
 import { sageTool } from '../src/sage.js';
 import { record, sessionOf } from '../src/sessions.js';
 import { loadVotes, saveVotes, writeWhole } from '../src/state.js';
-import { CONFIG, execFileSync, MAYA, SAGE, setup } from './bridge-setup.js';
+import { CONFIG, execFileSync, MAYA, SAGE, setup, toolOf } from './bridge-setup.js';
 
 const NOTE = 'This question\'s project is no longer served; Erick answers it at the terminal.';
 const S1 = 'eeeeeeee-0000-4000-8000-000000000145';
@@ -28,7 +28,7 @@ function three() {
   for (const [name, asks] of [['beta', [['Which colour?', 'Red|Blue'], ['Which font?', 'Serif|Sans']]], ['gamma', [['Delete the prod database?', 'Keep|Delete'], ['Drop the users table?', 'Keep|Drop']]]]) {
     const folder = join(b.root, name);
     mkdirSync(folder);
-    const sh = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', folder], { env, encoding: 'utf8' }).trim();
+    const sh = toolOf(b, folder);
     sh('init');
     for (const [n, [question, options]] of asks.entries()) {
       sh('task', 'add', '--title', `${name} task ${n + 1}`, '--size', 'small');
@@ -141,7 +141,7 @@ test('G45 A: a gate file and marks of the time before the folders migrate once, 
   // The card still works: Maya's press records the answer in beta.
   await b.pressOn(card, 'press:beta/G1:0:1');
   await b.bridge.loop();
-  assert.equal(b.beta.answer('G1'), 'B. Blue');
+  assert.equal(b.beta.answer('G1'), 'Blue');
   // Once only: the next start logs no update.
   const again = b.lines.length;
   b.bridge = b.with({ beta: 'beta' });

@@ -12,7 +12,7 @@ import { sageTool } from '../src/sage.js';
 import { loadProjects, pickProject } from '../src/projects.js';
 import { record } from '../src/sessions.js';
 import { openGate } from '../src/vote.js';
-import { CHANNEL, CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
+import { CHANNEL, CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';
@@ -26,7 +26,7 @@ function two() {
   b.beta = join(b.root, 'beta');
   mkdirSync(b.beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  b.shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', b.beta], { env, encoding: 'utf8' }).trim();
+  b.shBeta = toolOf(b, b.beta);
   b.shBeta('init');
   b.betaSage = sageTool({ sagePath: SAGE, project: b.beta, env });
   b.sh('task', 'add', '--title', 'Alpha export', '--size', 'small');
@@ -162,7 +162,7 @@ test('F-T132-3: a settled card with old buttons answers an old press with the us
   await b.bridge.loop();
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
   assert.equal(saved(b).entries[0].oldButtons, undefined);
-  assert.equal(b.answerOf('G1'), 'A');
+  assert.equal(b.answerOf('G1'), 'CSV');
 });
 
 test('F-T132-6, G43 A: a session keeps the project of its first event, also for an event in another project\'s folder; a gate add for another --project changes nothing', () => {

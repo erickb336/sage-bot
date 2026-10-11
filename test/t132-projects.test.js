@@ -10,7 +10,7 @@ import { record } from '../src/sessions.js';
 import { sageTool } from '../src/sage.js';
 import { load, loadVotes, saveVotes } from '../src/state.js';
 import { openGate } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
 
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
@@ -26,7 +26,7 @@ function twoProjects() {
   b.beta = join(b.root, 'beta');
   mkdirSync(b.beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  b.shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', b.beta], { env, encoding: 'utf8' }).trim();
+  b.shBeta = toolOf(b, b.beta);
   b.shBeta('init');
   b.betaSage = sageTool({ sagePath: SAGE, project: b.beta, env });
   b.make = () => createBridge({ sages: new Map([['project', b.sage], ['beta', b.betaSage]]), own: 'project', discord: b.discord, config: CONFIG,
@@ -77,7 +77,7 @@ test('T132, G10: Erick\'s answer at the terminal in one project is final there, 
   assert.match(b.discord.latest(beta).embeds[0].description, /Answered by Erick \(terminal\) at <t:\d+:t>: A\. Red\. Final\./);
   const late = await b.press(MAYA, 'press:beta/G1:0:1');
   assert.equal(late[0].content, 'Already answered by Erick at the terminal: A. Red. Your press did not count.');
-  assert.equal(await b.answerOfBeta('G1'), 'A');
+  assert.equal(await b.answerOfBeta('G1'), 'Red');
   await b.press(MAYA, 'press:project/G1:0:1'); // the own project's G1 is another gate: the press counts
   assert.equal(b.answerOf('G1'), 'JSON');
 });

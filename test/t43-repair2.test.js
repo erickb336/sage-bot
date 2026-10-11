@@ -38,7 +38,7 @@ async function openMarker() {
   b.sh('gate', 'add', 'T2', '--question', 'Which footer?', '--options', 'Short|Long', '--recommend', 'Short');
   await b.post();
   await b.press(MAYA, 'press:project/G1:0:0');
-  assert.deepEqual(b.writes, ['G1 A. Old page', 'G1 New page']);
+  assert.deepEqual(b.writes, ['G1 Old page', 'G1 New page']);
   assert.equal(b.answerOf('G1'), 'Old page'); // the marker of G1 is open: the owner's answer is only in decisions.tsv
   return b;
 }
@@ -48,12 +48,12 @@ test('F-T43-7: a marker on a gate that is gone from gates.tsv is cleared, and th
   b.hide.add('G1');
   await b.press(MAYA, 'press:project/G2:0:0'); // one flush: the marker of G1 first, then the answer of G2
   assert.equal(b.answerOf('G2'), 'Short');
-  assert.deepEqual(b.writes.slice(2), ['G2 A. Short']);
+  assert.deepEqual(b.writes.slice(2), ['G2 Short']);
   const gone = 'G1: the gate is not in gates.tsv any more; the bridge stops its check of the owner\'s answer and writes nothing back';
   assert.deepEqual(b.lines.filter((l) => l.startsWith('G1: the gate')), [gone]);
   b.hide.clear(); // the marker is gone: G1 comes back, and no loop writes to it again
   for (let i = 0; i < 3; i++) { b.now += 60_000; await b.bridge.loop(); }
-  assert.deepEqual(b.writes.slice(2), ['G2 A. Short']);
+  assert.deepEqual(b.writes.slice(2), ['G2 Short']);
   assert.equal(b.lines.filter((l) => l.startsWith('G1: the gate')).length, 1);
 });
 
@@ -66,7 +66,7 @@ test('F-T43-7: an error in the restore of one gate does not stop the answers of 
   b.now += 60_000;
   await b.bridge.loop(); // the marker of G1 is still open, and the next flush writes the owner's answer back
   assert.equal(b.answerOf('G1'), 'New page');
-  assert.deepEqual(b.writes.slice(2), ['G2 A. Short', 'G1 New page']);
+  assert.deepEqual(b.writes.slice(2), ['G2 Short', 'G1 New page']);
 });
 
 test('F-T43-8: a decisions trail made shorter under a pending write back gives at most one write in a flush and clears the marker', async () => {

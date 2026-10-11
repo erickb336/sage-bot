@@ -74,30 +74,18 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
-  const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', project], { env, encoding: 'utf8' }).trim();
   const statePath = join(root, 'state', 'gates.json');
-  /**
-   * The owner's answer at the terminal, `gate answer <G> <text>`, as the owner types it since T176: a key ("A"), "A. text" or the
-   * option's text is `--option <n>`; any other words are `--other-hex`, and sage keeps them as "other: <words>".
-   */
-  const typed = (id, text) => {
-    const row = table(b, 'gates').find((r) => r.id === id);
-    const options = optionsOf(row);
-    const m = /^([A-E])(?:\. (.*))?$/.exec(text);
-    const named = m ? options[KEYS.indexOf(m[1])] : undefined;
-    const picked = named !== undefined && (m[2] === undefined || m[2] === named) ? named : options.includes(text) ? text : `${OTHER}${text}`;
-    return answerArgs(row, picked);
-  };
+  const discord = fakeDiscord(members);
+  const lines = [];
+  const b = { root, project, env, discord, lines, now: T0, statePath };
+  const run = toolOf(b, project);
   const sh = (...args) => {
-    if (args[0] === 'gate' && args[1] === 'answer' && args.length === 4) args = [...args.slice(0, 3), ...typed(args[2], args[3])];
     const out = run(...args);
     if (markAll && args[0] === 'gate' && args[1] === 'add') b.mark(...table(b, 'gates').map((r) => r.id));
     return out;
   };
+  b.sh = sh;
   sh('init');
-  const discord = fakeDiscord(members);
-  const lines = [];
-  const b = { root, project, sh, discord, lines, now: T0, statePath };
   /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys, with the folder of the project (G45 A). */
   b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Map([...loadVotes(`${statePath}.votes`), ...ids.map((id) => [`${NAME}/${id}`, project])]));
   b.sage = sageTool({ sagePath: SAGE, project, env });
@@ -114,9 +102,27 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   b.post = async () => { await b.bridge.loop(); b.now += SETTLE; await b.bridge.loop(); };
   return b;
 }
+/**
+ * The state tool on `folder`, a project in `b.root`, as the owner runs it at the terminal. A `gate answer <G> <text>` is what the
+ * owner types since T176: a key ("A"), "A. text" or the option's text is `--option <n>`; any other words are `--other-hex`, and
+ * sage keeps them as "other: <words>".
+ */
+export function toolOf(b, folder) {
+  const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', folder], { env: b.env, encoding: 'utf8' }).trim();
+  const typed = (id, text) => {
+    const row = rowsOf(run('logbook'), 'gates').find((r) => r.id === id);
+    const options = optionsOf(row);
+    const m = /^([A-E])(?:\. (.*))?$/.exec(text);
+    const named = m ? options[KEYS.indexOf(m[1])] : undefined;
+    const picked = named !== undefined && (m[2] === undefined || m[2] === named) ? named : options.includes(text) ? text : `${OTHER}${text}`;
+    return answerArgs(row, picked);
+  };
+  return (...args) => run(...(args[0] === 'gate' && args[1] === 'answer' && args.length === 4 ? [...args.slice(0, 3), ...typed(args[2], args[3])] : args));
+}
 /** The rows of a logbook table, as { column: value }. */
-export function table(b, name) {
-  const [head, ...lines] = readFileSync(join(b.sh('logbook'), `${name}.tsv`), 'utf8').split('\n').filter(Boolean);
+export const table = (b, name) => rowsOf(b.sh('logbook'), name);
+function rowsOf(dir, name) {
+  const [head, ...lines] = readFileSync(join(dir, `${name}.tsv`), 'utf8').split('\n').filter(Boolean);
   const cols = head.split('\t');
   return lines.map((l) => Object.fromEntries(l.split('\t').map((v, i) => [cols[i], v])));
 }

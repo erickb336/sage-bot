@@ -99,11 +99,13 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
   return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
 }
 
-/** The option key that an answer typed at the terminal names ("A", the option's text, or "A. text"), or undefined. */
-function optionOf(said, texts) {
-  const s = said.trim().toLowerCase();
-  return KEYS.slice(0, texts.length).find((k, j) => [k, texts[j], `${k}. ${texts[j]}`].some((t) => t.toLowerCase() === s));
-}
+/** The option key of an answer in sage: sage keeps the option's own text (`gate answer --option <n>`, T176), else undefined. */
+const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
+/**
+ * An answer that the bridge wrote before T176, "A. text" (with RECOMMENDED after it for a leads-only gate): the owner cannot type it
+ * since then (sage takes an option number or the owner's own words, kept as "other: …"), so it never counts as the owner's.
+ */
+const oldForm = (said, texts) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${RECOMMENDED}`);
 
 /**
  * The gate rows of one task in groups of the questions that the task asked together: sorted by `at`, a group starts at its first row
@@ -444,6 +446,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         // A gate with an open check of the trail waits for it: the answer in sage may be the bridge's write back of an older owner answer.
         if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || m.restore?.[sageId]) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
+        if (oldForm(said, m.texts[i])) continue; // a write of the bridge before T176, never the owner's
         const option = optionOf(said, m.texts[i]);
         if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
         const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');

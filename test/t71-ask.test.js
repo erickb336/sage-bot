@@ -38,7 +38,7 @@ function world(t) {
   t.after(() => rmSync(b.root, { recursive: true, force: true }));
   b.sh('task', 'add', '--title', 'Board sort', '--size', 'small', '--why', `why ${SECRET}`);
   b.sh('task', 'T1', 'set', 'state=briefed');
-  b.sh('task', 'T1', 'set', 'state=building', 'pr=17', `branch=${SECRET.toLowerCase()}-branch`);
+  b.sh('task', 'T1', 'set', 'state=building', 'pr=17', `branch=t1-${SECRET.toLowerCase()}`);
   b.sh('task', 'add', '--title', 'Wake notes', '--size', 'tiny');
   b.sh('finding', 'add', 'T1', '--source', 'qa', '--severity', 'high', '--summary', `finding ${SECRET}`);
   b.sh('log', 'T1', `owner said ${SECRET}`, '--why', `security detail ${SECRET}`);
@@ -94,27 +94,30 @@ test('the PR of a task links to the repository when the project names one', asyn
 
 test('no answer holds text from decisions.tsv, findings, briefs, reports, a why or a branch; the open questions show in full (G20)', async (t) => {
   const b = world(t);
-  b.sh('gate', 'add', 'T2', '--question', 'Rename the <@&300000000000000001> field?', '--options', 'Yes|**No**', '--recommend', '@everyone [x](https://evil.example)', '--default', '`No`');
+  b.sh('gate', 'add', 'T2', '--question', 'Rename the <@&300000000000000001> field?', '--options', 'Yes|**No** @everyone [x](https://evil.example)', '--recommend', '2', '--default', 'Yes');
   const all = [];
   for (const [sub, options] of [['board'], ['gates'], ['task', { id: 'T1' }], ['task', { id: 'T2' }], ['files']]) all.push(...await b.cmd(JON, sub, options));
   all.push(...await b.mention(MAYA, 'what is new?'));
   assert.equal(all.length, 6);
   for (const r of all) assert.ok(!JSON.stringify(r).toUpperCase().includes(SECRET), JSON.stringify(r));
   // The recommendation and the default of each open question, escaped as all logbook text: no ping, no link, no markdown.
-  const g3 = 'G3 (T2), answered at the terminal: Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\*\n  Recommended: @everyone \\[x\\](https:// evil.example) · Default: No';
+  const g3 = 'G3 (T2), answered at the terminal: Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\* @everyone \\[x\\](https:// evil.example)\n  Recommended: \\*\\*No\\*\\* @everyone \\[x\\](https:// evil.example) · Default: Yes';
   assert.deepEqual(all[1], { content: `${GATES.replace('(2)', '(3)')}\n- ${g3}`, ...PUBLIC });
-  assert.ok(all[0].content.endsWith('\n- G3 (T2): Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\*'), all[0].content); // no advice on the board
+  assert.ok(all[0].content.endsWith('\n- G3 (T2): Rename the \\<@&300000000000000001\\> field?\n  A. Yes · B. \\*\\*No\\*\\* @everyone \\[x\\](https:// evil.example)'), all[0].content); // no advice on the board
 });
 
-/** Six more open questions of T2 (G3 to G8), each of about the longest normal size: 130 characters, 3 options, a 100-character recommendation. */
+/**
+ * Six more open questions of T2 (G3 to G8), each of about the longest normal size: 130 characters, 3 options, and the recommendation
+ * a 100-character option (sage takes only an option as the recommendation, T176).
+ */
 function sixLong(b) {
   for (let n = 3; n <= 8; n++) {
-    b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', 'First option|Second option|Third option', '--recommend', `R${n} ${'r'.repeat(96)}`, '--default', 'First option');
+    b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', `First option|Second option|R${n} ${'r'.repeat(96)}`, '--recommend', '3', '--default', 'First option');
   }
 }
 const isWhole = (content) => { // every heading in the reply shows its question to the end
   const heads = [...content.matchAll(/^- G(\d+) \(T\d\)[^:]*: (.*)$/gm)].filter((m) => Number(m[1]) > 2);
-  assert.ok(heads.length >= 4, content);
+  assert.ok(heads.length >= 3, content);
   for (const [, n, text] of heads) assert.equal(text, `Q${n} ${'q'.repeat(126)}?`);
 };
 
@@ -123,8 +126,8 @@ test('F-T95-1: /sage gates shows the open questions that fit in full, then "N mo
   sixLong(b);
   const [{ content }] = await b.cmd(MAYA, 'gates');
   assert.ok(content.length <= 2000, String(content.length));
-  assert.deepEqual(content.match(/^- G\d/gm), ['- G1', '- G2', '- G3', '- G4', '- G5', '- G6']);
-  assert.ok(content.endsWith(`  Recommended: R6 ${'r'.repeat(96)} · Default: First option\n2 more open question(s): G7, G8.`), content);
+  assert.deepEqual(content.match(/^- G\d/gm), ['- G1', '- G2', '- G3', '- G4', '- G5']);
+  assert.ok(content.endsWith(`  Recommended: R5 ${'r'.repeat(96)} · Default: First option\n3 more open question(s): G6, G7, G8.`), content);
   assert.ok(!content.includes('…'), content);
   isWhole(content);
 });
@@ -138,20 +141,20 @@ test('F-T95-1: when even the ids of the rest do not fit, the reply ends with the
   const [{ content }] = await b.cmd(MAYA, 'gates');
   assert.ok(content.length <= 2000, String(content.length));
   assert.match(content, /^\*\*Open questions · project\*\* \(408\)\n/);
-  assert.equal(content.match(/^- G\d/gm).length, 6);
-  assert.ok(content.endsWith(`· Default: First option\n402 more open question(s).`), content);
+  assert.equal(content.match(/^- G\d/gm).length, 5);
+  assert.ok(content.endsWith(`· Default: First option\n403 more open question(s).`), content);
 });
 
 test('F-T95-1: the board shows no advice line, and the same "N more open question(s)" line when its list does not fit', async (t) => {
   const b = world(t);
   sixLong(b);
-  for (let n = 9; n <= 14; n++) b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', 'First option|Second option|Third option', '--recommend', 'x');
+  for (let n = 9; n <= 14; n++) b.sh('gate', 'add', 'T2', '--question', `Q${n} ${'q'.repeat(126)}?`, '--options', 'First option|Second option|Third option', '--recommend', 'First option');
   const [{ content }] = await b.cmd(MAYA, 'board');
   assert.ok(content.length <= 2000, String(content.length));
   assert.ok(!/Recommended|Default/.test(content), content);
   assert.match(content, /\n14 open question\(s\):\n- G1 \(T1\): Which sort is the default\?\n  A\. Name · B\. Date\n- G2 /);
-  assert.equal(content.match(/^- G\d+/gm).length, 10);
-  assert.ok(content.endsWith('\n  A. First option · B. Second option · C. Third option\n4 more open question(s): G11, G12, G13, G14.'), content);
+  assert.equal(content.match(/^- G\d+/gm).length, 8);
+  assert.ok(content.endsWith(`\n  A. First option · B. Second option · C. R8 ${'r'.repeat(96)}\n6 more open question(s).`), content);
   isWhole(content);
 });
 
