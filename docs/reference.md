@@ -8,7 +8,7 @@ In this page, a "gate" is a sage gate: a question that sage parks for the owner.
 
 ## The demo
 
-The demo needs Node 22 or later, `npm ci` once, and the sage plugin. It finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `plugins/cache/sage/sage/*/skills/sage/` in the Claude Code config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`); else it stops with a message that names `SAGE_TOOL`. The tests do not use the plugin's cache: see [Run the checks](#run-the-checks).
+The demo needs Node 24 or later, `npm ci` once, and the sage plugin. It finds the sage state tool in this order: `SAGE_TOOL` when it is set; else the newest `sage.mjs` in the plugin's cache, `plugins/cache/sage/sage/*/skills/sage/` in the Claude Code config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`); else it stops with a message that names `SAGE_TOOL`. The tests do not use the plugin's cache: see [Run the checks](#run-the-checks).
 
 The demo plays one sage session end to end with sample data and a scripted clock, then prints the path of one HTML page. The page opens with no network. It shows the session's line in the parent channel, first as posted ("running" with its counts) and then each edit with its time, up to "ended", and its whole thread: the cards at their final state, the private notes that each person sees, the answers in the logbook and the reasons for sage.
 
@@ -507,7 +507,7 @@ The file is version 3: each entry's gate id is its key (`your-project/G3+G4`, se
 
 ### Run it
 
-The steps to set up the bridge are in the README: [Set up a live trial](../README.md#set-up-a-live-trial). These are the details behind them.
+The steps to set up the bridge are in the setup guide: [the checklist](setup.md#the-checklist). These are the details behind them.
 
 1. **The Discord app.** A Discord application with a bot user in your server, with the Server Members intent on (Message Content off), invited with the `bot` and `applications.commands` scopes, and the roles sage-apprentice and sage-lead. Each person has one of them, never both.
 2. **The Keychain item.** Put the bot token in the macOS Keychain as a generic password with the service name `sage-bot`, with Keychain Access (File, New Password Item: name `sage-bot`). Do not type it in a command, because the shell history keeps it. At start the bridge reads it with `/usr/bin/security find-generic-password -s sage-bot -w`. It never writes the token to a file, a log or an error. When the item is missing, the bridge stops with: "no bot token: the macOS Keychain has no generic password with the service "sage-bot". Add it with Keychain Access, then start the bridge again."
@@ -604,7 +604,7 @@ The parent channel (for example `#sage`) is read only for people. It has one lin
 
 The hook never blocks or fails a session: it always exits 0 and prints nothing on stdout. It refuses input that is not a hook's JSON, a session id that is not a UUID, a config whose `projects` the bridge refuses (or with no `project` when it has no `projects`), and a config whose `project` is not one of its `projects`; then it writes nothing and prints one line on stderr. It records an event in the folder of any project of `projects`, or in a folder inside it (a subfolder, a worktree in it, also through a link), and ignores the first event of a session in any other folder without a line. For project folders inside each other, the deepest one is the session's project. The spool file names the session's project (`project`). A session keeps the project it started in: once its spool exists, each later event (also a `gate add` or the end in a nested project's folder, or in a folder outside every project) is of the spool's project, not of the cwd's (G43 A, F-T132-19). It ignores a `gate add` whose `--project` names a folder outside the session's project. In `--project`, a leading `~`, `$HOME` or `${HOME}` is the hook's HOME; a `gate add` whose `--project` has any other `$` or a backtick is ignored, because only the shell knows that folder. A folder whose name starts with two dots (for example `..cache`) is a folder inside the project. Its config is `~/.config/sage-bot/config.json`, or the file after `--config`.
 
-**What the owner adds.** The owner adds the hook lines, the Discord permissions and a deny rule for the Discord plugin's `fetch_messages` tool; the bridge changes no settings file. The README's [setup checklist](../README.md#set-up-a-live-trial) shows each one. The tie posts in a thread hold reasons cleaned for people, not for a model, so sage must not read them (see "The reason contract").
+**What the owner adds.** The owner adds the hook lines, the Discord permissions and a deny rule for the Discord plugin's `fetch_messages` tool; the bridge changes no settings file. The setup guide's [checklist](setup.md#the-checklist) shows each one (steps 4, 6 and 7). The tie posts in a thread hold reasons cleaned for people, not for a model, so sage must not read them (see "The reason contract").
 
 **The thread of a session.** `node scripts/session.mjs [--config <config.json>] thread <session id>` prints the thread id of a session, from the gate file. A session with no thread yet, or an id that is not a UUID, gives one line on stderr and exit code 1:
 
@@ -848,7 +848,7 @@ node scripts/lead-policy-mutations.mjs             # KILLED, SURVIVED or INVALID
 
 Status: the harness and the rows that need no model (T157, T134 PR 2a), and the live runner (T165, T134 PR 2b). `npm run proof` runs with no key and reports the rows that need a lead session as SKIPPED, with the command for them. `npm run proof:live` runs those rows, with Haiku 4.5 and `--max-budget-usd 1` for each of 3 sessions (G68 a); only Erick runs it (G67 a): see "The live run" below.
 
-The proof needs Node 22 or later, `npm ci`, and the `claude` command (Claude Code) on PATH.
+The proof needs Node 24 or later, `npm ci`, and the `claude` command (Claude Code) on PATH.
 
 <!-- check: skip, it runs the claude CLI (sandbox status only) and reaches github.com for the network controls -->
 ```sh
@@ -920,7 +920,7 @@ A whole-run test with a fake `claude` that fails open (every probe and tool call
 
 ## Run the checks
 
-You need Node 22 or later, and `npm ci` once (discord.js and playwright-core, both pinned to one exact version).
+You need Node 24 or later, and `npm ci` once (discord.js and playwright-core, both pinned to one exact version).
 
 <!-- check: skip, the check runs this test itself -->
 ```sh

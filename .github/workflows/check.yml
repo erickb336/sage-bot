@@ -1,0 +1,28 @@
+# Runs the checks on each push to main and on each pull request. No secrets: the checks use sample data and a fake Discord.
+# The runner is macOS, because the checks run macOS tools (plutil, ps -o lstart) as the owner's Mac does.
+# Each action is pinned by its full commit SHA; the comment names its tag.
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 30 # the check takes about 2 minutes on a Mac; a hang stops here, not after 6 hours of macOS minutes
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # 24, the least Node in package.json engines. On Node 22 (V8 12.4), safe() in src/cards.js is quadratic (16,384 characters take
+          # 2.6 s, 65,536 take 41 s), so test/t27-repair6.test.js ran past the job limit.
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      # Claude Code makes its shared temp folder /tmp/claude-<uid> at its start, as on the owner's Mac; the sandbox proof's
+      # shared-tmp probe (F-T134-13) checks that a session cannot write there, and its control needs the folder. The runner has no Claude Code.
+      - run: mkdir -p "/tmp/claude-$(id -u)"
+      - run: npm run check
