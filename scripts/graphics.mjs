@@ -82,7 +82,7 @@ function hero(t, id) {
   return panel(t, id, W, H, body, `sage-bot: ask sage from your team's Discord. Mention @sage-bot, and each mention opens its own thread. The flow: Discord, your server, sends an ask to sage-bot on the owner's Mac, which reads sage's logbook. Two roles: sage-apprentice reads and asks; sage-lead also decides and stops. ${NOTICE}`);
 }
 
-/** How it works: three rows (a read ask, a team vote, a lead's talk) across the three nodes. */
+/** How it works: three rows (a read ask, a team vote, a sage-lead's talk) across the three nodes. */
 function how(t, id) {
   const W = 1100, H = 900;
   const C = [185, 550, 915], PW = 300, PH = 64;
@@ -109,14 +109,14 @@ function how(t, id) {
     p(0, 494, 'the team presses'),
     back(0, 2, 558, 'only the chosen option goes back'),
     // 3. A lead's talk.
-    heading(t, 40, 682, '3 · LEAD TALK'),
+    heading(t, 40, 682, '3 · SAGE-LEAD TALK'),
     p(0, 700, '@sage-bot talk', 'hot'), right(0, 1, 732, 'mention'),
     p(1, 700, 'lead log · #sage-audit'), right(1, 2, 732, 'not yet', t.line, 'muted', { dash: '7 7' }),
-    p(2, 700, 'lead session · T159', 'wait'),
+    p(2, 700, 'bridge session · T159', 'wait'),
     text(W / 2, 820, 'No Discord text reaches sage as an instruction.', { size: 28, weight: 800, fill: t.loop, anchor: 'middle' }),
     label(t, W / 2, 866, NOTICE),
   ].join('\n');
-  return panel(t, id, W, H, body, `How sage-bot works, in three rows across Discord, sage-bot (the bridge on the owner's Mac) and sage. 1, a read ask: a mention such as @sage-bot board goes to the bridge, which checks the role and the hourly limit and reads sage's logbook, read only; the answer goes into a new thread. 2, a team vote: sage marks a question, the bridge posts a card, the team presses, and only the chosen option goes back to sage. 3, a lead's talk: the bridge records it in the lead log and #sage-audit; a lead session with sage is not built yet (T159). No Discord text reaches sage as an instruction. ${NOTICE}`);
+  return panel(t, id, W, H, body, `How sage-bot works, in three rows across Discord, sage-bot (the bridge on the owner's Mac) and sage. 1, a read ask: a mention such as @sage-bot board goes to the bridge, which checks the role and the hourly limit and reads sage's logbook, read only; the answer goes into a new thread. 2, a team vote: sage marks a question, the bridge posts a card, the team presses, and only the chosen option goes back to sage. 3, a sage-lead's talk: the bridge records it in the lead log and #sage-audit; a bridge session with sage is not built yet (T159). No Discord text reaches sage as an instruction. ${NOTICE}`);
 }
 
 /** The two roles side by side: what each one can do now, and what is coming. */
@@ -147,13 +147,13 @@ function roles(t, id) {
       [true, ['Recommend on the autopilot', 'question; the owner decides']],
       [true, 'Unregister a channel'],
       [true, ['/sage stop: turn off the link', 'from Discord to sage']],
-      [false, ['Talk to sage, write, start build', 'sessions: not built (T159)']],
+      [false, ['Instructing sage, write, start', 'build sessions: not built (T159)']],
     ]),
     dot(t, 60, 630, true), label(t, 78, 638, 'built', { anchor: 'start' }),
     dot(t, 180, 630, false), label(t, 198, 638, 'not built yet', { anchor: 'start' }),
     label(t, 1060, 638, 'No role: sage-bot does not answer you.', { anchor: 'end' }),
   ].join('\n');
-  return panel(t, id, W, H, body, 'The two roles. sage-apprentice reads and asks: the board with tasks by state, tasks left and the open questions; one task such as T7; the open questions and their options; the shared graphics and PDFs; and answers and votes on team questions. Time left is not estimated yet. sage-lead can do everything an apprentice can, plus: break a tie or end a vote early; recommend on the autopilot question, where the owner decides; unregister a channel; and turn off the link from Discord to sage with /sage stop. Talking to sage, write operations and build sessions are not built yet (T159). A member with no role gets no answer.');
+  return panel(t, id, W, H, body, 'The two roles. sage-apprentice reads and asks: the board with tasks by state, tasks left and the open questions; one task such as T7; the open questions and their options; the shared graphics and PDFs; and answers and votes on team questions. Time left is not estimated yet. sage-lead can do everything an apprentice can, plus: break a tie or end a vote early; recommend on the autopilot question, where the owner decides; unregister a channel; and turn off the link from Discord to sage with /sage stop. Instructing sage, write operations and build sessions are not built yet (T159). A member with no role gets no answer.');
 }
 
 /** A mention opens a thread: a channel on the left, its thread on the right. Sample data. */
@@ -169,7 +169,7 @@ function threads(t, id) {
     label(t, 70, 108, 'a registered channel', { anchor: 'start' }),
     msg(66, 166, 'Maya · apprentice', '@sage-bot board'),
     pill(t, id, 120, 216, 300, 48, 'thread: board', 'hot'),
-    msg(66, 336, 'Jon · lead', ['@sage-bot talk: is the', 'release ready?']),
+    msg(66, 336, 'Jon · sage-lead', ['@sage-bot talk: is the', 'release ready?']),
     pill(t, id, 120, 420, 300, 48, 'lead thread', 'wait'),
     label(t, 70, 520, ['Each mention in the channel', 'opens its own public thread.'], { anchor: 'start' }),
     flow(id, 'M428 240 L 556 240', t.edge, 'hot'),
@@ -185,10 +185,10 @@ function threads(t, id) {
     label(t, W / 2, 636, 'Mention @sage-bot again inside its thread to go on. Sample data.'),
     label(t, W / 2, 674, NOTICE),
   ].join('\n');
-  return panel(t, id, W, H, body, `A mention opens a thread, with sample data. In the registered channel #ask-sage, Maya, an apprentice, writes @sage-bot board, and sage-bot opens a public thread named board with the answer: building 2, framed 5, merged 9, and the open question G7. Inside the thread she writes @sage-bot T7 and gets that task. Jon, a lead, writes @sage-bot talk; that opens a lead thread, where sage-bot replies that his message is recorded in the lead log and that sessions with sage are not on yet. ${NOTICE}`);
+  return panel(t, id, W, H, body, `A mention opens a thread, with sample data. In the registered channel #ask-sage, Maya, an apprentice, writes @sage-bot board, and sage-bot opens a public thread named board with the answer: building 2, framed 5, merged 9, and the open question G7. Inside the thread she writes @sage-bot T7 and gets that task. Jon, a sage-lead, writes @sage-bot talk; that opens a lead thread, where sage-bot replies that his message is recorded in the lead log and that sessions with sage are not on yet. ${NOTICE}`);
 }
 
-/** The guardrails: the layers that are on now, and the ones that come with lead sessions. */
+/** The guardrails: the layers that are on now, and the ones that come with bridge sessions. */
 function safety(t, id) {
   const W = 1100, H = 860;
   const bar = (y, title, sub, on) => (on ? rect(40, y, W - 80, 76, { rx: 8, fill: t.tile, stroke: t.edge, sw: 1.5 }) : rect(40, y, W - 80, 76, { rx: 8, fill: t.tile, stroke: t.line, sw: 1.5, dash: '7 6' })) +
@@ -199,14 +199,14 @@ function safety(t, id) {
     bar(70, 'Roles and registered channels', 'No sage role: no reply. Only the owner registers a channel.', true),
     bar(156, 'An hourly limit', '10 asks for each person in a rolling hour.', true),
     bar(242, 'No AI reads Discord text', 'Code answers read asks. A vote gives sage only the option.', true),
-    bar(328, 'The lead log', 'Each lead message, hash-chained, copied to #sage-audit.', true),
+    bar(328, 'The lead log', 'Each sage-lead message, hash-chained, copied to #sage-audit.', true),
     bar(414, 'The kill switch', '/sage stop turns the link off. Only the owner turns it on.', true),
-    heading(t, 40, 548, 'FOR LEAD SESSIONS · NOT ON YET (T159)'),
+    heading(t, 40, 548, 'FOR BRIDGE SESSIONS · NOT ON YET (T159)'),
     bar(566, 'The sandbox: the guarantee · built', 'No GitHub host. Logbooks, sage and secrets denied.', false),
     bar(652, 'The guard hook · built · the broker · T158', 'An allow-list of commands. No broker verb merges.', false),
-    bar(738, 'A spend cap · built', 'At most $5 of model use for each lead session.', false),
+    bar(738, 'A spend cap · built', 'At most $5 of model use for each bridge session.', false),
   ].join('\n');
-  return panel(t, id, W, H, body, 'The guardrails. On now, for every ask: roles and registered channels, so a member with no sage role gets no reply and only the owner registers a channel; an hourly limit of 10 asks for each person; no AI reads Discord text, because code answers read asks and a vote gives sage only the option; the lead log, hash-chained and copied to #sage-audit; and the kill switch, /sage stop, which only the owner turns back on. For lead sessions, not on yet (T159): the sandbox settings, built, which are the guarantee (G44 A), with no GitHub host and the logbooks, sage and secrets denied; the guard hook, built, and the broker, coming in T158, whose verbs never merge; and a spend cap, built, of 5 dollars of model use for each lead session.');
+  return panel(t, id, W, H, body, 'The guardrails. On now, for every ask: roles and registered channels, so a member with no sage role gets no reply and only the owner registers a channel; an hourly limit of 10 asks for each person; no AI reads Discord text, because code answers read asks and a vote gives sage only the option; the lead log, hash-chained and copied to #sage-audit; and the kill switch, /sage stop, which only the owner turns back on. For bridge sessions, not on yet (T159): the sandbox settings, built, which are the guarantee (G44 A), with no GitHub host and the logbooks, sage and secrets denied; the guard hook, built, and the broker, coming in T158, whose verbs never merge; and a spend cap, built, of 5 dollars of model use for each bridge session.');
 }
 
 const GRAPHICS = {
