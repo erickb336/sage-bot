@@ -18,7 +18,7 @@
 <radialGradient id="roles-l-orb" cx="0.4" cy="0.38" r="0.65"><stop offset="0" stop-color="#FFF6D0"/><stop offset="0.45" stop-color="#FFC93C"/><stop offset="1" stop-color="#FF6A0F"/></radialGradient>
 <linearGradient id="roles-l-fall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F4E6CC" stop-opacity="0.95"/><stop offset="1" stop-color="#F4E6CC" stop-opacity="0"/></linearGradient>
 <linearGradient id="roles-l-word" x1="0" y1="0" x2="0" y2="1"><stop offset="0.2" stop-color="#FFF8EC"/><stop offset="0.5" stop-color="#FFD27A"/><stop offset="0.72" stop-color="#FF8A2A"/><stop offset="0.9" stop-color="#E2470A"/></linearGradient>
-<linearGradient id="roles-l-chief" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFA040"/><stop offset="1" stop-color="#F05A0A"/></linearGradient>
+<linearGradient id="roles-l-ember" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFA040"/><stop offset="1" stop-color="#F05A0A"/></linearGradient>
 <filter id="roles-l-wordglow" x="-10%" y="-20%" width="120%" height="140%"><feGaussianBlur in="SourceAlpha" stdDeviation="10" result="b"/><feFlood flood-color="#FF6A0F" flood-opacity="0.7"/><feComposite in2="b" operator="in" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 <filter id="roles-l-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 <filter id="roles-l-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>

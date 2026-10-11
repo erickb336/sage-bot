@@ -38,7 +38,7 @@ function botMark(t, id, cx, cy, s) {
   const X = (x) => f1(cx + x * s), Y = (y) => f1(cy + y * s), R = (n) => f1(n * s);
   return [
     `<g class="pulse">${circle(cx, cy, R(46), { fill: EMBER.orange, opacity: t.dark ? 0.3 : 0.16 })}</g>`,
-    path(`M${X(-40)} ${Y(18)} C ${X(-30)} ${Y(-34)}, ${X(30)} ${Y(-34)}, ${X(40)} ${Y(18)}`, { stroke: `url(#${id}-chief)`, sw: R(9) }),
+    path(`M${X(-40)} ${Y(18)} C ${X(-30)} ${Y(-34)}, ${X(30)} ${Y(-34)}, ${X(40)} ${Y(18)}`, { stroke: `url(#${id}-ember)`, sw: R(9) }),
     path(`M${X(-40)} ${Y(18)} L ${X(40)} ${Y(18)}`, { stroke: t.dark ? EMBER.gold : EMBER.deep, sw: R(4) }),
     path(`M${X(-22)} ${Y(-6)} L ${X(-22)} ${Y(18)} M${X(0)} ${Y(-14)} L ${X(0)} ${Y(18)} M${X(22)} ${Y(-6)} L ${X(22)} ${Y(18)}`, { stroke: t.dark ? EMBER.gold : EMBER.deep, sw: R(3), opacity: 0.8 }),
     circle(X(-40), Y(24), R(7), { fill: EMBER.orange }), circle(X(40), Y(24), R(7), { fill: EMBER.orange }),
@@ -80,21 +80,6 @@ function hero(t, id) {
     label(t, W / 2, 610, NOTICE, { anchor: 'middle' }),
   ].join('\n');
   return panel(t, id, W, H, body, `sage-bot: ask sage from your team's Discord. Mention @sage-bot, and each mention opens its own thread. The flow: Discord, your server, sends an ask to sage-bot on the owner's Mac, which reads sage's logbook. Two roles: sage-apprentice reads and asks; sage-lead also decides and stops. ${NOTICE}`);
-}
-
-/** The plain hero, the alternative: no Discord symbol, only sage-bot's mark, the toad sage and the pitch. */
-function heroPlain(t, id) {
-  const W = 1100, H = 420;
-  const wordFill = t.dark ? `url(#${id}-word)` : t.loop;
-  const body = [
-    backdrop(t, id, W, H, { moon: [880, 200, 150], seeds: [12, 77, 8], far: [330, 40, 140, 70, 140], near: [440, 50, 160, 80, 170], mist: [80, 280, 330], mistK: 0.6, embersTo: 400 }),
-    emblem(880, 200, 120, id),
-    botMark(t, id, 112, 124, 1.25),
-    `<text x="190" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif" font-size="96" font-weight="900" letter-spacing="-3" fill="${wordFill}"${t.dark ? ` filter="url(#${id}-wordglow)"` : ''}>sage-bot</text>`,
-    text(64, 236, ['Ask sage from', 'your team’s chat.'], { size: 40, weight: 800, fill: t.ink, lh: 1.15 }),
-    text(64, 350, ['Mention @sage-bot. Each mention', 'opens its own thread.'], { size: 26, fill: t.muted, lh: 1.25 }),
-  ].join('\n');
-  return panel(t, id, W, H, body, 'sage-bot: ask sage from your team\'s chat. Mention @sage-bot, and each mention opens its own thread. sage-bot\'s ember arch mark beside the hooded toad sage.');
 }
 
 /** How it works: three rows (a read ask, a team vote, a lead's talk) across the three nodes. */
@@ -221,20 +206,23 @@ function safety(t, id) {
     bar(652, 'The guard hook · built · the broker · T158', 'An allow-list of commands. No broker verb merges.', false),
     bar(738, 'A spend cap · built', 'At most $5 of model use for each lead session.', false),
   ].join('\n');
-  return panel(t, id, W, H, body, 'The guardrails. On now, for every ask: roles and registered channels, so a member with no sage role gets no reply and only the owner registers a channel; an hourly limit of 10 asks for each person; no AI reads Discord text, because code answers read asks and a vote gives sage only the option; the lead log, hash-chained and copied to #sage-audit; and the kill switch, /sage stop, which only the owner turns back on. For lead sessions, not on yet (T159): the sandbox settings, built, which are the guarantee, with no GitHub host and the logbooks, sage and secrets denied; the guard hook, built, and the broker, coming in T158, whose verbs never merge; and a spend cap, built, of 5 dollars of model use for each lead session.');
+  return panel(t, id, W, H, body, 'The guardrails. On now, for every ask: roles and registered channels, so a member with no sage role gets no reply and only the owner registers a channel; an hourly limit of 10 asks for each person; no AI reads Discord text, because code answers read asks and a vote gives sage only the option; the lead log, hash-chained and copied to #sage-audit; and the kill switch, /sage stop, which only the owner turns back on. For lead sessions, not on yet (T159): the sandbox settings, built, which are the guarantee (G44 A), with no GitHub host and the logbooks, sage and secrets denied; the guard hook, built, and the broker, coming in T158, whose verbs never merge; and a spend cap, built, of 5 dollars of model use for each lead session.');
 }
 
 const GRAPHICS = {
-  hero, 'hero-plain': heroPlain, how, roles, threads, safety,
+  hero, how, roles, threads, safety,
   'tip-mention': tip(['Mention @sage-bot in a registered channel.', 'Each mention opens its own thread.', 'Mention it again inside the thread to go on.'], 'The toad sage\'s tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again inside the thread to go on.'),
 };
 
 /** Every graphic in both themes, as [file name, SVG]. Each file's ids start with its own name and theme. */
 export const files = () => Object.entries(GRAPHICS).flatMap(([name, draw]) => Object.entries(THEMES).map(([theme, t]) => [`${name}-${theme}.svg`, draw(t, `${name}-${theme[0]}`)]));
 
+// `node scripts/graphics.mjs` writes into docs/assets; `--out <folder>` writes into another folder (the check redraws into a temp folder).
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  mkdirSync(OUT, { recursive: true });
+  const at = process.argv.indexOf('--out');
+  const out = at === -1 ? OUT : process.argv[at + 1];
+  mkdirSync(out, { recursive: true });
   const all = files();
-  for (const [file, svg] of all) writeFileSync(join(OUT, file), svg);
-  console.log(`drew ${all.length} files in docs/assets`);
+  for (const [file, svg] of all) writeFileSync(join(out, file), svg);
+  console.log(`drew ${all.length} files in ${at === -1 ? 'docs/assets' : out}`);
 }
