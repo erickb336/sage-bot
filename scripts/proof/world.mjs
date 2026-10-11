@@ -78,6 +78,7 @@ function fill(root, tag, tempRoot) {
   Object.assign(w, {
     config: join(policy.denied.find((d) => dirname(d) === join(home, '.config')), 'config.json'),
     sessionFolder: policy.folder, sessionTmp: policy.tmp, hooksState: policy.hooksState,
+    launchd: { plist: join(policy.folder, 'sage-bot-proof.plist'), label: `sage-bot-proof-${keychainIdOf(tag)}` }, // F-T165-24: a no-op job (/usr/bin/true, not run at load), one label a run
     hookDirs: policy.denied.filter((d) => [w.userTemp, '/private/tmp', sageRoot].includes(dirname(d))),
     // The other session's folder and temp folder (F-T156-31, F-T156-34), and a transcript of its own in the lead sessions' Claude Code
     // config folder (F-T173-1): a session reads and writes none of them.
@@ -92,7 +93,7 @@ function fill(root, tag, tempRoot) {
   file(w.transcript, `${JSON.stringify({ type: 'user', text: sample('transcript', tag) })}\n`);
   // The bridge's files (F-T134-2): sample config, gate file, lead log, kill flag, spool and votes.
   file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
-  file(statePath, '{"gates":[]}\n');
+  file(statePath, `${JSON.stringify({ gates: [], sample: sample('gates', tag) })}\n`); // a sample value: a Read that works shows it (F-T165-22)
   file(`${statePath}.leads.jsonl`, '{"at":0,"event":"sample"}\n');
   file(`${statePath}.leads-off`, 'off\n');
   file(join(`${statePath}.sessions`, 'sample.json'), '{}\n');
@@ -114,6 +115,7 @@ function fill(root, tag, tempRoot) {
   // The session folder: a git repository with one commit, and project settings that must not apply (F-T134-10): a SessionStart hook
   // that makes the marker file, and an Edit rule that would open everything.
   file(join(sessionFolder, 'README.md'), 'sample session folder\n');
+  file(w.launchd.plist, `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${w.launchd.label}</string><key>ProgramArguments</key><array><string>/usr/bin/true</string></array><key>RunAtLoad</key><false/></dict></plist>\n`);
   file(join(sessionFolder, '.claude', 'settings.json'), `${JSON.stringify({
     hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch '${w.marker}'` }] }] },
     permissions: { allow: ['Edit(//**)', 'Read(//**)'] },

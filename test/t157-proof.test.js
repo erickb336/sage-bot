@@ -8,7 +8,7 @@ import { join, relative } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
-import { didOf, probes } from '../scripts/proof/probe.mjs';
+import { didOf, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { ROWS, out, prove, statusOf, verdict } from '../scripts/proof/run.mjs';
 import { buildWorld, policyOf, removeTempRoots } from '../scripts/proof/world.mjs';
 import { spawnSync } from './bridge-setup.js';
@@ -170,6 +170,11 @@ test('didOf: worked, refused (EPERM, or any failure of the command itself for a 
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', "Error: Cannot find module '/x'")), false); // node hides the EPERM
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', 'SyntaxError: x')), null);
   assert.equal(didOf({ anyFail: true }, r(6, '', 'curl: (6) Could not resolve host')), false);
+  // F-T165-22: a network call that ran out of time (curl's own -m, the node probe's timeout) proves nothing, not a refusal.
+  assert.equal(didOf({ anyFail: true }, r(28, '', 'curl: (28) Connection timed out after 15001 milliseconds')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'timeout')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'ETIMEDOUT')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'ECONNREFUSED')), false);
   // F-T165-17: no command ran (the shell's 127, its message, the xcode-select stub), a timeout or a spawn error: nothing, never refused
   assert.equal(didOf({ anyFail: true }, r(127, '', 'sh: curl: command not found')), null);
   assert.equal(didOf({ anyFail: true }, r(1, '', 'xcode-select: note: No developer tools were found, requesting install.')), null);
@@ -230,6 +235,8 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
     const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker, w.other.tmp]; // the other session's folder and transcript are in the home
     const denyWrite = ['config', 'hooks', 'commondir', 'info/attributes'].map((p) => join(f, '.git', p)).concat([join(f, 'sub'), join(f, '.claude'), join(f, '.mcp.json'), `/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}/sage-bot-proof-s1`]);
     const profile = ['(version 1)', '(allow default)', '(deny network*)',
+      '(deny mach-lookup (global-name-regex "^com.apple.xpc.launchd"))', // launchd: `launchctl load` prints "Load failed: 5: Input/output error" (F-T165-24)
+      '(deny file-read* file-write* (subpath "/private/var/at"))', // the cron tabs: `crontab` is refused at its exec with "Operation not permitted"
       ...deny.map((d) => `(deny file-read* file-write* (subpath ${sb(d)}))`),
       `(allow file-read* file-write* (subpath ${sb(f)}))`,
       ...denyWrite.map((d) => `(deny file-write* (subpath ${sb(d)}))`)].join('\n');
@@ -238,7 +245,7 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
     const r = spawnSync('sandbox-exec', ['-f', join(root, 'lead.sb'), process.execPath, PROBE, join(f, 'world.json')],
       { cwd: f, encoding: 'utf8', env: launchOf(policy, {}).env }); // the session's environment
     assert.equal(r.status, 0, r.stderr);
-    const results = r.stdout.trim().split('\n').map((l) => JSON.parse(l));
+    const results = [...resultsOf(r.stdout).results.values()];
     const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process and no scratch keychain here: those cannot tell
     assert.deepEqual(wrong, []);
     assert.ok(results.length >= 40);

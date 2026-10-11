@@ -53,6 +53,10 @@ export async function startSession(policy, env, model, prompt, { timeout = 15 * 
     child.stderr.on('data', (d) => { stderr += d; });
     const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ } }, timeout);
     child.on('error', (e) => { clearTimeout(timer); running.delete(child); resolve({ stdout, stderr: `${stderr}${e.message}`, status: null, timedOut }); });
-    child.on('close', (status) => { clearTimeout(timer); running.delete(child); resolve({ stdout, stderr, status, timedOut }); });
+    child.on('close', (status) => { // also on a normal end: a command that the session left in the background goes with its group (F-T165-24)
+      clearTimeout(timer); running.delete(child);
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ }
+      resolve({ stdout, stderr, status, timedOut });
+    });
   });
 }

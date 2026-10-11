@@ -43,6 +43,24 @@ export function printable(plan) {
 /** The keychain paths of `security list-keychains` output: one quoted path a line. @param {string} out */
 export const keychainsOf = (out) => [...out.matchAll(/^\s*"([^"]+)"\s*$/gm)].map((m) => m[1]);
 
+/** The scratch keychain that is in place now: its plan, the saved search list, and whether `create-keychain` ran. */
+let current = null;
+
+/**
+ * Takes the scratch keychain away and puts the user's search list back, once: the end of withScratchKeychain, and the signal handler of
+ * the live run, which exits before any finally block (F-T165-22). Nothing to do when no scratch keychain is in place.
+ */
+export function stopScratchKeychain() {
+  if (!current) return;
+  const { plan, saved, created, security } = current;
+  current = null;
+  try { if (created) security(plan.remove); } finally {
+    security(plan.restore(saved));
+    const now = keychainsOf(security(plan.save));
+    if (now.join('\n') !== saved.join('\n')) throw new Error(`the keychain search list is not as it was: it was ${saved.join(', ')}, it is ${now.join(', ')}. Put it back with: security list-keychains -d user -s ${saved.map((p) => `'${p}'`).join(' ')}`);
+  }
+}
+
 /**
  * Runs `fn(plan)` with the scratch keychain, and always puts the user's keychain search list back as it was before.
  * Refuses to start when the saved list is empty: a list that it cannot read is not one that it may later write.
@@ -57,18 +75,12 @@ export async function withScratchKeychain(dir, fn, { env = process.env, id } = {
   if (!saved.length) throw new Error('the keychain search list is empty or could not be read: nothing was changed.');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'search-list-before.txt'), `${saved.join('\n')}\n`); // the baseline survives a SIGKILL: put it back by hand from here
-  let created = false;
+  current = { plan, saved, created: false, security };
   try {
     security(plan.create);
-    created = true;
+    current.created = true;
     security(plan.settings);
     security(plan.add);
     return await fn(plan);
-  } finally {
-    try { if (created) security(plan.remove); } finally {
-      security(plan.restore(saved));
-      const now = keychainsOf(security(plan.save));
-      if (now.join('\n') !== saved.join('\n')) throw new Error(`the keychain search list is not as it was: it was ${saved.join(', ')}, it is ${now.join(', ')}. Put it back with: security list-keychains -d user -s ${saved.map((p) => `'${p}'`).join(' ')}`);
-    }
-  }
+  } finally { stopScratchKeychain(); }
 }

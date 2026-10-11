@@ -1,6 +1,8 @@
 // The probes of the proof (T157): each one tries one operation that a lead session's sandbox must refuse (or must allow), and prints
-// one JSON line: { id, row, expect, did, code, why }. `did` is true when the operation worked, false when it was refused, and null when
-// the probe could not tell (it proves nothing). The probes test only the sandbox: they run with no guard hook.
+// one line to stdout: the sentinel SENTINEL, then the JSON { id, row, expect, did, code, why }. `did` is true when the operation worked,
+// false when it was refused, and null when the probe could not tell (it proves nothing). The runner reads the lines from the Bash
+// tool's result in the session's stream, never from a file that the session can write (F-T165-23); resultsOf parses them. The probes
+// test only the sandbox: they run with no guard hook.
 //   node probe.mjs <world.json>             in a lead session (T165): each probe, sandboxed
 //   node probe.mjs <world.json> --control   outside the sandbox, first: each operation must work there, or its probe is INVALID
 //   node probe.mjs <world.json> --control --only <needs or id>   only those probes (`keychain`: the control after the sessions)
@@ -17,6 +19,27 @@ import { fileURLToPath } from 'node:url';
 
 /** An error line that says the sandbox refused the operation (Go and Python spell it in lower case). Any other failure proves nothing. */
 const DENIED = /Operation not permitted|EPERM/i;
+/** A network call that ran out of time (curl's exit 28 message, the node probe's own 'timeout'): a slow host is no refusal (F-T165-22). */
+const TIMED_OUT = /timed ?out|timeout/i;
+/** The start of each result line on stdout; a line without it is not a result. */
+export const SENTINEL = 'probe-result ';
+/**
+ * The probe results of a text (a Bash tool's result, or the control's stdout), by id, and the count of sentinel lines that are not a
+ * probe's JSON (a malformed line is no result; F-T165-18). Each `why` is cut to 200 characters; the runner cleans it. @param {string} text
+ */
+export function resultsOf(text) {
+  const results = new Map();
+  let malformed = 0;
+  for (const line of String(text).split('\n')) {
+    if (!line.startsWith(SENTINEL)) continue;
+    try {
+      const p = JSON.parse(line.slice(SENTINEL.length));
+      if (typeof p?.id !== 'string') throw new Error('no id');
+      results.set(p.id, { ...p, did: p.did === true || p.did === false ? p.did : null, code: p.code ?? null, why: String(p.why ?? '').slice(0, 200) });
+    } catch { malformed += 1; }
+  }
+  return { results, malformed };
+}
 /** A command that is not there: the shell's 127, its message, or the xcode-select stub of a Mac without the developer tools (F-T165-17). */
 const NO_COMMAND = /command not found|xcode-select/;
 const q = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
@@ -144,6 +167,12 @@ export function probes(w, { pid = process.pid } = {}) {
     // (world.mjs: ghConfig), so the control proves that gh reads one from there (with the control world's sample GH_TOKEN unset: gh
     // prefers the variable), and the session's gh, whose HOME is that folder, must not (F-T165-18). A Mac with no gh skips the row.
     P('F-T165-10', 'gh-auth-token', 'refused', 'gh auth token', { shows: w.ghTokenId, control: `unset GH_TOKEN GITHUB_TOKEN; GH_CONFIG_DIR=${q(w.ghConfig)} gh auth token`, tool: 'gh' }),
+    // F-T165-24: no job of the owner's launchd from a plist in the session folder, and no crontab. launchctl load prints "Load failed: 5:
+    // Input/output error" with exit 0 where launchd refuses it, so the job counts as loaded only when `launchctl list <label>` finds it
+    // after; the control proves that the plist loads outside, so that error inside is a refusal, and the job goes again at once (unload).
+    // crontab -l exits 1 with "no crontab for <user>" when the owner has none, so exit 0 or 1 is "worked" (crontab reached its tabs).
+    P('F-T165-24', 'launchctl-load', 'refused', `launchctl load ${q(w.launchd.plist)} && launchctl list ${q(w.launchd.label)} >/dev/null && launchctl unload ${q(w.launchd.plist)}`, { refusedAs: /Load failed: 5: Input\/output error/ }),
+    P('F-T165-24', 'crontab-list', 'refused', 'crontab -l >/dev/null; test $? -le 1'),
   ];
 }
 
@@ -161,7 +190,7 @@ export function didOf(p, r) {
     return p.see.some((n) => r.stdout.split('\n').some((l) => l.startsWith(`${n}=`) || l.includes(` ${n}=`)));
   }
   if (r.status === 0) return true;
-  if (p.anyFail) return false;
+  if (p.anyFail) return TIMED_OUT.test(r.stderr) ? null : false; // a call that ran out of time proves nothing (F-T165-22)
   return DENIED.test(r.stderr) || p.refusedAs?.test(r.stderr) ? false : null;
 }
 
@@ -198,5 +227,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [file, ...flags] = process.argv.slice(2);
   const control = flags[0] === '--control', only = control && flags[1] === '--only' ? flags[2] : undefined;
   if (!file || !(flags.length === 0 || (control && (flags.length === 1 || (flags.length === 3 && only))))) { console.error('usage: node probe.mjs <world.json> [--control [--only <needs>]]'); process.exit(2); }
-  for (const result of runProbes(JSON.parse(readFileSync(file, 'utf8')), control, only)) console.log(JSON.stringify(result));
+  for (const result of runProbes(JSON.parse(readFileSync(file, 'utf8')), control, only)) console.log(`${SENTINEL}${JSON.stringify(result)}`);
 }
