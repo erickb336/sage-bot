@@ -162,7 +162,8 @@ export function leadPolicy(config, session, host = {}) {
     home, // the session's HOME
     homes, // F-T156-5, F-T157-7: $HOME and the owner's home folder; sandboxed commands read nothing in them but the session's own folders
     // F-T156-15, F-T157-20, F-T173-1: the host's Claude config folders, and the lead sessions' own one (CLAUDE_CONFIG_DIR of every session,
-    // with their transcripts): an exact credentials deny holds also where blockReadsOutsideWorkingDirectories re-opens the config folder.
+    // with their transcripts). The lead one is also a denied path (denyRead, denyWrite, Read and Edit deny rules), and Claude Code 2.1.289
+    // does not re-open to commands a path under a denyRead; this credentials deny is a second layer.
     credentialFiles: [...homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir],
     hooksState: join(stateDir, 'lead-hooks', session),
     claudeDir,
