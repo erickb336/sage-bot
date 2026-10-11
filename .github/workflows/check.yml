@@ -18,9 +18,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          # 24, the least Node in package.json engines. On Node 22, discord.js escapeMarkdown is quadratic (a 16,384-character name takes
+          # 2.6 s, so test/t27-repair6.test.js ran past the job limit) and `node --check` passes a file that does not parse (t156-mutations).
+          node-version: 24
       - run: npm ci --ignore-scripts
-      - run: node scripts/diag-safe.mjs
-        timeout-minutes: 5
-      - run: ls -ld /tmp/claude-* /private/tmp/claude-* || echo no claude tmp; id -u
-      - run: node --test --test-reporter=spec test/t156-mutations.test.js test/t157-proof.test.js
+      # Claude Code makes its shared temp folder /tmp/claude-<uid> at its start, as on the owner's Mac; the sandbox proof's
+      # shared-tmp probe (F-T134-13) checks that a session cannot write there, and its control needs the folder. The runner has no Claude Code.
+      - run: mkdir -p "/tmp/claude-$(id -u)"
+      - run: npm run check

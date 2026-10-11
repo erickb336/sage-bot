@@ -5,7 +5,7 @@
   "description": "The sage bridge: posts sage gates to Discord as cards and gives the final answers back to sage.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "check": "node scripts/syntax.mjs && node --test --test-timeout=120000 \"test/*.test.js\"",

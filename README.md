@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/erickb336/sage-bot/actions/workflows/check.yml"><img alt="check" src="https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg"></a>
-  <img alt="Node 22 or later" src="https://img.shields.io/badge/node-%E2%89%A522-555">
+  <img alt="Node 24 or later" src="https://img.shields.io/badge/node-%E2%89%A524-555">
 </p>
 
 **Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) · [Roles](#roles) · [What to say](#what-to-say) · [Safety](#safety) · [Set up a live trial](#set-up-a-live-trial) · [Concepts](#concepts) · [FAQ](#faq) · [Under the hood](#under-the-hood) · [Credits](#credits)
@@ -18,7 +18,7 @@
 
 ## Quick start
 
-You need Node 22 or later and the [sage](https://github.com/erickb336/sage) plugin in Claude Code. You do not need a Discord account, an app or a token for the demo.
+You need Node 24 or later and the [sage](https://github.com/erickb336/sage) plugin in Claude Code. You do not need a Discord account, an app or a token for the demo.
 
 **1. Install** (in the sage-bot folder):
 
