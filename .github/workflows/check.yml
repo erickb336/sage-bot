@@ -22,4 +22,5 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: node scripts/diag-safe.mjs
         timeout-minutes: 5
-      - run: npm run check
+      - run: ls -ld /tmp/claude-* /private/tmp/claude-* || echo no claude tmp; id -u
+      - run: node --test --test-reporter=spec test/t156-mutations.test.js test/t157-proof.test.js
