@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { launchOf, settingsOf } from '../src/lead-policy.js';
+import { LEAD_PATH, launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { ROWS, out, prove, statusOf, verdict } from '../scripts/proof/run.mjs';
@@ -20,6 +20,29 @@ const scratch = () => realpathSync.native(tempFolder('sage-bot-t157-'));
 function world() {
   const root = scratch(), w = buildWorld(join(root, 'w'), TAG);
   return { root, w, done: () => { rmSync(root, { recursive: true, force: true }); rmSync(w.tempRoot, { recursive: true, force: true }); } };
+}
+const HOST_TOOLS = ['launchctl', 'crontab', 'security', 'gh'];
+/** The real host tools on the lead PATH, by their real paths (the seatbelt test refuses to exec them, F-T165-41). */
+const REAL_HOST_TOOLS = [...new Set(LEAD_PATH.split(':').flatMap((d) => HOST_TOOLS.map((t) => join(d, t))).filter((p) => existsSync(p)).map((p) => realpathSync.native(p)))];
+/**
+ * Logging fakes of the host tools in `<root>/bin` (G73, standing order 20): each appends its name to a log. gh prints the token of the
+ * hosts file in GH_CONFIG_DIR, else in $HOME/.config/gh, and shows the read's error, so that a sandbox EPERM is a refusal; security
+ * finds no item; launchctl and crontab print "fake <name>", exit 2.
+ */
+function hostFakes(root) {
+  const bin = join(root, 'bin'), log = join(root, 'host-calls.log');
+  mkdirSync(bin);
+  writeFileSync(log, '');
+  const body = {
+    launchctl: "echo 'fake launchctl' >&2; exit 2",
+    crontab: "echo 'fake crontab' >&2; exit 2",
+    security: "echo 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' >&2; exit 44",
+    gh: `t=$(sed -n 's/^ *oauth_token: *//p' "\${GH_CONFIG_DIR:-$HOME/.config/gh}/hosts.yml") || exit 1
+if [ -n "$t" ]; then echo "$t"; exit 0; fi
+echo 'gh: not logged in to any hosts' >&2; exit 1`,
+  };
+  for (const tool of HOST_TOOLS) writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> '${log}'\n${body[tool]}\n`, { mode: 0o755 });
+  return { bin, calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
 }
 const inside = (path, dir) => !relative(dir, path).startsWith('..');
 const SBP = /^\/private\/tmp\/sbp-[A-Za-z0-9]{6}$/; // short and canonical (F-T156-35), never /private/tmp/sage-lead
@@ -134,7 +157,9 @@ test('F-T157-23: a git error of the world reaches the error line, and the temp r
 test('F-T157-30: a claude that is not on PATH gives one line with the cause and exit 1; the caller\'s shell lives and no temp root stays', () => {
   const root = scratch();
   try {
-    const PATH = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude'))).join(':'); // the real PATH, minus every claude
+    // The real PATH, minus every claude, after the host fakes: the controls run before the claude error (standing order 20, F-T165-41).
+    const host = hostFakes(root);
+    const PATH = [host.bin, ...process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude')))].join(':');
     // A shell of its own group, as a user's shell: without the fix, the run kills its own group (pid 0), and the shell with it.
     const r = spawnSync('/bin/sh', ['-c', `'${process.execPath}' '${RUN}' --out '${join(root, 'out')}'; echo "shell alive, exit $?" >&2`],
       { encoding: 'utf8', detached: true, env: { PATH, HOME: join(root, 'no-home') } });
@@ -142,6 +167,7 @@ test('F-T157-30: a claude that is not on PATH gives one line with the cause and 
     assert.equal(r.stderr, 'proof: the claude command is not on PATH (ENOENT)\nshell alive, exit 1\n');
     assert.equal(r.stdout, '');
     for (const d of tempRootsOf(join(root, 'out'), ['control', 'live'])) assert.ok(!existsSync(d), `${d} is removed`); // both worlds were built before the claude error
+    assert.deepEqual([...new Set(host.calls())], ['security', 'gh']); // the controls' keychain and gh probes reached the fakes
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -240,18 +266,17 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
       ...deny.map((d) => `(deny file-read* file-write* (subpath ${sb(d)}))`),
       `(allow file-read* file-write* (subpath ${sb(f)}))`,
       ...denyWrite.map((d) => `(deny file-write* (subpath ${sb(d)}))`)].join('\n');
-    writeFileSync(join(root, 'lead.sb'), profile);
-    // G73: launchctl and crontab first on PATH are fakes that log their call and print no refusal, so the test never reaches the real
-    // launchd or crontab; the host probes then cannot tell (the live run is their proof).
-    const bin = join(root, 'bin');
-    mkdirSync(bin);
-    for (const tool of ['launchctl', 'crontab']) writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> '${join(root, 'host-calls.log')}'\necho 'fake ${tool}' >&2\nexit 2\n`, { mode: 0o755 });
+    // G73, standing order 20: launchctl, crontab, security and gh first on PATH are fakes that log their call, so the test never reaches
+    // the real launchd, crontab, Keychain or gh login; the host and keychain probes then cannot tell (the live run is their proof). The
+    // profile also refuses to exec the real ones, so a probe that bypasses PATH fails this test instead of reaching them (F-T165-41).
+    const host = hostFakes(root);
+    writeFileSync(join(root, 'lead.sb'), [profile, ...REAL_HOST_TOOLS.map((p) => `(deny process-exec (literal ${sb(p)}))`)].join('\n'));
     const policy = policyOf(w);
     const env = launchOf(policy, {}).env; // the session's environment
     const r = spawnSync('sandbox-exec', ['-f', join(root, 'lead.sb'), process.execPath, PROBE, join(f, 'world.json')],
-      { cwd: f, encoding: 'utf8', env: { ...env, PATH: `${bin}:${env.PATH}` } });
+      { cwd: f, encoding: 'utf8', env: { ...env, PATH: `${host.bin}:${env.PATH}` } });
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(readFileSync(join(root, 'host-calls.log'), 'utf8'), 'launchctl\ncrontab\n');
+    assert.deepEqual([...new Set(host.calls())], ['security', 'gh', 'launchctl', 'crontab']);
     const results = [...resultsOf(r.stdout).results.values()];
     const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' || p.needs === 'host' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process, no scratch keychain and no real launchd here: those cannot tell
     assert.deepEqual(wrong, []);

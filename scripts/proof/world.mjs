@@ -23,9 +23,12 @@ const VERSION = 'proof1';
 const SHORT_TMP = '/private/tmp/sbp-';
 /** The temp roots that this process made and has not removed yet. */
 const tempRoots = new Set();
-/** Removes every temp root that this process made (F-T157-10). Safe to call twice, and after a world was removed by hand. */
+/** Removes every temp root that this process made (F-T157-10). Safe to call twice, and after a world was removed by hand. A root that
+ * cannot go prints one line and stays recorded; the loop goes on to the next (F-T165-40). */
 export function removeTempRoots() {
-  for (const d of tempRoots) { rmSync(d, { recursive: true, force: true }); tempRoots.delete(d); }
+  for (const d of tempRoots) {
+    try { rmSync(d, { recursive: true, force: true }); tempRoots.delete(d); } catch (e) { console.error(`proof: could not remove the temp root ${d}: ${String(e.message).split('\n')[0]}`); }
+  }
 }
 /** The lead policy of a world: the one resolver of its paths (src/lead-policy.js), with the world's home and temp folders. The
  * owner's home folder is the real one (ownerHome): the proof checks that it stays denied with the world's HOME (F-T157-7). */

@@ -301,9 +301,9 @@ export function checksOf(w, { tools, calls }, { settingsBefore, hide, rg = null 
 /**
  * The `live` hook of prove (scripts/proof/run.mjs): the controls of launchd and crontab, the three sessions in the live world, the L1
  * results by probe id, the L2 and L3 rows.
- * @param {object} ctx @param {{ key: string | null, env: NodeJS.ProcessEnv, dryRun: boolean, leadPath: string }} o
+ * @param {object} ctx @param {{ key: string | null, env: NodeJS.ProcessEnv, dryRun: boolean, rg: string | null }} o  rg: rgOn's
  */
-async function sessionsOf({ root, world: w, control, policy, tag, controls }, { key, env, dryRun, leadPath }) {
+async function sessionsOf({ root, world: w, control, policy, tag, controls }, { key, env, dryRun, rg }) {
   const hide = (t) => { let s = String(t).replaceAll(tag, '<tag>'); if (key) s = s.replaceAll(key, '<key>'); return s; };
   const model = key ? { ANTHROPIC_API_KEY: key } : {};
   const skipped = dryRun ? 'dry run: the dummy claude ran no model' : 'the session gave no result';
@@ -312,9 +312,6 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
   const host = inControl('--only', 'host');
   removeJob(env, w.launchd.label);
   for (const [id, p] of resultsOf(host.stdout).results) controls.set(id, p);
-  // The rg that a session's Bash should find: the lead PATH's, outside the sandbox (F-T157-5).
-  const where = spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: { PATH: leadPath }, encoding: 'utf8' });
-  const rg = where.status === 0 && where.stdout.trim().startsWith('/') ? where.stdout.trim() : null;
   // The runner's own copies of probe.mjs and world.json, outside the session folder, where a session can read and not write: the asked
   // command names them by absolute paths, so no file of the session folder takes their place (F-T165-23). The runner writes no file into
   // a session folder; after each session the copies must still be the runner's, else that session's results count for nothing.
@@ -424,6 +421,15 @@ function wouldBe(path) {
 }
 
 /**
+ * The rg that a session's Bash should find: the one of the lead PATH, looked up outside the sandbox (F-T157-5), or null. The one lookup
+ * of rg (standing order 15): the preflight (F-T165-38) and the F-T157-5 row both use its result. @param {string} leadPath
+ */
+function rgOn(leadPath) {
+  const where = spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: { PATH: leadPath }, encoding: 'utf8' });
+  return where.status === 0 && where.stdout.trim().startsWith('/') ? where.stdout.trim() : null;
+}
+
+/**
  * Runs the live proof in `root`. @param {string} root
  * @param {{ env?: NodeJS.ProcessEnv, dryRun?: boolean, claude?: string, leadPath?: string, home?: string }} [o]  env: the host's (its PATH finds
  *   `security`, `launchctl` and `claude`); dryRun: no key, a dummy claude; claude: a claude to run in place of the one on PATH (the
@@ -432,8 +438,8 @@ function wouldBe(path) {
  * @returns {Promise<{ report: object, summary: string }>}
  */
 export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = LEAD_PATH, home = ownerHome() } = {}) {
-  // gh, the folder, then the key, each before any folder is made: a refusal makes and leaves nothing (a refused --out a/b/c leaves no
-  // a/b, F-T165-15).
+  // gh, the folder, rg, then the key, each before any folder is made: a refusal makes and leaves nothing (a refused --out a/b/c leaves no
+  // a/b, F-T165-15), and no refusal comes after a Keychain prompt (F-T165-39).
   if (!dryRun) refuseWhileGhLoggedIn(env);
   root = wouldBe(root);
   const uid = userInfo().uid, inside = (top) => isWithin(top, root);
@@ -443,9 +449,12 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   // The sandbox denies the home folder, so a session could not read the runner's copies there: every L1 row would be INVALID (F-T165-32).
   home = realpathSync.native(home);
   if (inside(home)) throw new Error(`the scratch folder ${root} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
+  if (existsSync(root)) refuseUsed(root); // F-T157-23: before the keychain, the dummy and the temp folder go in
+  // F-T165-38: with no rg on the lead PATH, row F-T157-5 is INVALID only after the three paid sessions.
+  const rg = rgOn(leadPath);
+  if (!rg && !dryRun) throw new Error(`ripgrep (rg) is not on the sessions' PATH ${leadPath}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
   mkdirSync(root, { recursive: true });
-  refuseUsed(root); // F-T157-23: before the keychain, the dummy and the temp folder go in
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
   // The preflights' temp folders (sage-bot-preflight-*, src/lead-policy.js makes them in os.tmpdir()) go in the run's own folder, which
@@ -458,7 +467,7 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   try {
     const { report, summary } = await withScratchKeychain(join(root, 'keychain'), async () => {
       saved = readFileSync(join(root, 'keychain', 'search-list-before.txt'), 'utf8').split('\n').filter(Boolean);
-      const live = async (ctx) => ({ ...(await sessionsOf(ctx, { key, env, dryRun, leadPath })), keychain: { run: true, searchList: saved, item: `${ctx.world.keychain.service} in ${ctx.world.keychain.path} (removed at the end of the run)` } });
+      const live = async (ctx) => ({ ...(await sessionsOf(ctx, { key, env, dryRun, rg })), keychain: { run: true, searchList: saved, item: `${ctx.world.keychain.service} in ${ctx.world.keychain.path} (removed at the end of the run)` } });
       return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], made: ['keychain', 'dummy', 'tmp'], live, proof: dryRun ? 'T165 (T134 PR 2b), dry run: dummy claude, no key' : undefined });
     }, { env, id: keychainIdOf(tag) });
     if (key) scan = redactLeaks(root, key);
@@ -482,8 +491,11 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
+/**
+ * The command `npm run proof:live`, with its arguments. @param {string[]} args @param {{ leadPath?: string }} [o]  leadPath: for the
+ * tests only (a fake's folder, as rg is on no lead PATH of a test Mac); the command itself always gives LEAD_PATH
+ */
+export async function main(args, { leadPath } = {}) {
   const dryRun = args.includes('--dry-run');
   const rest = args.filter((a) => a !== '--dry-run');
   const at = rest.indexOf('--out');
@@ -503,11 +515,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     });
   }
   try {
-    const { report, summary } = await proveLive(root, { dryRun });
+    const { report, summary } = await proveLive(root, { dryRun, leadPath });
     console.log(summary);
     process.exitCode = exitCode(report);
-  } catch (e) { // one line, never a stack (F-T157-21): the refusal names what is missing (the key item, gh logged in, the folder)
+  } catch (e) { // one line, never a stack (F-T157-21): the refusal names what is missing (the key item, gh logged in, the folder, rg)
     console.error(`proof:live: ${String(e?.message ?? e).split('\n').find(Boolean)}`);
     process.exit(e?.exitCode ?? 1);
   }
 }
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));

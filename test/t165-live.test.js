@@ -27,6 +27,9 @@ const scratch = () => realpathSync.native(tempFolder('sage-bot-t165-'));
 const inShared = (dir) => isWithin(`/private/tmp/claude-${UID}`, realpathSync.native(dir));
 const liveScratch = () => realpathSync.native(tempFolder('sage-bot-t165-', inShared(tmpdir()) ? '/private/tmp' : tmpdir()));
 const sb = (s) => JSON.stringify(s);
+/** The node arguments of `npm run proof:live <args>` in a child, with the rg control on `leadPath` (a fake's folder: no rg is on the lead
+ * PATH of a test Mac, F-T165-38), or LEAD_PATH when it is undefined. */
+const cli = (args, leadPath) => ['--input-type=module', '-e', `const [a, l] = JSON.parse(process.argv[1]); await (await import(${sb(LIVE)})).main(a, { leadPath: l });`, sb([args, leadPath])];
 const T165 = ['F-T165-1', 'F-T165-2', 'F-T165-4', 'F-T165-5', 'F-T165-6', 'F-T165-7', 'F-T165-8', 'F-T165-9', 'F-T165-10', 'F-T165-24'];
 const LIVE_ROWS = 23;
 const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 'true']).status === 0;
@@ -659,7 +662,7 @@ test('F-T165-23: links that a session puts in place of probe.mjs and world.json 
     mkdirSync(bin);
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
     // The whole run in a child with a timeout: a run that waits on the pipe fails here instead of hanging the test file (F-T165-33).
-    const r = spawnSync(process.execPath, [LIVE, '--out', out], { encoding: 'utf8', timeout: 100_000, killSignal: 'SIGKILL', env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'home'), TMPDIR: root } });
+    const r = spawnSync(process.execPath, cli(['--out', out], fake.bin), { encoding: 'utf8', timeout: 100_000, killSignal: 'SIGKILL', env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'home'), TMPDIR: root } });
     assert.equal(r.error?.code, undefined, `the run did not end: ${r.error?.code}`);
     const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'));
     assert.equal(readFileSync(owner.probe, 'utf8'), 'the owner\'s file\n');
@@ -689,7 +692,7 @@ test('F-T165-24: a session that makes a folder unreadable, writes the key after 
     const out = join(root, 'run'), bin = join(root, 'cbin');
     mkdirSync(bin);
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
-    const r = spawnSync(process.execPath, [LIVE, '--out', out], { encoding: 'utf8', env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'home'), TMPDIR: root } });
+    const r = spawnSync(process.execPath, cli(['--out', out], fake.bin), { encoding: 'utf8', env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'home'), TMPDIR: root } });
     assert.equal(r.status, 1, r.stderr);
     const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'));
     const s1 = JSON.parse(readFileSync(files(join(out, 'live')).find((p) => p.endsWith('/world.json')), 'utf8')).sessionFolder;
@@ -721,7 +724,7 @@ test('F-T165-19: the keychain probes stand only when their control works again a
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin, { breaksKeychain: true }) });
+    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin, { breaksKeychain: true }), leadPath: fake.bin });
     const row = report.rows.find((r) => r.row === 'F-T165-2');
     assert.equal(row.status, 'INVALID');
     assert.deepEqual(row.probes.map((p) => [p.control.did, p.live.did, p.verdict]), Array(4).fill([true, null, 'INVALID']));
@@ -734,7 +737,7 @@ test('F-T165-15: the leak scan runs also when the run fails after the sessions, 
   const root = liveScratch();
   try {
     const broken = fakeSecurity(join(root, 'broken'), { breakRestore: true });
-    await assert.rejects(proveLive(join(root, 'run'), { env: broken.env, claude: fakeClaude(join(root, 'broken'), broken.bin, { leak: true }) }), /the keychain search list is not as it was/);
+    await assert.rejects(proveLive(join(root, 'run'), { env: broken.env, claude: fakeClaude(join(root, 'broken'), broken.bin, { leak: true }), leadPath: broken.bin }), /the keychain search list is not as it was/);
     const leaks = files(join(root, 'run')).filter((p) => p.endsWith('/leak.txt'));
     assert.ok(leaks.length >= 1);
     for (const path of files(join(root, 'run'))) assert.ok(!readFileSync(path, 'latin1').includes(KEY), `${path} holds the key`);
@@ -748,7 +751,7 @@ test('F-T165-15: the leak scan runs also when the run fails after the sessions, 
     mkdirSync(bin);
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
     const { spawn } = await import('node:child_process');
-    const child = spawn(process.execPath, [LIVE, '--out', out], { env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'sig', 'home'), TMPDIR: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, cli(['--out', out], fake.bin), { env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'sig', 'home'), TMPDIR: root }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
     const find = () => existsSync(out) && files(out).find((p) => p.endsWith('/sleep.pid'));
@@ -780,12 +783,12 @@ test('the command with no key item refuses with one line that names the item, ex
     const none = fakeSecurity(root, { key: '' });
     const out = join(root, 'out');
     const env = { PATH: none.env.PATH, HOME: join(root, 'home'), TMPDIR: root };
-    const r = spawnSync(process.execPath, [LIVE, '--out', out], { encoding: 'utf8', env });
+    const r = spawnSync(process.execPath, cli(['--out', out], none.bin), { encoding: 'utf8', env });
     assert.equal(r.status, 1);
     assert.equal(r.stderr, `proof:live: no API key in the Keychain item sage-bot-proof-key (account sage-bot-proof; security exit 44): add it with \`${ADD_KEY}\` (it asks for the value), then run npm run proof:live. Nothing was started.\n`);
     assert.equal(r.stdout, '');
     assert.ok(!existsSync(out));
-    const d = spawnSync(process.execPath, [LIVE], { encoding: 'utf8', env }); // no --out: no folder in TMPDIR either
+    const d = spawnSync(process.execPath, cli([], none.bin), { encoding: 'utf8', env }); // no --out: no folder in TMPDIR either
     assert.equal(d.status, 1);
     assert.deepEqual(readdirSync(root).filter((n) => n.startsWith('sage-bot-proof-live-')), []);
     assert.deepEqual(none.calls().map((c) => c[0]), ['find-generic-password', 'find-generic-password']); // the key read only: no fixture
@@ -853,7 +856,7 @@ test('F-T165-30: two SIGINTs to the runner\'s process group 700 ms apart, during
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
     const { spawn } = await import('node:child_process');
     // A process group of its own, as at a terminal: each SIGINT goes to the whole group, as a Ctrl-C does.
-    const child = spawn(process.execPath, [LIVE, '--out', out], { env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'sig', 'home'), TMPDIR: tmp }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const child = spawn(process.execPath, cli(['--out', out], fake.bin), { env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'sig', 'home'), TMPDIR: tmp }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d; });
     const closed = new Promise((r) => child.on('close', (code, signal) => r({ code, signal })));
@@ -882,9 +885,9 @@ test('F-T165-30: a security command that fails names its verb and exit only, nev
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root, { failVerb: 'create-keychain' });
-    await assert.rejects(proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin) }), (e) => e.message === 'security create-keychain failed (exit 1)');
+    await assert.rejects(proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin), leadPath: fake.bin }), (e) => e.message === 'security create-keychain failed (exit 1)');
     const bad = fakeSecurity(join(root, 'add'), { failVerb: 'add-generic-password' });
-    await assert.rejects(proveLive(join(root, 'run-add'), { env: bad.env, claude: fakeClaude(join(root, 'add'), bad.bin) }), (e) => e.message === 'security add-generic-password failed (exit 1)');
+    await assert.rejects(proveLive(join(root, 'run-add'), { env: bad.env, claude: fakeClaude(join(root, 'add'), bad.bin), leadPath: bad.bin }), (e) => e.message === 'security add-generic-password failed (exit 1)');
     assert.deepEqual([fake.state().list, bad.state().list, bad.state().keychains], [[LOGIN], [LOGIN], [LOGIN]]);
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
@@ -900,20 +903,39 @@ test('F-T165-30: a launchd job that is still loaded after launchctl remove stops
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('F-T165-31, F-T165-33: a refused L1 start makes every L1 row INVALID (exit 1); with an empty lead PATH and rg on the host PATH, both F-T157-5 checks are INVALID', { timeout: 300_000 }, async () => {
+test('F-T165-38, F-T165-39: the refusals come in the order gh, shared folder, home folder, folder not empty, rg, then the key; a used folder and a lead PATH with no rg read no key and make nothing', async () => {
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    assert.equal(spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: fake.env, encoding: 'utf8' }).stdout.trim(), join(fake.bin, 'rg')); // rg is on env.PATH
+    assert.equal(spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: fake.env, encoding: 'utf8' }).stdout.trim(), join(fake.bin, 'rg')); // rg is on env.PATH, not on the lead PATH
+    const noRg = join(root, 'no-rg'), used = join(root, 'used'), out = join(root, 'run', 'a');
+    mkdirSync(noRg);
+    mkdirSync(used);
+    writeFileSync(join(used, 'notes.txt'), 'sample\n');
+    // F-T165-39: a folder that is not empty is refused before rg and before the key: no Keychain prompt for a run that cannot start.
+    await assert.rejects(proveLive(used, { env: fake.env, leadPath: noRg }), (e) => e.exitCode === 2 && e.message === `the scratch folder ${used} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`);
+    // F-T165-38: no rg on the lead PATH: one line that names ripgrep and its install command, before the key and before any folder.
+    const noRgLine = `ripgrep (rg) is not on the sessions' PATH ${noRg}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`;
+    await assert.rejects(proveLive(out, { env: fake.env, leadPath: noRg }), (e) => e.message === noRgLine);
+    const r = spawnSync(process.execPath, cli(['--out', out], noRg), { encoding: 'utf8', env: { PATH: fake.env.PATH, HOME: join(root, 'home'), TMPDIR: root } });
+    assert.deepEqual([r.status, r.stderr, r.stdout], [1, `proof:live: ${noRgLine}\n`, '']);
+    assert.ok(!existsSync(join(root, 'run')));
+    assert.deepEqual(fake.calls(), []); // no key read, no fixture
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-31, F-T165-33: a refused L1 start makes every L1 row INVALID (exit 1)', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root);
     const claude = fakeClaude(root, fake.bin, { preflight: { runner: join(root, 'run', 'runner'), mode: 'unavailable' } });
-    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude, leadPath: '' });
+    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude, leadPath: fake.bin });
     const l1 = report.rows.filter((r) => r.group === 'L1');
     assert.deepEqual([...new Set(l1.map((r) => r.status))], ['INVALID']);
     assert.deepEqual([...new Set(l1.flatMap((r) => r.probes.map((p) => `${p.live.did} ${p.live.why}`)))], ['null start refused: claude sandbox status: supported true, enabled false, strict true']);
     assert.equal(report.sessions[0].outcome, 'start refused: no sandbox');
     assert.equal(exitCode(report), 1);
     assert.equal(report.rows.find((r) => r.row === 'F-T134-15').status, 'PASS'); // L2 started: only L1 was refused
-    assert.deepEqual(report.rows.find((r) => r.row === 'F-T157-5').checks.map((c) => [c.id, c.verdict, c.why]), ['rg-where', 'rg-credential'].map((id) => [id, 'INVALID', 'no rg on the lead PATH of this Mac: the row proves nothing until rg is installed there']));
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -921,7 +943,7 @@ test('F-T165-32, F-T165-35, F-T165-37: an --out in the owner\'s home folder (a s
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    // Each --out exists and is not empty, so a runner without the refusal stops at refuseUsed after it read the key: no test names the
+    // Each --out exists and is not empty, so a runner without the refusal stops at refuseUsed, with another line: no test names the
     // real home folder (F-T165-35).
     const home = join(root, 'home'), claude = fakeClaude(root, fake.bin);
     for (const out of [home, join(home, 'work'), join(home, '..x')]) {
@@ -969,20 +991,23 @@ test('F-T165-34: on a signal, a cleanup step that fails (the temp roots) prints 
     const code = `import fs from 'node:fs';
 import { join } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
-const [run, env, claude] = JSON.parse(process.argv[1]), rm = fs.rmSync;
+const [run, env, claude, leadPath] = JSON.parse(process.argv[1]), rm = fs.rmSync;
 fs.rmSync = (p, o) => { if (String(p).startsWith('/private/tmp/sbp-')) throw new Error('EACCES: sample refusal, rmdir ' + p + '\\nsecond line'); return rm(p, o); };
 syncBuiltinESMExports();
 const m = await import(${sb(LIVE)});
-m.proveLive(run, { env, claude }).catch(() => {});
+m.proveLive(run, { env, claude, leadPath }).catch(() => {});
 const slept = () => fs.existsSync(run) && fs.readdirSync(run, { recursive: true }).some((n) => String(n).endsWith('sleep.pid'));
 for (let i = 0; i < 600 && !slept(); i++) await new Promise((r) => setTimeout(r, 100));
 m.stopLive();
 console.log(JSON.stringify({ slept: slept(), tmp: fs.existsSync(join(run, 'tmp')) }));
 process.exit(0);`;
-    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify([run, fake.env, claude])], { encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify([run, fake.env, claude, fake.bin])], { encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), { slept: true, tmp: false });
-    assert.match(r.stderr, /^proof:live: EACCES: sample refusal, rmdir \/private\/tmp\/sbp-\S+\n$/);
+    // F-T165-40: one line for each temp root that cannot go, and the loop goes on to the next: both roots of the run are named.
+    const failed = [...r.stderr.matchAll(/^proof: could not remove the temp root (\/private\/tmp\/sbp-\S+): EACCES: sample refusal, rmdir \1$/gm)].map((m) => m[1]);
+    assert.deepEqual(failed.toSorted(), tempRootsOf(run).toSorted(), r.stderr);
+    assert.equal(r.stderr.split('\n').filter(Boolean).length, 2, r.stderr);
     assert.deepEqual(fake.state().list, [LOGIN]); // the step before it ran too
   } finally {
     for (const d of existsSync(run) ? tempRootsOf(run) : []) rmSync(d, { recursive: true, force: true }); // the child could not remove them
