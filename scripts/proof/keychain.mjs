@@ -26,6 +26,7 @@ export function keychainPlan(dir, id = randomBytes(8).toString('hex')) {
     path, service, password, value,
     save: ['list-keychains', '-d', 'user'],
     create: ['create-keychain', '-p', password, path],
+    settings: ['set-keychain-settings', path], // no lock timeout and no lock on sleep: the keychain stays open between the control and the sessions (F-T165-19)
     add: ['add-generic-password', '-a', ACCOUNT, '-s', service, '-w', value, path],
     probe: ['find-generic-password', '-a', ACCOUNT, '-s', service, path], // T165's probes name the scratch keychain by its path
     remove: ['delete-keychain', path],
@@ -36,7 +37,7 @@ export function keychainPlan(dir, id = randomBytes(8).toString('hex')) {
 /** The plan's commands for a report: each sample value shown as <sample>. @param {ReturnType<typeof keychainPlan>} plan */
 export function printable(plan) {
   const hide = (args) => ['security', ...args.map((a) => (a === plan.password || a === plan.value ? '<sample>' : a))].join(' ');
-  return [plan.save, plan.create, plan.add, plan.probe, plan.remove, plan.restore(['<each keychain of the saved list>']), plan.save].map(hide);
+  return [plan.save, plan.create, plan.settings, plan.add, plan.probe, plan.remove, plan.restore(['<each keychain of the saved list>']), plan.save].map(hide);
 }
 
 /** The keychain paths of `security list-keychains` output: one quoted path a line. @param {string} out */
@@ -60,6 +61,7 @@ export async function withScratchKeychain(dir, fn, { env = process.env, id } = {
   try {
     security(plan.create);
     created = true;
+    security(plan.settings);
     security(plan.add);
     return await fn(plan);
   } finally {

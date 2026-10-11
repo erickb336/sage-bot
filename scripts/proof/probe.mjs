@@ -3,6 +3,10 @@
 // the probe could not tell (it proves nothing). The probes test only the sandbox: they run with no guard hook.
 //   node probe.mjs <world.json>             in a lead session (T165): each probe, sandboxed
 //   node probe.mjs <world.json> --control   outside the sandbox, first: each operation must work there, or its probe is INVALID
+//   node probe.mjs <world.json> --control --only <needs or id>   only those probes (`keychain`: the control after the sessions)
+// The rule of every verdict (standing order 19): refused only on positive evidence of a sandbox denial (EPERM, or the error that a
+// control proves is a refusal); worked only with the sentinel, the sample value's id, or an exit 0 that the probe's shape makes evidence;
+// anything else (no command, a timeout, a prompt, nothing printed, any other error) is null: the probe cannot tell, and its row is INVALID.
 // It prints no output of an operation and no value of a variable: only whether a variable's name appeared, and the first line of an
 // error, with the world's tag cut out. It imports nothing of sage-bot, so that a session can run a copy of it from its own folder.
 import { spawnSync } from 'node:child_process';
@@ -11,8 +15,10 @@ import { userInfo } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** An error line that says the sandbox refused the operation. Any other failure proves nothing. */
-const DENIED = /Operation not permitted|EPERM/;
+/** An error line that says the sandbox refused the operation (Go and Python spell it in lower case). Any other failure proves nothing. */
+const DENIED = /Operation not permitted|EPERM/i;
+/** A command that is not there: the shell's 127, its message, or the xcode-select stub of a Mac without the developer tools (F-T165-17). */
+const NO_COMMAND = /command not found|xcode-select/;
 const q = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
 const names = (cmd) => `${cmd} | cut -d= -f1 | sed 's/$/=/'`; // variable names only: no value leaves the command
 /** The variables of the model credential (MODEL_KEYS of src/lead-policy.js, repeated here: this script imports nothing of sage-bot). */
@@ -26,11 +32,13 @@ const touchIn = (dir, name) => `touch ${q(join(dir, name))} && rm ${q(join(dir, 
  * The probes, for one world (scripts/proof/world.mjs). Each: id, row (the finding it proves), expect ('refused' or 'allowed'), cmd (a
  * /bin/sh command, run in the session folder), and optionally control (the command outside the sandbox, when cmd itself must not run
  * there), see (variable names: the operation "worked" when one of them appears in its output) with sentinel (a line that the output
- * must have for the listing to count at all: without it, exit 0 with nothing printed is "cannot tell", not refused; F-T157-29), anyFail (any failure counts as refused,
- * not only an EPERM, for a network call or a test), refusedAs (the error that a refusal shows as, when the tool hides the EPERM: a
+ * must have for the listing to count at all: without it, exit 0 with nothing printed is "cannot tell", not refused; F-T157-29), anyFail (any failure of the command itself counts as refused,
+ * not only an EPERM, for a network call or a test; never a missing command, a timeout or a spawn error), refusedAs (the error that a refusal shows as, when the tool hides the EPERM: a
  * glob in a folder that cannot be listed stays as it is, and node reports a script that it cannot read as not found; the control proves
- * that the path is there), shows (a sample value's id: the operation "worked" only when the command printed it; any failure, prompt or
- * timeout counts as refused), needs ('keychain': the probe needs the run's scratch keychain, which only the live run makes).
+ * that the path is there), shows (a sample value's id: the operation "worked" only when the command printed it, and "refused" only on an EPERM; any
+ * other failure, a prompt or a timeout proves nothing), needs ('keychain': the probe needs the run's scratch keychain, which only the
+ * live run makes; its control runs again after the sessions), tool (a command the probe needs: a control on a Mac without it is
+ * skipped, with the reason, not INVALID).
  * @param {object} w  the world @param {{ pid?: number }} [o]  the process whose environment the ps probes read
  */
 export function probes(w, { pid = process.pid } = {}) {
@@ -132,8 +140,10 @@ export function probes(w, { pid = process.pid } = {}) {
     keychain('node', `node -e "process.stdout.write(require('child_process').execFileSync('/bin/sh', ['-c', process.argv[1]]))" ${q(find)}`),
     keychain('python3', `python3 -c "import subprocess, sys; sys.exit(subprocess.call(['/bin/sh', '-c', sys.argv[1]]))" ${q(find)}`),
     keychain('osascript', `osascript -e ${q(`do shell script "${find.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)}`),
-    // F-T165-10 (G70 a): gh, on the lead PATH, prints no token in a session (the control: gh is there)
-    P('F-T165-10', 'gh-auth-token', 'refused', 'gh auth token', { anyFail: true, control: 'command -v gh', needs: 'keychain' }),
+    // F-T165-10 (G70 a): gh, on the lead PATH, prints no token in a session. The world's home has a gh config with a sample token
+    // (world.mjs: ghConfig), so the control proves that gh reads one from there (with the control world's sample GH_TOKEN unset: gh
+    // prefers the variable), and the session's gh, whose HOME is that folder, must not (F-T165-18). A Mac with no gh skips the row.
+    P('F-T165-10', 'gh-auth-token', 'refused', 'gh auth token', { shows: w.ghTokenId, control: `unset GH_TOKEN GITHUB_TOKEN; GH_CONFIG_DIR=${q(w.ghConfig)} gh auth token`, tool: 'gh' }),
   ];
 }
 
@@ -142,8 +152,10 @@ export function probes(w, { pid = process.pid } = {}) {
  * @param {{ see?: string[], sentinel?: RegExp, anyFail?: boolean, refusedAs?: RegExp }} p @param {{ status: number | null, stdout: string, stderr: string, error?: Error }} r
  */
 export function didOf(p, r) {
-  if (p.shows) return r.status === 0 && r.stdout.includes(p.shows); // only a printed value counts; a failure, a prompt or a timeout is a refusal
-  if (r.error || r.status === null) return p.anyFail ? false : null; // a timeout or a spawn error
+  if (p.shows && r.stdout.includes(p.shows)) return true; // the value came out, whatever the exit
+  if (r.error || r.status === null) return null; // a timeout or a spawn error proves nothing
+  if (r.status === 127 || NO_COMMAND.test(r.stderr)) return null; // no command ran
+  if (p.shows) return DENIED.test(r.stderr) || DENIED.test(r.stdout) ? false : null; // a prompt, a locked keychain, a missing item: nothing
   if (r.status === 0 && p.see) { // F-T157-29: a listing without its sentinel line (nothing printed) is no evidence
     if (!p.sentinel.test(r.stdout)) return null;
     return p.see.some((n) => r.stdout.split('\n').some((l) => l.startsWith(`${n}=`) || l.includes(` ${n}=`)));
@@ -165,19 +177,26 @@ function claudePid() {
   return undefined;
 }
 
-/** Runs each probe once and returns its JSON result. @param {object} w @param {boolean} control */
-export function runProbes(w, control) {
+/**
+ * Runs each probe once and returns its JSON result. A control on a Mac without the probe's `tool` is `skipped`, with the reason.
+ * @param {object} w @param {boolean} control @param {string} [only]  a `needs` value or a probe id: run only those probes
+ */
+export function runProbes(w, control, only) {
   const pid = control ? process.pid : claudePid();
-  return probes(w, { pid: pid ?? 0 }).map((p) => {
-    const r = spawnSync('/bin/sh', ['-c', control ? p.control ?? p.cmd : p.cmd], { cwd: w.sessionFolder, encoding: 'utf8', timeout: 30_000, maxBuffer: 1 << 24 });
+  const sh = (cmd) => spawnSync('/bin/sh', ['-c', cmd], { cwd: w.sessionFolder, encoding: 'utf8', timeout: 30_000, maxBuffer: 1 << 24 });
+  return probes(w, { pid: pid ?? 0 }).filter((p) => !only || p.needs === only || p.id === only).map((p) => {
+    const base = { id: p.id, row: p.row, expect: p.expect, ...(p.needs && { needs: p.needs }) };
+    if (control && p.tool && sh(`command -v ${p.tool}`).status !== 0) return { ...base, did: null, code: null, why: `${p.tool} is not on this Mac`, skipped: `${p.tool} is not on this Mac` };
+    const r = sh(control ? p.control ?? p.cmd : p.cmd);
     const did = !control && !pid && p.id.startsWith('model-key-ps') ? null : didOf(p, r); // no claude process found: nothing to read
     const why = String(r.error?.message ?? r.stderr ?? '').split('\n').find(Boolean)?.replaceAll(w.tag, '<tag>').slice(0, 200) ?? '';
-    return { id: p.id, row: p.row, expect: p.expect, did, code: r.status, why, ...(p.needs && { needs: p.needs }) };
+    return { ...base, did, code: r.status, why };
   });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [file, flag] = process.argv.slice(2);
-  if (!file || (flag !== undefined && flag !== '--control')) { console.error('usage: node probe.mjs <world.json> [--control]'); process.exit(2); }
-  for (const result of runProbes(JSON.parse(readFileSync(file, 'utf8')), flag === '--control')) console.log(JSON.stringify(result));
+  const [file, ...flags] = process.argv.slice(2);
+  const control = flags[0] === '--control', only = control && flags[1] === '--only' ? flags[2] : undefined;
+  if (!file || !(flags.length === 0 || (control && (flags.length === 1 || (flags.length === 3 && only))))) { console.error('usage: node probe.mjs <world.json> [--control [--only <needs>]]'); process.exit(2); }
+  for (const result of runProbes(JSON.parse(readFileSync(file, 'utf8')), control, only)) console.log(JSON.stringify(result));
 }

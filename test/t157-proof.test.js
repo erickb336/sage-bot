@@ -161,16 +161,32 @@ test('F-T157-22: a claude that hangs is killed with its whole process group at t
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('didOf: worked, refused (EPERM, or any failure for a network call or a test), or cannot tell', () => {
+test('didOf: worked, refused (EPERM, or any failure of the command itself for a network call or a test), or cannot tell', () => {
   const r = (status, stdout = '', stderr = '') => ({ status, stdout, stderr });
   assert.equal(didOf({}, r(0)), true);
   assert.equal(didOf({}, r(1, '', 'cat: /x: Operation not permitted')), false);
+  assert.equal(didOf({}, r(1, '', 'open /x: operation not permitted')), false); // Go and Python spell it in lower case
   assert.equal(didOf({}, r(1, '', 'cat: /x: No such file or directory')), null); // a missing file proves nothing
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', "Error: Cannot find module '/x'")), false); // node hides the EPERM
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', 'SyntaxError: x')), null);
   assert.equal(didOf({ anyFail: true }, r(6, '', 'curl: (6) Could not resolve host')), false);
-  assert.equal(didOf({ anyFail: true }, { status: null, error: new Error('ETIMEDOUT') }), false);
+  // F-T165-17: no command ran (the shell's 127, its message, the xcode-select stub), a timeout or a spawn error: nothing, never refused
+  assert.equal(didOf({ anyFail: true }, r(127, '', 'sh: curl: command not found')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'xcode-select: note: No developer tools were found, requesting install.')), null);
+  assert.equal(didOf({ anyFail: true }, { status: null, error: new Error('ETIMEDOUT') }), null);
   assert.equal(didOf({}, { status: null, error: new Error('ETIMEDOUT') }), null);
+  assert.equal(didOf({}, r(127, '', 'sh: jq: command not found')), null);
+  // F-T165-19: a probe that shows a value: worked only with the value, refused only with an EPERM; a prompt that timed out, a missing
+  // security, a locked keychain or a missing item proves nothing
+  const shows = { shows: 'sample-item-abc' };
+  assert.equal(didOf(shows, r(0, 'sample-item-abc\n')), true);
+  assert.equal(didOf(shows, r(1, 'sample-item-abc\n', 'warning')), true);
+  assert.equal(didOf(shows, r(1, '', 'security: SecKeychainOpen: Operation not permitted')), false);
+  assert.equal(didOf(shows, r(0, '')), null);
+  assert.equal(didOf(shows, r(44, '', 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.')), null);
+  assert.equal(didOf(shows, r(36, '', 'security: SecKeychainUnlock: User interaction is not allowed.')), null);
+  assert.equal(didOf(shows, { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT') }), null);
+  assert.equal(didOf(shows, r(127, '', 'sh: security: command not found')), null);
   const see = { see: ['GH_TOKEN'], sentinel: /^PATH=$/m };
   assert.equal(didOf(see, r(0, 'PATH=\nGH_TOKEN=\n')), true);
   assert.equal(didOf({ see: ['GH_TOKEN'], sentinel: /^\s*42\s/ }, r(0, '   42 node probe.mjs PATH=/bin GH_TOKEN=x')), true); // ps output, the pid first
@@ -223,7 +239,7 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
       { cwd: f, encoding: 'utf8', env: launchOf(policy, {}).env }); // the session's environment
     assert.equal(r.status, 0, r.stderr);
     const results = r.stdout.trim().split('\n').map((l) => JSON.parse(l));
-    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') ? p.did !== null : p.did !== (p.expect === 'allowed')));
+    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process and no scratch keychain here: those cannot tell
     assert.deepEqual(wrong, []);
     assert.ok(results.length >= 40);
     assert.ok(!r.stdout.includes(TAG) && !r.stdout.includes('sample-fake-'));
@@ -267,7 +283,7 @@ test('keychain fixture: it saves the search list, makes the scratch keychain, an
     assert.equal(readFileSync(join(root, 'kc', 'search-list-before.txt'), 'utf8'), '/Users/sample/Library/Keychains/login.keychain-db\n/Library/Keychains/System.keychain\n'); // the baseline on disk, for a crash
     assert.deepEqual(during.list, ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain', join(root, 'kc', 'proof.keychain-db')]);
     assert.deepEqual(fake.state(), { list: ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain'], keychains: [] });
-    assert.deepEqual(fake.verbs(), ['list-keychains', 'create-keychain', 'add-generic-password', 'delete-keychain', 'list-keychains', 'list-keychains']);
+    assert.deepEqual(fake.verbs(), ['list-keychains', 'create-keychain', 'set-keychain-settings', 'add-generic-password', 'delete-keychain', 'list-keychains', 'list-keychains']); // set-keychain-settings with no option: no lock timeout (F-T165-19)
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -296,6 +312,7 @@ test('keychain fixture: an empty or unreadable search list changes nothing; the 
   assert.deepEqual(printable(plan), [
     'security list-keychains -d user',
     'security create-keychain -p <sample> /k/proof.keychain-db',
+    'security set-keychain-settings /k/proof.keychain-db',
     'security add-generic-password -a sage-bot-proof -s sage-bot-proof-sample-abc123 -w <sample> /k/proof.keychain-db',
     'security find-generic-password -a sage-bot-proof -s sage-bot-proof-sample-abc123 /k/proof.keychain-db',
     'security delete-keychain /k/proof.keychain-db',

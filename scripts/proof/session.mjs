@@ -11,6 +11,12 @@ const DUMMY = fileURLToPath(new URL('dummy-claude.mjs', import.meta.url));
 /** The model of a proof session (G68 a), and its budget in USD (sage: 1 USD a session). */
 export const MODEL = 'claude-haiku-4-5';
 export const BUDGET_USD = 1;
+/** The sessions that run now, each a process group of its own. */
+const running = new Set();
+/** Kills the process group of every session that runs now (a signal to the runner, F-T165-15): nothing of a session stays with the key. */
+export function killSessions() {
+  for (const child of running) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ } running.delete(child); }
+}
 
 /**
  * A wrapper script `<dir>/claude-<mode>` that runs the dummy claude (scripts/proof/dummy-claude.mjs) in that mode, for a policy's `claude`.
@@ -41,11 +47,12 @@ export async function startSession(policy, env, model, prompt, { timeout = 15 * 
   return new Promise((resolve) => {
     const child = spawn(launch.command, [...launch.args, '--model', MODEL, '--output-format', 'stream-json', '--verbose', prompt],
       { cwd: launch.cwd, env: launch.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    running.add(child);
     let stdout = '', stderr = '', timedOut = false;
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
     const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group is gone */ } }, timeout);
-    child.on('error', (e) => { clearTimeout(timer); resolve({ stdout, stderr: `${stderr}${e.message}`, status: null, timedOut }); });
-    child.on('close', (status) => { clearTimeout(timer); resolve({ stdout, stderr, status, timedOut }); });
+    child.on('error', (e) => { clearTimeout(timer); running.delete(child); resolve({ stdout, stderr: `${stderr}${e.message}`, status: null, timedOut }); });
+    child.on('close', (status) => { clearTimeout(timer); running.delete(child); resolve({ stdout, stderr, status, timedOut }); });
   });
 }

@@ -58,8 +58,10 @@ export const ROWS = [
   ['F-T157-5', 'L3', 'command -v rg in the Bash tool, and rg on a credential file refused', 'Run `command -v rg`, then `rg sample <the ssh file of world.json>`.'],
 ].map(([row, group, title, ask]) => ({ row, group, title, ...(ask && { ask }) }));
 
-/** The verdict of one probe from its control and its live result (undefined: no session ran it). */
+/** The verdict of one probe from its control and its live result (undefined: no session ran it). A control skipped on this Mac
+ * (the probe's command is not here) is SKIPPED, with its reason in the row. */
 export function verdict(expect, control, live) {
+  if (control?.skipped) return 'SKIPPED';
   if (control?.did !== true) return 'INVALID';
   if (live === undefined) return 'SKIPPED';
   if (live.did === null) return 'INVALID';
@@ -121,6 +123,7 @@ async function nowRows(w, policy, env, root) {
  * @param {string} [o.claude]  a claude to run in place of the one on PATH: the dummy of a dry run, or a fake in the tests
  * @param {string[]} [o.secrets]  values that the report must never hold (the key): the run refuses to write a report that holds one
  * @param {string[]} [o.made]  the entries of `root` that the caller made before this run (refuseUsed): any other entry is an earlier run
+ * @param {string} [o.proof]  the report's name of the proof, in place of the one that `live` or its absence gives (the dry run)
  * @param {(ctx: { root: string, world: object, policy: object, tag: string, controls: Map<string, object> }) => Promise<{ results: Map<string, { did: boolean | null, why: string }>, rows: Record<string, { status: string, why: string, checks?: object[] }>, skipped: string, sessions?: object[], keychain?: object }>} [o.live]
  *   the sessions (scripts/proof/live.mjs): `results` by probe id for the L1 probes, `rows` by row for L2 and L3, `skipped` the why of a
  *   live row with no result, `sessions` and `keychain` for the report. Without it, every live row is SKIPPED
@@ -138,7 +141,7 @@ export async function prove(root, o = {}) {
 export function refuseUsed(root, made = []) {
   if (readdirSync(root).some((n) => !made.includes(n))) throw Object.assign(new Error(`the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`), { exitCode: 2 });
 }
-async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host = process.env, claude, secrets = [], made = [], live: sessions } = {}) {
+async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host = process.env, claude, secrets = [], made = [], proof, live: sessions } = {}) {
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
   refuseUsed(root, made);
@@ -163,11 +166,12 @@ async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host =
     });
     const status = probes.length ? statusOf(probes.map((p) => p.verdict)) : 'INVALID';
     const passed = probes.filter((p) => p.control.did === true).length;
-    return { ...row, status, why: `${status === 'SKIPPED' ? `${skipped}; ` : ''}controls ${passed} of ${probes.length} work outside the sandbox`, probes };
+    const skips = [...new Set(probes.filter((p) => p.verdict === 'SKIPPED').map((p) => controls.get(p.id).skipped ?? skipped))];
+    return { ...row, status, why: `${skips.length ? `${skips.join('; ')}; ` : ''}controls ${passed} of ${probes.length} work outside the sandbox`, probes };
   });
   const count = (s) => rows.filter((x) => x.status === s).length;
   const report = {
-    proof: session ? 'T165 (T134 PR 2b), live' : 'T157 (T134 PR 2a), no key', at: new Date().toISOString(), root, tempRoots: [control.tempRoot, live.tempRoot],
+    proof: proof ?? (session ? 'T165 (T134 PR 2b), live' : 'T157 (T134 PR 2a), no key'), at: new Date().toISOString(), root, tempRoots: [control.tempRoot, live.tempRoot],
     platform: now['F-T157-3'][1].split(':')[0], claude: out(policy.claude, ['--version'], { env: launchOf(policy, env).env, cwd: root })?.split(' ')[0] ?? null,
     counts: Object.fromEntries(['PASS', 'FAIL', 'INVALID', 'SKIPPED'].map((s) => [s, count(s)])),
     probeErrors: r.status === 0 ? null : (r.stderr || r.error?.message || '').split('\n')[0],

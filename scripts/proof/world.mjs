@@ -57,7 +57,8 @@ function fill(root, tag, tempRoot) {
   const kc = keychainPlan(join(dirname(root), 'keychain'), keychainIdOf(tag));
   const w = {
     root, tag, session: SESSION, home, claudeConfig, statePath, cache, marketplace, sageRoot,
-    keychain: { path: kc.path, service: kc.service, account: ACCOUNT, id: keychainIdOf(tag) }, // F-T165-2, F-T165-10
+    keychain: { path: kc.path, service: kc.service, account: ACCOUNT, id: keychainIdOf(tag) }, // F-T165-2
+    ghConfig: join(home, '.config', 'gh'), ghTokenId: keychainIdOf(tag), // F-T165-10: a gh config with a sample token that ends in this id, for the control
     tool: sageToolIn(cache, VERSION),
     logbook: join(sageRoot, 'proof-000000', 'tasks.tsv'),
     userTemp: join(root, 'utmp'), tempRoot,
@@ -107,6 +108,7 @@ function fill(root, tag, tempRoot) {
   file(w.credentials.gitconfig, `[user]\n\tname = sample\n[sample]\n\tvalue = ${sample('gitconfig', tag)}\n`);
   file(w.credentials.gitXdg, `[sample]\n\tvalue = ${sample('git-xdg', tag)}\n`);
   file(w.credentials.claude, `${JSON.stringify({ sample: sample('claude', tag) })}\n`);
+  file(join(w.ghConfig, 'hosts.yml'), `github.com:\n    oauth_token: sample-fake-gh-token-${w.ghTokenId}\n    user: sample\n    git_protocol: https\n`);
   file(w.credentials.claudeJson, `${JSON.stringify({ mcpServers: { sample: { env: { SAMPLE: sample('claude-json', tag) } } } })}\n`);
   mkdirSync(w.userTemp, { recursive: true });
   // The session folder: a git repository with one commit, and project settings that must not apply (F-T134-10): a SessionStart hook
