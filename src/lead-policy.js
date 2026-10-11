@@ -131,12 +131,17 @@ export function leadPolicy(config, session, host = {}) {
   if (sageTool && sageTool !== sageToolIn(plugin.cache, version)) throw new Error(`the sage state tool ${sageTool} is not ${sageToolIn(plugin.cache, '<version>')}, the sage plugin of the sage marketplace, the only place that a lead session loads sage from. Unset SAGE_TOOL, or set it to that sage.mjs. Nothing was started.`);
   const sageRoot = env.SAGE_HOME || join(claudeConfig, 'sage');
   const claudeDir = join(leads, 'claude');
+  const homes = [...new Set([home, owner])]; // F-T157-7
+  // F-T156-15, F-T157-20: every Claude Code config folder of the host, CLAUDE_CONFIG_DIR and each home's ~/.claude, is a credential
+  // file and a denied path: with a scratch HOME, the owner's real ~/.claude (its plugin cache, sage root and logbooks) stays denied too.
+  const claudeDirs = [...new Set([claudeConfig, ...homes.map((h) => join(h, '.claude'))])];
   const denied = [...new Set([
     stateDir, config.statePath, ...[auditPathOf, killPathOf, sessionsPathOf, votesPathOf, leadsPathOf].map((of) => of(config)), // F-T134-2
     dirname(defaultConfigPath(home)), // F-T134-2
     plugin.cache, plugin.marketplace, sageRoot, // F-T134-6, F-T134-12
     join(userTempDir, 'sage-hooks'), '/private/tmp/sage-hooks', join(sageRoot, '.hooks'), // F-T134-7, F-T156-40, F-T134-12
     claudeDir, // F-T134-10
+    ...claudeDirs, // F-T157-20
   ].map((d) => canonicalPath('the denied path', d)))];
   // F-T156-31, F-T156-34: the two folders of all sessions' folders apart from each other and from every denied path. Their folders are
   // own folders (no link), so each session's folder is in its sessions folder and its temp folder in the folder of all temp folders.
@@ -149,7 +154,6 @@ export function leadPolicy(config, session, host = {}) {
   }
   const tmpOwn = join(temps, session), perUser = join(tmpOwn, `claude-${uid}`);
   if (Buffer.byteLength(perUser) > CLAUDE_TMP_MAX) throw new Error(`the lead session's per-user temp folder ${perUser} is longer than ${CLAUDE_TMP_MAX} bytes: Claude Code would give its commands the shared /tmp/claude-${uid} (F-T156-35). Nothing was started.`);
-  const homes = [...new Set([home, owner])]; // F-T157-7
   return {
     session,
     folder: join(sessions, session), // F-T156-6, F-T156-29
@@ -157,7 +161,10 @@ export function leadPolicy(config, session, host = {}) {
     sessions, tempRoot: temps, // F-T156-31: every session's folder and every session's temp folder, denied to the others
     home, // the session's HOME
     homes, // F-T156-5, F-T157-7: $HOME and the owner's home folder; sandboxed commands read nothing in them but the session's own folders
-    credentialFiles: [...homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f))), claudeConfig], // F-T156-15: the owner's Claude config folder
+    // F-T156-15, F-T157-20, F-T173-1: the host's Claude config folders, and the lead sessions' own one (CLAUDE_CONFIG_DIR of every session,
+    // with their transcripts). The lead one is also a denied path (denyRead, denyWrite, Read and Edit deny rules), and Claude Code 2.1.289
+    // does not re-open to commands a path under a denyRead; this credentials deny is a second layer.
+    credentialFiles: [...homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir],
     hooksState: join(stateDir, 'lead-hooks', session),
     claudeDir,
     denied,

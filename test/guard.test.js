@@ -7,9 +7,9 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempFolder } from './temp-folder.js';
 import { decideText } from '../src/guard.js';
 import { spawn, spawnSync } from './bridge-setup.js';
 
@@ -22,7 +22,7 @@ const F = { REPO: '/sample/repo', WT: '/sample/repo/wt', SCRATCH: '/sample/scrat
 const fill = (v) => JSON.parse(JSON.stringify(v).replace(/\{(\w+)\}/g, (m, k) => F[k] ?? m));
 const LEAD = { SAGE_ORIGIN: 'lead', SAGE_TOOL: F.TOOL };
 const text = (stdin) => (typeof stdin === 'string' ? stdin : JSON.stringify(stdin));
-const base = mkdtempSync(join(tmpdir(), 'sage-bot-guard-'));
+const base = tempFolder('sage-bot-guard-');
 after(() => rmSync(base, { recursive: true, force: true }));
 let n = 0;
 /**

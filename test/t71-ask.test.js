@@ -2,9 +2,9 @@
 // with the fake Discord. SAMPLE DATA ONLY: every id, name and file is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
 import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
@@ -234,7 +234,7 @@ test('untrusted logbook text is made safe: no mention, no link, no markdown from
 
 /** A project folder with files for /sage files. */
 function filesProject(t) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t71-files-'))); // the real path: a listed link to a folder outside git is refused (F-T132-24)
+  const root = realpathSync.native(tempFolder('sage-bot-t71-files-')); // the real path: a listed link to a folder outside git is refused (F-T132-24)
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const project = join(root, 'project');
   mkdirSync(join(project, 'docs'), { recursive: true });
@@ -311,7 +311,7 @@ test('rolesOf reads the roles from Discord data: a GuildMember or the raw API me
 });
 
 test('launchd.mjs refuses a config whose projects the bridge would refuse, with the same message, and prints no plist', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t71-launchd-'));
+  const dir = tempFolder('sage-bot-t71-launchd-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const root = new URL('..', import.meta.url).pathname;
   const sample = JSON.parse(readFileSync(join(root, 'examples/config.example.json'), 'utf8'));
@@ -330,7 +330,7 @@ const THREAD = '400000000000000077';
 
 /** A project folder `site` with the given files (name → content), and an ask whose only project is it, with `files` as its allow-list. */
 function site(t, b, contents, files) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-r333-')));
+  const root = realpathSync.native(tempFolder('sage-bot-r333-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const project = join(root, 'site');
   mkdirSync(join(project, 'shots'), { recursive: true });

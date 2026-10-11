@@ -2,9 +2,9 @@
 // file that does not load is no failing test. Each case runs the real test runner on sample test files in a new temp folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { parses, verdictOf } from '../scripts/lead-policy-mutations.mjs';
 import { spawnSync } from './bridge-setup.js';
 
@@ -15,7 +15,7 @@ const BROKEN = "import { test } from 'node:test';\nimport './m.js';\ntest('passe
 
 /** The verdict of a run of the two sample files a and b, with the given bodies, as the mutation run calls the test runner. */
 function verdict(a, b, parses = true) {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t156-mut-'));
+  const dir = tempFolder('sage-bot-t156-mut-');
   try {
     writeFileSync(join(dir, 'm.js'), 'export const x = (;\n');
     writeFileSync(join(dir, FILES[0]), a);
@@ -35,7 +35,7 @@ test('F-T156-23: a test file that does not load is no failing test: INVALID alon
 });
 
 test('F-T156-23: a mutated file that does not parse is INVALID, even with failing tests', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t156-mut-'));
+  const dir = tempFolder('sage-bot-t156-mut-');
   try {
     writeFileSync(join(dir, 'good.js'), 'export const x = 1;\n');
     writeFileSync(join(dir, 'bad.js'), 'export const x = (;\n');

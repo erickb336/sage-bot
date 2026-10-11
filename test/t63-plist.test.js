@@ -2,9 +2,9 @@
 // SAMPLE DATA ONLY. HOME is a scratch folder; nothing writes into ~/Library or runs launchctl.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import * as launchdModule from '../src/launchd.js';
 import { spawnSync } from './bridge-setup.js';
 
@@ -12,7 +12,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const SCRIPT = join(ROOT, 'scripts/launchd.mjs');
 
 function launchd(config) {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-t63-'));
+  const home = tempFolder('sage-bot-t63-');
   try {
     const path = config === undefined ? join(home, 'missing.json') : join(home, 'config.json');
     if (config !== undefined) writeFileSync(path, config);

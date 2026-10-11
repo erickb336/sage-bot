@@ -2,9 +2,9 @@
 // error log and the notes. SAMPLE DATA ONLY: no real token, no network, no launchctl.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { memberOf, readToken } from '../src/discord.js';
 import { plist } from '../src/launchd.js';
@@ -15,7 +15,7 @@ import { save } from '../src/state.js';
 import { openGate, step } from '../src/vote.js';
 import { execFileSync } from './bridge-setup.js';
 
-const scratch = () => mkdtempSync(join(tmpdir(), 'sage-bot-discord-'));
+const scratch = () => tempFolder('sage-bot-discord-');
 const [OWNER, MAYA, APPRENTICE, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
 const CONFIG = { channelId: '400000000000000001', ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 

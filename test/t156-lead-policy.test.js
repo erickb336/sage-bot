@@ -4,9 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from './bridge-setup.js';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { dirname, join, relative } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { CLAUDE_TMP_MAX, LEAD_PATH, MODEL_KEYS, TEMP_ROOT, launchOf, leadPolicy, preflight, settingsOf } from '../src/lead-policy.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -24,6 +25,7 @@ const DENIED = [
   '/h/.claude/plugins/cache/sage', '/h/.claude/plugins/marketplaces/sage', '/h/.claude/sage', // the sage plugin and root (F-T134-6, -12)
   '/u/sage-hooks', '/private/tmp/sage-hooks', '/h/.claude/sage/.hooks', // sage's hook state (F-T134-7, F-T156-40, -12)
   '/h/.local/share/sage-bot/leads/claude', // the lead sessions' Claude Code config folder (F-T134-10)
+  '/h/.claude', // the host's Claude Code config folder, whole (F-T157-20)
 ];
 const fileRules = (tool) => DENIED.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
 // The git control paths of session s21 (F-T156-13): literal paths in its own .git, and every other .git below it, whole.
@@ -32,9 +34,9 @@ const GIT_CONTROL = [
   `${S21}/.git/config`, `${S21}/.git/config.worktree`, `${S21}/.git/hooks`, `${S21}/.git/commondir`, `${S21}/.git/modules`,
   `${S21}/.git/info/attributes`, `${S21}/.git/worktrees`, `${S21}/*/**/.git`,
 ];
-// The credential files (F-T156-5), git's global files that blockReadsOutsideWorkingDirectories re-opens, and the owner's Claude Code
-// config folder (F-T156-15).
-const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'].map((f) => `/h/${f}`), '/h/.claude'];
+// The credential files (F-T156-5), git's global files that blockReadsOutsideWorkingDirectories re-opens, the owner's Claude Code
+// config folder (F-T156-15) and the lead sessions' own one (F-T173-1).
+const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'].map((f) => `/h/${f}`), '/h/.claude', '/h/.local/share/sage-bot/leads/claude'];
 /** A sage plugin cache with one version, v1, in a new Claude Code config folder below `root`; the state tool's path. */
 function pluginCache(root, tool = "console.log('lead-sessions 1')") {
   const at = join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1', 'skills', 'sage');
@@ -133,7 +135,7 @@ test('the launch: claude -p with the settings, sage-bot\'s settings only, strict
 });
 
 test('sage, the only plugin: --plugin-dir is the version folder of the denied plugin cache; a state tool outside that cache, or not at sage/<version>/skills/sage/sage.mjs in it, is refused (F-T156-14, F-T156-24)', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const tool = pluginCache(root), config = join(root, 'claude-config'), cache = join(config, 'plugins', 'cache', 'sage');
     const h = (env) => ({ ...HOST, home: join(root, 'h'), env: { CLAUDE_CONFIG_DIR: config, ...env } });
@@ -160,7 +162,7 @@ test('sage, the only plugin: --plugin-dir is the version folder of the denied pl
 });
 
 test('the claude command is found in the host\'s PATH, because the session\'s PATH is fixed', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     for (const d of ['a', 'b', 'c/claude']) mkdirSync(join(root, d), { recursive: true });
     writeFileSync(join(root, 'a', 'claude'), ''); // not executable
@@ -183,7 +185,7 @@ test('CLAUDE_CONFIG_DIR: empty counts as not set; a relative one is refused (F-T
 });
 
 test('refusal: a link to a path that is not made yet, at the state file or at sessions (F-T156-17)', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const state = join(root, 'state');
     for (const d of [state, join(root, 'l')]) mkdirSync(d);
@@ -206,7 +208,7 @@ test('refusal: a session folder in a denied path, or a denied path in the sessio
 });
 
 test('refusal: a link at the leads folder, at sessions, at any session folder or at the home folder (F-T156-6, F-T156-29, G48 A)', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const state = join(root, 'state'), home = join(root, 'home');
     for (const d of [state, home, join(root, 'l2'), join(root, 'l3', 'sessions')]) mkdirSync(d, { recursive: true });
@@ -237,7 +239,7 @@ test('refusal: a session name that is not s and a number, and a statePath or lea
 
 /** A scratch folder with a dummy state tool and a dummy `claude`, each a sample. `tool` is the tool's body, `status` the JSON that claude prints. */
 function host({ tool = "console.log('lead-sessions 1')", status = { supported: true, enabled: true, strictMode: true, unavailableReason: null }, claudeExit = 0 } = {}) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   pluginCache(root, tool);
   const claude = join(root, 'claude');
   // It records its arguments, its CLAUDE_CONFIG_DIR, and its two temp variables with whether that folder is there.
@@ -299,7 +301,7 @@ test('preflight: "no sandbox" when claude says not enabled, not strict, not supp
 });
 
 test('the script prints the settings of a sample config, and the preflight state, with sample paths only', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const config = join(root, 'config.json');
     writeFileSync(config, JSON.stringify({ statePath: join(root, 'state', 'gates.json') }));
@@ -348,11 +350,11 @@ test('one resolver: no module but src/lead-policy.js (and sagePlugin in src/sage
 // F-T156-7: the real claude binary, when it is installed, with a scratch HOME and a dummy state tool. It runs only `claude --version`
 // and `claude ... sandbox status`; no model session starts. Claude Code 2.1.289 reports strictMode true exactly when a settings source
 // sets sandbox.allowUnsandboxedCommands to false, and strictModeSource "policy" when --settings has the key, whatever its value.
-const versionHome = mkdtempSync(join(tmpdir(), 'sage-bot-t156-v-'));
+const versionHome = tempFolder('sage-bot-t156-v-');
 const realClaude = spawnSync('claude', ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: versionHome, DISABLE_TELEMETRY: '1' } });
 rmSync(versionHome, { recursive: true, force: true });
 test('preflight with the real claude: "ready" with the generated settings, and only scratch folders used', { skip: realClaude.status !== 0 && 'claude is not installed' }, async () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     pluginCache(root);
     const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), CLAUDE_CONFIG_DIR: join(root, 'claude-config'), DISABLE_TELEMETRY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
@@ -387,7 +389,7 @@ test('preflight: a state tool that ignores SIGTERM is killed at its own timeout,
 });
 
 test('F-T156-28: a ".." after a link is refused in every configured and environment path, because the OS follows the link first', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const h = join(root, 'h'), other = join(root, 'p', 'other', 'a');
     for (const d of [h, other]) mkdirSync(d, { recursive: true });
@@ -423,7 +425,7 @@ test('F-T156-31: with the leads folder outside the home folder, commands of one 
 });
 
 test('F-T156-31, F-T156-34: the sessions folder as a link into a temp folder, or in the folder of all temp folders, or holding it, is refused', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const temps = join(root, 'st', 'sage-lead'), leads = join(root, 'l');
     for (const d of [join(temps, 's1'), leads]) mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -439,7 +441,7 @@ test('F-T156-31, F-T156-34: the sessions folder as a link into a temp folder, or
 });
 
 test('F-T156-40: no rule of the policy comes from TMPDIR; it denies sage-hooks in the real DARWIN_USER_TEMP_DIR and in /private/tmp', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     // A stand-in of macOS's /var/folders/<x>/T, a link to /private/var/folders/<x>/T: the TMPDIR of the owner's Terminal and of launchd.
     const T = join(root, 'private', 'var', 'folders', 'x', 'T'), linked = join(root, 'var', 'folders', 'x', 'T');
@@ -464,7 +466,7 @@ test('F-T156-40: by default the policy runs getconf DARWIN_USER_TEMP_DIR and tak
   const real = realpathSync.native(spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }).stdout.trim());
   assert.match(real, /^\/private\/var\/folders\/[^/]+\/[^/]+\/T$/);
   assert.ok(leadPolicy(CONFIG, 's1', host).denied.includes(join(real, 'sage-hooks')));
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const policy = (getconf) => {
       writeFileSync(join(root, 'getconf'), `#!/bin/sh\n${getconf}\n`, { mode: 0o755 });
@@ -478,7 +480,7 @@ test('F-T156-40: by default the policy runs getconf DARWIN_USER_TEMP_DIR and tak
 });
 
 test('F-T156-41: a .DS_Store in the sessions folder or the temp root is no refusal; a link or a bad folder that this session uses still is', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t156-'));
   try {
     const leads = join(root, 'leads'), sessions = join(leads, 'sessions'), temps = join(root, 'tt');
     for (const d of [leads, sessions, temps]) mkdirSync(d, { mode: 0o700 });

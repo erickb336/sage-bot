@@ -1,9 +1,9 @@
 // Tests for the round-6 findings F-T1-65 to F-T1-68. SAMPLE DATA: every id here is a made-up sample.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { openGate, step, parseGate, MINUTE } from '../src/vote.js';
 import { spawnSync } from './bridge-setup.js';
 
@@ -70,7 +70,7 @@ test('F-T1-68: a non-holder gets not-holder on an open or a closed gate, single 
 });
 
 test('F-T1-65: npm in this project writes nothing to HOME', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-home-'));
+  const home = tempFolder('sage-bot-home-');
   try {
     // Drop the npm_config_* values that a parent `npm run` passes down, so that only the project's .npmrc counts.
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^npm_config_/i.test(k)));

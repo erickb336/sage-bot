@@ -3,9 +3,10 @@
 // folder. F-T157-11: the owner's ~/.claude.json is a credential file. SAMPLE DATA ONLY: the values are made up, and no session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { realpathSync, rmSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { launchOf, leadPolicy, settingsOf } from '../src/lead-policy.js';
 
 const HOST = { env: {}, home: '/h', owner: '/h', userTemp: '/u', tempRoot: '/st/sage-lead' };
@@ -31,7 +32,7 @@ test('F-T157-8: a launch takes the one model variable that its caller gives, nev
 });
 
 test('F-T157-7: with HOME set to a scratch folder, commands still read nothing in the owner\'s real home folder (from the user database)', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t157-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t157-'));
   const saved = process.env.HOME;
   try {
     process.env.HOME = join(root, 'home'); // the defaults: home from $HOME, owner from the user database
@@ -49,6 +50,24 @@ test('F-T157-7: with HOME set to a scratch folder, commands still read nothing i
     process.env.HOME = saved;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('F-T157-20: with a scratch HOME, the owner\'s real ~/.claude (plugin cache, sage root, logbooks) is a credential file and a denied path', () => {
+  const settings = settingsOf(leadPolicy(CONFIG, 's1', { ...HOST, owner: '/o' }));
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === '/o/.claude' && f.mode === 'deny'));
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === '/h/.claude' && f.mode === 'deny'));
+  for (const list of [settings.sandbox.filesystem.denyRead, settings.sandbox.filesystem.denyWrite]) assert.ok(list.includes('/o/.claude') && list.includes('/h/.claude'), list.join(' '));
+  for (const rule of ['Read(//o/.claude)', 'Read(//o/.claude/**)', 'Edit(//o/.claude)', 'Edit(//o/.claude/**)']) assert.ok(settings.permissions.deny.includes(rule), rule);
+  assert.ok(!settings.sandbox.filesystem.allowRead.some((a) => a.startsWith('/o/')));
+});
+
+test('F-T173-1: the lead sessions\' shared Claude config folder (every session\'s CLAUDE_CONFIG_DIR, with their transcripts) is a credential file and a denied path', () => {
+  const settings = settingsOf(leadPolicy(CONFIG, 's1', HOST));
+  const claudeDir = '/h/.local/share/sage-bot/leads/claude';
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === claudeDir && f.mode === 'deny'), settings.sandbox.credentials.files.map((f) => f.path).join(' '));
+  for (const list of [settings.sandbox.filesystem.denyRead, settings.sandbox.filesystem.denyWrite]) assert.ok(list.includes(claudeDir), list.join(' '));
+  for (const rule of [`Read(/${claudeDir})`, `Read(/${claudeDir}/**)`]) assert.ok(settings.permissions.deny.includes(rule), rule);
+  assert.equal(launchOf(leadPolicy(CONFIG, 's1', HOST), {}).env.CLAUDE_CONFIG_DIR, claudeDir); // the folder that the credential deny names is the one every session uses
 });
 
 test('F-T157-11: the owner\'s ~/.claude.json (MCP configs, account data) is a credential file, in $HOME and in the owner\'s home folder', () => {

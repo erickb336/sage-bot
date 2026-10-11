@@ -25,7 +25,7 @@ The demo plays one sage session from start to end, with sample people and a scri
 
 In the demo, Maya answers a single question first, so her answer is final. Sam has no role, so sage-bot ignores his press: he gets no reply, and the press does not count. A batch vote ends in a tie, and Jon, a sage-lead, breaks it. Erick, the owner, answers one question at the terminal, and that answer is final. When the session ends, its thread locks.
 
-All files go into a new scratch folder, so the demo never touches your home folder or a real logbook. To write the page to a path of your own, run `npm run demo -- --out <page.html>`. More options are in the [reference](docs/reference.md#the-demo).
+All files go into a new scratch folder, so the demo never touches your home folder or a real logbook, and the folder goes at the end. The page goes to `sage-bot-demo.html` in your temp folder, overwritten on each run; to keep it elsewhere, run `npm run demo -- --out <page.html>`. More options are in the [reference](docs/reference.md#the-demo).
 
 ## How it works
 

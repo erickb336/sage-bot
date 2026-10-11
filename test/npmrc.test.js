@@ -2,15 +2,15 @@
 // It runs npm with HOME set to a scratch folder, never the real home folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { execFileSync } from './bridge-setup.js';
 
 const PROJECT = new URL('..', import.meta.url).pathname;
 
 test('F-T27-2, F-T27-15: planted npm logs survive an npm run from another folder, and npm writes no log in its cache either', () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'sage-bot-npmrc-'));
+  const scratch = tempFolder('sage-bot-npmrc-');
   const home = join(scratch, 'home');
   const elsewhere = join(scratch, 'elsewhere');
   const planted = ['2026-01-01T00_00_00_000Z-debug-0.log', '2026-01-02T00_00_00_000Z-debug-0.log', '2026-01-03T00_00_00_000Z-debug-0.log'];

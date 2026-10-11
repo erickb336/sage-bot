@@ -5,10 +5,10 @@
 // SAMPLE DATA ONLY: the paths do not exist, and nothing runs; the commands are only text.
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { openSync, closeSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempFolder } from './temp-folder.js';
 import { spawn } from './bridge-setup.js';
 
 const HOOK = fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url));
@@ -16,7 +16,7 @@ const { entries } = JSON.parse(readFileSync(new URL('./normal-lead-work.json', i
 const byId = new Map(entries.map((e) => [e.id, e]));
 const ENV = { PATH: process.env.PATH, SAGE_ORIGIN: 'lead', SAGE_TOOL: '/sample/plugin/state.mjs' };
 const HINT = 'sage can do this instead: ';
-const base = mkdtempSync(join(tmpdir(), 'sage-bot-normal-'));
+const base = tempFolder('sage-bot-normal-');
 after(() => rmSync(base, { recursive: true, force: true }));
 
 /** The hook's answer to one entry: 'allow', or the refusal text. The stdin comes from a file (see test/guard.test.js). */
