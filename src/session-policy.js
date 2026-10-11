@@ -40,7 +40,7 @@ export const BRIDGE_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/
 export const CAPABILITY_ARGS = ['capabilities'];
 export const CAPABILITY_LINE = 'bridge-sessions 1';
 /** A bridge session's name, as the design shows it: s and its number (branch sage-lead/s21). */
-const SESSION = /^s[1-9]\d{0,5}$/;
+export const SESSION = /^s[1-9]\d{0,5}$/;
 /** The paths of the config that the policy reads; each must be canonicalPath when it is set, statePath always (F-T156-10, F-T156-30). */
 const CONFIG_PATHS = ['statePath', 'auditPath', 'killPath', 'sessionsPath', 'votesPath', 'leadSessionsPath'];
 /** The folder of every bridge session's temp folder (F-T134-13), short, in the real form of /tmp (a link to /private/tmp on macOS). */
