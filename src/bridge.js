@@ -7,6 +7,7 @@ import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
+import { OTHER } from './sage.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
 import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
@@ -98,11 +99,16 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
   return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
 }
 
-/** The option key that an answer typed at the terminal names ("A", the option's text, or "A. text"), or undefined. */
-function optionOf(said, texts) {
-  const s = said.trim().toLowerCase();
-  return KEYS.slice(0, texts.length).find((k, j) => [k, texts[j], `${k}. ${texts[j]}`].some((t) => t.toLowerCase() === s));
-}
+/** The option key of an answer in sage: sage keeps the option's own text (`gate answer --option <n>`, T176), else undefined. */
+const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
+/**
+ * An answer in sage that only the bridge writes, never the owner: the form before T176, "A. text" (with RECOMMENDED after it for a
+ * leads-only gate), and a leads-only recommendation of today, "other: A. Yes" with RECOMMENDED after it. The owner picks an option by
+ * its number or types own words, kept as "other: <words>" (sage never lets an option read as "other:"), so neither is the owner's.
+ * Checked only after optionOf found no option: an option may itself read "A. Yes" (F-T176-1).
+ */
+const bridgeWrote = (said, texts) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${RECOMMENDED}`)
+  || (said.startsWith(OTHER) && said.endsWith(RECOMMENDED));
 
 /**
  * The gate rows of one task in groups of the questions that the task asked together: sorted by `at`, a group starts at its first row
@@ -413,14 +419,15 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * The answers that the bridge gives sage for a settled gate: one per sage gate, as "A. option text", never for a part with a final answer.
-   * A leads-only answer ends with RECOMMENDED, so the logbook shows the leads' advice, and readOwner tells it from the owner's own "A. Yes".
+   * The answers that the bridge gives sage for a settled gate: one per sage gate, as gates.tsv holds it (T176): the option's own text,
+   * never for a part with a final answer. A leads-only answer is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
+   * not an option, so the logbook shows the leads' advice, and readOwner tells it from the owner's own "Yes".
    */
   function answersOf(id) {
     const { gate, ask } = gates.get(id);
     const { sage: ids, texts } = meta.get(id);
     if (!settled(gate, ask) || gate.outcome.status === 'withdrawn') return [];
-    const keyText = (i, key) => `${key}. ${texts[i][KEYS.indexOf(key)]}${ask.leads ? RECOMMENDED : ''}`;
+    const keyText = (i, key) => (ask.leads ? `${OTHER}${key}. ${texts[i][KEYS.indexOf(key)]}${RECOMMENDED}` : texts[i][KEYS.indexOf(key)]);
     const keys = gate.kind === 'single' ? [gate.outcome.option] : gate.parts.map((p) => p.outcome.option);
     return keys.flatMap((key, i) => (key && !ask.parts[i].final ? [[ids[i], keyText(i, key)]] : []));
   }
@@ -443,6 +450,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || m.restore?.[sageId]) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
         const option = optionOf(said, m.texts[i]);
+        if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a leads' recommendation), never the owner's
         if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
         const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');
         const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };

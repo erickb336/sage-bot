@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
@@ -12,11 +12,16 @@ import { execFileSync, FIXTURE, SAGE, spawnSync, testSage } from './bridge-setup
 test('with SAGE_TOOL unset, the tests use the pinned copy, and it is the version that its README names', () => {
   assert.equal(testSage({}), FIXTURE);
   assert.equal(testSage({ SAGE_TOOL: '' }), FIXTURE);
-  assert.match(FIXTURE, /\/test\/fixtures\/sage\/39e9bf767a1f\/sage\.mjs$/);
+  assert.match(FIXTURE, /\/test\/fixtures\/sage\/6ea307ffa7b5\/skills\/sage\/sage\.mjs$/);
   if (!process.env.SAGE_TOOL) assert.equal(SAGE, FIXTURE);
-  const sha = createHash('sha256').update(readFileSync(FIXTURE)).digest('hex');
+  // One hash of the whole version folder (each file's path and content, in path order): the tool imports its core/ folder.
+  const version = new URL('fixtures/sage/6ea307ffa7b5/', import.meta.url).pathname;
+  const files = (dir, rel = '') => readdirSync(dir).sort().flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f), `${rel}${f}/`) : [`${rel}${f}`]));
+  const hash = createHash('sha256');
+  for (const f of files(version)) hash.update(`${f}\0${readFileSync(join(version, f), 'utf8')}\0`);
+  const sha = hash.digest('hex');
   const readme = readFileSync(new URL('fixtures/sage/README.md', import.meta.url), 'utf8');
-  assert.ok(readme.includes(`version \`39e9bf767a1f\``) && readme.includes(`SHA-256: \`${sha}\``), `the README names the pin and ${sha}`);
+  assert.ok(readme.includes(`version \`6ea307ffa7b5\``) && readme.includes(`SHA-256: \`${sha}\``), `the README names the pin and ${sha}`);
 });
 
 test('the pinned copy runs in a scratch HOME and SAGE_HOME and writes its logbook only there', () => {

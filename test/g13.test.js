@@ -147,7 +147,7 @@ test('end to end, G13: two gates are added, sage marks one with scripts/vote.mjs
   b.now += MINUTE;
   await b.press(MAYA, 'press:project/G1:0:1');
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. All fields', '']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['All fields', '']);
   assert.equal(titles(b).length, 1);
   assert.deepEqual(kept(b), ['project/G2 stays at the terminal: sage did not mark it as a team vote']);
 });

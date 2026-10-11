@@ -39,7 +39,7 @@ test('T43 repair: the write back fails once (the logbook is busy), and the next 
   });
   await oneGate(b);
   await b.press(MAYA, 'press:project/G1:0:0');
-  assert.equal(b.answerOf('G1'), 'A. Old page'); // the write back failed: the owner's answer is only in decisions.tsv
+  assert.equal(b.answerOf('G1'), 'Old page'); // the write back failed: the owner's answer is only in decisions.tsv
   b.now += 15_000;
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), 'New page');
@@ -64,7 +64,7 @@ test('T43 repair: the bridge stops between its write and the write back, and the
   await oneGate(b);
   b.press(MAYA, 'press:project/G1:0:0'); // never returns
   while (!stopped) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(b.answerOf('G1'), 'A. Old page');
+  assert.equal(b.answerOf('G1'), 'Old page');
   b.sage = b.real;
   const restart = b.make();
   await restart.loop();
@@ -104,11 +104,11 @@ test('T43 repair: a write back that sage refused never lands over a later owner 
   await a.press(MAYA, 'press:project/G1:0:0');
   assert.equal(a.answerOf('G1'), 'New page');
   await a.bridge.loop();
-  assert.equal(a.answerOf('G1'), 'Old page after all');
-  assert.equal(a.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
+  assert.equal(a.answerOf('G1'), 'other: Old page after all');
+  assert.equal(a.bridge.entry('project/G1').ask.parts[0].final.text, 'other: Old page after all');
   for (let i = 0; i < 5; i++) { a.now += 60_000; await a.bridge.loop(); }
-  assert.equal(a.answerOf('G1'), 'Old page after all');
-  assert.deepEqual(restored(a), [RESTORED('G1', 'New page'), RESTORED('G1', 'Old page after all')]);
+  assert.equal(a.answerOf('G1'), 'other: Old page after all');
+  assert.deepEqual(restored(a), [RESTORED('G1', 'New page'), RESTORED('G1', 'other: Old page after all')]);
 
   // b) The write back of New fails; before the next loop the owner answers again. The next loop leaves the later answer.
   let n = 0;
@@ -122,8 +122,8 @@ test('T43 repair: a write back that sage refused never lands over a later owner 
   await b.press(MAYA, 'press:project/G1:0:0');
   b.sh('gate', 'answer', 'G1', 'Old page after all');
   for (let i = 0; i < 5; i++) { b.now += 60_000; await b.bridge.loop(); }
-  assert.equal(b.answerOf('G1'), 'Old page after all');
+  assert.equal(b.answerOf('G1'), 'other: Old page after all');
   assert.equal(n, 2);
   assert.deepEqual(restored(b), []);
-  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'other: Old page after all');
 });

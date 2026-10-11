@@ -10,7 +10,7 @@ import { record } from '../src/sessions.js';
 import { sageTool } from '../src/sage.js';
 import { load, loadVotes, saveVotes } from '../src/state.js';
 import { openGate } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
 
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
@@ -26,7 +26,7 @@ function twoProjects() {
   b.beta = join(b.root, 'beta');
   mkdirSync(b.beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  b.shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', b.beta], { env, encoding: 'utf8' }).trim();
+  b.shBeta = toolOf(b, b.beta);
   b.shBeta('init');
   b.betaSage = sageTool({ sagePath: SAGE, project: b.beta, env });
   b.make = () => createBridge({ sages: new Map([['project', b.sage], ['beta', b.betaSage]]), own: 'project', discord: b.discord, config: CONFIG,
@@ -57,14 +57,14 @@ test('T132: two projects with a G1 each get two cards; a press on one records it
   assert.deepEqual(buttons(b.discord.latest(beta)), ['press:beta/G1:0:0', 'press:beta/G1:0:1']);
   b.now += 60_000;
   await b.press(MAYA, 'press:beta/G1:0:1');
-  assert.equal(await b.answerOfBeta('G1'), 'B. Blue');
+  assert.equal(await b.answerOfBeta('G1'), 'Blue');
   assert.equal(b.answerOf('G1'), ''); // the own project's G1 is still open
   assert.match(b.discord.latest(beta).embeds[0].description, /Answered by Maya at <t:\d+:t>: B\. Blue\. Final\./);
   assert.doesNotMatch(b.discord.latest(alpha).embeds[0].description, /Answered/);
   await b.press(JON, 'press:project/G1:0:0');
-  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['A. CSV', 'B. Blue']);
-  assert.ok(b.lines.includes('sage gate beta/G1 answered: B. Blue'), b.lines.join('\n'));
-  assert.ok(b.lines.includes('sage gate project/G1 answered: A. CSV'), b.lines.join('\n'));
+  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['CSV', 'Blue']);
+  assert.ok(b.lines.includes('sage gate beta/G1 answered: Blue'), b.lines.join('\n'));
+  assert.ok(b.lines.includes('sage gate project/G1 answered: CSV'), b.lines.join('\n'));
   assert.deepEqual(load(b.statePath, 'project').entries.map((e) => [e.gate.id, e.sage]), [['project/G1', ['G1']], ['beta/G1', ['G1']]]);
 });
 
@@ -77,9 +77,9 @@ test('T132, G10: Erick\'s answer at the terminal in one project is final there, 
   assert.match(b.discord.latest(beta).embeds[0].description, /Answered by Erick \(terminal\) at <t:\d+:t>: A\. Red\. Final\./);
   const late = await b.press(MAYA, 'press:beta/G1:0:1');
   assert.equal(late[0].content, 'Already answered by Erick at the terminal: A. Red. Your press did not count.');
-  assert.equal(await b.answerOfBeta('G1'), 'A');
+  assert.equal(await b.answerOfBeta('G1'), 'Red');
   await b.press(MAYA, 'press:project/G1:0:1'); // the own project's G1 is another gate: the press counts
-  assert.equal(b.answerOf('G1'), 'B. JSON');
+  assert.equal(b.answerOf('G1'), 'JSON');
 });
 
 test('T132: a button id without a project, or with a project that the config does not list, is refused and changes nothing', async () => {
@@ -133,7 +133,7 @@ test('T132 migration: a gate file, a team votes file and a spool file of the tim
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
   assert.equal((await b.press(MAYA, 'press:G1:0:1'))[0].content, UNKNOWN);
   await b.press(MAYA, 'press:project/G1:0:1');
-  assert.equal(b.answerOf('G1'), 'B. JSON');
+  assert.equal(b.answerOf('G1'), 'JSON');
   // G2, a bare id in the old team votes file, is the own project's; the old spool lists it, so its card goes to that session's thread.
   const [[threadId, thread]] = [...b.discord.threads];
   assert.equal(thread.name, 'Session 1 · project · Sun 4 Oct');

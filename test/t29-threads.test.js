@@ -165,7 +165,7 @@ test('a press in a thread of the configured channel counts; a press in another c
   await b.post();
   b.now += MINUTE;
   await b.press(MAYA, 'press:project/G1:0:1');
-  assert.equal(b.answerOf('G1'), 'B. y');
+  assert.equal(b.answerOf('G1'), 'y');
   assert.match(b.discord.latest(b.discord.in(b.bridge.threadOf(S1))[0]).embeds[0].description, /Answered by Maya/);
 });
 
@@ -232,7 +232,7 @@ test('G15: a session that ends with an open batch keeps its thread open: the lin
   await b.bridge.loop();
   assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [true, true]);
   assert.match(lineOf(b, 'Session 1 · project · Sun 4 Oct'), /\nended <t:\d+:f> · 1 task · no open questions$/);
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. x']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'x']);
 });
 
 test('G15: a session that ends with no open question locks its thread at once; a withdrawn question counts as settled', async () => {
@@ -355,7 +355,7 @@ test('end to end: SessionStart, gate add and its PostToolUse, sage marks the gat
   assert.match(lineOf(b, b.discord.threads.get(thread).name), /\nrunning · 1 task · 1 open question$/);
   b.now += MINUTE;
   await b.press(MAYA, 'press:project/G1:0:1');
-  assert.equal(b.answerOf('G1'), 'B. All fields');
+  assert.equal(b.answerOf('G1'), 'All fields');
   assert.equal(event('SessionEnd', { reason: 'logout' }).code, 0);
   await b.bridge.loop();
   assert.match(lineOf(b, b.discord.threads.get(thread).name), /\nended <t:\d+:f> · 1 task · no open questions$/);
@@ -383,7 +383,7 @@ test('F-T29-2: a thread that Discord made but whose reply was lost: the card goe
   // The press on the card in the parent channel counts, and the line counts both cards.
   b.now += MINUTE;
   await b.press(MAYA, 'press:project/G1:0:1');
-  assert.equal(b.answerOf('G1'), 'B. y');
+  assert.equal(b.answerOf('G1'), 'y');
   await b.bridge.loop();
   assert.match(lineOf(b, 'Session 1 · project · Sun 4 Oct'), /\nrunning · 2 tasks · 1 open question$/);
 });
@@ -556,7 +556,7 @@ test('T29 with T39: a session thread gets the tie post after a lead ends the vot
   assert.equal(b.discord.in(CHANNEL).filter((id) => /G1\+G2/.test(b.discord.latest(id).content ?? '')).length, 0);
   const entry = load(b.statePath).entries[0];
   assert.deepEqual([entry.session, entry.gate.endedBy, entry.gate.parts[0].outcome], [S1, JON, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt }]);
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. x']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'x']);
 });
 
 test('F-T29-10: a press in a thread that is not in the cache (i.channel is null) is fetched by its id: a thread of the channel counts, any other place does not', async () => {

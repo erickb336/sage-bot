@@ -2,12 +2,50 @@
 // logbook as sage wrote them, and records an answer with `sage gate answer`. It never writes a logbook file itself.
 import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { userInfo } from 'node:os';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+
+/** The form of `gate answer` that the bridge uses, named in the refusal of probeTool. */
+const NEEDED = 'gate answer <G> --option <n> (sage plugin 6ea307ffa7b5 or later)';
+const probed = new Map();
+/**
+ * Checks once that the sage state tool at `sagePath` takes the command forms that the bridge uses (T176): a dry run in a scratch
+ * logbook (HOME and SAGE_HOME in a temp folder that goes at the end): init, task add, gate add, then `gate answer G1 --option 1`.
+ * Rejects with one line that names the tool path and the needed form when the tool refuses it or records something else.
+ * @param {string} sagePath  @param {NodeJS.ProcessEnv} [env]  @returns {Promise<void>}
+ */
+export function probeTool(sagePath, env = process.env) {
+  if (!probed.has(sagePath)) probed.set(sagePath, probe(sagePath, env).catch((e) => { probed.delete(sagePath); throw e; }));
+  return probed.get(sagePath);
+}
+async function probe(sagePath, env) {
+  const root = await mkdtemp(join(tmpdir(), 'sage-bot-probe-'));
+  try {
+    const project = join(root, 'project');
+    await mkdir(project);
+    const home = join(root, 'home');
+    const scratch = { PATH: env.PATH, HOME: home, SAGE_HOME: join(home, 'sage') };
+    const sage = async (...args) => (await run(process.execPath, [sagePath, ...args, '--project', project], { env: scratch, encoding: 'utf8' })).stdout.trim();
+    const refused = (what, detail) => new Error(`the sage state tool ${sagePath} ${what}; the bridge needs ${NEEDED}: ${detail}. Nothing was started.`);
+    try {
+      await sage('init');
+      await sage('task', 'add', '--title', 'probe', '--size', 'tiny');
+      await sage('gate', 'add', 'T1', '--question', 'Probe?', '--options', 'Yes|No', '--recommend', 'Yes');
+    } catch (e) {
+      throw refused('refused the probe of its gate commands', firstLine(e));
+    }
+    let said;
+    try { said = await sage('gate', 'answer', 'G1', '--option', '1'); } catch (e) { throw refused('refused gate answer --option', firstLine(e)); }
+    if (said !== 'G1 answered · Yes') throw refused('recorded gate answer --option 1 as something else', JSON.stringify(said));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+const firstLine = (e) => String(e?.stderr || e?.message || e).split('\n').find(Boolean) ?? '';
 
 /** A TSV table of the logbook as rows of { column: value }, by its header line, as sage reads it. */
 function rows(text) {
@@ -17,6 +55,22 @@ function rows(text) {
     const v = line.split('\t');
     return Object.fromEntries(cols.map((c, i) => [c, v[i] ?? '']));
   });
+}
+
+/** What sage puts before the owner's own words in a gate's answer, so that they never pass for one of the options. */
+export const OTHER = 'other: ';
+/** The options of a gate row, as sage numbers them (1, 2, …) and as the bridge reads them (frame). */
+export const optionsOf = (row) => row.options.split('|').map((o) => o.trim()).filter(Boolean);
+/**
+ * The arguments of `gate answer` for what gates.tsv is to hold (T176): the text of one of the row's options, as `--option <n>`,
+ * or the owner's own words after OTHER, as `--other-hex` with their UTF-8 bytes in hex. sage takes no answer text in the command.
+ * @param {{ id: string, options: string }} row  @param {string} text  @returns {string[]}
+ */
+export function answerArgs(row, text) {
+  const n = optionsOf(row).indexOf(text) + 1;
+  if (n) return ['--option', String(n)];
+  if (text.startsWith(OTHER) && text.length > OTHER.length) return ['--other-hex', Buffer.from(text.slice(OTHER.length), 'utf8').toString('hex')];
+  throw new Error(`${row.id}: ${JSON.stringify(text)} is not the text of one of its options and does not start with ${JSON.stringify(OTHER)}`);
 }
 
 /**
@@ -39,8 +93,11 @@ export function sageTool({ sagePath, project, env = process.env }) {
     tasks: () => table('tasks'),
     /** Every decision row, in the order sage wrote them: { at, task, decision, why }. */
     decisions: () => table('decisions'),
-    /** Records the answer of one gate. */
-    answer: (id, text) => sage('gate', 'answer', id, text),
+    /** Records the answer of one gate: `text` is what gates.tsv is to hold (answerArgs). */
+    answer: async (id, text) => {
+      const row = (await table('gates')).find((r) => r.id === id) ?? (() => { throw new Error(`gate ${id} is not in gates.tsv`); })();
+      return sage('gate', 'answer', id, ...answerArgs(row, text));
+    },
   };
 }
 

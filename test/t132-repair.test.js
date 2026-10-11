@@ -12,7 +12,7 @@ import { sageTool } from '../src/sage.js';
 import { loadProjects, pickProject } from '../src/projects.js';
 import { record } from '../src/sessions.js';
 import { openGate } from '../src/vote.js';
-import { CHANNEL, CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
+import { CHANNEL, CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';
@@ -26,7 +26,7 @@ function two() {
   b.beta = join(b.root, 'beta');
   mkdirSync(b.beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  b.shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', b.beta], { env, encoding: 'utf8' }).trim();
+  b.shBeta = toolOf(b, b.beta);
   b.shBeta('init');
   b.betaSage = sageTool({ sagePath: SAGE, project: b.beta, env });
   b.sh('task', 'add', '--title', 'Alpha export', '--size', 'small');
@@ -100,7 +100,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   b.now += 60_000;
   await b.press(MAYA, 'press:G1:0:1'); // the old button, before the first loop
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['B. JSON', '']);
+  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['JSON', '']);
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
   // vote.mjs with the same config marks the own project's gate.
   const file = join(b.root, 'config.json');
@@ -146,7 +146,7 @@ test('F-T132-5: a stop and a failed edit before the redraw keep the mark; the ol
   const replies = await b.press(MAYA, 'press:G1:0:1');
   assert.notEqual(replies[0]?.content, UNKNOWN);
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'B. JSON');
+  assert.equal(b.answerOf('G1'), 'JSON');
   assert.deepEqual([saved(b).entries[0].oldButtons, buttons(b.discord.latest(old))], [undefined, ['press:project/G1:0:0', 'press:project/G1:0:1']]);
   assert.equal((await b.press(MAYA, 'press:G1:0:0'))[0].content, UNKNOWN); // after the edit, an old button is unknown
 });
@@ -162,7 +162,7 @@ test('F-T132-3: a settled card with old buttons answers an old press with the us
   await b.bridge.loop();
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
   assert.equal(saved(b).entries[0].oldButtons, undefined);
-  assert.equal(b.answerOf('G1'), 'A');
+  assert.equal(b.answerOf('G1'), 'CSV');
 });
 
 test('F-T132-6, G43 A: a session keeps the project of its first event, also for an event in another project\'s folder; a gate add for another --project changes nothing', () => {
@@ -194,7 +194,7 @@ test('F-T132-6: a settled card of a project that left the config sends no answer
   const lines = b.lines.length;
   await b.press(MAYA, 'press:project/G1:0:0');
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['A. CSV', '']);
+  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['CSV', '']);
   assert.deepEqual(b.lines.slice(lines).filter((l) => /beta\/G1/.test(l)), []);
 });
 

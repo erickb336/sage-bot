@@ -11,7 +11,7 @@ import { card } from '../src/cards.js';
 import { prepare } from '../src/discord.js';
 import { sageTool } from '../src/sage.js';
 import { openGate } from '../src/vote.js';
-import { CONFIG, execFileSync, OWNER, SAGE, setup, spawnSync, T0 } from './bridge-setup.js';
+import { CONFIG, execFileSync, OWNER, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const S1 = 'eeeeeeee-0000-4000-8000-000000000134';
@@ -79,7 +79,7 @@ test('F-T132-20: a closed card\'s body says the vote is closed, as its note does
   const beta = join(b.root, 'beta');
   mkdirSync(beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  const shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', beta], { env, encoding: 'utf8' }).trim();
+  const shBeta = toolOf(b, beta);
   shBeta('init');
   shBeta('task', 'add', '--title', 'Beta colours', '--size', 'small');
   shBeta('gate', 'add', 'T1', '--question', 'Which colour?', '--options', 'Red|Blue', '--recommend', 'Red');
