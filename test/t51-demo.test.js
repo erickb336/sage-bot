@@ -68,15 +68,19 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
 });
 
-test('the demo removes its scratch folder at the end: with no --out nothing is left, with --out the page is kept (T57)', () => {
+test('the demo removes its scratch folder at the end and keeps one page: <TMPDIR>/sage-bot-demo.html with no --out, else the --out path (T57)', () => {
   const root = tempFolder('sage-bot-t51-tmp-');
   const env = { PATH: process.env.PATH, HOME: root, TMPDIR: root, SAGE_TOOL: SAGE };
+  const fixed = join(root, 'sage-bot-demo.html');
   const said = execFileSync(process.execPath, [DEMO], { env, encoding: 'utf8' });
-  assert.match(said, /\nPage: not kept\. Run npm run demo -- --out <page\.html> to keep the page\.\n/);
-  assert.deepEqual(readdirSync(root), []); // the scratch folder went with the page
+  assert.match(said, new RegExp(`\nPage: ${fixed}\n`));
+  assert.deepEqual(readdirSync(root), ['sage-bot-demo.html']); // the page stays; the scratch folder went
+  assert.match(readFileSync(fixed, 'utf8'), /Sample data\. Fake Discord\. No bot, no token\./);
+  execFileSync(process.execPath, [DEMO], { env, encoding: 'utf8' });
+  assert.deepEqual(readdirSync(root), ['sage-bot-demo.html']); // a second run overwrites the same page
   const out = join(root, 'kept', 'demo.html');
   execFileSync(process.execPath, [DEMO, '--out', out], { env, encoding: 'utf8' });
-  assert.deepEqual(readdirSync(root), ['kept']); // the page's folder stays; the scratch folder went
+  assert.deepEqual(readdirSync(root), ['kept', 'sage-bot-demo.html']); // the --out page's folder stays; the scratch folder went
   assert.deepEqual(readdirSync(join(root, 'kept')), ['demo.html']);
 });
 
