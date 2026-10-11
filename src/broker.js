@@ -5,10 +5,11 @@
 //
 // Host-side git never runs in a session folder (docs/reference.md, "Git in a session folder"): an upload reads the object files of
 // the session's .git as plain files, into a new bare repository of the broker, and runs git only there, with hooks and config off.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { githubRest } from './github.js';
 import { BRIDGE_PATH, SESSION } from './session-policy.js';
 
@@ -16,7 +17,10 @@ import { BRIDGE_PATH, SESSION } from './session-policy.js';
 export const IDENTITY = { name: 'sage-lead (via sage-bot)', email: 'sage-lead@sage-bot.invalid' };
 /** The base of every session's pull request, and the branch that an upload starts from. */
 export const BASE = 'main';
-export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500, files: 100_000, bytes: 512 * 2 ** 20 };
+/** `bytes` and `files`: the object files that an upload copies. `object` and `inflated`: the size of each copied object and of all of
+ * them, unpacked, before git reads them (F-T158-10). `gitMs`: the most time of one git call. */
+export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500, files: 100_000, bytes: 512 * 2 ** 20,
+  object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000 };
 
 class Refusal extends Error {}
 const refuse = (why) => { throw new Refusal(why); };
@@ -26,7 +30,7 @@ const refuse = (why) => { throw new Refusal(why); };
  * The allow-list keeps letters, marks, digits, punctuation, symbols, the space and (in a body or a message) the newline, so markdown
  * stays as it is; no control, format, bidi, private-use, unassigned or default-ignorable character passes (standing order 12).
  */
-const TEXT = /^[[\p{L}\p{M}\p{N}\p{P}\p{S} ]--\p{Default_Ignorable_Code_Point}]$/v;
+const TEXT = /^[[\p{L}\p{M}\p{N}\p{P}\p{S} ]--[\p{Default_Ignorable_Code_Point}\u2800\uFFFD]]$/v; // U+2800 is blank; U+FFFD hides bytes that were not UTF-8
 const allowed = (ch, lines) => TEXT.test(ch) || (lines && ch === '\n');
 const hex = (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
 export function textOf(what, value, max, lines) {
@@ -56,13 +60,22 @@ export function scopeOf(policy, { owner, repo, remote }) {
   };
 }
 
-/** Run git, as the broker's own process, never in a session folder. Tests wrap it to record each call. */
-export const runGit = (args, { cwd, env, input }) =>
-  execFileSync('git', args, { cwd, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 256 * 2 ** 20 });
+/** Run git, as the broker's own process, never in a session folder, and never longer than `timeout` (F-T158-10): it does not block
+ * the sage-bot process. A git HTTP helper that outlives a killed git stops at http.lowSpeedTime. It gives the output as bytes.
+ * Tests wrap it to record each call. */
+const execGit = promisify(execFile);
+export function runGit(args, { cwd, env, input, timeout = LIMITS.gitMs }) {
+  const run = execGit('git', args, { cwd, env, encoding: 'buffer', maxBuffer: 256 * 2 ** 20, timeout, killSignal: 'SIGKILL' });
+  run.child.stdin.on('error', () => {}); // git can exit before it reads its input; the exit code tells
+  run.child.stdin.end(input);
+  return run.then(({ stdout }) => stdout);
+}
 
-/** The settings of every git call: no global or system config, no hooks, no fsmonitor, no prompt. The token goes only in an
- * environment variable for github.com (as actions/checkout does), never in an argument or a URL. */
-const NEUTRAL = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'credential.helper='];
+/** The settings of every git call: no global or system config, no hooks, no fsmonitor, no prompt, and a stalled HTTP transfer
+ * (under 1,000 bytes a second for 30 seconds) stops. The token goes only in an environment variable for github.com (as
+ * actions/checkout does), never in an argument or a URL. */
+const NEUTRAL = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'credential.helper=',
+  '-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=30'];
 const envOf = (home, token) => ({
   PATH: BRIDGE_PATH, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',
   GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
@@ -80,77 +93,122 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
   const rest = githubRest({ api: github.api, token, fetch });
   const MAIN = `refs/heads/${BASE}`, BRANCH = `refs/heads/${s.branch}`;
 
-  /** A new bare repository of the broker, with GitHub's main (and the session's branch, when it exists) in it. */
-  async function mirror() {
+  /**
+   * `work` with a new bare repository of the broker that holds GitHub's main (and the session's branch, when it exists). The
+   * repository goes when `work` ends, and also when anything before it fails (F-T158-5).
+   */
+  async function withMirror(work) {
     const repo = mkdtempSync(join(workDir, `${s.session}-`));
-    const env = envOf(repo, await token());
-    const g = (args, input) => {
-      try { return git(['--git-dir', repo, ...NEUTRAL, ...args], { cwd: repo, env, input }); }
-      catch { throw new Error(`git ${args[0]} failed`); }
-    };
-    g(['init', '--bare', '--quiet']);
-    const heads = Object.fromEntries(g(['ls-remote', '--heads', s.remote, MAIN, BRANCH]).split('\n').filter(Boolean).map((l) => l.split('\t').reverse()));
-    if (!SHA.test(heads[MAIN] ?? '')) refuse(`GitHub has no ${BASE} branch in ${s.full}`);
-    return { repo, g, heads, done: () => rmSync(repo, { recursive: true, force: true }) };
+    try {
+      const env = envOf(repo, await token());
+      const g = async (args, input) => {
+        try { return await git(['--git-dir', repo, ...NEUTRAL, ...args], { cwd: repo, env, input }); }
+        catch (e) { throw new Error(`git ${args[0]} ${e?.killed ? 'took too long' : 'failed'}`); }
+      };
+      const text = async (args) => String(await g(args));
+      await g(['init', '--bare', '--quiet']);
+      const heads = Object.fromEntries((await text(['ls-remote', '--heads', s.remote, MAIN, BRANCH])).split('\n').filter(Boolean).map((l) => l.split('\t').reverse()));
+      if (!SHA.test(heads[MAIN] ?? '')) refuse(`GitHub has no ${BASE} branch in ${s.full}`);
+      return await work({ repo, g, text, heads });
+    } finally { rmSync(repo, { recursive: true, force: true }); }
   }
   const pull = (m) => m.g(['fetch', '--quiet', '--no-tags', s.remote, ...[MAIN, ...(m.heads[BRANCH] ? [BRANCH] : [])].map((r) => `+${r}:${r}`)]);
 
   /** fetch: read-only. GitHub's main and the session's branch, as a git bundle in the session's temp folder. */
-  async function fetchVerb() {
-    const m = await mirror();
+  const fetchVerb = () => withMirror(async (m) => {
+    await pull(m);
+    await m.g(['bundle', 'create', '--quiet', join(m.repo, 'out.bundle'), MAIN, ...(m.heads[BRANCH] ? [BRANCH] : [])]);
+    const bundle = writeInTemp(`fetch-${randomBytes(6).toString('hex')}.bundle`, readFileSync(join(m.repo, 'out.bundle')));
+    return { main: m.heads[MAIN], branch: m.heads[BRANCH] ?? null, bundle };
+  });
+
+  /**
+   * A new file in the session's temp folder (F-T158-9). The folder must be a real folder of this user at its resolved path, before
+   * and after the write; the file opens with O_EXCL and O_NOFOLLOW. When the folder changed meanwhile, the file goes and the call refuses.
+   */
+  function writeInTemp(name, data) {
+    const real = () => {
+      const st = lstatSync(s.tmp, { throwIfNoEntry: false });
+      return st?.isDirectory() && st.uid === process.getuid() && realpathSync(s.tmp) === s.tmp ? st : null;
+    };
+    const before = real();
+    if (!before) refuse('the session\'s temp folder is missing or is not a real folder of the session (a link is not one)');
+    const path = join(s.tmp, name);
+    const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try {
-      pull(m);
-      const bundle = join(s.tmp, `fetch-${randomBytes(6).toString('hex')}.bundle`);
-      m.g(['bundle', 'create', '--quiet', join(m.repo, 'out.bundle'), MAIN, ...(m.heads[BRANCH] ? [BRANCH] : [])]);
-      writeFileSync(bundle, readFileSync(join(m.repo, 'out.bundle')), { flag: 'wx', mode: 0o600 }); // wx: never through a link the session made
-      return { main: m.heads[MAIN], branch: m.heads[BRANCH] ?? null, bundle };
-    } finally { m.done(); }
+      writeFileSync(fd, data);
+      const after = real(), file = fstatSync(fd), there = lstatSync(path, { throwIfNoEntry: false });
+      const same = (a, b) => a && b && a.dev === b.dev && a.ino === b.ino;
+      if (!same(after, before) || !same(there, file)) {
+        if (same(there, file)) rmSync(path);
+        refuse('the session\'s temp folder changed while the broker wrote to it');
+      }
+      return path;
+    } finally { closeSync(fd); }
   }
 
   /** upload: the session's commits after main, made again with the fixed identity, to sage-lead/s<n> by fast-forward only. */
   async function upload({ commit }) {
     if (!SHA.test(commit ?? '')) refuse('commit must be the 40-character id of the session\'s commit (git rev-parse HEAD)');
-    const m = await mirror();
-    try {
+    return withMirror(async (m) => {
       copyObjects(s.folder, m.repo);
-      m.g(['fsck', '--strict', '--no-dangling', '--no-progress']);
-      pull(m);
-      if (m.g(['cat-file', '-t', commit]).trim() !== 'commit') refuse(`${commit} is not a commit of the session`);
-      m.g(['rev-list', '--objects', '--quiet', commit, '--not', MAIN]); // every object of the new commits is there
-      const lines = m.g(['rev-list', '--reverse', '--topo-order', '--parents', commit, '--not', MAIN]).split('\n').filter(Boolean);
+      await capInflated(m);
+      await m.g(['fsck', '--strict', '--no-dangling', '--no-progress']);
+      await pull(m);
+      if ((await m.text(['cat-file', '-t', commit]).catch(() => '')).trim() !== 'commit') refuse(`${commit} is not a commit of the session`);
+      await m.g(['rev-list', '--objects', '--quiet', commit, '--not', MAIN]); // every object of the new commits is there
+      const lines = (await m.text(['rev-list', '--reverse', '--topo-order', '--parents', commit, '--not', MAIN])).split('\n').filter(Boolean);
       if (!lines.length) refuse(`${commit} has no commit that ${BASE} does not have: nothing to upload`);
       if (lines.length > LIMITS.commits) refuse(`the upload has ${lines.length} commits; the most is ${LIMITS.commits}`);
       const made = new Map();
       for (const line of lines) {
         const [c, ...parents] = line.split(' ');
         if (parents.length !== 1) refuse(`commit ${c} is a merge or has no parent; the broker uploads a straight line of commits on ${BASE}`);
-        const paths = m.g(['diff-tree', '-r', '-z', '--name-only', '--no-renames', parents[0], c]).split('\0').filter(Boolean);
-        const ci = paths.find((p) => p === '.github' || p.startsWith('.github/'));
+        const paths = (await m.text(['diff-tree', '-r', '-z', '--name-only', '--no-renames', parents[0], c])).split('\0').filter(Boolean);
+        const ci = paths.find((p) => /^\.github(\/|$)/i.test(p)); // any letter case (F-T158-12)
         if (ci) refuse(`commit ${c} changes ${JSON.stringify(keep(ci))}; a session does not change .github (workflows run with the repository's rights)`);
-        made.set(c, remake(m, c, made.get(parents[0]) ?? parents[0]));
+        made.set(c, await remake(m, c, made.get(parents[0]) ?? parents[0]));
       }
       const head = made.get(commit);
       const old = m.heads[BRANCH];
       if (old === head) return { branch: s.branch, head, commits: lines.length, pushed: false };
-      if (old) { try { m.g(['merge-base', '--is-ancestor', BRANCH, head]); } catch { refuse(`the upload is not a fast-forward of ${s.branch}: the broker never rewrites the session's branch`); } }
-      m.g(['push', '--quiet', '--no-verify', s.remote, `${head}:${BRANCH}`]); // no +, no delete, one fixed ref
+      if (old) { try { await m.g(['merge-base', '--is-ancestor', BRANCH, head]); } catch { refuse(`the upload is not a fast-forward of ${s.branch}: the broker never rewrites the session's branch`); } }
+      await m.g(['push', '--quiet', '--no-verify', s.remote, `${head}:${BRANCH}`]); // no +, no delete, one fixed ref
       return { branch: s.branch, head, commits: lines.length, pushed: true };
-    } finally { m.done(); }
+    });
   }
 
-  /** One commit again: its tree, its message (checked) and its dates; the fixed identity; the new parent. The same input gives the same id. */
-  function remake(m, c, parent) {
-    const raw = m.g(['cat-file', 'commit', c]);
+  /** The unpacked size of each copied object, from its header, before any git command unpacks one (F-T158-10: a zlib bomb). */
+  async function capInflated(m) {
+    let total = 0;
+    for (const line of (await m.text(['cat-file', '--batch-all-objects', '--unordered', '--batch-check=%(objectsize)'])).split('\n').filter(Boolean)) {
+      if (!/^\d+$/.test(line)) refuse('the session\'s .git has an object that git cannot read');
+      const size = Number(line);
+      total += size;
+      if (size > LIMITS.object || total > LIMITS.inflated) refuse(`the session's .git has an object over ${LIMITS.object / 2 ** 20} MB, or more than ${LIMITS.inflated / 2 ** 20} MB of objects, unpacked`);
+    }
+  }
+
+  /**
+   * One commit again: its tree, its message (checked) and its dates; the fixed identity; the new parent. The same input gives the same id.
+   * The commit must be UTF-8 text with no other `encoding` (F-T158-13): commit-tree writes the message as UTF-8, with no `encoding`.
+   */
+  async function remake(m, c, parent) {
+    let raw;
+    try { raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await m.g(['cat-file', 'commit', c])); }
+    catch (e) { if (e instanceof TypeError) refuse(`commit ${c} is not UTF-8 text; the broker uploads only UTF-8 commits`); throw e; }
     const cut = raw.indexOf('\n\n');
     const head = raw.slice(0, cut < 0 ? raw.length : cut), message = cut < 0 ? '' : raw.slice(cut + 2);
     const tree = /^tree ([0-9a-f]{40})$/m.exec(head)?.[1];
     const when = (who) => { const d = new RegExp(`^${who} .* (\\d{1,12}) ([+-]\\d{4})$`, 'm').exec(head); return d && `@${d[1]} ${d[2]}`; };
     if (!tree || !when('author') || !when('committer')) refuse(`commit ${c} is not a commit that the broker can read`);
+    const encoding = /^encoding (.*)$/m.exec(head)?.[1];
+    if (encoding !== undefined && !/^utf-?8$/i.test(encoding)) refuse(`commit ${c} has the encoding ${JSON.stringify(keep(encoding))}; the broker uploads only UTF-8 commits`);
     textOf(`the message of commit ${c}`, message, LIMITS.message, true);
     const env = { GIT_AUTHOR_NAME: IDENTITY.name, GIT_AUTHOR_EMAIL: IDENTITY.email, GIT_AUTHOR_DATE: when('author'),
       GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email, GIT_COMMITTER_DATE: when('committer') };
     try {
-      return git(['--git-dir', m.repo, ...NEUTRAL, 'commit-tree', tree, '-p', parent, '-F', '-'], { cwd: m.repo, env: { ...envOf(m.repo, ''), ...env }, input: message }).trim();
+      return String(await git(['--git-dir', m.repo, ...NEUTRAL, 'commit-tree', tree, '-p', parent, '-F', '-'], { cwd: m.repo, env: { ...envOf(m.repo, ''), ...env }, input: message })).trim();
     } catch { throw new Error('git commit-tree failed'); }
   }
 

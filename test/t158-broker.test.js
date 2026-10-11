@@ -2,9 +2,13 @@
 // in-process fake REST API (src/fake-github.js). No network, no real token: SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { createBroker, IDENTITY, runGit, textOf } from '../src/broker.js';
+import { pipeline } from 'node:stream/promises';
+import { createDeflate } from 'node:zlib';
+import { createBroker, IDENTITY, LIMITS, runGit, textOf } from '../src/broker.js';
 import { fakeGitHub, samplePull } from '../src/fake-github.js';
 import { execFileSync } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
@@ -16,8 +20,9 @@ const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_GLOBAL: '
 /** git as the test's session or the test's GitHub, never as the broker. */
 const sh = (cwd, ...args) => execFileSync('git', args, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-function world({ pulls = [] } = {}) {
-  const root = tempFolder('t158-');
+/** `remote`, `token` and `timeout` change the broker's GitHub, its token function and the most time of each of its git calls. */
+function world({ pulls = [], remote, token = () => TOKEN, timeout } = {}) {
+  const root = realpathSync(tempFolder('t158-')); // the broker compares the temp folder with its real path
   const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', 's1'), tmp = join(root, 'tmp', 's1');
   const workDir = join(root, 'broker');
   for (const d of [seed, tmp, workDir]) mkdirSync(d, { recursive: true });
@@ -29,10 +34,10 @@ function world({ pulls = [] } = {}) {
   sh(seed, 'tag', 'v1'); sh(seed, 'push', '--quiet', origin, 'v1');
   sh(root, 'clone', '--quiet', origin, folder);
   const calls = [];
-  const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return runGit(args, o); };
+  const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return runGit(args, timeout ? { ...o, timeout } : o); };
   const gh = fakeGitHub({ owner: OWNER, repo: REPO, token: TOKEN, pulls });
-  const broker = createBroker({ policy: { session: 's1', folder, tmp }, github: { owner: OWNER, repo: REPO, remote: origin },
-    token: () => TOKEN, workDir, fetch: gh.fetch, git });
+  const broker = createBroker({ policy: { session: 's1', folder, tmp }, github: { owner: OWNER, repo: REPO, remote: remote ?? origin },
+    token, workDir, fetch: gh.fetch, git });
   const refs = () => Object.fromEntries(sh(origin, 'for-each-ref', '--format=%(refname) %(objectname)').split('\n').map((l) => l.split(' ')));
   const commit = (file, text, message = `change ${file}`) => {
     mkdirSync(join(folder, file, '..'), { recursive: true });
@@ -99,6 +104,10 @@ test('upload: refuses a merge, a change under .github and a message with a hidde
   const refused = async (commit, text) => { const r = await w.broker.call('upload', { commit }); assert.equal(r.ok, false); assert.match(r.refused, text); };
   await refused(w.commit('.github/workflows/x.yml', 'on: push\n'), /changes "\.github\/workflows\/x\.yml"/);
   sh(w.folder, 'reset', '--quiet', '--hard', base);
+  sh(w.folder, 'config', 'core.ignorecase', 'false'); // the Mac's disk ignores case; git must keep the name as written
+  await refused(w.commit('.GitHub/workflows/y.yml', 'on: push\n'), /changes "\.GitHub\/workflows\/y\.yml"/); // any letter case (F-T158-12)
+  sh(w.folder, 'reset', '--quiet', '--hard', base);
+  rmSync(join(w.folder, '.GitHub'), { recursive: true, force: true });
   await refused(w.commit('a.txt', 'one\n', 'hidden ‮ text'), /has the character U\+202E/);
   sh(w.folder, 'reset', '--quiet', '--hard', base);
   const side = w.commit('a.txt', 'one\n');
@@ -203,7 +212,178 @@ test('the text allow-list, over every Unicode code point (standing order 12): pe
     if (ok) kept += 1;
     if (ok && cp !== 0x0A) assert.ok(!hidden.test(ch) && (cp === 0x20 || !/^\s$/u.test(ch)), `U+${cp.toString(16)} passed`);
   }
-  for (const ch of ['é', '中', '`', '#', '>', '\n', ' ']) assert.doesNotThrow(() => textOf('body', `a${ch}`, 10, true), ch);
+  for (const ch of ['é', '中', '`', '#', '>', '\n', ' ', '@']) assert.doesNotThrow(() => textOf('body', `a${ch}`, 10, true), ch);
+  // Blank-looking symbols and the replacement character (F-T158-12): each one is refused by its code point.
+  for (const cp of [0x2800, 0x3164, 0x115F, 0x1160, 0xFFA0, 0xFFFD]) {
+    assert.throws(() => textOf('body', `a${String.fromCodePoint(cp)}`, 10, true), new RegExp(`U\\+${cp.toString(16).toUpperCase()}`));
+  }
   assert.throws(() => textOf('title', 'a\nb', 10, false));
   assert.ok(kept > 150_000, `${kept}`); // 159,347 on Node 26: the letters of every script stay
+});
+
+/** git as the session, with more environment (for example the commit encoding or a rebase editor). */
+const shWith = (cwd, env, ...args) => execFileSync('git', args, { cwd, env: { ...ENV, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const refusedWith = async (w, verb, input, text) => {
+  const r = await w.broker.call(verb, input);
+  assert.equal(r.ok, false, `${verb} worked`);
+  assert.match(r.refused, text);
+  return r;
+};
+
+test('F-T158-13: a commit that is not UTF-8 is refused, so its bytes never change on the way to GitHub', async () => {
+  const w = world();
+  const before = w.refs();
+  const base = sh(w.folder, 'rev-parse', 'HEAD');
+  // ISO-8859-1: the message holds the byte 0xE9 (é), and git writes the header "encoding ISO-8859-1".
+  writeFileSync(join(w.folder, 'msg'), Buffer.from([0x63, 0x61, 0x66, 0xE9, 0x0A]));
+  writeFileSync(join(w.folder, 'a.txt'), 'one\n');
+  sh(w.folder, 'add', 'a.txt');
+  shWith(w.folder, {}, '-c', 'i18n.commitEncoding=ISO-8859-1', 'commit', '--quiet', '-F', 'msg');
+  await refusedWith(w, 'upload', { commit: sh(w.folder, 'rev-parse', 'HEAD') }, /is not UTF-8 text; the broker uploads only UTF-8 commits/);
+  // The same encoding with a message that is plain ASCII: the bytes are UTF-8 too, but the header says otherwise.
+  sh(w.folder, 'reset', '--quiet', '--hard', base);
+  writeFileSync(join(w.folder, 'b.txt'), 'two\n');
+  sh(w.folder, 'add', 'b.txt');
+  shWith(w.folder, {}, '-c', 'i18n.commitEncoding=ISO-8859-1', 'commit', '--quiet', '-m', 'plain');
+  await refusedWith(w, 'upload', { commit: sh(w.folder, 'rev-parse', 'HEAD') }, /has the encoding "ISO-8859-1"/);
+  assert.deepEqual(w.refs(), before);
+  // The control: the same message in UTF-8 goes up with its bytes unchanged.
+  sh(w.folder, 'reset', '--quiet', '--hard', base);
+  const ok = await w.broker.call('upload', { commit: w.commit('c.txt', 'three\n', 'café') });
+  assert.equal(ok.ok, true, ok.refused);
+  assert.equal(sh(w.origin, 'cat-file', 'commit', ok.head).split('\n\n')[1], 'café');
+});
+
+test('F-T158-5: an error before the work starts leaves no folder of the broker behind', async () => {
+  const empty = join(realpathSync(tempFolder('t158-empty-')), 'empty.git');
+  sh(join(empty, '..'), 'init', '--bare', '--quiet', empty);
+  const cases = [
+    [{ remote: join(empty, '..', 'nowhere.git') }, /git ls-remote failed/],
+    [{ remote: empty }, /GitHub has no main branch/],
+    [{ token: () => { throw new Error('no token'); } }, /could not finish fetch \(no token\)/],
+  ];
+  for (const [o, text] of cases) {
+    const w = world(o);
+    await refusedWith(w, 'fetch', {}, text);
+    assert.deepEqual(readdirSync(w.workDir), [], String(text));
+  }
+});
+
+test('F-T158-9, F-T158-7: fetch writes only into the real temp folder of the session; a link or a missing folder is refused', async () => {
+  const w = world();
+  const outside = join(w.root, 'outside');
+  mkdirSync(outside);
+  rmSync(w.tmp, { recursive: true });
+  symlinkSync(outside, w.tmp);
+  await refusedWith(w, 'fetch', {}, /temp folder is missing or is not a real folder of the session/);
+  assert.deepEqual(readdirSync(outside), [], 'the broker wrote through the link');
+  rmSync(w.tmp);
+  const r = await refusedWith(w, 'fetch', {}, /temp folder is missing/);
+  assert.ok(!r.refused.includes(w.root) && !r.refused.includes('ENOENT'), r.refused); // one clear line, no path
+  assert.deepEqual(readdirSync(w.workDir), []);
+  mkdirSync(w.tmp);
+  assert.equal((await w.broker.call('fetch')).ok, true, 'the control: a real folder works');
+});
+
+/** A loose object of `size` zero bytes, written as a stream: about 1 MB on disk for 1 GB of content. */
+async function zeroBlob(folder, size) {
+  const head = Buffer.from(`blob ${size}\0`), zero = Buffer.alloc(2 ** 20);
+  const sha = createHash('sha1').update(head);
+  const tmp = join(folder, '.git', 'objects', 'bomb.tmp');
+  async function* content() { yield head; for (let n = 0; n < size; n += zero.length) { sha.update(zero); yield zero; } }
+  await pipeline(content, createDeflate({ level: 1 }), createWriteStream(tmp));
+  const id = sha.digest('hex');
+  mkdirSync(join(folder, '.git', 'objects', id.slice(0, 2)), { recursive: true });
+  renameSync(tmp, join(folder, '.git', 'objects', id.slice(0, 2), id.slice(2)));
+  return id;
+}
+
+/** The longest delay of a 20 ms timer while `work` runs: the event loop of the sage-bot process must keep running. */
+async function lagDuring(work) {
+  let last = Date.now(), lag = 0;
+  const tick = () => { const now = Date.now(); lag = Math.max(lag, now - last - 20); last = now; };
+  const timer = setInterval(tick, 20);
+  try { return { result: await work(), lag: () => lag }; } finally { clearInterval(timer); tick(); } // the last gap too: a timer that never fired
+}
+
+test('F-T158-10: a 1 GB object of zeros is refused before git unpacks it, and the event loop keeps running', async () => {
+  const w = world();
+  const c1 = w.commit('a.txt', 'one\n');
+  const id = await zeroBlob(w.folder, 2 ** 30);
+  assert.equal(sh(w.folder, 'cat-file', '-s', id), String(2 ** 30)); // the control: git sees 1 GB
+  const start = Date.now();
+  const { result, lag } = await lagDuring(() => w.broker.call('upload', { commit: c1 }));
+  assert.equal(result.ok, false);
+  assert.match(result.refused, /an object over 50 MB, or more than 512 MB of objects, unpacked/);
+  assert.ok(Date.now() - start < 10_000, `${Date.now() - start} ms`);
+  assert.ok(lag() < 500, `the event loop stopped for ${lag()} ms`);
+  assert.deepEqual([LIMITS.object, LIMITS.inflated], [50 * 2 ** 20, 512 * 2 ** 20]);
+  assert.deepEqual(readdirSync(w.workDir), []);
+});
+
+test('F-T158-10: a GitHub that never answers times out and refuses; the event loop keeps running meanwhile', async () => {
+  const open = new Set();
+  const silent = createServer((socket) => { open.add(socket); socket.on('close', () => open.delete(socket)); }); // it says nothing
+  await new Promise((done) => silent.listen(0, '127.0.0.1', done));
+  try {
+    const w = world({ remote: `http://127.0.0.1:${silent.address().port}/sample.git`, timeout: 1500 });
+    const start = Date.now();
+    const { result, lag } = await lagDuring(() => w.broker.call('fetch'));
+    assert.ok(lag() < 500, `the event loop stopped for ${lag()} ms`);
+    assert.equal(result.ok, false);
+    assert.match(result.refused, /git ls-remote took too long/);
+    assert.ok(Date.now() - start < 5000, `${Date.now() - start} ms`);
+    assert.deepEqual(readdirSync(w.workDir), []);
+  } finally { for (const socket of open) socket.destroy(); silent.close(); } // git's HTTP helper can still hold it (http.lowSpeedTime)
+});
+
+test('F-T158-6: a commit id that the session does not have gets the clear refusal', async () => {
+  const w = world();
+  await refusedWith(w, 'upload', { commit: 'a'.repeat(40) }, new RegExp(`^${'a'.repeat(40)} is not a commit of the session\\.`));
+});
+
+test('F-T158-11: a hard link to a file outside the session is not an object, and the upload refuses it', async () => {
+  const w = world();
+  const c1 = w.commit('a.txt', 'one\n');
+  const secret = join(w.root, 'secret.txt');
+  writeFileSync(secret, 'sample secret, not a git object\n');
+  mkdirSync(join(w.folder, '.git', 'objects', 'ab'), { recursive: true });
+  linkSync(secret, join(w.folder, '.git', 'objects', 'ab', 'c'.repeat(38)));
+  await refusedWith(w, 'upload', { commit: c1 }, /an object that git cannot read|git (cat-file|fsck) failed/);
+  assert.equal(w.refs()['refs/heads/sage-lead/s1'], undefined);
+});
+
+test('F-T158-1, -2, -4: a fake bare repository, a rebase exec line and an alternates file in the session folder change nothing', async () => {
+  const w = world();
+  const sentinel = join(w.root, 'ran');
+  const run = `#!/bin/sh\ntouch ${sentinel}\n`;
+  // -1: a fake bare repository in the session folder, with a hook that git there would run.
+  const fake = join(w.folder, 'fake');
+  sh(w.folder, 'init', '--bare', '--quiet', fake);
+  writeFileSync(join(fake, 'hooks', 'reference-transaction'), run, { mode: 0o755 });
+  // -2: a rebase stopped at "break", with an exec line still in its todo list.
+  const c1 = w.commit('a.txt', 'one\n');
+  const c2 = w.commit('b.txt', 'two\n');
+  shWith(w.folder, { GIT_SEQUENCE_EDITOR: `printf 'break\\nexec touch ${sentinel}\\n' >` }, 'rebase', '--quiet', '-i', c1);
+  assert.match(sh(w.folder, 'status'), /interactive rebase in progress/);
+  // -4: c2's new blob lives only in another repository, that objects/info/alternates names.
+  const blob = sh(w.folder, 'rev-parse', `${c2}:b.txt`);
+  const other = join(w.root, 'other.git');
+  sh(w.root, 'init', '--bare', '--quiet', other);
+  mkdirSync(join(other, 'objects', blob.slice(0, 2)), { recursive: true });
+  renameSync(join(w.folder, '.git', 'objects', blob.slice(0, 2), blob.slice(2)), join(other, 'objects', blob.slice(0, 2), blob.slice(2)));
+  writeFileSync(join(w.folder, '.git', 'objects', 'info', 'alternates'), `${join(other, 'objects')}\n`);
+  assert.equal(sh(w.folder, 'cat-file', '-t', blob), 'blob'); // the control: git in the session folder reads the alternates
+  // The broker: c1 goes up from the copied objects; c2 needs the blob that only the alternates have, so it is refused.
+  const r1 = await w.broker.call('upload', { commit: c1 });
+  assert.equal(r1.ok, true, r1.refused);
+  await refusedWith(w, 'upload', { commit: c2 }, /git (fsck|rev-list) failed/);
+  assert.equal(existsSync(sentinel), false, 'code of the session ran');
+  assert.ok(w.calls.every(({ cwd, args }) => cwd.startsWith(w.workDir) && !args.some((a) => a.includes(w.folder))));
+  // The controls: git in the session folder runs the exec line and the fake repository's hook.
+  shWith(w.folder, { GIT_EDITOR: 'true' }, 'rebase', '--continue');
+  assert.equal(existsSync(sentinel), true, 'the rebase exec line');
+  rmSync(sentinel);
+  sh(fake, 'update-ref', 'refs/tags/x', sh(fake, 'hash-object', '-w', '--stdin'));
+  assert.equal(existsSync(sentinel), true, 'the fake repository\'s hook');
 });
