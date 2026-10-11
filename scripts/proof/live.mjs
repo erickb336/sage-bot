@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { LEAD_PATH } from '../../src/lead-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, stopScratchKeychain, withScratchKeychain } from './keychain.mjs';
-import { isWithin, resultsOf } from './probe.mjs';
+import { HOST_OFF, isWithin, resultsOf } from './probe.mjs';
 import { ROWS, OWNER_COMMAND, prove, refuseUsed, statusOf, verdict } from './run.mjs';
 import { dummyClaude, killSessions, startSession } from './session.mjs';
 import { jobLabelOf, removeTempRoots } from './world.mjs';
@@ -312,6 +312,10 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
   const host = inControl('--only', 'host');
   removeJob(env, w.launchd.label);
   for (const [id, p] of resultsOf(host.stdout).results) controls.set(id, p);
+  // F-T181-1: a host probe that the host control left as skipped (a crash, the timeout, no output) is no result, so it is INVALID, not
+  // SKIPPED (standing order 19). A dry run keeps it SKIPPED, as every live row.
+  const noHost = `the host control gave no result (${host.error?.code ?? host.signal ?? `exit ${host.status}`})`;
+  if (!dryRun) for (const p of controls.values()) if (p.skipped === HOST_OFF) controls.set(p.id, { ...p, why: noHost, skipped: undefined });
   // The runner's own copies of probe.mjs and world.json, outside the session folder, where a session can read and not write: the asked
   // command names them by absolute paths, so no file of the session folder takes their place (F-T165-23). The runner writes no file into
   // a session folder; after each session the copies must still be the runner's, else that session's results count for nothing.

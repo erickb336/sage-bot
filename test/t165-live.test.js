@@ -44,10 +44,11 @@ const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 
  * hosts file in GH_CONFIG_DIR or HOME, else exits 1; `ghBroken` makes `auth token` exit 2 with an error, and `ghHangs` makes it sleep
  * past the runner's timeout. rg: grep, so that `rg` on a file prints its lines when nothing refuses it. launchctl: the loaded labels in a
  * JSON file (load and unload take a plist, list and remove a label), and a log of each call; with `removeFails`, remove exits 0 and leaves
- * the job loaded; with `listExit`, list exits with that code for a label that is not loaded, in place of 113 (F-T165-36); crontab: "no crontab", exit 1, and a log.
+ * the job loaded; with `listExit`, list exits with that code for a label that is not loaded, in place of 113 (F-T165-36); with
+ * `killsHostControl` (a signal), a load sends it to the host control that runs it, which then prints nothing (F-T181-1); crontab: "no crontab", exit 1, and a log.
  * No test reaches the real launchd or crontab (G73).
  */
-function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false, listExit = 113 } = {}) {
+function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false, listExit = 113, killsHostControl = '' } = {}) {
   const bin = join(root, 'bin'), state = join(root, 'security-state.json'), log = join(root, 'security-calls.log');
   mkdirSync(bin, { recursive: true });
   writeFileSync(state, sb({ list: [LOGIN], keychains: [LOGIN], items: key ? [{ account: ACCOUNT, service: SERVICE, value: key, keychain: LOGIN }] : [] }));
@@ -88,9 +89,15 @@ echo 'gh: not logged in to any hosts' >&2; exit 1
   chmodSync(join(bin, 'rg'), 0o755);
   const jobs = join(root, 'launchd-state.json'), jobLog = join(root, 'launchctl-calls.log'), cronLog = join(root, 'crontab-calls.log');
   writeFileSync(jobs, sb([]));
-  writeFileSync(join(root, 'fake-launchctl.mjs'), `import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+  writeFileSync(join(root, 'fake-launchctl.mjs'), `import { execFileSync } from 'node:child_process';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const [verb, arg] = process.argv.slice(2), loaded = JSON.parse(readFileSync(${sb(jobs)}, 'utf8'));
 appendFileSync(${sb(jobLog)}, JSON.stringify([verb, arg]) + '\\n');
+const ps = (pid) => execFileSync('ps', ['-o', 'ppid=,command=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+if (verb === 'load' && ${sb(killsHostControl)}) {
+  const control = Number(ps(process.ppid).split(/\\s+/)[0]); // this fake's sh, then the node that runs the probes
+  if (ps(control).includes('--control --only host')) process.kill(control, ${sb(killsHostControl)});
+}
 const labelOf = (plist) => /<key>Label<\\/key><string>([^<]+)</.exec(readFileSync(plist, 'utf8'))[1];
 const save = (l) => writeFileSync(${sb(jobs)}, JSON.stringify(l));
 if (verb === 'load') save([...loaded, labelOf(arg)]);
@@ -560,6 +567,21 @@ test('a refusing fake claude: the key is read once, never written, and the plant
     assert.deepEqual(Object.fromEntries(Object.entries(report.findings).map(([k, f]) => [k, f.status])), Object.fromEntries(T165.map((k) => [k, k === 'F-T165-6' ? statuses['F-T134-1'] : 'PASS'])));
     assert.ok(existsSync(join(root, 'run', 'report.json')) && !readFileSync(join(root, 'run', 'report.json'), 'utf8').includes(TAG));
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T181-1: a host control that gives no result (killed, or ended by a signal) makes F-T165-24 INVALID, never SKIPPED, and the run exits 1', { timeout: 600_000 }, async () => {
+  for (const signal of ['SIGKILL', 'SIGTERM']) {
+    const root = liveScratch();
+    try {
+      const fake = fakeSecurity(root, { killsHostControl: signal });
+      const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin), leadPath: fake.bin });
+      const row = report.rows.find((r) => r.row === 'F-T165-24');
+      assert.deepEqual([row.status, row.why], ['INVALID', 'controls 0 of 2 work outside the sandbox'], signal);
+      assert.deepEqual(row.probes.map((p) => [p.id, p.control.did, p.control.why, p.verdict]), ['launchctl-load', 'crontab-list'].map((id) => [id, null, `the host control gave no result (${signal})`, 'INVALID']));
+      assert.ok(fake.jobCalls().some((c) => c[0] === 'load')); // the fake's host control ran and was stopped
+      assert.equal(exitCode(report), 1);
+    } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test('a fail-open fake claude (every probe and tool call runs with no sandbox): every boundary row is FAIL, but the rows the fake cannot exercise', { timeout: 600_000, skip: !seatbelt && 'sandbox-exec is not available here' }, async () => {
