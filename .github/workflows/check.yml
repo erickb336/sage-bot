@@ -20,4 +20,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts
+      - run: node scripts/diag-safe.mjs
+        timeout-minutes: 5
       - run: npm run check
