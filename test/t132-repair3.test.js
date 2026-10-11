@@ -9,7 +9,7 @@ import { createBridge } from '../src/bridge.js';
 import { prepare } from '../src/discord.js';
 import { sageTool } from '../src/sage.js';
 import { record } from '../src/sessions.js';
-import { CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync } from './bridge-setup.js';
+import { CONFIG, execFileSync, MAYA, SAGE, setup, spawnSync, toolOf } from './bridge-setup.js';
 
 const SCRIPT = (name) => new URL(`../scripts/${name}`, import.meta.url).pathname;
 const GONE = 'This question\'s project is no longer served; Erick answers it at the terminal.';
@@ -22,7 +22,7 @@ function two() {
   b.beta = join(b.root, 'beta');
   mkdirSync(b.beta);
   const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
-  b.shBeta = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', b.beta], { env, encoding: 'utf8' }).trim();
+  b.shBeta = toolOf(b, b.beta);
   b.shBeta('init');
   b.betaSage = sageTool({ sagePath: SAGE, project: b.beta, env });
   b.sh('task', 'add', '--title', 'Alpha export', '--size', 'small');
@@ -104,7 +104,7 @@ test('F-T132-15: a closed card of a project that returns gets no reminder until 
   assert.deepEqual([buttons(b.discord.latest(card)), b.discord.latest(card).content, shutOf(b)], [['press:beta/G1:0:0', 'press:beta/G1:0:1'], '', undefined]);
   await b.press(MAYA, 'press:beta/G1:0:1');
   await b.bridge.loop();
-  assert.equal(await b.answerOfBeta('G1'), 'B. Blue');
+  assert.equal(await b.answerOfBeta('G1'), 'Blue');
   assert.match(b.discord.latest(card).embeds[0].description, /Blue/);
   assert.equal(contentOf(b, card), '');
 });

@@ -170,8 +170,8 @@ await advance(SETTLE);
 const second = `project/${g5}+${g6}`;
 step(`gate add ${g5}+${g6} (T4): a second batch card in the thread`);
 await advance(MINUTE);
-sage('gate', 'answer', g5, 'A');
-terminal(`Erick, the owner, answers ${g5} at the terminal: A. The owner's answer at the terminal is final.`);
+sage('gate', 'answer', g5, '--option', '1');
+terminal(`Erick, the owner, answers ${g5} at the terminal: option 1. The owner's answer at the terminal is final.`);
 await loop();
 step(`Erick answers ${g5} at the terminal: the card shows it as final`);
 await advance(MINUTE);
@@ -186,8 +186,8 @@ step(`Jon ends the vote on ${second} early: part 2 goes to A`);
 
 // SessionEnd: the line says "ended", and the thread locks because nothing is open.
 await advance(MINUTE);
-sage('gate', 'answer', g4, 'A');
-terminal(`Erick answers ${g4} at the terminal: A. It was never on Discord.`);
+sage('gate', 'answer', g4, '--option', '1');
+terminal(`Erick answers ${g4} at the terminal: option 1. It was never on Discord.`);
 hook('SessionEnd', { reason: 'logout' });
 terminal('The sage session ends. The SessionEnd hook records it.');
 await advance(MINUTE);

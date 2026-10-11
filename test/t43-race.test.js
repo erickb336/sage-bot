@@ -33,7 +33,7 @@ test('T43: the owner answers between the read and the write of the bridge: gates
   await b.press(MAYA, 'press:project/G1:0:0'); // Maya presses A; the owner types B at the same moment
   await b.press(MAYA, 'press:project/G2:0:1'); // no owner answer on G2
   assert.equal(b.answerOf('G1'), 'New page');
-  assert.equal(b.answerOf('G2'), 'B. Long'); // without an owner answer, the bridge answer stays
+  assert.equal(b.answerOf('G2'), 'Long'); // without an owner answer, the bridge answer stays
   assert.deepEqual(b.lines.filter((l) => l.includes('wrote the owner')), [RESTORED('G1', 'New page')]);
   await b.bridge.loop();
   assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'B. New page'); // the card shows the owner answer as final
@@ -50,37 +50,37 @@ test('T43: repeated loops and presses after the write back never flip the answer
   await restart.loop();
   assert.equal(b.answerOf('G1'), 'New page');
   assert.equal(b.lines.filter((l) => l.includes('wrote the owner')).length, 1);
-  assert.equal(b.lines.filter((l) => l === 'sage gate project/G1 answered: A. Old page').length, 1);
+  assert.equal(b.lines.filter((l) => l === 'sage gate project/G1 answered: Old page').length, 1);
 });
 
 test('T43: the bridge never writes back over a later owner answer, also one that lands during its own check', async () => {
   // a) The owner changes the answer again after the bridge's write, while the bridge reads the trail to check.
   let phase = 0;
   const a = raced({
-    before: (b, id, text) => { if (phase === 0 && text === 'A. Old page') { phase = 1; b.sh('gate', 'answer', id, 'New page'); } },
-    check: (b) => { if (phase === 1 && b.answerOf('G1') === 'A. Old page') { phase = 2; b.sh('gate', 'answer', 'G1', 'Old page after all'); } },
+    before: (b, id, text) => { if (phase === 0 && text === 'Old page') { phase = 1; b.sh('gate', 'answer', id, 'New page'); } },
+    check: (b) => { if (phase === 1 && b.answerOf('G1') === 'Old page') { phase = 2; b.sh('gate', 'answer', 'G1', 'Old page after all'); } },
   });
   await twoGates(a);
   await a.press(MAYA, 'press:project/G1:0:0');
   await a.bridge.loop();
-  assert.equal(a.answerOf('G1'), 'Old page after all');
+  assert.equal(a.answerOf('G1'), 'other: Old page after all');
   assert.equal(phase, 2);
   assert.equal(a.lines.filter((l) => l.includes('wrote the owner')).length, 0);
-  assert.equal(a.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
+  assert.equal(a.bridge.entry('project/G1').ask.parts[0].final.text, 'other: Old page after all');
 
   // b) The owner changes the answer again between the bridge's check and its write back: the next check writes back the later one.
   let step = 0;
   const b = raced({
     before: (b, id, text) => {
-      if (step === 0 && text === 'A. Old page') { step = 1; b.sh('gate', 'answer', id, 'New page'); }
+      if (step === 0 && text === 'Old page') { step = 1; b.sh('gate', 'answer', id, 'New page'); }
       else if (step === 1 && text === 'New page') { step = 2; b.sh('gate', 'answer', id, 'Old page after all'); }
     },
   });
   await twoGates(b);
   await b.press(MAYA, 'press:project/G1:0:0');
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'Old page after all');
+  assert.equal(b.answerOf('G1'), 'other: Old page after all');
   assert.equal(step, 2);
-  assert.deepEqual(b.lines.filter((l) => l.includes('wrote the owner')), [RESTORED('G1', 'New page'), RESTORED('G1', 'Old page after all')]);
-  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'Old page after all');
+  assert.deepEqual(b.lines.filter((l) => l.includes('wrote the owner')), [RESTORED('G1', 'New page'), RESTORED('G1', 'other: Old page after all')]);
+  assert.equal(b.bridge.entry('project/G1').ask.parts[0].final.text, 'other: Old page after all');
 });

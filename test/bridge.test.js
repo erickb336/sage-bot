@@ -31,9 +31,9 @@ test('end to end: a scratch logbook gets a gate, the bridge posts its card, two 
   b.now += 1000;
   const later = await b.press(JON, 'press:project/G1:0:0');
   assert.equal(later[0].content, 'Already answered by Maya: B');
-  assert.equal(b.answerOf('G1'), 'B. Show a Session ended screen');
+  assert.equal(b.answerOf('G1'), 'Show a Session ended screen');
   assert.match(card(b).embeds[0].description, /Answered by Maya at <t:\d+:t>: B\. Show a Session ended screen\. Final\./);
-  assert.ok(b.lines.includes('sage gate project/G1 answered: B. Show a Session ended screen'));
+  assert.ok(b.lines.includes('sage gate project/G1 answered: Show a Session ended screen'));
 });
 
 test('end to end: a task with two open gates is one batch vote; two holders vote, the tick at the limit decides, sage gets both answers', async () => {
@@ -52,7 +52,7 @@ test('end to end: a task with two open gates is one batch vote; two holders vote
   assert.equal(b.answerOf('G1'), '');
   b.now = T0 + SETTLE + 30 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['A. Visible only', 'C. Both']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Visible only', 'Both']);
   assert.match(card(b, id).embeds[0].description, /Closed: every part is decided\. T7 goes on\./);
 });
 
@@ -114,7 +114,7 @@ test('F-T28-4: a press after the limit with no tick before it settles the vote: 
   b.now += 31 * MINUTE;
   const late = await b.press(JON, 'press:project/G1+G2:0:0');
   assert.match(late[0].content, /^The vote on project\/G1\+G2 ended at <t:\d+:t>\. Your press did not count\.$/);
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. p']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'p']);
   assert.match(card(b).embeds[0].description, /Closed: every part is decided/);
 });
 
@@ -132,7 +132,7 @@ test('F-T28-1: after the Mac slept, the bridge asks for a new press and the tick
   assert.equal(wake.content, `The host was asleep from <t:${asleep / 1000}:t> to <t:${b.now / 1000}:t>. Presses in that time did not count. Please press again on any open question.`);
   assert.deepEqual(wake.allowedMentions, { parse: [] });
   assert.equal(b.bridge.entry('project/G1+G2').gate.phase, 'closed');
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['A. x', 'B. q']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['x', 'q']);
   // A loop on time after that is no wake.
   b.now += 15_000;
   await b.bridge.loop();
@@ -201,7 +201,7 @@ test('F-T28-9: a withdraw comes only from sage side; an answer at the terminal i
   assert.deepEqual(b.bridge.entry('project/G1').ask.parts[0].final, { by: OWNER, at: b.now, option: 'B', text: 'B. y' });
   assert.equal(b.answerOf('G1'), 'y');
   assert.deepEqual(b.bridge.entry('project/G2').gate.outcome, { status: 'withdrawn' });
-  assert.equal(b.answerOf('G2'), 'dropped: the task changed');
+  assert.equal(b.answerOf('G2'), 'other: dropped: the task changed');
   const [g1, g2] = b.discord.messages.keys();
   assert.match(card(b, g1).embeds[0].description, /Answered by Erick \(terminal\)/);
   assert.match(card(b, g2).embeds[0].description, /Withdrawn by Erick/);
@@ -237,7 +237,7 @@ test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the leads, the 
   await b.press(JON, 'tiebreak:project/G1+G2:0:1');
   assert.deepEqual(b.discord.posts.at(-1), { content: 'Jon (sage-lead) broke the tie on part 1 of project/G1+G2: B.', allowedMentions: { parse: [] } });
   assert.match(card(b, id).embeds[0].description, /Closed: every part is decided/);
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['B. y', 'A. p']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'p']);
   // The card was edited after each of the 5 changes: 3 ballots, the end, the tie-break.
   assert.equal(b.discord.messages.get(id).length, 1 + 5);
 });

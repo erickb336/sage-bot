@@ -11,11 +11,13 @@ import { join, resolve, sep } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
-import { sagePath, sageTool } from '../src/sage.js';
+import { answerArgs, optionsOf, OTHER, sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
 
+const KEYS = ['A', 'B', 'C', 'D', 'E'];
+
 /** The pinned copy of the sage state tool (test/fixtures/sage/README.md). */
-export const FIXTURE = new URL('fixtures/sage/39e9bf767a1f/sage.mjs', import.meta.url).pathname;
+export const FIXTURE = new URL('fixtures/sage/6ea307ffa7b5/skills/sage/sage.mjs', import.meta.url).pathname;
 /**
  * The sage state tool of the tests: SAGE_TOOL when it is set, else the pinned copy. It refuses a path in the owner's real
  * ~/.claude (os.userInfo, not $HOME), for example the sage plugin's cache, so that no test depends on it.
@@ -72,17 +74,18 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
-  const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', project], { env, encoding: 'utf8' }).trim();
   const statePath = join(root, 'state', 'gates.json');
+  const discord = fakeDiscord(members);
+  const lines = [];
+  const b = { root, project, env, discord, lines, now: T0, statePath };
+  const run = toolOf(b, project);
   const sh = (...args) => {
     const out = run(...args);
     if (markAll && args[0] === 'gate' && args[1] === 'add') b.mark(...table(b, 'gates').map((r) => r.id));
     return out;
   };
+  b.sh = sh;
   sh('init');
-  const discord = fakeDiscord(members);
-  const lines = [];
-  const b = { root, project, sh, discord, lines, now: T0, statePath };
   /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys, with the folder of the project (G45 A). */
   b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Map([...loadVotes(`${statePath}.votes`), ...ids.map((id) => [`${NAME}/${id}`, project])]));
   b.sage = sageTool({ sagePath: SAGE, project, env });
@@ -99,9 +102,27 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   b.post = async () => { await b.bridge.loop(); b.now += SETTLE; await b.bridge.loop(); };
   return b;
 }
+/**
+ * The state tool on `folder`, a project in `b.root`, as the owner runs it at the terminal. A `gate answer <G> <text>` is what the
+ * owner types since T176: a key ("A"), "A. text" or the option's text is `--option <n>`; any other words are `--other-hex`, and
+ * sage keeps them as "other: <words>".
+ */
+export function toolOf(b, folder) {
+  const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', folder], { env: b.env, encoding: 'utf8' }).trim();
+  const typed = (id, text) => {
+    const row = rowsOf(run('logbook'), 'gates').find((r) => r.id === id);
+    const options = optionsOf(row);
+    const m = /^([A-E])(?:\. (.*))?$/.exec(text);
+    const named = m ? options[KEYS.indexOf(m[1])] : undefined;
+    const picked = named !== undefined && (m[2] === undefined || m[2] === named) ? named : options.includes(text) ? text : `${OTHER}${text}`;
+    return answerArgs(row, picked);
+  };
+  return (...args) => run(...(args[0] === 'gate' && args[1] === 'answer' && args.length === 4 ? [...args.slice(0, 3), ...typed(args[2], args[3])] : args));
+}
 /** The rows of a logbook table, as { column: value }. */
-export function table(b, name) {
-  const [head, ...lines] = readFileSync(join(b.sh('logbook'), `${name}.tsv`), 'utf8').split('\n').filter(Boolean);
+export const table = (b, name) => rowsOf(b.sh('logbook'), name);
+function rowsOf(dir, name) {
+  const [head, ...lines] = readFileSync(join(dir, `${name}.tsv`), 'utf8').split('\n').filter(Boolean);
   const cols = head.split('\t');
   return lines.map((l) => Object.fromEntries(l.split('\t').map((v, i) => [cols[i], v])));
 }

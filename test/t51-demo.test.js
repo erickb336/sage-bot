@@ -23,7 +23,7 @@ test('the demo page shows the session line, the thread in order with the private
   assert.equal(a.page, b.page);
   const { page, said, root } = a;
   assert.match(said, new RegExp(`Page: ${join(root, 'demo.html')}\n`));
-  assert.match(said, /G3 {2}T2 {2}B\. 04\/10\/2026 \(the user locale\)/);
+  assert.match(said, /G3 {2}T2 {2}04\/10\/2026 \(the user locale\)/);
   assert.equal(page.includes(root), false); // the scratch path is not on the page
   assert.equal(/<script|\b(?:src|href)=|url\(/.test(page), false); // no script and no external asset: the page opens with no network
   assert.match(page, /Sample data\. Fake Discord\. No bot, no token\./);
@@ -57,14 +57,14 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /Jon \(sage-lead\) broke the tie on part 2 of project\/G2\+G3: B\./);
   // The owner's answer at the terminal is final on the card, and a later press on that part does not count.
   // The rule in plain words, and no rule code that the page does not explain (F-T51-5).
-  assert.match(page, /Erick, the owner, answers G5 at the terminal: A\. The owner's answer at the terminal is final\./);
+  assert.match(page, /Erick, the owner, answers G5 at the terminal: option 1\. The owner's answer at the terminal is final\./);
   assert.equal(/\bG10\b/.test(page), false);
   assert.match(page, /Answered by Erick \(terminal\) at <time>14:39<\/time>: A\. An example report and a Create button\. Final\./);
   assert.match(page, /Already answered by Erick at the terminal: A\. An example report and a Create button\. Your press did not count\./);
   assert.match(page, /Ended early by Jon \(sage-lead\) at <time>14:42<\/time>/);
-  // The answers in sage's gates.tsv, and the reasons line for sage.
+  // The answers in sage's gates.tsv (the option's own text, as sage keeps a `gate answer --option <n>`: T176), and the reasons line for sage.
   const rows = [...page.matchAll(/<tr><td>(G\d)<\/td><td>T\d<\/td><td>[^<]*<\/td><td>([^<]*)<\/td><\/tr>/g)].map((m) => `${m[1]} ${m[2]}`);
-  assert.deepEqual(rows, ['G1 A. Sign in', 'G2 A. Only the visible columns', 'G3 B. 04/10/2026 (the user locale)', 'G4 A', 'G5 A', 'G6 A. Yes, under the button']);
+  assert.deepEqual(rows, ['G1 Sign in', 'G2 Only the visible columns', 'G3 04/10/2026 (the user locale)', 'G4 1.4.0', 'G5 An example report and a Create button', 'G6 Yes, under the button']);
   assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
 });
 
