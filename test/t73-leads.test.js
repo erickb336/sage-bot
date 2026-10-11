@@ -1,4 +1,4 @@
-// T73, the owner's decision G18 item 8: sage marks a Yes or No question "leads only" with scripts/vote.mjs --leads. Only the
+// T73, the owner's decision G18 item 8: sage marks a Yes or No question "sage-leads only" with scripts/vote.mjs --leads. Only the
 // sage-leads can answer its card; their answer reaches sage as a recommendation, and the owner decides at the terminal (G10).
 // sage-bot never switches a mode of sage. Through the fake Discord layer and a scratch sage logbook.
 // SAMPLE DATA ONLY: every id, name and question is made up. Nothing connects to Discord or reads the Keychain.
@@ -38,7 +38,7 @@ function voteWith(b, sage, ...args) {
   const r = spawnSync(process.execPath, [VOTE, ...args], { cwd: b.project, env, encoding: 'utf8' }); // sage runs it in the project's folder
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
-/** A scratch project where sage asked the mode question as G1 of T1 and marked it leads only; the card is posted. */
+/** A scratch project where sage asked the mode question as G1 of T1 and marked it sage-leads only; the card is posted. */
 async function asked({ question = QUESTION[0], options = QUESTION[1], members } = {}) {
   const b = setup({ markAll: false, ...(members && { members }) });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
@@ -58,30 +58,30 @@ test('T73: vote.mjs --leads marks one gate, --unmark clears it, and a batch is r
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   const leadsFile = `${b.statePath}.votes.leads`;
   assert.deepEqual(vote(b, 'G2'), { code: 0, out: 'team votes: project/G2', err: '' });
-  assert.deepEqual(vote(b, '--leads', 'G2'), { code: 0, out: 'team votes: none\nleads only: project/G2', err: '' }); // a mark moves the gate
+  assert.deepEqual(vote(b, '--leads', 'G2'), { code: 0, out: 'team votes: none\nsage-leads only: project/G2', err: '' }); // a mark moves the gate
   assert.equal(readFileSync(leadsFile, 'utf8'), JSON.stringify({ 'project/G2': b.project }));
   assert.deepEqual(vote(b, '--leads', 'G3', 'G4'), { code: 1, out: '',
-    err: 'sage-bot vote: a leads-only question is one Yes or No question, never a batch: give one gate id to --leads, not 2. Nothing changed.' });
-  assert.deepEqual(vote(b, '--list'), { code: 0, out: 'team votes: none\nleads only: project/G2', err: '' });
+    err: 'sage-bot vote: a sage-leads-only question is one Yes or No question, never a batch: give one gate id to --leads, not 2. Nothing changed.' });
+  assert.deepEqual(vote(b, '--list'), { code: 0, out: 'team votes: none\nsage-leads only: project/G2', err: '' });
   assert.deepEqual(vote(b, '--unmark', 'G2'), { code: 0, out: 'team votes: none', err: '' });
   assert.equal(readFileSync(leadsFile, 'utf8'), '{}');
 });
 
-test('T73: the card of a leads-only question pings sage-lead only and is titled as a recommendation for Erick', async () => {
+test('T73: the card of a sage-leads-only question pings sage-lead only and is titled as a recommendation for Erick', async () => {
   const b = await asked();
   assert.deepEqual(b.discord.posts.map((p) => [p.content, p.allowedMentions.roles, p.embeds?.[0].title]), [[
     `<@&${LEAD}> project T1 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal.`,
     [LEAD], 'Recommend for Erick: Question project/G1 · T1 Ship the export page',
   ]]);
   assert.match(text(b), /\*\*Who can answer:\*\* every sage-lead$/);
-  assert.equal(b.lines.filter((l) => l.includes('merge')).length, 0); // a leads-only question about a merge is posted, not kept at the terminal
+  assert.equal(b.lines.filter((l) => l.includes('merge')).length, 0); // a sage-leads-only question about a merge is posted, not kept at the terminal
   // The 2-hour reminder pings sage-lead only too.
   b.now += 2 * 60 * MINUTE;
   await b.bridge.loop();
   assert.deepEqual(b.discord.posts.at(-1).allowedMentions.roles, [LEAD]);
 });
 
-test('T73: an apprentice press gets the leads-only note, a press with no role gets no reply (G20), and sage gets nothing', async () => {
+test('T73: an apprentice press gets the sage-leads-only note, a press with no role gets no reply (G20), and sage gets nothing', async () => {
   const b = await asked();
   b.now += MINUTE;
   assert.deepEqual(await b.press(MAYA, 'press:project/G1:0:0'), [NOTE]);
@@ -108,26 +108,26 @@ test('T73: a lead\'s press records the answer in sage, posts the recommendation 
   assert.deepEqual(switchesIn(`Turn ${SWITCHES[2]} now`), [PILOT, SWITCHES[2]]); // the check finds a phrase when one is there
 });
 
-test('T73: a leads-only question whose options are not Yes and No gets no card', async () => {
+test('T73: a sage-leads-only question whose options are not Yes and No gets no card', async () => {
   const b = await asked({ options: 'Merge now|Wait' });
   assert.deepEqual(cards(b), []);
-  assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')), ['not posted: project: G1 is leads only, and a leads-only question needs the options Yes|No. Answer them at the terminal.']);
+  assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')), ['not posted: project: G1 is sage-leads only, and a sage-leads-only question needs the options Yes|No. Answer them at the terminal.']);
 });
 
-test('T73: a bad leads-only file is refused at load: no card, one log line, and vote.mjs stops with the same reason', async () => {
+test('T73: a bad sage-leads-only file is refused at load: no card, one log line, and vote.mjs stops with the same reason', async () => {
   const b = setup({ markAll: false });
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   const leadsFile = `${b.statePath}.votes.leads`;
   mkdirSync(join(b.root, 'state'), { recursive: true, mode: 0o700 });
   writeFileSync(leadsFile, '{"G1":true}', { mode: 0o600 });
   await b.post();
-  const why = `the leads-only file ${leadsFile} must be a JSON object of sage gate keys (a project name, a slash, G and digits) and their folders. Nothing was loaded.`;
+  const why = `the sage-leads-only file ${leadsFile} must be a JSON object of sage gate keys (a project name, a slash, G and digits) and their folders. Nothing was loaded.`;
   assert.deepEqual(cards(b), []);
   assert.deepEqual(b.lines.filter((l) => l.startsWith('no gate')), [`no gate is posted: ${why}`]);
   assert.deepEqual(vote(b, '--list'), { code: 1, out: '', err: `sage-bot vote: ${why}` });
   writeFileSync(leadsFile, '["G1"]');
   chmodSync(leadsFile, 0o644);
-  assert.match(vote(b, '--list').err, /the leads-only file .* must be a regular file of this user with mode 0600/);
+  assert.match(vote(b, '--list').err, /the sage-leads-only file .* must be a regular file of this user with mode 0600/);
 });
 
 test('T73, G10: Erick\'s answer at the terminal wins, before a lead\'s press and after the leads\' recommendation', async () => {
@@ -168,21 +168,21 @@ test('F-T73-1: vote.mjs --leads refuses a gate that is not the automatic-merge q
   b.sh('gate', 'add', 'T1', '--question', 'Merge PR 18 now?', '--options', 'Yes|No', '--recommend', 'No');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', 'On|Off', '--recommend', 'Off');
   assert.deepEqual(vote(b, '--leads', 'G1'), { code: 1, out: '',
-    err: `sage-bot vote: G1 is leads only, and a leads-only question must be the automatic-merge question, word for word: "${QUESTION[0]}". Nothing changed.` });
-  assert.deepEqual(vote(b, '--leads', 'G2'), { code: 1, out: '', err: 'sage-bot vote: G2 is leads only, and a leads-only question needs the options Yes|No. Nothing changed.' });
+    err: `sage-bot vote: G1 is sage-leads only, and a sage-leads-only question must be the automatic-merge question, word for word: "${QUESTION[0]}". Nothing changed.` });
+  assert.deepEqual(vote(b, '--leads', 'G2'), { code: 1, out: '', err: 'sage-bot vote: G2 is sage-leads only, and a sage-leads-only question needs the options Yes|No. Nothing changed.' });
   assert.deepEqual(vote(b, '--leads', 'G9'), { code: 1, out: '', err: `sage-bot vote: G9 is not a gate of the sage project project. Nothing changed.` });
   assert.equal(existsSync(`${b.statePath}.votes`) || existsSync(`${b.statePath}.votes.leads`), false);
 });
 
-test('F-T73-1: the bridge posts no card for a hand-marked leads-only gate that is not the automatic-merge question', async () => {
+test('F-T73-1: the bridge posts no card for a hand-marked sage-leads-only gate that is not the automatic-merge question', async () => {
   const b = await asked({ question: 'Merge PR 18 now?' });
   assert.deepEqual(cards(b), []);
   assert.deepEqual(b.lines.filter((l) => l.startsWith('not posted')),
-    [`not posted: project: G1 is leads only, and a leads-only question must be the automatic-merge question, word for word: "${QUESTION[0]}". Answer them at the terminal.`]);
+    [`not posted: project: G1 is sage-leads only, and a sage-leads-only question must be the automatic-merge question, word for word: "${QUESTION[0]}". Answer them at the terminal.`]);
   assert.equal(b.answerOf('G1'), '');
 });
 
-test('F-T73-2: a gate in both the team votes file and the leads-only file gets no card and one log line', async () => {
+test('F-T73-2: a gate in both the team votes file and the sage-leads-only file gets no card and one log line', async () => {
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
@@ -192,7 +192,7 @@ test('F-T73-2: a gate in both the team votes file and the leads-only file gets n
   await b.bridge.loop();
   assert.deepEqual(cards(b), []);
   assert.deepEqual(b.lines.filter((l) => l.startsWith('project/G1')),
-    ['project/G1 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs']);
+    ['project/G1 stays at the terminal: it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs']);
   // A mark again moves it to one list, and the card comes.
   assert.equal(vote(b, '--leads', 'G1').code, 0);
   await b.post();
@@ -205,13 +205,13 @@ test('F-T73-2: a mark that moves a gate saves the file that loses it first, then
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   const savedAt = (path) => statSync(path, { bigint: true }).mtimeNs;
   const [votesFile, leadsFile] = [`${b.statePath}.votes`, `${b.statePath}.votes.leads`];
-  assert.equal(vote(b, '--leads', 'G1').out, 'team votes: none\nleads only: project/G1');
-  assert.ok(savedAt(votesFile) < savedAt(leadsFile), 'to leads only: the team votes file first');
+  assert.equal(vote(b, '--leads', 'G1').out, 'team votes: none\nsage-leads only: project/G1');
+  assert.ok(savedAt(votesFile) < savedAt(leadsFile), 'to sage-leads only: the team votes file first');
   assert.equal(vote(b, 'G1').out, 'team votes: project/G1');
-  assert.ok(savedAt(leadsFile) < savedAt(votesFile), 'to a team vote: the leads-only file first');
+  assert.ok(savedAt(leadsFile) < savedAt(votesFile), 'to a team vote: the sage-leads-only file first');
 });
 
-test('F-T73-11: a team vote and the leads-only question of one task, asked together, get two cards, and the leads-only one is never in the batch', async () => {
+test('F-T73-11: a team vote and the sage-leads-only question of one task, asked together, get two cards, and the sage-leads-only one is never in the batch', async () => {
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', 'Ship it?', '--options', 'Yes|No', '--recommend', 'No');
@@ -244,11 +244,11 @@ test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both"
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', QUESTION[0], '--options', QUESTION[1], '--recommend', 'No');
   b.mark('G1');
-  // The bridge reads the team votes file (G1 in it), then sage moves G1 to leads only, then the bridge reads the leads-only file.
+  // The bridge reads the team votes file (G1 in it), then sage moves G1 to sage-leads only, then the bridge reads the sage-leads-only file.
   let moved;
   onFirstOpen(`${b.statePath}.votes.leads`, () => { moved = vote(b, '--leads', 'G1'); });
   await b.bridge.loop();
-  assert.deepEqual(moved, { code: 0, out: 'team votes: none\nleads only: project/G1', err: '' });
+  assert.deepEqual(moved, { code: 0, out: 'team votes: none\nsage-leads only: project/G1', err: '' });
   b.now += SETTLE;
   await b.bridge.loop();
   assert.deepEqual(b.lines.filter((l) => l.includes('both')), []);
@@ -261,7 +261,7 @@ test('F-T73-12: a --leads move between the bridge\'s two reads logs no "in both"
   await b.bridge.loop();
   assert.equal(cards(b).length, 1);
   assert.deepEqual(b.lines.filter((l) => l.includes('both')),
-    ['project/G2 stays at the terminal: it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs']);
+    ['project/G2 stays at the terminal: it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs']);
 });
 
 test('F-T73-3: the terminal line after a No recommendation says to do nothing, and after a Yes says to switch the mode', async () => {
@@ -318,7 +318,7 @@ test('F-T73-5: a press after the recommendation, also Erick\'s own, gets a note 
     ['Already recommended by Erick (sage-lead): B. No. A recommendation only; Erick decides at the terminal. Your press did not count.']);
 });
 
-test('F-T73-6: with the owner missing from the member list, every leads-only text still names Erick, with a capital at each sentence start', async () => {
+test('F-T73-6: with the owner missing from the member list, every sage-leads-only text still names Erick, with a capital at each sentence start', async () => {
   const b = await asked({ members: MEMBERS.filter((m) => m.id !== OWNER) });
   assert.deepEqual(b.discord.posts.map((p) => [p.content, p.embeds?.[0].title]), [[
     `<@&${LEAD}> project T1 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal.`,

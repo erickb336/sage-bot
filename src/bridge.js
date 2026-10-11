@@ -34,17 +34,17 @@ export const ASKED_TOGETHER = 30_000;
 /** A question about a merge in any form: merges never go to a vote, also when sage marked one (F-T28-28, a second guard to G13). */
 export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
 /**
- * T73, G18 item 8: the only question that may be leads only, word for word, with the options Yes|No. A sage-lead's answer to any other gate
+ * T73, G18 item 8: the only question that may be sage-leads only, word for word, with the options Yes|No. A sage-lead's answer to any other gate
  * would close a decision of the owner, so scripts/vote.mjs refuses to mark another gate, and the bridge refuses to post one (F-T73-1).
  */
 export const LEADS_QUESTION = 'Switch the automatic-merge mode on for this session?';
-/** What the bridge adds to a leads-only answer in sage: the answer is the sage-leads' advice, never the owner's decision (F-T73-1). */
+/** What the bridge adds to a sage-leads-only answer in sage: the answer is the sage-leads' advice, never the owner's decision (F-T73-1). */
 export const RECOMMENDED = ' (sage-leads recommend; the owner decides)';
-/** Why a sage gate row cannot be leads only, or null when it can. scripts/vote.mjs and the bridge both ask this. */
+/** Why a sage gate row cannot be sage-leads only, or null when it can. scripts/vote.mjs and the bridge both ask this. */
 export function notLeadsOnly(row) {
-  if (row.question !== LEADS_QUESTION) return `${row.id} is leads only, and a leads-only question must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
+  if (row.question !== LEADS_QUESTION) return `${row.id} is sage-leads only, and a sage-leads-only question must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
   const options = row.options.split('|').map((o) => o.trim().toLowerCase()).filter(Boolean).sort().join('|');
-  return options === 'no|yes' ? null : `${row.id} is leads only, and a leads-only question needs the options Yes|No`;
+  return options === 'no|yes' ? null : `${row.id} is sage-leads only, and a sage-leads-only question needs the options Yes|No`;
 }
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
@@ -72,7 +72,7 @@ export function monotonic(now, floor = 0) {
  * The ask and the gate of a group of sage gate rows of one task of `project`: one row is a single question, 2 to 4 rows a batch. The
  * gate id is the key of the group (T132): the project name, a slash and the sage gate ids, for example `sage-bot/G1+G2`.
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
- * With `leads` (T73) the one row is a leads-only question: it must be LEADS_QUESTION with the options Yes and No, so that a sage-lead
+ * With `leads` (T73) the one row is a sage-leads-only question: it must be LEADS_QUESTION with the options Yes and No, so that a sage-lead
  * never answers another question and every text that the bridge writes about the answer comes from that allow-list.
  */
 export function frame(project, rows, title, ownerId, at, leads = false) {
@@ -103,7 +103,7 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
 const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
 /**
  * An answer in sage that only the bridge writes, never the owner: the form before T176, "A. text" (with RECOMMENDED after it for a
- * leads-only gate), and a leads-only recommendation of today, "other: A. Yes" with RECOMMENDED after it. The owner picks an option by
+ * sage-leads-only gate), and a sage-leads-only recommendation of today, "other: A. Yes" with RECOMMENDED after it. The owner picks an option by
  * its number or types own words, kept as "other: <words>" (sage never lets an option read as "other:"), so neither is the owner's.
  * Checked only after optionOf found no option: an option may itself read "A. Yes" (F-T176-1).
  */
@@ -227,7 +227,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings these roles and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const alert = (roles, text) => ({ content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } });
-  /** The roles of the holders: a new card and a single gate's reminder ping both (T70), or only sage-lead for a leads-only question (T73). */
+  /** The roles of the holders: a new card and a single gate's reminder ping both (T70), or only sage-lead for a sage-leads-only question (T73). */
   const holderRoles = (ask) => (ask.leads ? [config.leadRole] : [config.apprenticeRole, config.leadRole]);
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
@@ -420,7 +420,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
 
   /**
    * The answers that the bridge gives sage for a settled gate: one per sage gate, as gates.tsv holds it (T176): the option's own text,
-   * never for a part with a final answer. A leads-only answer is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
+   * never for a part with a final answer. A sage-leads-only answer is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
    * not an option, so the logbook shows the sage-leads' advice, and readOwner tells it from the owner's own "Yes".
    */
   function answersOf(id) {
@@ -601,7 +601,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * The gate keys in the team votes file and in the leads-only file (T73). A refused file counts as both empty, so nothing is posted;
+   * The gate keys in the team votes file and in the sage-leads-only file (T73). A refused file counts as both empty, so nothing is posted;
    * the log says why once. A mark that moves a gate saves the two files one after the other, so a read across the move can find the
    * gate in both: then it reads both files again, and only a gate still in both is an error (F-T73-12).
    */
@@ -651,8 +651,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const t = clock();
     // The time a gate was first seen counts also before sage marks it: a gate marked later posts at the next loop.
     for (const r of untracked) if (!r.answer && !firstSeen.has(key(r.id))) firstSeen.set(key(r.id), t);
-    // Only the gates that sage marked as team votes or leads only go to Discord (G13, T73); every rule below sees only these.
-    // A leads-only question may be about a merge: the sage-leads only recommend, and the owner decides at the terminal (G18).
+    // Only the gates that sage marked as team votes or sage-leads only go to Discord (G13, T73); every rule below sees only these.
+    // A sage-leads-only question may be about a merge: the sage-leads only recommend, and the owner decides at the terminal (G18).
     // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
     // A mark counts only with the folder of this project: a mark of the same name for another folder is another gate (G45 A).
     const voted = (r) => marks.votes.has(key(r.id)) && serves(key(r.id), marks.votes.get(key(r.id)));
@@ -668,7 +668,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const markOf = (r) => [...marks.votes.keys(), ...marks.leads.keys()].find((k) => !listed(k) && k.endsWith(`/${r.id}`));
     const fresh = untracked.filter((r) => {
       const why = cardOf(r) ? `its card is ${unlisted(cardOf(r))}`
-        : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the leads-only file. Mark it again with scripts/vote.mjs'
+        : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs'
         : leadsOnly(r) ? null : !voted(r) && markOf(r) ? `it has no mark of ${project}; the mark is ${unlisted(markOf(r))}`
         : !voted(r) && elsewhere(r) !== undefined ? `its mark is of the folder ${elsewhere(r) ?? '(none)'}, not of ${project}'s folder now. Mark it again with scripts/vote.mjs`
         : !voted(r) ? 'sage did not mark it as a team vote'
@@ -678,7 +678,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     });
     const tasks = new Map();
     for (const r of fresh.filter((x) => !leadsOnly(x))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    // A leads-only question is always one question on its own card, never part of a batch (T73).
+    // A sage-leads-only question is always one question on its own card, never part of a batch (T73).
     const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter(leadsOnly).map((x) => [x])];
     const open = groups.map((g) => g.filter((r) => !r.answer));
     const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();

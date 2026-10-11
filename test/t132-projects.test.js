@@ -1,5 +1,5 @@
 // T132: one bridge posts the cards and takes the votes of every project in the config. sage's gate ids start at G1 in each logbook,
-// so the bridge names each gate by its key, `<project>/<gate id>`, in its gate file, the team votes file, the leads-only file, the
+// so the bridge names each gate by its key, `<project>/<gate id>`, in its gate file, the team votes file, the sage-leads-only file, the
 // reasons and the card buttons. SAMPLE DATA ONLY: scratch logbooks, made-up Discord ids, the fake Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

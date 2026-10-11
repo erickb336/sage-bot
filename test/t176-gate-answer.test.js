@@ -80,7 +80,7 @@ test('F-T176-1: an option that reads like the old form ("A. Yes" beside "Yes") i
   assert.equal(b.answerOf('G1'), 'A. Yes');
 });
 
-test('R677: a stored leads-only recommendation never counts as the owner\'s terminal answer, also after the bridge\'s own state is rolled back', async () => {
+test('R677: a stored sage-leads-only recommendation never counts as the owner\'s terminal answer, also after the bridge\'s own state is rolled back', async () => {
   const b = setup({ markAll: false });
   b.sh('task', 'add', '--title', 'Ship the export page', '--size', 'small');
   b.sh('gate', 'add', 'T1', '--question', LEADS_QUESTION, '--options', 'Yes|No', '--recommend', '2');
