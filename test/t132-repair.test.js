@@ -100,7 +100,7 @@ test('F-T132-1: with a trailing slash on project and the own project listed seco
   b.now += 60_000;
   await b.press(MAYA, 'press:G1:0:1'); // the old button, before the first loop
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['B. JSON', '']);
+  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['JSON', '']);
   assert.deepEqual(buttons(b.discord.latest(old)), ['press:project/G1:0:0', 'press:project/G1:0:1']);
   // vote.mjs with the same config marks the own project's gate.
   const file = join(b.root, 'config.json');
@@ -146,7 +146,7 @@ test('F-T132-5: a stop and a failed edit before the redraw keep the mark; the ol
   const replies = await b.press(MAYA, 'press:G1:0:1');
   assert.notEqual(replies[0]?.content, UNKNOWN);
   await b.bridge.loop();
-  assert.equal(b.answerOf('G1'), 'B. JSON');
+  assert.equal(b.answerOf('G1'), 'JSON');
   assert.deepEqual([saved(b).entries[0].oldButtons, buttons(b.discord.latest(old))], [undefined, ['press:project/G1:0:0', 'press:project/G1:0:1']]);
   assert.equal((await b.press(MAYA, 'press:G1:0:0'))[0].content, UNKNOWN); // after the edit, an old button is unknown
 });
@@ -194,7 +194,7 @@ test('F-T132-6: a settled card of a project that left the config sends no answer
   const lines = b.lines.length;
   await b.press(MAYA, 'press:project/G1:0:0');
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['A. CSV', '']);
+  assert.deepEqual([b.answerOf('G1'), await b.answerOfBeta('G1')], ['CSV', '']);
   assert.deepEqual(b.lines.slice(lines).filter((l) => /beta\/G1/.test(l)), []);
 });
 

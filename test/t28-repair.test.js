@@ -61,7 +61,7 @@ test('G10 a: before each `sage gate answer` the bridge reads the row again: an o
   b.sh('gate', 'answer', 'G1', 'Visible');
   b.now += 2 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Visible', 'A. ISO']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Visible', 'ISO']);
   assert.deepEqual(decisionsOf(b, 'Which columns?'), ['Which columns? → Visible']);
   assert.deepEqual(decisionsOf(b, 'Which format?'), ['Which format? → A. ISO']);
   assert.equal(b.bridge.entry('project/G1+G2').ask.parts[0].final.text, 'A. Visible');
@@ -87,7 +87,7 @@ test('F-T28-27, G10 a: in a batch the owner\'s terminal answer closes its part, 
   assert.equal((await b.press(MAYA, 'press:project/G1+G2:1:1'))[0].kind, 'modal');
   b.now += 30 * MINUTE;
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'B. q']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'q']);
   assert.match(lastCard(b).embeds[0].description, /Closed: every part is decided or answered at the terminal\. T7 goes on\./);
   // Part 1 had no votes, which the vote rules call a tie, but it has the owner's answer: the leads get no ping.
   assert.deepEqual(pings(b, LEADR), []);
@@ -115,7 +115,7 @@ test('the bridge\'s own answer in sage, without its save (a crash in between), s
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   await b.press(MAYA, 'press:project/G1:0:1');
-  assert.equal(b.answerOf('G1'), 'B. y');
+  assert.equal(b.answerOf('G1'), 'y');
   const data = load(b.statePath).entries.map(({ sent, ...e }) => ({ ...e, sent: {} }));
   save(b.statePath, data);
   b.bridge = b.make();

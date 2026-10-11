@@ -11,11 +11,13 @@ import { join, resolve, sep } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
-import { sagePath, sageTool } from '../src/sage.js';
+import { answerArgs, optionsOf, OTHER, sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
 
+const KEYS = ['A', 'B', 'C', 'D', 'E'];
+
 /** The pinned copy of the sage state tool (test/fixtures/sage/README.md). */
-export const FIXTURE = new URL('fixtures/sage/39e9bf767a1f/sage.mjs', import.meta.url).pathname;
+export const FIXTURE = new URL('fixtures/sage/6ea307ffa7b5/skills/sage/sage.mjs', import.meta.url).pathname;
 /**
  * The sage state tool of the tests: SAGE_TOOL when it is set, else the pinned copy. It refuses a path in the owner's real
  * ~/.claude (os.userInfo, not $HOME), for example the sage plugin's cache, so that no test depends on it.
@@ -74,7 +76,20 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
   const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', project], { env, encoding: 'utf8' }).trim();
   const statePath = join(root, 'state', 'gates.json');
+  /**
+   * The owner's answer at the terminal, `gate answer <G> <text>`, as the owner types it since T176: a key ("A"), "A. text" or the
+   * option's text is `--option <n>`; any other words are `--other-hex`, and sage keeps them as "other: <words>".
+   */
+  const typed = (id, text) => {
+    const row = table(b, 'gates').find((r) => r.id === id);
+    const options = optionsOf(row);
+    const m = /^([A-E])(?:\. (.*))?$/.exec(text);
+    const named = m ? options[KEYS.indexOf(m[1])] : undefined;
+    const picked = named !== undefined && (m[2] === undefined || m[2] === named) ? named : options.includes(text) ? text : `${OTHER}${text}`;
+    return answerArgs(row, picked);
+  };
   const sh = (...args) => {
+    if (args[0] === 'gate' && args[1] === 'answer' && args.length === 4) args = [...args.slice(0, 3), ...typed(args[2], args[3])];
     const out = run(...args);
     if (markAll && args[0] === 'gate' && args[1] === 'add') b.mark(...table(b, 'gates').map((r) => r.id));
     return out;

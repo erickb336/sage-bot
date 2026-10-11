@@ -19,6 +19,22 @@ function rows(text) {
   });
 }
 
+/** What sage puts before the owner's own words in a gate's answer, so that they never pass for one of the options. */
+export const OTHER = 'other: ';
+/** The options of a gate row, as sage numbers them (1, 2, …) and as the bridge reads them (frame). */
+export const optionsOf = (row) => row.options.split('|').map((o) => o.trim()).filter(Boolean);
+/**
+ * The arguments of `gate answer` for what gates.tsv is to hold (T176): the text of one of the row's options, as `--option <n>`,
+ * or the owner's own words after OTHER, as `--other-hex` with their UTF-8 bytes in hex. sage takes no answer text in the command.
+ * @param {{ id: string, options: string }} row  @param {string} text  @returns {string[]}
+ */
+export function answerArgs(row, text) {
+  const n = optionsOf(row).indexOf(text) + 1;
+  if (n) return ['--option', String(n)];
+  if (text.startsWith(OTHER) && text.length > OTHER.length) return ['--other-hex', Buffer.from(text.slice(OTHER.length), 'utf8').toString('hex')];
+  throw new Error(`${row.id}: ${JSON.stringify(text)} is not the text of one of its options and does not start with ${JSON.stringify(OTHER)}`);
+}
+
 /**
  * The sage state tool for one project.
  * @param {{ sagePath: string, project: string, env?: NodeJS.ProcessEnv }} o  `env` is for the tests: a scratch HOME or SAGE_HOME.
@@ -39,8 +55,11 @@ export function sageTool({ sagePath, project, env = process.env }) {
     tasks: () => table('tasks'),
     /** Every decision row, in the order sage wrote them: { at, task, decision, why }. */
     decisions: () => table('decisions'),
-    /** Records the answer of one gate. */
-    answer: (id, text) => sage('gate', 'answer', id, text),
+    /** Records the answer of one gate: `text` is what gates.tsv is to hold (answerArgs). */
+    answer: async (id, text) => {
+      const row = (await table('gates')).find((r) => r.id === id) ?? (() => { throw new Error(`gate ${id} is not in gates.tsv`); })();
+      return sage('gate', 'answer', id, ...answerArgs(row, text));
+    },
   };
 }
 

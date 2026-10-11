@@ -39,7 +39,7 @@ async function openMarker() {
   await b.post();
   await b.press(MAYA, 'press:project/G1:0:0');
   assert.deepEqual(b.writes, ['G1 A. Old page', 'G1 New page']);
-  assert.equal(b.answerOf('G1'), 'A. Old page'); // the marker of G1 is open: the owner's answer is only in decisions.tsv
+  assert.equal(b.answerOf('G1'), 'Old page'); // the marker of G1 is open: the owner's answer is only in decisions.tsv
   return b;
 }
 
@@ -47,7 +47,7 @@ test('F-T43-7: a marker on a gate that is gone from gates.tsv is cleared, and th
   const b = await openMarker();
   b.hide.add('G1');
   await b.press(MAYA, 'press:project/G2:0:0'); // one flush: the marker of G1 first, then the answer of G2
-  assert.equal(b.answerOf('G2'), 'A. Short');
+  assert.equal(b.answerOf('G2'), 'Short');
   assert.deepEqual(b.writes.slice(2), ['G2 A. Short']);
   const gone = 'G1: the gate is not in gates.tsv any more; the bridge stops its check of the owner\'s answer and writes nothing back';
   assert.deepEqual(b.lines.filter((l) => l.startsWith('G1: the gate')), [gone]);
@@ -61,7 +61,7 @@ test('F-T43-7: an error in the restore of one gate does not stop the answers of 
   const b = await openMarker();
   b.fail = 1; // the restore of G1 reads decisions.tsv first, and that read throws
   await b.press(MAYA, 'press:project/G2:0:0');
-  assert.equal(b.answerOf('G2'), 'A. Short');
+  assert.equal(b.answerOf('G2'), 'Short');
   assert.ok(b.lines.includes('the answers of project/G1 to sage failed; the bridge tries again: decisions.tsv is not readable'));
   b.now += 60_000;
   await b.bridge.loop(); // the marker of G1 is still open, and the next flush writes the owner's answer back

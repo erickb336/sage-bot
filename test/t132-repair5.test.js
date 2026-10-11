@@ -97,7 +97,7 @@ test('F-T132-21: beta is pointed at the folder gamma: the old card closes once, 
   assert.deepEqual([b.gamma.answer('G2'), b.beta.answer('G2')], ['', '']);
   await b.pressOn(fresh, 'press:beta/G2:0:1');
   await b.bridge.loop();
-  assert.deepEqual([b.gamma.answer('G2'), b.beta.answer('G2')], ['B. Drop', '']);
+  assert.deepEqual([b.gamma.answer('G2'), b.beta.answer('G2')], ['Drop', '']);
   // The gate file keeps both cards of the key beta/G2, each with its folder.
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
   assert.deepEqual(saved.entries.filter((e) => e.gate.id === 'beta/G2').map((e) => e.folder).sort(), [b.beta.folder, b.gamma.folder].sort());

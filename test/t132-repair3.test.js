@@ -104,7 +104,7 @@ test('F-T132-15: a closed card of a project that returns gets no reminder until 
   assert.deepEqual([buttons(b.discord.latest(card)), b.discord.latest(card).content, shutOf(b)], [['press:beta/G1:0:0', 'press:beta/G1:0:1'], '', undefined]);
   await b.press(MAYA, 'press:beta/G1:0:1');
   await b.bridge.loop();
-  assert.equal(await b.answerOfBeta('G1'), 'B. Blue');
+  assert.equal(await b.answerOfBeta('G1'), 'Blue');
   assert.match(b.discord.latest(card).embeds[0].description, /Blue/);
   assert.equal(contentOf(b, card), '');
 });

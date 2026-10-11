@@ -7,6 +7,7 @@ import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
+import { OTHER } from './sage.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
 import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
 import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
@@ -413,14 +414,15 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * The answers that the bridge gives sage for a settled gate: one per sage gate, as "A. option text", never for a part with a final answer.
-   * A leads-only answer ends with RECOMMENDED, so the logbook shows the leads' advice, and readOwner tells it from the owner's own "A. Yes".
+   * The answers that the bridge gives sage for a settled gate: one per sage gate, as gates.tsv holds it (T176): the option's own text,
+   * never for a part with a final answer. A leads-only answer is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
+   * not an option, so the logbook shows the leads' advice, and readOwner tells it from the owner's own "Yes".
    */
   function answersOf(id) {
     const { gate, ask } = gates.get(id);
     const { sage: ids, texts } = meta.get(id);
     if (!settled(gate, ask) || gate.outcome.status === 'withdrawn') return [];
-    const keyText = (i, key) => `${key}. ${texts[i][KEYS.indexOf(key)]}${ask.leads ? RECOMMENDED : ''}`;
+    const keyText = (i, key) => (ask.leads ? `${OTHER}${key}. ${texts[i][KEYS.indexOf(key)]}${RECOMMENDED}` : texts[i][KEYS.indexOf(key)]);
     const keys = gate.kind === 'single' ? [gate.outcome.option] : gate.parts.map((p) => p.outcome.option);
     return keys.flatMap((key, i) => (key && !ask.parts[i].final ? [[ids[i], keyText(i, key)]] : []));
   }

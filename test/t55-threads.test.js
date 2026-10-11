@@ -69,7 +69,7 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   await b.press(MAYA, 'press:project/G1:0:1');
   assert.match(cardIn(b, CHANNEL, 'Question project/G1 · T1 ').embeds[0].description, /Answered by Maya/);
   await b.bridge.loop();
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2'), b.answerOf('G3'), b.answerOf('G4')], ['B. y', 'A. x', 'B. y', 'A. x']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2'), b.answerOf('G3'), b.answerOf('G4')], ['y', 'x', 'y', 'x']);
   // G4 was settled: it stays in the deleted thread and is not posted again.
   assert.equal(shown(b, CHANNEL).filter((t) => t === 'Question project/G4 · T3 ').length, 0);
 });
@@ -198,7 +198,7 @@ test('F-T65-1: moved cards that are settled before their new post (one at the te
   await b.bridge.loop();
   assert.deepEqual(cards(b), []);
   assert.deepEqual(pings(b), []);
-  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2'), b.answerOf('G3')], ['y', 'A. x', 'A. x']);
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2'), b.answerOf('G3')], ['y', 'x', 'x']);
   b.now += 3 * HOUR; // never later either
   await b.bridge.loop();
   b.bridge = b.make();
