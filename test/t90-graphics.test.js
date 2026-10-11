@@ -43,6 +43,7 @@ test('T90: the comparison fails for an SVG changed by hand, an SVG added by hand
   const copy = tempFolder('sage-bot-assets-');
   cpSync(drawn, copy, { recursive: true }); // a copy of a clean redraw, so this test does not depend on docs/assets
   writeFileSync(join(copy, 'how-dark.svg'), readFileSync(join(copy, 'how-dark.svg'), 'utf8').replace('LEAD TALK', 'LEAD CHAT'));
+  assert.notEqual(readFileSync(join(copy, 'how-dark.svg'), 'utf8'), readFileSync(join(drawn, 'how-dark.svg'), 'utf8'));
   writeFileSync(join(copy, 'extra-light.svg'), '<svg/>');
   rmSync(join(copy, 'roles-light.svg'));
   assert.deepEqual(differences(copy, drawn), [
@@ -60,24 +61,40 @@ test('G77: the Discord symbol files are Discord\'s own, unchanged, and nothing e
   ]);
 });
 
-test('T90: the README shows each graphic in the reader\'s theme, with alt text, inside a link to its light file', () => {
+test('T90: the README shows each graphic in the reader\'s theme, inside a link to its light file, with a short alt text that is the SVG\'s own label', () => {
   // As in sage's README: the <a> line stands alone, because on the same line as <picture> GitHub drops the dark version.
+  // The alt text is the graphic's aria-label (F-T90-13): 80 to 170 characters, the main point; the text beside the graphic has the detail.
   const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
-  const names = [...new Set(readdirSync(redraw()).map((f) => f.replace(/-(light|dark)\.svg$/, '')))];
-  const missing = names.filter((name) => {
+  const drawn = redraw();
+  const names = [...new Set(readdirSync(drawn).map((f) => f.replace(/-(light|dark)\.svg$/, '')))];
+  const wrong = names.flatMap((name) => {
     const svg = (theme) => `docs/assets/${name}-${theme}\\.svg`;
-    return !new RegExp(`<a href="${svg('light')}">\\n<picture>\\n\\s*<source media="\\(prefers-color-scheme: dark\\)" srcset="${svg('dark')}">\\n\\s*<img alt="[^"]{80,}" src="${svg('light')}"[^>]*>\\n</picture>\\n</a>\\n`).test(readme);
+    const shown = new RegExp(`<a href="${svg('light')}">\\n<picture>\\n\\s*<source media="\\(prefers-color-scheme: dark\\)" srcset="${svg('dark')}">\\n\\s*<img alt="([^"]*)" src="${svg('light')}"[^>]*>\\n</picture>\\n</a>\\n`).exec(readme);
+    if (!shown) return [`${name}: not shown as a picture in a link`];
+    const labels = ['light', 'dark'].map((theme) => /aria-label="([^"]*)"/.exec(readFileSync(join(drawn, `${name}-${theme}.svg`), 'utf8'))[1]);
+    const alt = shown[1];
+    return [
+      ...labels.filter((l) => l !== alt).map(() => `${name}: the alt text differs from the SVG's aria-label`),
+      ...(alt.length < 80 || alt.length > 170 ? [`${name}: the alt text has ${alt.length} characters, not 80 to 170`] : []),
+    ];
   });
-  assert.deepEqual(missing, []);
+  assert.deepEqual(wrong, []);
 });
 
-test('T90: each text in a graphic is 7 px or more on a phone, where GitHub shows a graphic 324 px wide', () => {
-  const drawn = redraw();
-  const small = readdirSync(drawn).flatMap((f) => {
-    const svg = readFileSync(join(drawn, f), 'utf8');
+/** Each SVG file whose smallest text is under 36 in a graphic 1100 wide, with that size. */
+function tooSmall(dir) {
+  return readdirSync(dir).flatMap((f) => {
+    const svg = readFileSync(join(dir, f), 'utf8');
     const width = Number(/viewBox="0 0 ([\d.]+)/.exec(svg)[1]);
     const least = Math.min(...[...svg.matchAll(/font-size="([\d.]+)"/g)].map((m) => Number(m[1])));
-    return (least * 324) / width < 7 ? [`${f}: ${least} px in ${width}`] : [];
+    return (least * 1100) / width < 36 ? [`${f}: ${least} in ${width}`] : [];
   });
-  assert.deepEqual(small, []);
+}
+
+test('F-T90-9: each text in a graphic is 36 or more in 1100, so about 10.5 px or more where a phone shows it 320 px wide', () => {
+  assert.deepEqual(tooSmall(redraw()), []);
+  // The check fails for one label of 35 in a copy of a clean redraw.
+  const copy = redraw();
+  writeFileSync(join(copy, 'roles-dark.svg'), readFileSync(join(copy, 'roles-dark.svg'), 'utf8').replace('font-size="36"', 'font-size="35"'));
+  assert.deepEqual(tooSmall(copy), ['roles-dark.svg: 35 in 1100']);
 });

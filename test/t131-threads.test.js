@@ -574,3 +574,14 @@ test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, i
   const elsewhere = { ...button(STOP), guildId: '200000000000000002' }; // another guild gets nothing
   assert.equal(on.interaction(elsewhere), undefined);
 });
+
+test('F-T90-15: a mention with gates or questions gets the open questions in its thread, as /sage gates does', async (t) => {
+  const b = world(t);
+  for (const ask of ['<@1> gates', '<@1> any open questions?', '<@1> QUESTIONS']) {
+    const [[thread, content]] = await b.say(MAYA, ask);
+    assert.equal(b.place.threads.get(thread).name, ask.slice(5));
+    assert.equal(content, 'project has no open questions.');
+  }
+  assert.equal(b.threads().length, 3);
+  assert.deepEqual(await b.cmd(MAYA, 'gates'), ['project has no open questions.']); // the same answer as the slash form
+});

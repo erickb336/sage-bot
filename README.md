@@ -1,7 +1,7 @@
 <a href="docs/assets/hero-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-  <img alt="sage-bot: ask sage from your team's Discord. Mention @sage-bot, and each mention opens its own thread. A flow of three nodes: Discord, your server, sends an ask to sage-bot on the owner's Mac, which reads sage's logbook. Two roles: sage-apprentice reads and asks; sage-lead also decides and stops. Discord is a trademark of Discord Inc. sage-bot is not affiliated with Discord." src="docs/assets/hero-light.svg" width="100%">
+  <img alt="sage-bot: mention @sage-bot in Discord, and it answers from sage's logbook on the owner's Mac. A sage-apprentice reads and asks; a sage-lead also breaks ties and stops." src="docs/assets/hero-light.svg" width="100%">
 </picture>
 </a>
 
@@ -9,7 +9,6 @@
 
 <p align="center">
   <a href="https://github.com/erickb336/sage-bot/actions/workflows/check.yml"><img alt="check" src="https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg"></a>
-  <img alt="Node 24 or later" src="https://img.shields.io/badge/node-%E2%89%A524-555">
 </p>
 
 **Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) · [Roles](#roles) · [What to say](#what-to-say) · [Safety](#safety) · [Set up a live trial](#set-up-a-live-trial) · [Concepts](#concepts) · [FAQ](#faq) · [Under the hood](#under-the-hood) · [Credits](#credits)
@@ -20,14 +19,22 @@
 
 You need Node 24 or later and the [sage](https://github.com/erickb336/sage) plugin in Claude Code. You do not need a Discord account, an app or a token for the demo.
 
-**1. Install** (in the sage-bot folder):
+**1. Get the code:**
+
+<!-- check: skip, the test runs in a copy of this folder -->
+```sh
+git clone https://github.com/erickb336/sage-bot.git
+cd sage-bot
+```
+
+**2. Install** (in the sage-bot folder):
 
 <!-- check: run -->
 ```sh
 npm ci
 ```
 
-**2. Play the demo:**
+**3. Play the demo:**
 
 <!-- check: run, prints "Page: " -->
 ```sh
@@ -36,12 +43,12 @@ npm run demo
 
 The demo plays one sage session from start to end, with sample people and a scripted clock, on a fake Discord. It uses the real sage state tool, the real hook and the real bridge. It prints each step and the path of one HTML page.
 
-**3. Open the page.** It shows the session's thread, each card at its final state, the private notes that each person sees, and the answers that sage got. The page is `sage-bot-demo.html` in your temp folder. The [reference](docs/reference.md#the-demo) gives the demo's options.
+**4. Open the page.** Open the path that the demo prints after `Page:`. The page shows the session's thread, each card at its final state, the private notes that each person sees, and the answers that sage got. The [reference](docs/reference.md#the-demo) gives the demo's options.
 
 <a href="docs/assets/tip-mention-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tip-mention-dark.svg">
-  <img alt="The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again inside the thread to go on." src="docs/assets/tip-mention-light.svg" width="100%">
+  <img alt="The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on." src="docs/assets/tip-mention-light.svg" width="100%">
 </picture>
 </a>
 
@@ -52,7 +59,7 @@ To connect a real Discord server, follow [Set up a live trial](#set-up-a-live-tr
 <a href="docs/assets/how-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-dark.svg">
-  <img alt="How sage-bot works, in three rows across Discord, sage-bot (the bridge on the owner's Mac) and sage. 1, a read ask: a mention such as @sage-bot board goes to the bridge, which checks the role and the hourly limit and reads sage's logbook, read only; the answer goes into a new thread. 2, a team vote: sage marks a question, the bridge posts a card, the team presses, and only the chosen option goes back to sage. 3, a sage-lead's talk: the bridge records it in the lead log and #sage-audit; a bridge session with sage is not built yet (T159). Today, no Discord text reaches sage as an instruction." src="docs/assets/how-light.svg" width="100%">
+  <img alt="How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the lead log." src="docs/assets/how-light.svg" width="100%">
 </picture>
 </a>
 
@@ -69,7 +76,7 @@ The bridge only reads the logbook, and it changes it only through the sage state
 <a href="docs/assets/threads-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/threads-dark.svg">
-  <img alt="A mention opens a thread, with sample data. In the registered channel #ask-sage, Maya, an apprentice, writes @sage-bot board, and sage-bot opens a public thread named board with the answer. Inside the thread she writes @sage-bot T7 and gets that task. Jon, a sage-lead, writes @sage-bot talk; that opens a lead thread, where sage-bot replies that his message is recorded in the lead log and that sessions with sage are not on yet." src="docs/assets/threads-light.svg" width="100%">
+  <img alt="Sample data: each mention of @sage-bot in a registered channel opens its own thread, and a mention inside that thread continues it." src="docs/assets/threads-light.svg" width="100%">
 </picture>
 </a>
 
@@ -83,7 +90,7 @@ The bridge only reads the logbook, and it changes it only through the sage state
 <a href="docs/assets/roles-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/roles-dark.svg">
-  <img alt="The two roles. sage-apprentice reads and asks: the board, one task, the open questions, the shared graphics and PDFs, and answers and votes on team questions. Time left is not estimated yet. sage-lead can do everything an apprentice can, plus: break a tie or end a vote early; recommend on the autopilot question, where the owner decides; unregister a channel; and turn off the link from Discord to sage. Instructing sage, write operations and build sessions are not built yet (T159). A member with no role gets no answer." src="docs/assets/roles-light.svg" width="100%">
+  <img alt="The two roles: a sage-apprentice reads and asks; a sage-lead can also break ties, end votes early, unregister a channel and turn off the link to sage." src="docs/assets/roles-light.svg" width="100%">
 </picture>
 </a>
 
@@ -128,11 +135,11 @@ A mention that names none of these words gets a reply that lists them.
 | Turn off the link from Discord to sage | `/sage stop`, then the confirm button within 10 minutes |
 | Talk to sage | `@sage-bot talk …`: recorded in the lead log only, until bridge sessions come with T159 |
 
-**As the owner, at the terminal** (in the sage-bot folder):
+**As the owner, at the terminal** (in the sage-bot folder). These commands read the bridge's config, `~/.config/sage-bot/config.json`: make it first with the [setup guide](docs/setup.md#the-checklist), step 3.
 
 | You want to | Run this |
 | --- | --- |
-| Send a question to the team | `node scripts/vote.mjs G42` in the project's folder |
+| Send a question to the team | `node scripts/vote.mjs --project <project> G42` |
 | Register a channel for a project (stop the bridge first) | `node scripts/channels.mjs register <channel id> <project>` |
 | See if the link from Discord to sage is on | `node scripts/leads.mjs status` |
 | Turn the link on again | `node scripts/leads.mjs restore` |
@@ -145,7 +152,7 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 <a href="docs/assets/safety-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/safety-dark.svg">
-  <img alt="The guardrails. On now, for every ask: roles and registered channels; an hourly limit of 10 asks for each person; no AI reads Discord text; the lead log, hash-chained and copied to #sage-audit; and the kill switch, which only the owner turns back on. For bridge sessions, not on yet (T159): the sandbox settings, built, which are the guarantee (G44 A); the guard hook, built, and the broker, coming in T158, whose verbs never merge; and a spend cap, built, of 5 dollars of model use for each bridge session." src="docs/assets/safety-light.svg" width="100%">
+  <img alt="The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
 </picture>
 </a>
 
@@ -167,7 +174,7 @@ A bridge session will be a headless `claude -p` session that sage-bot starts for
 - **The broker** (not built: T158) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges (F-T134-1).
 - **A spend cap** (built): the bridge policy starts each session with `--max-budget-usd 5`.
 
-A text hook never guarantees a file or network boundary; only the sandbox does (G44 A). `npm run proof` checks the sandbox settings, and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-proof-of-the-sandbox) lists each row.
+A text hook never guarantees a file or network boundary; only the sandbox does (G44 A). `npm run proof` checks the sandbox settings (it needs the `claude` command on PATH), and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-proof-of-the-sandbox) lists each row.
 
 ## Set up a live trial
 
@@ -193,7 +200,7 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 | **The owner** | The person who runs sage at the terminal. The owner's answer is always final. |
 | **The bridge** | sage-bot's service on the owner's Mac: `scripts/bridge.mjs`. |
 | **sage-apprentice** | The Discord role that reads and asks, and answers and votes. |
-| **sage-lead** | The Discord role that can do everything an apprentice can, and also decides ties and stops the link. |
+| **sage-lead** | The Discord role that can do everything an apprentice can, and also breaks ties and stops the link. |
 | **Registered channel** | A channel where sage-bot works, for one project. Only the owner registers one. |
 | **Answer thread** | A thread that a mention opens. sage-bot answers read asks there. |
 | **Lead thread** | A thread that a sage-lead's "talk" opens. Each message there goes into the lead log. |
