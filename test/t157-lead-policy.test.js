@@ -61,6 +61,15 @@ test('F-T157-20: with a scratch HOME, the owner\'s real ~/.claude (plugin cache,
   assert.ok(!settings.sandbox.filesystem.allowRead.some((a) => a.startsWith('/o/')));
 });
 
+test('F-T173-1: the lead sessions\' shared Claude config folder (every session\'s CLAUDE_CONFIG_DIR, with their transcripts) is a credential file and a denied path', () => {
+  const settings = settingsOf(leadPolicy(CONFIG, 's1', HOST));
+  const claudeDir = '/h/.local/share/sage-bot/leads/claude';
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === claudeDir && f.mode === 'deny'), settings.sandbox.credentials.files.map((f) => f.path).join(' '));
+  for (const list of [settings.sandbox.filesystem.denyRead, settings.sandbox.filesystem.denyWrite]) assert.ok(list.includes(claudeDir), list.join(' '));
+  for (const rule of [`Read(/${claudeDir})`, `Read(/${claudeDir}/**)`]) assert.ok(settings.permissions.deny.includes(rule), rule);
+  assert.equal(launchOf(leadPolicy(CONFIG, 's1', HOST), {}).env.CLAUDE_CONFIG_DIR, claudeDir); // the folder that the credential deny names is the one every session uses
+});
+
 test('F-T157-11: the owner\'s ~/.claude.json (MCP configs, account data) is a credential file, in $HOME and in the owner\'s home folder', () => {
   const policy = leadPolicy(CONFIG, 's1', { ...HOST, owner: '/o' });
   const files = settingsOf(policy).sandbox.credentials.files;
