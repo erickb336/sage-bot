@@ -102,10 +102,13 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
 /** The option key of an answer in sage: sage keeps the option's own text (`gate answer --option <n>`, T176), else undefined. */
 const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
 /**
- * An answer that the bridge wrote before T176, "A. text" (with RECOMMENDED after it for a leads-only gate): the owner cannot type it
- * since then (sage takes an option number or the owner's own words, kept as "other: …"), so it never counts as the owner's.
+ * An answer in sage that only the bridge writes, never the owner: the form before T176, "A. text" (with RECOMMENDED after it for a
+ * leads-only gate), and a leads-only recommendation of today, "other: A. Yes" with RECOMMENDED after it. The owner picks an option by
+ * its number or types own words, kept as "other: <words>" (sage never lets an option read as "other:"), so neither is the owner's.
+ * Checked only after optionOf found no option: an option may itself read "A. Yes" (F-T176-1).
  */
-const oldForm = (said, texts) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${RECOMMENDED}`);
+const bridgeWrote = (said, texts) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${RECOMMENDED}`)
+  || (said.startsWith(OTHER) && said.endsWith(RECOMMENDED));
 
 /**
  * The gate rows of one task in groups of the questions that the task asked together: sorted by `at`, a group starts at its first row
@@ -446,8 +449,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         // A gate with an open check of the trail waits for it: the answer in sage may be the bridge's write back of an older owner answer.
         if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || m.restore?.[sageId]) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
-        if (oldForm(said, m.texts[i])) continue; // a write of the bridge before T176, never the owner's
         const option = optionOf(said, m.texts[i]);
+        if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a leads' recommendation), never the owner's
         if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
         const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');
         const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };
