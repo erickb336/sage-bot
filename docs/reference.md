@@ -624,7 +624,7 @@ node scripts/session.mjs thread aaaaaaaa-0000-4000-8000-000000000052
 | The guard hook | A second layer, by the text of each call. It cannot see what a script that the session writes does when it runs. Which tools run; which commands, subcommands and options a Bash call names; one simple command per call, or allowed commands joined by `&&`; the rephrase hints; as a second layer, no Bash call or file write that names the sage state tool (the class rules below); no write to a settings file or folder; no Keychain front end; no agent with an isolation field; WebFetch only to a URL whose host, as text, is a public name or a global unicast address (a name that resolves to a local address passes). | T133 (this hook) |
 | The Claude Code sandbox | Every Bash command and every process that it starts (`node`, `npm` scripts, git hooks, subagents: F-T134-16): it fails closed (F-T134-15); reads only in the working folder (`blockReadsOutsideWorkingDirectories`, F-T134-16); writes only in the worktree and the session's own scratch folder (F-T134-13); the sage plugin folder and every logbook denied, which is the guarantee that a bridge session cannot run or change the state tool (test F-T134-6 proves that each known bypass fails there; F-T134-12 denies each of those paths again where a wider rule opens it); secret files denied (F-T134-15); a strict list of hosts, with no GitHub (`allowedDomains` with `strictAllowlist: true`, F-T156-20); the GitHub token variables removed (F-T134-1). No command of the session runs outside it: the broker is MCP tools in the sage-bot process, not a command (G57 A, T158). The sage state tool never runs outside it for a bridge session (G30 A, F-T134-6). | Step 6 (T134) |
 | The permission rules | The Read, Edit and Write tools, which the sandbox does not cover: Read denied for secret files (F-T134-15); Read and Glob denied on every denied path; Edit and Write only in the session folder and its scratch folder; the Grep tool denied (F-T134-16). WebFetch: the session policy (T156) denies the WebFetch tool while the host list is empty, and else allows `WebFetch(domain:<host>)` for each host on the list only; the hook checks the host text in the URL as a second layer. | Step 6 (T134), T156 |
-| The broker: the sage-bot MCP tools of the session | GitHub: a fetch, an upload to the session's own branch, and the session's own pull request (create, edit, view); a few fixed logbook verbs, with the project fixed (F-T134-6). Nothing that merges (F-T134-1). The tools run in the sage-bot process (Claude Agent SDK, G57 A), which holds the GitHub credential of a dedicated GitHub identity (G58 a); the session has no GitHub host and no token. | Step 6 (T134, T158); owner decision G28 A (the broker) |
+| The broker: the sage-bot MCP tools of the session | GitHub: a fetch, an upload to the session's own branch, and the session's own pull request (create, edit, view); see "The broker" below. Nothing that merges (F-T134-1). A few fixed logbook verbs, with the project fixed (F-T134-6), come with a follow-up task. The tools run in the sage-bot process (Claude Agent SDK, G57 A), which holds the GitHub credential of a dedicated GitHub identity (G58 a); the session has no GitHub host and no token. | The GitHub verbs: T158 (`src/broker.js`); T159 wires them into a session; owner decision G28 A (the broker) |
 
 `autoAllowBashIfSandboxed` makes permission allow rules useless as a Bash allow-list, so the hook keeps that job.
 
@@ -727,7 +727,7 @@ The guarantee is the sandbox of T134: it denies the sage plugin folder and every
 - A secret file whose name matches none of the sandbox's secret patterns.
 - Damage inside the session's own folders: `rm -rf` of the worktree or the scratch folder, `git checkout` over uncommitted work.
 - A host name on the sandbox's list that resolves to another address, and WebFetch to a host name that resolves to a local address (DNS rebinding): the hook checks the name in the URL, not the address. T134 adds the WebFetch permission rule (T156).
-- What the broker uploads: the broker must allow only the session's own branch and pull request.
+- What the broker uploads: the broker allows only the session's own branch and pull request ("The broker" below, T158). The GitHub identity that T161 makes must be limited to `sage-lead/*` branches too, so that GitHub refuses a push to any other branch.
 - A copy of the state tool under another name, made without its name (a `cp -r` of its folder, then a name that the hook does not know), a script that builds the name or reads it from a folder listing, and any other spelling that the class rules miss: the sandbox, which denies the sage plugin folder and the logbooks, holds them (F-T134-6).
 - A hook that runs past its timeout: Claude Code then runs the tool call (F-T134-13). The hook's own deadline of 5 seconds, which also covers the read of stdin, writes a deny long before the 30-second timeout (F-T133-62, F-T134-5); only a `node` that does not start in 30 seconds gets past it.
 
@@ -776,7 +776,7 @@ The denied paths:
 
 These paths stay denied by name also when they are in the home folder, because some can be outside it.
 
-**Git in a session folder.** Host-side git must never run in a session folder: not a sage hook, not the bridge, not the owner. A session can change files that git reads at its next start, so a git command outside the sandbox there can run the session's code (F-T134-3, F-T156-13). The broker copies commits out of the folder into a repository of its own, with hooks off (PR 3 of T134). The sandbox side, `gitControl` in `src/session-policy.js`, is a second layer:
+**Git in a session folder.** Host-side git must never run in a session folder: not a sage hook, not the bridge, not the owner. A session can change files that git reads at its next start, so a git command outside the sandbox there can run the session's code (F-T134-3, F-T156-13). The broker copies the commits' object files out of the folder into a repository of its own, with hooks off (`src/broker.js`, T158; "The upload, step by step" below). The sandbox side, `gitControl` in `src/session-policy.js`, is a second layer:
 
 | Denied write | What it stops |
 | --- | --- |
@@ -843,6 +843,37 @@ node scripts/session-policy.mjs preflight             # bridge sessions: ready, 
 ```sh
 node scripts/session-policy-mutations.mjs             # KILLED, SURVIVED or INVALID for each mutation; exit 1 unless all are killed
 ```
+
+## The broker
+
+Status: the GitHub verbs are built and tested against a fake GitHub; no session uses them yet (T158, T134 PR 3). T159 wires them into a bridge session as in-process MCP tools of the Claude Agent SDK (G57 A). The logbook verbs (G30 A) are not built: a follow-up task adds them.
+
+`src/broker.js` is the only way a bridge session reaches GitHub (G28 A). `createBroker({ policy, github, token, workDir })` takes the session policy of one session (`sessionPolicy`), the repository (`owner`, `repo`), a function that gives the token of the broker's own GitHub identity (G58 a: a GitHub App or machine account that T161 makes, never the owner's `gh` login), and a folder of the broker outside every session folder. `scopeOf` resolves, in one place, the session, its branch `sage-lead/s<n>`, its folders and the repository (standing order 15).
+
+`broker.call(verb, input)` answers `{ ok: true, … }` or `{ ok: false, refused: "<one line>. The broker did nothing more." }`. A verb that is not in the table, an input that is not an object, a key that is not in the verb's row, and any error refuse (fail closed). No verb takes a branch, a ref or a base other than `main`.
+
+| Verb | Input | What it does on GitHub |
+| --- | --- | --- |
+| `fetch` | none | Reads only. It gets `main` and the session's branch into a new bare repository of the broker, and writes them as a git bundle, a new file in the session's temp folder (opened with `O_EXCL`, so never through a link). It answers the two commit ids and the bundle's path |
+| `upload` | `commit`: the 40-character id of the session's commit | Pushes the session's commits after `main`, made again with the fixed identity, to `sage-lead/s<n>` by fast-forward only (no `+`, no deletion, no other ref) |
+| `pr_create` | `title`, `body`, `draft` | Opens the session's one pull request: head `sage-lead/s<n>`, base `main`. A second one is refused |
+| `pr_edit` | `title`, `body`, `number`, `base` | Changes the title or the body of the session's own pull request. `number`, when given, must be its number; `base`, when given, must be `main` |
+| `pr_view` | `number` | Gives the session's own pull request: number, link, state, draft, title, body, head and base |
+
+The broker finds the session's pull request by its head: GitHub's list for `<owner>:sage-lead/s<n>`. When the list holds a pull request of another branch or repository, or more than one, the broker refuses. Nothing merges, approves, closes, changes a base or a branch rule, or deletes.
+
+**The upload, step by step.** Host-side git never runs in a session folder ("Git in a session folder" above).
+
+1. The broker makes a new bare repository in its own folder. Every git call has `--git-dir` of that repository, its folder as the working folder, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `core.hooksPath=/dev/null`, `core.fsmonitor=false` and no credential helper. The token goes only into an `http.https://github.com/.extraheader` variable of the environment (`GIT_CONFIG_COUNT`), never into an argument or a URL.
+2. It copies the object files of the session's `.git/objects` into that repository as plain files: only the names of loose objects (`xx/<38 hex>`) and packs (`pack/pack-<40 hex>.pack` and `.idx`), so no `info/alternates`. A link, a FIFO or any other file that is not a regular file is refused (`O_NOFOLLOW`, `O_NONBLOCK`), and so is a `.git` or `objects` that is not a real folder. At most 100,000 files and 512 MB.
+3. `git fsck --strict` checks every copied object. Then the broker fetches `main` and the session's branch from GitHub.
+4. It lists the commits of `commit` that `main` does not have. It refuses a merge, a commit with no parent, more than 500 commits, a change to any path under `.github` (workflows run with the repository's rights), and a commit message with a character outside the text allow-list.
+5. It makes each commit again with `git commit-tree`: the same tree, message and dates, the fixed identity `sage-lead (via sage-bot) <sage-lead@sage-bot.invalid>` (G62 a) and the new parent. The same commits give the same ids, so a second upload is a fast-forward of the first.
+6. When the session's branch exists, the new head must contain it (`merge-base --is-ancestor`); else it refuses. Then `git push <remote> <head>:refs/heads/sage-lead/s<n>`, and the broker removes its repository.
+
+**The text allow-list.** People on GitHub read a pull request's title and body and each commit message. The broker allows letters, marks, digits, punctuation, symbols, the space and (in a body or a message) the newline, and no default-ignorable character; any other character refuses the call with its code point (standing order 12). A title has at most 200 characters, a body 60,000, a message 20,000. The text that `pr_view` gives back to the session's model passes the same allow-list, with each other character as a space.
+
+**The tests.** `test/t158-broker.test.js` plays session `s1` with a local bare repository as GitHub's git and `src/fake-github.js` as its REST API. They show: an upload lands on `sage-lead/s1` only, with the fixed identity, and leaves `main`, `sage-lead/s2` and the tag `v1` as they were; a branch, ref, force or delete key, a ref name as `commit`, a rewritten history, a merge, a `.github` change and a hidden character are refused; host git never runs with the session folder as its working folder or git folder, and a hook and an fsmonitor that the session plants never run (the control: the same hook runs when git runs in the folder); a link in `.git/objects` is refused; `fetch` changes no ref and makes no REST call; a pull request of another session, a merge, an approve, a base other than `main` and a second pull request are refused. A sweep over every Unicode code point checks the text allow-list.
 
 ## The proof of the sandbox
 

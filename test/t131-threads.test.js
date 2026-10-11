@@ -339,8 +339,9 @@ test('T131: the lead-text cleaner keeps newlines and printable characters, maps 
 test('T131 dry run: no code in src/ can start a claude session; only the known tools run as child processes', () => {
   const src = join(ROOT, 'src');
   const users = readdirSync(src).filter((f) => /child_process/.test(readFileSync(join(src, f), 'utf8'))).sort();
-  // the Keychain tool, the session policy's preflight (T156), git (a folder in git, as the state tool asks), the sage state tool (node), /bin/ps
-  assert.deepEqual(users, ['discord.js', 'projects.js', 'sage.js', 'session-policy.js', 'state.js']);
+  // the broker's git in its own repositories (T158), the Keychain tool, the session policy's preflight (T156), git (a folder in git, as
+  // the state tool asks), the sage state tool (node), /bin/ps
+  assert.deepEqual(users, ['broker.js', 'discord.js', 'projects.js', 'sage.js', 'session-policy.js', 'state.js']);
   for (const f of readdirSync(src).filter((x) => x !== 'session-policy.js')) assert.ok(!/['"`]claude['"`]|\/claude\b|spawn\(/.test(readFileSync(join(src, f), 'utf8')), `${f} names a claude process or a spawn`);
   // The session policy runs claude only for `sandbox status` (its preflight), never a session: launchOf only returns the command.
   const policy = readFileSync(join(src, 'session-policy.js'), 'utf8');

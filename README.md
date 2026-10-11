@@ -171,7 +171,7 @@ A bridge session will be a headless `claude -p` session that sage-bot starts for
 
 - **The sandbox settings** (built and tested) are the guarantee (G44 A). They allow no GitHub host (F-T134-1), and they deny the sage plugin folder, every logbook (F-T134-6) and the secret files (F-T134-15).
 - **The guard hook** (built and tested) is a second layer. It allows only the commands on its allow-list.
-- **The broker** (not built: T158) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges (F-T134-1).
+- **The broker** (built in T158, not used by a session until T159) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges (F-T134-1).
 - **A spend cap** (built): the bridge policy starts each session with `--max-budget-usd 5`.
 
 A text hook never guarantees a file or network boundary; only the sandbox does (G44 A). `npm run proof` checks the sandbox settings (it needs the `claude` command on PATH), and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-proof-of-the-sandbox) lists each row.

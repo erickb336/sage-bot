@@ -2,11 +2,11 @@
 // in-process fake REST API (src/fake-github.js). No network, no real token: SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBroker, IDENTITY, runGit, textOf } from '../src/broker.js';
 import { fakeGitHub, samplePull } from '../src/fake-github.js';
+import { execFileSync } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
 
 const TOKEN = 'sample-token-not-real';
