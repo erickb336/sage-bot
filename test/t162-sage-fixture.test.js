@@ -3,9 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { execFileSync, FIXTURE, SAGE, spawnSync, testSage } from './bridge-setup.js';
 
 test('with SAGE_TOOL unset, the tests use the pinned copy, and it is the version that its README names', () => {
@@ -19,7 +20,7 @@ test('with SAGE_TOOL unset, the tests use the pinned copy, and it is the version
 });
 
 test('the pinned copy runs in a scratch HOME and SAGE_HOME and writes its logbook only there', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t162-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t162-'));
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
@@ -35,7 +36,7 @@ test('SAGE_TOOL in the owner\'s real ~/.claude, such as the sage plugin cache, i
     assert.throws(() => testSage({ SAGE_TOOL: path }), {
       message: `SAGE_TOOL is ${path}, in the owner's ${owner}/: the tests use the pinned copy ${FIXTURE}, or a copy outside it.` });
   }
-  const copy = join(mkdtempSync(join(tmpdir(), 'sage-bot-t162-tool-')), 'sage.mjs');
+  const copy = join(tempFolder('sage-bot-t162-tool-'), 'sage.mjs');
   copyFileSync(FIXTURE, copy);
   assert.equal(testSage({ SAGE_TOOL: copy }), copy);
 });

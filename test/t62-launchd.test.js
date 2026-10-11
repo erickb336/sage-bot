@@ -3,9 +3,9 @@
 // SAMPLE DATA ONLY. Every file is in a scratch folder; nothing writes into ~/Library or runs launchctl.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { stableNode } from '../src/launchd.js';
 import { spawnSync } from './bridge-setup.js';
 
@@ -16,7 +16,7 @@ const OLD = '<plist>the working plist</plist>\n';
 
 /** Runs launchd.mjs with a config and --out <dir>/com.sage.bot.plist, where that file holds OLD at the start. */
 function launchd(config, t) {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-t62-'));
+  const home = tempFolder('sage-bot-t62-');
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const path = join(home, 'config.json');
   const out = join(home, 'com.sage.bot.plist');
@@ -55,7 +55,7 @@ test('a Discord id field that is not 17 to 20 digits is refused, as the bridge r
 });
 
 test('without --out, the plist goes to stdout as before', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-t62-'));
+  const home = tempFolder('sage-bot-t62-');
   try {
     writeFileSync(join(home, 'config.json'), JSON.stringify(SAMPLE));
     const r = spawnSync(process.execPath, [join(ROOT, 'scripts/launchd.mjs'), join(home, 'config.json')], { encoding: 'utf8', env: { ...process.env, HOME: home } });
@@ -78,7 +78,7 @@ test('an old Cellar node after an upgrade: the message names the current node, n
 });
 
 test('preview.mjs --out writes the page there and leaves design/b2 in the repo as it was', () => {
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-t62-'));
+  const home = tempFolder('sage-bot-t62-');
   const repoPage = join(ROOT, 'design/b2/index.html');
   const before = statSync(repoPage).mtimeMs;
   try {

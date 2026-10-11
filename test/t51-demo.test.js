@@ -3,14 +3,14 @@
 // SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { execFileSync, SAGE, spawnSync } from './bridge-setup.js';
 
 const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
 function demo() {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t51-'));
+  const root = tempFolder('sage-bot-t51-');
   const out = join(root, 'demo.html');
   const env = { PATH: process.env.PATH, HOME: root, SAGE_TOOL: SAGE };
   const said = execFileSync(process.execPath, [DEMO, '--out', out], { env, encoding: 'utf8' });
@@ -68,8 +68,24 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
 });
 
+test('the demo removes its scratch folder at the end and keeps one page: <TMPDIR>/sage-bot-demo.html with no --out, else the --out path (T57)', () => {
+  const root = tempFolder('sage-bot-t51-tmp-');
+  const env = { PATH: process.env.PATH, HOME: root, TMPDIR: root, SAGE_TOOL: SAGE };
+  const fixed = join(root, 'sage-bot-demo.html');
+  const said = execFileSync(process.execPath, [DEMO], { env, encoding: 'utf8' });
+  assert.match(said, new RegExp(`\nPage: ${fixed}\n`));
+  assert.deepEqual(readdirSync(root), ['sage-bot-demo.html']); // the page stays; the scratch folder went
+  assert.match(readFileSync(fixed, 'utf8'), /Sample data\. Fake Discord\. No bot, no token\./);
+  execFileSync(process.execPath, [DEMO], { env, encoding: 'utf8' });
+  assert.deepEqual(readdirSync(root), ['sage-bot-demo.html']); // a second run overwrites the same page
+  const out = join(root, 'kept', 'demo.html');
+  execFileSync(process.execPath, [DEMO, '--out', out], { env, encoding: 'utf8' });
+  assert.deepEqual(readdirSync(root), ['kept', 'sage-bot-demo.html']); // the --out page's folder stays; the scratch folder went
+  assert.deepEqual(readdirSync(join(root, 'kept')), ['demo.html']);
+});
+
 test('a bad --out fails at once with a clear message, before anything runs (F-T51-5)', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t51-out-'));
+  const root = tempFolder('sage-bot-t51-out-');
   writeFileSync(join(root, 'a-file'), 'x');
   const env = { PATH: process.env.PATH, HOME: root, TMPDIR: root, SAGE_TOOL: SAGE };
   const bad = spawnSync(process.execPath, [DEMO, '--out', join(root, 'a-file', 'demo.html')], { env, encoding: 'utf8' });
@@ -85,7 +101,7 @@ test('a bad --out fails at once with a clear message, before anything runs (F-T5
 
 test('the sage tool lookup: SAGE_TOOL first, then the newest version in the plugin cache, then a message that names SAGE_TOOL (F-T51-4)', async () => {
   const { sagePath } = await import('../src/sage.js');
-  const home = mkdtempSync(join(tmpdir(), 'sage-bot-t51-home-'));
+  const home = tempFolder('sage-bot-t51-home-');
   const tool = (version, sec) => {
     const dir = join(home, '.claude', 'plugins', 'cache', 'sage', 'sage', version, 'skills', 'sage');
     mkdirSync(dir, { recursive: true });

@@ -4,10 +4,10 @@
 // copies of the sage state tool (test/fixtures/sage/<version>/sage.mjs, sage's own text, kept byte for byte, T162) are left out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempFolder } from './temp-folder.js';
 import { execFileSync } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -31,7 +31,7 @@ test('T97: no text of the repository says "chief"; sage-bot says "sage" for the 
 });
 
 test('T97: the check finds every form of the word in every text file, and skips only binary files, itself and the pinned sage tool', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sage-bot-t97-'));
+  const root = tempFolder('sage-bot-t97-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   const files = {
     'a.md': 'Ask the chiefs.\n',

@@ -2,13 +2,13 @@
 // Each bridge here is a child process that takes the lock with src/state.js lock(), as scripts/bridge.mjs does.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { execFileSync, spawn, spawnSync } from './bridge-setup.js';
 
 const state = new URL('../src/state.js', import.meta.url).href;
-const gatesIn = (dir) => { const path = join(mkdtempSync(join(tmpdir(), `sage-bot-${dir}-`)), 'state', 'gates.json'); mkdirSync(join(path, '..'), { recursive: true }); return path; };
+const gatesIn = (dir) => { const path = join(tempFolder(`sage-bot-${dir}-`), 'state', 'gates.json'); mkdirSync(join(path, '..'), { recursive: true }); return path; };
 /** Runs `code` in a child after `before` and the import of lock; gives what it printed: its stdout, or "lost: " and the error. */
 const node = (code, before = '') => {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `${before}

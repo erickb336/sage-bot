@@ -5,9 +5,10 @@
 // execFileSync from here, which give each child SAGE_TOOL (testEnv), so that a script that looks for sage (scripts/demo.mjs) gets the
 // tests' copy and never the owner's plugin cache (F-T162-2). t162-sage-fixture.test.js checks that no other test file imports it.
 import * as cp from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { sagePath, sageTool } from '../src/sage.js';
@@ -67,7 +68,7 @@ export const key = (id) => `${NAME}/${id}`;
  * the G13 tests pass `markAll: false` and mark gates with `b.mark`.
  */
 export function setup({ members = MEMBERS, markAll = true } = {}) {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-b3-'))); // the folder as the disk spells it, as loadProjects resolves it
+  const root = realpathSync.native(tempFolder('sage-bot-b3-')); // the folder as the disk spells it, as loadProjects resolves it
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };

@@ -4,15 +4,15 @@
 // folders that the lead sessions own. SAMPLE DATA ONLY: every path is in a new scratch folder or does not exist, and no session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { CLAUDE_TMP_MAX, leadPolicy } from '../src/lead-policy.js';
 import { canonicalPath } from '../src/sage.js';
 
 const CORPUS = JSON.parse(readFileSync(new URL('path-shapes.json', import.meta.url), 'utf8'));
 const within = (inner, outer) => { const rel = relative(outer, inner); return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)); };
-const scratch = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t156-shapes-')));
+const scratch = () => realpathSync.native(tempFolder('sage-bot-t156-shapes-'));
 /** A folder of all temp folders that does not exist and is short: a scratch one is longer than CLAUDE_TMP_MAX allows (F-T156-35). */
 const TEMPS = '/st/sage-lead';
 /** The config, environment and host of one case below `root`, with nothing in a denied path; `set` puts one key's value in. */
