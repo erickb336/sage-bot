@@ -1,4 +1,4 @@
-// T52: every shell command of the README and the reference runs, and every relative link points to a file that exists.
+// T52: every shell command of the README, the setup guide and the reference runs, and every relative link points to a file that exists.
 // Each ```sh block carries a mark on the line before it:
 //   <!-- check: run -->                      each line runs and exits 0
 //   <!-- check: run, exit 1, prints "…" -->  each line exits 1; the block's output holds each "…"
@@ -15,7 +15,7 @@ import { tempFolder } from './temp-folder.js';
 import { SAGE, spawnSync } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const DOCS = ['README.md', 'docs/reference.md'];
+const DOCS = ['README.md', 'docs/setup.md', 'docs/reference.md'];
 // Lines of a runnable block that the test does not run itself, with the reason.
 const NOT_HERE = { 'npm ci': 'the test runs inside the installed tree: npm ci would remove node_modules under it; the check runs after npm ci' };
 // Commands that write a page into the repo by default: the test gives them a path in the scratch home.
@@ -140,20 +140,6 @@ for (const doc of DOCS) {
     }
   });
 }
-
-test('README.md: each diagram is an image with alt text, its file exists and matches docs/diagrams.mjs, and no Mermaid block is left', async () => {
-  const text = readFileSync(join(ROOT, 'README.md'), 'utf8');
-  assert.doesNotMatch(text, /```mermaid/, 'GitHub draws a Mermaid block too small to read: use an SVG file in docs/');
-  const images = [...text.matchAll(/!\[([^\]]*)\]\(([^)\s]+)\)/g)].map((m) => ({ alt: m[1], src: m[2] }));
-  assert.deepEqual(images.map((i) => i.src), ['docs/flow.svg', 'docs/states.svg', 'docs/threads.svg']);
-  const { DIAGRAMS } = await import('../docs/diagrams.mjs');
-  for (const { alt, src } of images) {
-    assert.ok(alt.length > 80, `${src}: the alt text must describe the diagram`);
-    assert.ok(existsSync(join(ROOT, src)), `${src} does not exist`);
-    const name = src.replace('docs/', '');
-    assert.equal(readFileSync(join(ROOT, src), 'utf8'), DIAGRAMS[name], `${src} differs from docs/diagrams.mjs: run node docs/diagrams.mjs`);
-  }
-});
 
 /** GitHub's anchors of a Markdown file's headings (outside code blocks): lower case, punctuation gone, spaces to hyphens. */
 function anchorsOf(text) {

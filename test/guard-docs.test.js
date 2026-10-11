@@ -21,8 +21,8 @@ const PROVED = new RegExp(`\\b(F-T13[34]-\\d+|${DECISIONS.join('|')})\\b|second 
 const unproved = (text) =>
   text.split(/(?<=[.!?])\s+|\n+|\s\|\s/).filter((s) => BOUNDARY.test(s) && ABSOLUTE.test(s) && !PROVED.test(s));
 
-test('F-T133-68: each absolute boundary sentence of README.md and docs/reference.md names its requirement id or says "second layer"', () => {
-  for (const doc of ['README.md', 'docs/reference.md']) assert.deepEqual(unproved(readFileSync(join(ROOT, doc), 'utf8')), [], doc);
+test('F-T133-68: each absolute boundary sentence of README.md, docs/setup.md and docs/reference.md names its requirement id or says "second layer"', () => {
+  for (const doc of ['README.md', 'docs/setup.md', 'docs/reference.md']) assert.deepEqual(unproved(readFileSync(join(ROOT, doc), 'utf8')), [], doc);
 });
 
 test('F-T133-68: the scan finds the old README sentence, and its fix only with the id', () => {

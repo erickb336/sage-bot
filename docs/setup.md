@@ -1,0 +1,179 @@
+# Set up a live trial
+
+**This is the full checklist to connect sage-bot to a real Discord server.** The [README](../README.md#set-up-a-live-trial) gives the short list. The [reference](reference.md) gives every rule, case and setting.
+
+> **The live trial has not run yet.** This checklist comes from the principal engineer's check (run R260) for tasks T53 and T54. Every command in it runs in the tests, except the ones that need Discord, the Keychain or launchctl.
+
+The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
+
+**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [The lead log and the kill switch](#the-lead-log-and-the-kill-switch)
+
+## The checklist
+
+- [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Leave the **Message Content** intent off. Invite it to your server with the `bot` and `applications.commands` scopes. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
+  *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
+- [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
+  *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A lead has every right of an apprentice, so a lead needs no second role.
+- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. You can also leave both ids out and register the home channel with the script (see [Channels](#channels)). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+  Then set `projects`, every project of the bridge: it posts the cards of each one, and `/sage` reads each one. Put the folder of `project` in it too, with a name. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, the bridge works only for `project`, with no files. Remove the example's sample entry, or fill it in.
+  Keep the folder of `statePath` at mode 0700 (only you can read and write it).
+  *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
+
+  <!-- check: skip, the test writes a filled-in sample config in its place -->
+  ```sh
+  mkdir -p ~/.config/sage-bot
+  cp examples/config.example.json ~/.config/sage-bot/config.json
+  ```
+
+- [ ] **4. Set the parent channel's permissions.**
+
+  | Who | Permissions in the parent channel |
+  | --- | --- |
+  | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads. |
+  | sage-apprentice | Deny the same four permissions. |
+  | sage-lead | Deny the same four permissions. |
+  | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
+
+  In #ask-sage, and in each channel that you register later:
+
+  | Who | Permissions in #ask-sage |
+  | --- | --- |
+  | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
+  | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
+  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
+
+  **Do not let the Discord plugin watch this parent channel.** Chat with sage in a separate channel.
+  **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
+  *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+- [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
+  *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
+- [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
+
+  ```json
+  {
+    "hooks": {
+      "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+      "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }],
+      "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node /path/to/sage-bot/scripts/hook.mjs" }] }]
+    }
+  }
+  ```
+
+  *Why:* without the hook, the bridge does not know sage's sessions, and every card goes to the parent channel. The hook records a session in any project of `projects` and ignores every other folder.
+- [ ] **7. Deny the Discord plugin's `fetch_messages` tool** in the same settings file. Its name is probably `mcp__plugin_discord_discord__fetch_messages`: confirm the exact name with `/mcp` first.
+
+  ```json
+  { "permissions": { "deny": ["mcp__plugin_discord_discord__fetch_messages"] } }
+  ```
+
+  *Why:* the tie posts hold reasons that are cleaned for people, not for a model. sage must not read them.
+- [ ] **8. Start the bridge by hand once, then with launchd.** First run it in a terminal and read its log:
+
+  <!-- check: skip, needs Discord and the Keychain -->
+  ```sh
+  node scripts/bridge.mjs ~/.config/sage-bot/config.json
+  ```
+
+  When it works, stop it with Ctrl+C. Then write its launchd agent, so that it starts at each login and again after it stops:
+
+  <!-- check: run, prints "wrote " -->
+  ```sh
+  node scripts/launchd.mjs ~/.config/sage-bot/config.json --out ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  The script only writes the plist. You load it yourself:
+
+  <!-- check: skip, changes the Mac's login items; the test never runs launchctl -->
+  ```sh
+  launchctl load ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  The script refuses a config file that does not exist, is not JSON, lacks a field of step 3, has a Discord id that is not 17 to 20 digits, or has `projects` that the bridge refuses (for example a folder that does not exist). It then exits 1 and leaves the plist file as it was, so fix the config and run it again. It writes the new plist to a temp file first, so a refused run never empties a working plist.
+
+  The plist runs node through a path that a Node upgrade keeps, such as `/opt/homebrew/bin/node`. When the script prints "warning: … make the plist again after each Node upgrade", your node has no such path: after each Node upgrade, run the command above again and load the new plist. When it says that your node is an old node, a node from before a Homebrew upgrade still runs: run the command again with the current node that the message names. To see the node path of the plist, read the first entry of `ProgramArguments`:
+
+  <!-- check: run -->
+  ```sh
+  plutil -p ~/Library/LaunchAgents/com.sage.bot.plist
+  ```
+
+  *Why:* the first run by hand shows a setup error at once. The log of the launchd agent is `~/Library/Logs/sage-bot.log`. When the node path of the plist does not exist, launchd cannot start the bridge, and this log gets no line.
+- [ ] **9. Do a smoke test.** First start a new Claude Code session in your `project` folder (the folder you set as `project` in step 3), and turn on sage mode.
+  *Why:* Claude Code loads the hooks only when a session starts. In a session that started before step 6, the bridge does not know the session, and the first card goes to the parent channel.
+
+  Then ask sage for one test question. Mark it with its id, for example G42, in a terminal in the sage-bot folder. Name the project with `--project`: the sage-bot folder is not the folder of a listed project.
+
+  <!-- check: run, prints "team votes: your-project/G42" -->
+  ```sh
+  node scripts/vote.mjs --project your-project G42
+  ```
+
+  While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
+
+  Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and sage gets it in the logbook.
+
+## What the first live trial checks first
+
+1. The thread lock and unlock: a thread locks when its session ended and its questions are settled, and a resume opens it again.
+2. The permission codes: what Discord answers when a permission is missing (for example 50001, Missing Access), and that the card then goes to the parent channel.
+3. A press in a thread: it reaches the bridge, it counts, and the card changes.
+
+## Channels
+
+sage-bot works only in the channels that the owner registers. Each registered channel is for one project: `/sage` there reads that project when you leave out `project`. One channel is the home channel: the votes and cards post there. The list is the channel registry, the file `<statePath>.channels`.
+
+**Make the registry once.** The commands below read the bridge's config at `~/.config/sage-bot/config.json`; add `--config <config.json>` for another file.
+
+- If you used sage-bot before, you need to do nothing: at its first start the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. `/sage` now also works in the home channel.
+- On a new install, you can leave `channelId` and `askChannelId` out of the config. Then register the home channel first, while the bridge is stopped (see the next step). Until you do, the bridge does not start, and its message gives this command.
+
+<!-- check: run, prints "registered the channel 400000000000000001 for the project your-project (home channel of the votes and cards)" -->
+```sh
+node scripts/channels.mjs register 400000000000000001 your-project --home   # the home channel: the votes and cards post there
+```
+
+**Register or unregister a channel at the terminal.** Stop the bridge first: `register` and `unregister` refuse while the bridge runs, because only one of them may change the registry. `list` only reads, so it works at any time. To copy a channel id, right-click the channel with Developer Mode on.
+
+The launchd agent starts the bridge again when it stops, so stop it with launchctl, and start it again after your changes. If you run the bridge by hand, stop it with Ctrl+C instead.
+
+<!-- check: skip, changes the Mac's login items; the test never runs launchctl -->
+```sh
+launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist   # stop the bridge before register or unregister
+launchctl load ~/Library/LaunchAgents/com.sage.bot.plist     # start it again after them
+```
+
+<!-- check: run, prints "registered the channel 400000000000000003 for the project your-project" -->
+```sh
+node scripts/channels.mjs register 400000000000000003 your-project   # /sage works in that channel, for your-project
+node scripts/channels.mjs unregister 400000000000000003              # sage-bot ignores that channel again
+node scripts/channels.mjs list                                       # print the registry
+```
+
+- A project that is not in the config's `projects` is refused.
+- `register <id> <project> --home` makes that channel the home channel. The old home stays registered as a normal channel.
+- The home channel cannot move while a card waits for votes in the old home or its threads: their buttons would stop working. Wait until they are settled, or answer them at the terminal.
+- The home channel cannot be unregistered: make another channel the home first.
+- When you remove a project from the config, the bridge does not start while a channel still has it. `list` marks each such channel "not in the config". Register it again for a listed project, or unregister it.
+- When the registry file is broken (for example bad JSON, a wrong mode or a symlink), the bridge and the script stop, and the message gives the command that repairs it. For a wrong mode, it is `chmod 600 <file>`. For everything else, move the file aside with `mv <file> <file>.bad`, then register the home channel again with `register <channel id> <project> --home`, and then each other channel.
+- Then start the bridge again. At start it checks its permissions in each registered channel and logs each missing one, by name, in `~/Library/Logs/sage-bot.log`.
+
+**A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". A lead's press of the first removes the channel, and the terminal log gives the lead's name and id. The confirm works for 10 minutes. A sage-apprentice cannot unregister a channel. Nobody can register a channel from Discord.
+
+sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
+
+## The lead log and the kill switch
+
+**#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each line of the lead log there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
+
+The lead log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600. The kill switch is the flag file `<statePath>.leads-off`, or `killPath` in the config; a flag that the bridge cannot check counts as set. The [reference](reference.md#mention-threads) tells what the hash chain shows and what it does not.
+
+Check and change the link from Discord to sage at the terminal:
+
+<!-- check: run, prints "the link from Discord to sage is on" -->
+```sh
+node scripts/leads.mjs status    # is the link on or off?
+node scripts/leads.mjs stop      # turn the link off at the terminal
+node scripts/leads.mjs restore   # turn the link on again (only the owner, at the terminal)
+node scripts/leads.mjs verify    # check the hash chain of the lead log; exits 1 at a break
+node scripts/leads.mjs read 20   # print the last 20 lines of the lead log; a line from a break on starts with UNVERIFIED
+```

@@ -481,8 +481,8 @@ test('F-T130-14: the refusal while the bridge runs gives the launchctl lines tha
   writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`);
   const r = script(b, 'unregister', OTHER);
   assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
-  // The README and the reference give the same two lines beside register and unregister.
-  for (const doc of ['README.md', 'docs/reference.md']) {
+  // The setup guide and the reference give the same two lines beside register and unregister.
+  for (const doc of ['docs/setup.md', 'docs/reference.md']) {
     const text = readFileSync(join(ROOT, doc), 'utf8');
     assert.match(text, /launchctl unload ~\/Library\/LaunchAgents\/com\.sage\.bot\.plist/, doc);
     assert.match(text, /launchctl load ~\/Library\/LaunchAgents\/com\.sage\.bot\.plist/, doc);
