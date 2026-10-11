@@ -43,7 +43,7 @@ export function buildWorld(root, tag) {
   root = realpathSync.native(root);
   const tempRoot = mkdtempSync(SHORT_TMP); // mkdtemp: the user's own folder, 0700 (F-T156-29)
   tempRoots.add(tempRoot);
-  try { return fill(root, tag, tempRoot); } catch (e) { rmSync(tempRoot, { recursive: true, force: true }); tempRoots.delete(tempRoot); throw e; }
+  try { return fill(root, tag, tempRoot); } catch (e) { rmSync(tempRoot, { recursive: true, force: true }); tempRoots.delete(tempRoot); throw Object.assign(e, { tempRoot }); } // the error names the root, so a test can check that it went (T174)
 }
 function fill(root, tag, tempRoot) {
   const home = join(root, 'home'), claudeConfig = claudeDirOf({ env: {}, home }), statePath = join(root, 'state', 'gates.json');
