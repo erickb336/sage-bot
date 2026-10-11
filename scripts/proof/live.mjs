@@ -19,12 +19,12 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { constants, tmpdir, userInfo } from 'node:os';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LEAD_PATH } from '../../src/lead-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, stopScratchKeychain, withScratchKeychain } from './keychain.mjs';
-import { resultsOf } from './probe.mjs';
+import { isWithin, resultsOf } from './probe.mjs';
 import { ROWS, OWNER_COMMAND, prove, refuseUsed, statusOf, verdict } from './run.mjs';
 import { dummyClaude, killSessions, startSession } from './session.mjs';
 import { jobLabelOf, removeTempRoots } from './world.mjs';
@@ -159,13 +159,17 @@ function readPlain(path) {
 
 /**
  * Removes the run's job from launchd by its label, whatever loaded it and whatever state it is in (G73), then checks that `launchctl
- * list <label>` no longer finds it; throws one line with the owner's command when it still does (F-T165-30). Each launchctl runs in a
+ * list <label>` no longer finds it (exit 113); throws one line with the owner's command when it still does (F-T165-30) or gives any
+ * other result (F-T165-36). Each launchctl runs in a
  * process group of its own (detached), so a second Ctrl-C at the terminal does not stop it.
  */
 function removeJob(env, label) {
   const launchctl = (...args) => spawnSync('launchctl', args, { env: { PATH: env.PATH }, stdio: 'ignore', timeout: 30_000, detached: true });
   launchctl('remove', label);
-  if (launchctl('list', label).status === 0) throw new Error(`the launchd job ${label} is still loaded after launchctl remove: remove it with \`launchctl remove ${label}\`.`);
+  const listed = launchctl('list', label).status;
+  if (listed === 113) return; // launchctl's "Could not find service": the one proof that the job is gone (F-T165-36)
+  if (listed === 0) throw new Error(`the launchd job ${label} is still loaded after launchctl remove: remove it with \`launchctl remove ${label}\`.`);
+  throw new Error(`launchctl list ${label} gave ${listed === null ? 'no exit (a timeout, a signal or no launchctl)' : `exit ${listed}`}, so the launchd job may still be loaded: check it with \`launchctl list ${label}\` and remove it with \`launchctl remove ${label}\`.`);
 }
 
 /**
@@ -400,12 +404,10 @@ export function stopLive() {
   killSessions();
   const children = spawnSync('/usr/bin/pgrep', ['-P', String(process.pid)], { encoding: 'utf8', detached: true }).stdout ?? '';
   for (const pid of children.split('\n').filter(Boolean).map(Number)) for (const p of [-pid, pid]) try { process.kill(p, 'SIGKILL'); } catch { /* gone */ }
-  for (const step of [() => current && removeJob(current.env, current.label), stopScratchKeychain]) {
-    try { step(); } catch (e) { console.error(`proof:live: ${String(e.message).split('\n')[0]}`); }
+  const redact = () => { if (current?.key) try { redactLeaks(current.root, current.key); } catch { /* the folder is gone */ } };
+  for (const step of [() => current && removeJob(current.env, current.label), stopScratchKeychain, redact, removeTempRoots, () => current && rmSync(current.tmp, { recursive: true, force: true })]) {
+    try { step(); } catch (e) { console.error(`proof:live: ${String(e.message).split('\n')[0]}`); } // F-T165-34: each step runs
   }
-  if (current?.key) try { redactLeaks(current.root, current.key); } catch { /* the folder is gone */ }
-  removeTempRoots();
-  if (current) rmSync(current.tmp, { recursive: true, force: true });
 }
 
 /** The command's exit for a report: 1 on a FAIL, an INVALID, a leak or an entry that the scan could not read (F-T165-21), else 0. */
@@ -423,22 +425,23 @@ function wouldBe(path) {
 
 /**
  * Runs the live proof in `root`. @param {string} root
- * @param {{ env?: NodeJS.ProcessEnv, dryRun?: boolean, claude?: string, leadPath?: string }} [o]  env: the host's (its PATH finds
+ * @param {{ env?: NodeJS.ProcessEnv, dryRun?: boolean, claude?: string, leadPath?: string, home?: string }} [o]  env: the host's (its PATH finds
  *   `security`, `launchctl` and `claude`); dryRun: no key, a dummy claude; claude: a claude to run in place of the one on PATH (the
- *   tests' fake); leadPath: the PATH in which the rg control looks for rg, the sessions' own LEAD_PATH (a fake's folder, in the tests)
+ *   tests' fake); leadPath: the PATH in which the rg control looks for rg, the sessions' own LEAD_PATH (a fake's folder, in the tests);
+ *   home: the owner's home folder, which the sandbox denies to the sessions (a scratch folder, in the tests: F-T165-35)
  * @returns {Promise<{ report: object, summary: string }>}
  */
-export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = LEAD_PATH } = {}) {
+export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = LEAD_PATH, home = ownerHome() } = {}) {
   // gh, the folder, then the key, each before any folder is made: a refusal makes and leaves nothing (a refused --out a/b/c leaves no
   // a/b, F-T165-15).
   if (!dryRun) refuseWhileGhLoggedIn(env);
   root = wouldBe(root);
-  const uid = userInfo().uid, inside = (top) => !relative(top, root).startsWith('..');
+  const uid = userInfo().uid, inside = (top) => isWithin(top, root);
   for (const shared of [`/tmp/claude-${uid}`, `/private/tmp/claude-${uid}`]) {
     if (inside(shared)) throw new Error(`the scratch folder ${root} is in the shared ${shared}: use --out with a folder outside it (F-T165-8). Nothing was started.`);
   }
   // The sandbox denies the home folder, so a session could not read the runner's copies there: every L1 row would be INVALID (F-T165-32).
-  const home = realpathSync.native(ownerHome());
+  home = realpathSync.native(home);
   if (inside(home)) throw new Error(`the scratch folder ${root} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
   mkdirSync(root, { recursive: true });

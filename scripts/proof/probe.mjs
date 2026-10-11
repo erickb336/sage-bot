@@ -16,13 +16,15 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** An error line that says the sandbox refused the operation (Go and Python spell it in lower case). Any other failure proves nothing. */
 const DENIED = /Operation not permitted|EPERM/i;
 /** A network call that ran out of time (curl's exit 28 message, the node probe's own 'timeout'): a slow host is no refusal (F-T165-22). */
 const TIMED_OUT = /timed ?out|timeout/i;
+/** Whether `path` is `dir` or below it (both absolute): a folder named `..x` is below it, `..` and `../x` are not (F-T165-37). */
+export const isWithin = (dir, path) => { const rel = relative(dir, path); return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
 /** The start of each result line on stdout; a line without it is not a result. */
 export const SENTINEL = 'probe-result ';
 /**
@@ -75,7 +77,6 @@ export function probes(w, { pid = process.pid } = {}) {
   const nodeName = `node -e "require('fs').readFileSync([${[...w.tool].map((ch) => ch.charCodeAt(0)).join(',')}].map((n) => String.fromCharCode(n)).join(''))"`;
   const shared = `/tmp/claude-${userInfo().uid}`;
   const commondir = q(join(w.sessionTmp, 'no-such-commondir'));
-  const inWorld = (path) => !relative(w.root, path).startsWith('..');
   const P = (row, id, expect, cmd, more = {}) => ({ id, row, expect, cmd, ...more });
   const kc = w.keychain, find = `security find-generic-password -a ${q(kc.account)} -s ${q(kc.service)} -w ${q(kc.path)}`;
   const keychain = (how, cmd) => P('F-T165-2', `keychain-${how}`, 'refused', cmd, { shows: kc.id, needs: 'keychain' });
@@ -125,7 +126,7 @@ export function probes(w, { pid = process.pid } = {}) {
     // the policy). The one outside the world is the host's own: its control only checks that its folder is writable, as for shared-tmp.
     // The host's folder: no `mkdir -p` (F-T165-9), so that a sandbox that fails open leaves nothing: a file in a folder that is there goes
     // again, and a folder that the probe made goes again. Its control checks only that the folder above is writable.
-    ...w.hookDirs.map((d, i) => (inWorld(d)
+    ...w.hookDirs.map((d, i) => (isWithin(w.root, d)
       ? P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && echo x > ${q(join(d, 'x'))}`)
       : P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `if [ -d ${q(d)} ]; then ${touchIn(d, `sage-bot-proof-${w.session}`)}; else mkdir ${q(d)} && rmdir ${q(d)}; fi`, { control: `test -w ${q(dirname(d))}` }))),
     // F-T134-10: the project settings' SessionStart hook did not run (the control runs the hook's command itself)

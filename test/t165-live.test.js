@@ -7,13 +7,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
 import { ADD_KEY, FINDINGS, GH_LOGOUT, SERVICE, askedRun, callsOf, checksOf, clean, exitCode, keyFromKeychain, probeCommand, prompts, proveLive, refuseWhileGhLoggedIn } from '../scripts/proof/live.mjs';
-import { ownerHome } from '../src/sage.js';
 import { ACCOUNT } from '../scripts/proof/keychain.mjs';
-import { HOST_OFF, SENTINEL, probes, resultsOf } from '../scripts/proof/probe.mjs';
+import { HOST_OFF, SENTINEL, isWithin, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { OWNER_COMMAND, ROWS, prove } from '../scripts/proof/run.mjs';
 import { buildWorld, removeTempRoots } from '../scripts/proof/world.mjs';
 
@@ -25,7 +24,7 @@ const LOGIN = '/Users/sample/Library/Keychains/login.keychain-db';
 const UID = userInfo().uid;
 const scratch = () => realpathSync.native(tempFolder('sage-bot-t165-'));
 /** A scratch folder for a live run, which refuses the shared /tmp/claude-<uid> (F-T165-8): outside it when TMPDIR is in it. */
-const inShared = (dir) => !relative(`/private/tmp/claude-${UID}`, realpathSync.native(dir)).startsWith('..');
+const inShared = (dir) => isWithin(`/private/tmp/claude-${UID}`, realpathSync.native(dir));
 const liveScratch = () => realpathSync.native(tempFolder('sage-bot-t165-', inShared(tmpdir()) ? '/private/tmp' : tmpdir()));
 const sb = (s) => JSON.stringify(s);
 const T165 = ['F-T165-1', 'F-T165-2', 'F-T165-4', 'F-T165-5', 'F-T165-6', 'F-T165-7', 'F-T165-8', 'F-T165-9', 'F-T165-10', 'F-T165-24'];
@@ -42,10 +41,10 @@ const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 
  * hosts file in GH_CONFIG_DIR or HOME, else exits 1; `ghBroken` makes `auth token` exit 2 with an error, and `ghHangs` makes it sleep
  * past the runner's timeout. rg: grep, so that `rg` on a file prints its lines when nothing refuses it. launchctl: the loaded labels in a
  * JSON file (load and unload take a plist, list and remove a label), and a log of each call; with `removeFails`, remove exits 0 and leaves
- * the job loaded; crontab: "no crontab", exit 1, and a log.
+ * the job loaded; with `listExit`, list exits with that code for a label that is not loaded, in place of 113 (F-T165-36); crontab: "no crontab", exit 1, and a log.
  * No test reaches the real launchd or crontab (G73).
  */
-function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false } = {}) {
+function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false, listExit = 113 } = {}) {
   const bin = join(root, 'bin'), state = join(root, 'security-state.json'), log = join(root, 'security-calls.log');
   mkdirSync(bin, { recursive: true });
   writeFileSync(state, sb({ list: [LOGIN], keychains: [LOGIN], items: key ? [{ account: ACCOUNT, service: SERVICE, value: key, keychain: LOGIN }] : [] }));
@@ -93,7 +92,7 @@ const labelOf = (plist) => /<key>Label<\\/key><string>([^<]+)</.exec(readFileSyn
 const save = (l) => writeFileSync(${sb(jobs)}, JSON.stringify(l));
 if (verb === 'load') save([...loaded, labelOf(arg)]);
 if (verb === 'unload') save(loaded.filter((l) => l !== labelOf(arg)));
-if (verb === 'list' && !loaded.includes(arg)) { console.error('Could not find service "' + arg + '" in domain for port'); process.exit(113); }
+if (verb === 'list' && !loaded.includes(arg)) { console.error('Could not find service "' + arg + '" in domain for port'); process.exit(${listExit}); }
 if (verb === 'remove') { if (!loaded.includes(arg)) process.exit(3); if (!${removeFails}) save(loaded.filter((l) => l !== arg)); }
 `);
   writeFileSync(join(bin, 'launchctl'), `#!/bin/sh\nexec ${sb(process.execPath)} ${sb(join(root, 'fake-launchctl.mjs'))} "$@"\n`);
@@ -810,7 +809,7 @@ test('the hook-dir probe of the host\'s folder makes nothing that it does not ta
   try {
     const w = buildWorld(join(root, 'w'), TAG);
     removeTempRoots();
-    const host = w.hookDirs.find((d) => relative(w.root, d).startsWith('..'));
+    const host = w.hookDirs.find((d) => !isWithin(w.root, d));
     assert.equal(host, '/private/tmp/sage-hooks');
     const p = probes(w).find((x) => x.row === 'F-T134-7' && x.cmd.includes(host));
     assert.ok(!p.cmd.includes('mkdir -p') && p.control === `test -w '/private/tmp'`);
@@ -918,16 +917,77 @@ test('F-T165-31, F-T165-33: a refused L1 start makes every L1 row INVALID (exit 
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('F-T165-32: an --out in the owner\'s home folder is refused before the key is read, with one line, and makes nothing', async () => {
+test('F-T165-32, F-T165-35, F-T165-37: an --out in the owner\'s home folder (a scratch one), also in a folder named ..x, is refused before the key is read, with one line, and makes nothing', async () => {
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    // The home folder itself: it exists and is not empty, so a runner without the refusal stops at refuseUsed and makes nothing there.
-    const home = realpathSync.native(ownerHome()), before = readdirSync(home).toSorted();
-    await assert.rejects(proveLive(home, { env: fake.env, claude: fakeClaude(root, fake.bin) }), (e) => e.message === `the scratch folder ${home} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
-    assert.deepEqual(readdirSync(home).toSorted(), before);
-    assert.deepEqual(fake.calls(), []); // no key read, no fixture
+    // Each --out exists and is not empty, so a runner without the refusal stops at refuseUsed after it read the key: no test names the
+    // real home folder (F-T165-35).
+    const home = join(root, 'home'), claude = fakeClaude(root, fake.bin);
+    for (const out of [home, join(home, 'work'), join(home, '..x')]) {
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, 'notes.txt'), 'sample\n');
+      const before = readdirSync(root, { recursive: true }).toSorted();
+      await assert.rejects(proveLive(out, { env: fake.env, claude, home }), (e) => e.message === `the scratch folder ${out} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
+      assert.deepEqual(readdirSync(root, { recursive: true }).toSorted(), before);
+      assert.deepEqual(fake.calls(), []); // no key read, no fixture
+    }
+    // A sibling of the home folder is outside it: the refusal is the folder's (refuseUsed), not the home's.
+    mkdirSync(join(root, 'home2'));
+    writeFileSync(join(root, 'home2', 'notes.txt'), 'sample\n');
+    await assert.rejects(proveLive(join(root, 'home2'), { env: fake.env, claude, home }), (e) => !e.message.includes('home folder'));
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-37: isWithin counts a folder named ..x as inside, and .. or a sibling as outside; the hook-dir probe of a folder named ..x in the world is the world\'s', () => {
+  assert.deepEqual([['/a', '/a'], ['/a', '/a/..x'], ['/a', '/a/..x/b'], ['/a', '/a/b/..'], ['/a', '/'], ['/a', '/a/..'], ['/a', '/b'], ['/a', '/ab'], ['/a', '/a/../b']].map(([d, p]) => isWithin(d, p)), [true, true, true, true, false, false, false, false, false]);
+  const root = scratch();
+  try {
+    const w = buildWorld(join(root, 'w'), TAG);
+    removeTempRoots();
+    const d = join(w.root, '..x', 'hooks');
+    assert.equal(probes({ ...w, hookDirs: [d] }).find((x) => x.id === 'hook-dir-1').cmd, `mkdir -p '${d}' && echo x > '${join(d, 'x')}'`);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-36: launchctl list with any exit but 113 (not found) stops the run with one line: the job may still be loaded', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root, { listExit: 5 });
+    await assert.rejects(proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin), leadPath: fake.bin }),
+      (e) => /^launchctl list (sage-bot-proof-[0-9a-f]{16}) gave exit 5, so the launchd job may still be loaded: check it with `launchctl list \1` and remove it with `launchctl remove \1`\.$/.test(e.message));
+    assert.deepEqual(fake.state().list, [LOGIN]);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-34: on a signal, a cleanup step that fails (the temp roots) prints one line, and the next step (the preflights\' temp folder) still runs', { timeout: 300_000 }, () => {
+  const root = liveScratch(), run = join(root, 'run');
+  try {
+    const fake = fakeSecurity(root);
+    const claude = fakeClaude(root, fake.bin, { sleep: true });
+    // In a child: rmSync of a temp root fails, as a folder that cannot be removed does; stopLive runs while the session sleeps.
+    const code = `import fs from 'node:fs';
+import { join } from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
+const [run, env, claude] = JSON.parse(process.argv[1]), rm = fs.rmSync;
+fs.rmSync = (p, o) => { if (String(p).startsWith('/private/tmp/sbp-')) throw new Error('EACCES: sample refusal, rmdir ' + p + '\\nsecond line'); return rm(p, o); };
+syncBuiltinESMExports();
+const m = await import(${sb(LIVE)});
+m.proveLive(run, { env, claude }).catch(() => {});
+const slept = () => fs.existsSync(run) && fs.readdirSync(run, { recursive: true }).some((n) => String(n).endsWith('sleep.pid'));
+for (let i = 0; i < 600 && !slept(); i++) await new Promise((r) => setTimeout(r, 100));
+m.stopLive();
+console.log(JSON.stringify({ slept: slept(), tmp: fs.existsSync(join(run, 'tmp')) }));
+process.exit(0);`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify([run, fake.env, claude])], { encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { slept: true, tmp: false });
+    assert.match(r.stderr, /^proof:live: EACCES: sample refusal, rmdir \/private\/tmp\/sbp-\S+\n$/);
+    assert.deepEqual(fake.state().list, [LOGIN]); // the step before it ran too
+  } finally {
+    for (const d of existsSync(run) ? tempRootsOf(run) : []) rmSync(d, { recursive: true, force: true }); // the child could not remove them
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('F-T165-32: with GH_TOKEN or GITHUB_TOKEN set, the gh refusal names the variable and says to unset it, never its value', () => {
