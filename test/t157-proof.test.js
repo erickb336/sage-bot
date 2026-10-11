@@ -241,12 +241,19 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
       `(allow file-read* file-write* (subpath ${sb(f)}))`,
       ...denyWrite.map((d) => `(deny file-write* (subpath ${sb(d)}))`)].join('\n');
     writeFileSync(join(root, 'lead.sb'), profile);
+    // G73: launchctl and crontab first on PATH are fakes that log their call and print no refusal, so the test never reaches the real
+    // launchd or crontab; the host probes then cannot tell (the live run is their proof).
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    for (const tool of ['launchctl', 'crontab']) writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> '${join(root, 'host-calls.log')}'\necho 'fake ${tool}' >&2\nexit 2\n`, { mode: 0o755 });
     const policy = policyOf(w);
+    const env = launchOf(policy, {}).env; // the session's environment
     const r = spawnSync('sandbox-exec', ['-f', join(root, 'lead.sb'), process.execPath, PROBE, join(f, 'world.json')],
-      { cwd: f, encoding: 'utf8', env: launchOf(policy, {}).env }); // the session's environment
+      { cwd: f, encoding: 'utf8', env: { ...env, PATH: `${bin}:${env.PATH}` } });
     assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(root, 'host-calls.log'), 'utf8'), 'launchctl\ncrontab\n');
     const results = [...resultsOf(r.stdout).results.values()];
-    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process and no scratch keychain here: those cannot tell
+    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' || p.needs === 'host' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process, no scratch keychain and no real launchd here: those cannot tell
     assert.deepEqual(wrong, []);
     assert.ok(results.length >= 40);
     assert.ok(!r.stdout.includes(TAG) && !r.stdout.includes('sample-fake-'));

@@ -9,8 +9,10 @@
 // The rule of every verdict (standing order 19): refused only on positive evidence of a sandbox denial (EPERM, or the error that a
 // control proves is a refusal); worked only with the sentinel, the sample value's id, or an exit 0 that the probe's shape makes evidence;
 // anything else (no command, a timeout, a prompt, nothing printed, any other error) is null: the probe cannot tell, and its row is INVALID.
+// The probes that need the owner's launchd and crontab (`needs: 'host'`) run in a control only when it names them (`--only host`): the
+// live run does that, and `npm run proof` and `npm run check` never touch the real launchd or crontab (G73).
 // It prints no output of an operation and no value of a variable: only whether a variable's name appeared, and the first line of an
-// error, with the world's tag cut out. It imports nothing of sage-bot, so that a session can run a copy of it from its own folder.
+// error, with the world's tag cut out. It imports nothing of sage-bot, so that the live run can run a copy of it from its own folder.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -42,6 +44,8 @@ export function resultsOf(text) {
 }
 /** A command that is not there: the shell's 127, its message, or the xcode-select stub of a Mac without the developer tools (F-T165-17). */
 const NO_COMMAND = /command not found|xcode-select/;
+/** The why of a host probe in a control that does not name it (G73). */
+export const HOST_OFF = 'only the live run touches launchd and crontab (G73)';
 const q = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
 const names = (cmd) => `${cmd} | cut -d= -f1 | sed 's/$/=/'`; // variable names only: no value leaves the command
 /** The variables of the model credential (MODEL_KEYS of src/lead-policy.js, repeated here: this script imports nothing of sage-bot). */
@@ -60,7 +64,8 @@ const touchIn = (dir, name) => `touch ${q(join(dir, name))} && rm ${q(join(dir, 
  * glob in a folder that cannot be listed stays as it is, and node reports a script that it cannot read as not found; the control proves
  * that the path is there), shows (a sample value's id: the operation "worked" only when the command printed it, and "refused" only on an EPERM; any
  * other failure, a prompt or a timeout proves nothing), needs ('keychain': the probe needs the run's scratch keychain, which only the
- * live run makes; its control runs again after the sessions), tool (a command the probe needs: a control on a Mac without it is
+ * live run makes; its control runs again after the sessions; 'host': the probe needs the owner's launchd or crontab, and only the live
+ * run's control runs it, G73), tool (a command the probe needs: a control on a Mac without it is
  * skipped, with the reason, not INVALID).
  * @param {object} w  the world @param {{ pid?: number }} [o]  the process whose environment the ps probes read
  */
@@ -171,8 +176,8 @@ export function probes(w, { pid = process.pid } = {}) {
     // Input/output error" with exit 0 where launchd refuses it, so the job counts as loaded only when `launchctl list <label>` finds it
     // after; the control proves that the plist loads outside, so that error inside is a refusal, and the job goes again at once (unload).
     // crontab -l exits 1 with "no crontab for <user>" when the owner has none, so exit 0 or 1 is "worked" (crontab reached its tabs).
-    P('F-T165-24', 'launchctl-load', 'refused', `launchctl load ${q(w.launchd.plist)} && launchctl list ${q(w.launchd.label)} >/dev/null && launchctl unload ${q(w.launchd.plist)}`, { refusedAs: /Load failed: 5: Input\/output error/ }),
-    P('F-T165-24', 'crontab-list', 'refused', 'crontab -l >/dev/null; test $? -le 1'),
+    P('F-T165-24', 'launchctl-load', 'refused', `launchctl load ${q(w.launchd.plist)} && launchctl list ${q(w.launchd.label)} >/dev/null && launchctl unload ${q(w.launchd.plist)}`, { refusedAs: /Load failed: 5: Input\/output error/, needs: 'host' }),
+    P('F-T165-24', 'crontab-list', 'refused', 'crontab -l >/dev/null; test $? -le 1', { needs: 'host' }),
   ];
 }
 
@@ -215,6 +220,7 @@ export function runProbes(w, control, only) {
   const sh = (cmd) => spawnSync('/bin/sh', ['-c', cmd], { cwd: w.sessionFolder, encoding: 'utf8', timeout: 30_000, maxBuffer: 1 << 24 });
   return probes(w, { pid: pid ?? 0 }).filter((p) => !only || p.needs === only || p.id === only).map((p) => {
     const base = { id: p.id, row: p.row, expect: p.expect, ...(p.needs && { needs: p.needs }) };
+    if (control && p.needs === 'host' && only !== 'host' && only !== p.id) return { ...base, did: null, code: null, why: HOST_OFF, skipped: HOST_OFF };
     if (control && p.tool && sh(`command -v ${p.tool}`).status !== 0) return { ...base, did: null, code: null, why: `${p.tool} is not on this Mac`, skipped: `${p.tool} is not on this Mac` };
     const r = sh(control ? p.control ?? p.cmd : p.cmd);
     const did = !control && !pid && p.id.startsWith('model-key-ps') ? null : didOf(p, r); // no claude process found: nothing to read

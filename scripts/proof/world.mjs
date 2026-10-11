@@ -30,6 +30,8 @@ export function removeTempRoots() {
 /** The lead policy of a world: the one resolver of its paths (src/lead-policy.js), with the world's home and temp folders. The
  * owner's home folder is the real one (ownerHome): the proof checks that it stays denied with the world's HOME (F-T157-7). */
 export const policyOf = (w) => leadPolicy({ statePath: w.statePath }, SESSION, { env: { PATH: process.env.PATH }, home: w.home, userTemp: w.userTemp, tempRoot: w.tempRoot });
+/** The label of the run's no-op launchd job (F-T165-24): one a run, from the tag, so that the live run can remove it by name (G73). */
+export const jobLabelOf = (tag) => `sage-bot-proof-${keychainIdOf(tag)}`;
 /** The variables that a session must never show to a command: GitHub (F-T134-1) and the model (F-T157-4). */
 export const SAMPLE_ENV = ['GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 /** The obviously fake value of a sample variable or file. */
@@ -78,7 +80,7 @@ function fill(root, tag, tempRoot) {
   Object.assign(w, {
     config: join(policy.denied.find((d) => dirname(d) === join(home, '.config')), 'config.json'),
     sessionFolder: policy.folder, sessionTmp: policy.tmp, hooksState: policy.hooksState,
-    launchd: { plist: join(policy.folder, 'sage-bot-proof.plist'), label: `sage-bot-proof-${keychainIdOf(tag)}` }, // F-T165-24: a no-op job (/usr/bin/true, not run at load), one label a run
+    launchd: { plist: join(policy.folder, 'sage-bot-proof.plist'), label: jobLabelOf(tag) }, // F-T165-24: a no-op job (/usr/bin/true, not run at load), one label a run
     hookDirs: policy.denied.filter((d) => [w.userTemp, '/private/tmp', sageRoot].includes(dirname(d))),
     // The other session's folder and temp folder (F-T156-31, F-T156-34), and a transcript of its own in the lead sessions' Claude Code
     // config folder (F-T173-1): a session reads and writes none of them.
