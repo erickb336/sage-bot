@@ -20,7 +20,7 @@ The session uses the real sage state tool, hook (`scripts/hook.mjs`), team votes
 4. In a second batch (T4), Erick answers part 1 at the terminal, and Jon ends the vote early.
 5. The session ends: its line says "ended", and its thread locks because no question is open.
 
-Everything goes into a new scratch folder (printed at the end), with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. Options: `--out <page.html>` writes the page there instead (the demo checks this path before it starts, and stops with a message when it cannot make the folder or the path is a folder); `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
+Everything goes into a new scratch folder, with `HOME` and `SAGE_HOME` of every child process in it, so the demo never touches your home folder or a real logbook. The folder goes when the demo ends, also after a failure, so with no `--out` the page goes with it and the demo says so. Options: `--out <page.html>` writes the page there, and keeps it (the demo checks this path before it starts, and stops with a message when it cannot make the folder or the path is a folder); `--shot <page.png>` also screenshots it with the local Chrome (playwright-core, channel `chrome`). Two runs give the same page bytes.
 
 ## The vote rules
 

@@ -1,9 +1,9 @@
 // The allow-lists for sage (a model reader) and for the terminal. SAMPLE DATA ONLY.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { forModel, forTerminal, reasonLines } from '../src/clean.js';
 import { openGate, step } from '../src/vote.js';
 import { save } from '../src/state.js';
@@ -63,7 +63,7 @@ test('F-T28-22: text for the terminal keeps printable characters only; every con
 
 /** A scratch gate file and a config with two projects, `project` (the bridge's own) and `other`. SAMPLE DATA ONLY. */
 function reasonsSetup() {
-  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-reasons-'))); // as loadProjects names it
+  const dir = realpathSync.native(tempFolder('sage-bot-reasons-')); // as loadProjects names it
   const config = join(dir, 'config.json');
   for (const p of ['project', 'other']) mkdirSync(join(dir, p)); // a listed folder that does not exist is refused (F-T132-14)
   writeFileSync(config, JSON.stringify({ project: join(dir, 'project'), sagePath: '/sample/sage.mjs', statePath: join(dir, 'gates.json'),

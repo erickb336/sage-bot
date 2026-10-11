@@ -3,9 +3,9 @@
 // `security`. SAMPLE DATA ONLY: no model session, no network, and no real keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes } from '../scripts/proof/probe.mjs';
@@ -15,7 +15,7 @@ import { spawnSync } from './bridge-setup.js';
 
 const PROBE = new URL('../scripts/proof/probe.mjs', import.meta.url).pathname;
 const TAG = 'f00dfeedf00dfeed';
-const scratch = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t157-')));
+const scratch = () => realpathSync.native(tempFolder('sage-bot-t157-'));
 /** A world in a new scratch folder, and the removal of both its folder and its temp root. */
 function world() {
   const root = scratch(), w = buildWorld(join(root, 'w'), TAG);

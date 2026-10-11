@@ -2,9 +2,9 @@
 // and a scratch sage logbook. SAMPLE DATA ONLY: every id, name and question is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { askedTogether, MERGE } from '../src/bridge.js';
 import { lock, load, save } from '../src/state.js';
 import { HOUR, MINUTE } from '../src/vote.js';
@@ -229,7 +229,7 @@ test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the lea
 });
 
 test('F-T28-30: one bridge per gate file: a second lock stops with a clear message; a lock of a gone process is replaced; exit frees it', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-lock-'));
+  const dir = tempFolder('sage-bot-lock-');
   const path = join(dir, 'state', 'gates.json');
   const node = (code) => execFileSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
   const state = new URL('../src/state.js', import.meta.url).href;

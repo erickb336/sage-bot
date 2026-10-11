@@ -6,9 +6,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from './bridge-setup.js';
-import { cpSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { leadPolicy, settingsOf } from '../src/lead-policy.js';
 
 // How Claude Code 2.1.289 turns a denyWrite entry into seatbelt rules on macOS (read from its binary: functions ZBt, cGr, lc and mT):
@@ -29,7 +29,7 @@ function denied(denyWrite, path, kind) {
   });
 }
 
-const ROOT = realpathSync(mkdtempSync(join(tmpdir(), 'sage-bot-git-control-')));
+const ROOT = realpathSync(tempFolder('sage-bot-git-control-'));
 process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
 const POLICY = leadPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: ROOT }, 's1', { env: {}, home: '/h', userTemp: '/u' });
 const F = POLICY.folder, TEMPLATE = join(ROOT, 'template'), MARK = join(ROOT, 'pwned');

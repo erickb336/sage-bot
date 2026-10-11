@@ -3,9 +3,10 @@
 // folder. F-T157-11: the owner's ~/.claude.json is a credential file. SAMPLE DATA ONLY: the values are made up, and no session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { realpathSync, rmSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { launchOf, leadPolicy, settingsOf } from '../src/lead-policy.js';
 
 const HOST = { env: {}, home: '/h', owner: '/h', userTemp: '/u', tempRoot: '/st/sage-lead' };
@@ -31,7 +32,7 @@ test('F-T157-8: a launch takes the one model variable that its caller gives, nev
 });
 
 test('F-T157-7: with HOME set to a scratch folder, commands still read nothing in the owner\'s real home folder (from the user database)', () => {
-  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t157-')));
+  const root = realpathSync.native(tempFolder('sage-bot-t157-'));
   const saved = process.env.HOME;
   try {
     process.env.HOME = join(root, 'home'); // the defaults: home from $HOME, owner from the user database

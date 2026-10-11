@@ -2,14 +2,14 @@
 // SAMPLE DATA: every gate id and file text here is a made-up sample.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { load, loadVotes, readOwn } from '../src/state.js';
 import { spawn, spawnSync } from './bridge-setup.js';
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
-const scratch = (name) => realpathSync.native(mkdtempSync(join(tmpdir(), `sage-bot-t47-${name}-`))); // the real path, as loadProjects names a project
+const scratch = (name) => realpathSync.native(tempFolder(`sage-bot-t47-${name}-`)); // the real path, as loadProjects names a project
 const own = (path, text) => writeFileSync(path, text, { mode: 0o600 });
 const REFUSED = (what, path) => `the ${what} ${path} must be a regular file of this user with mode 0600. Nothing was loaded.`;
 

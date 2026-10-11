@@ -3,9 +3,9 @@
 // SAMPLE DATA ONLY: every id and name is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempFolder } from './temp-folder.js';
 import { createBridge } from '../src/bridge.js';
 import { fakeDiscord } from '../src/fake-discord.js';
 import { peopleOf } from '../src/handle.js';
@@ -53,14 +53,14 @@ test('a new card pings sage-apprentice and sage-lead; a tie after the vote pings
 });
 
 test('a config with driverRole and no apprenticeRole stops the bridge with the rename message', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t70-'));
+  const dir = tempFolder('sage-bot-t70-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const config = { channelId: CHANNEL, ownerId: OWNER, driverRole: APPRENTICE, leadRole: LEAD };
   assert.throws(() => createBridge({ sages: new Map([['project', {}]]), own: 'project', discord: fakeDiscord([]), config, statePath: join(dir, 'gates.json'), log: () => {} }), { message: OLD_CONFIG });
 });
 
 test('launchd.mjs refuses a config with driverRole and no apprenticeRole with the same message, and writes no plist', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'sage-bot-t70-'));
+  const dir = tempFolder('sage-bot-t70-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const { apprenticeRole, ...rest } = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
   const path = join(dir, 'config.json');

@@ -6,7 +6,7 @@
 // are in it, so nothing touches the owner's home folder or real logbook.
 process.env.TZ = 'UTC'; // the title of a thread has the host's date
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
@@ -44,7 +44,8 @@ if (outArg) {
 let SAGE;
 try { SAGE = sagePath(); } catch (e) { fail(e.message); }
 const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-demo-'))); // the real path, as loadProjects names the project
-const out = outArg ?? join(root, 'demo.html');
+process.on('exit', () => rmSync(root, { recursive: true, force: true })); // the scratch folder goes at the end, also after a failure (T57)
+const out = outArg ?? join(root, 'demo.html'); // with no --out, the page goes with the scratch folder
 const project = join(root, 'project');
 const statePath = join(root, 'state', 'gates.json');
 const configPath = join(root, 'config.json');
@@ -252,8 +253,7 @@ console.log('\nThe answers in sage (gates.tsv):');
 for (const g of gates) console.log(`  ${g.id}  ${g.task}  ${g.answer || '(open)'}  · ${g.question}`);
 console.log('\nThe bridge log:');
 for (const l of log) console.log(`  ${l}`);
-console.log(`\nScratch folder: ${root}`);
-console.log(`Page: ${out}`);
+console.log(outArg ? `\nPage: ${out}` : '\nPage: not kept. Run npm run demo -- --out <page.html> to keep the page.');
 
 const shot = arg('--shot');
 if (shot) {
