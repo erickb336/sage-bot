@@ -11,6 +11,7 @@
     { "key": "CLAUDE_CONFIG_DIR", "in": "env", "name": "CLAUDE_CONFIG_DIR", "kind": "folder" },
     { "key": "SAGE_TOOL", "in": "env", "name": "SAGE_TOOL", "kind": "file" },
     { "key": "home", "in": "host", "name": "HOME", "kind": "folder" },
+    { "key": "owner", "in": "host", "name": "the owner's home folder", "kind": "folder" },
     { "key": "userTemp", "in": "host", "name": "DARWIN_USER_TEMP_DIR", "kind": "folder" }
   ],
   "notPaths": {
