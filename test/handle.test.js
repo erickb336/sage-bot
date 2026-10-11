@@ -25,7 +25,7 @@ function bridge(ids, at) {
   return ctx;
 }
 
-test('F-T27-12: holders are exactly the members with the driver role, leads those with the lead role; a bot is neither', () => {
+test('F-T27-12: holders are exactly the members with the driver role, leads those with the sage-lead role; a bot is neither', () => {
   assert.deepEqual([...PEOPLE.holders], [ERICK, MAYA, JON]);
   assert.deepEqual([...PEOPLE.leads], [ERICK, JON]);
   assert.deepEqual([PEOPLE.names.get(SAM), PEOPLE.names.get(BRIDGE)], ['Sam', 'sage bridge']);
@@ -84,7 +84,7 @@ test('a modal submit after the vote ended gets the vote-ended note, and the time
   assert.equal(late.gate.phase, 'tied');
 });
 
-test('end vote now: a lead gets a confirm, confirms, and the vote ends; a non-lead holder and a cancel change nothing', async () => {
+test('end vote now: a sage-lead gets a confirm, confirms, and the vote ends; a non-sage-lead holder and a cancel change nothing', async () => {
   const b = bridge(['B9'], clock(15, 10));
   b.now = clock(15, 20);
   await b.press(ERICK, 'press:B9:0:0'); await b.press(JON, 'press:B9:0:0'); await b.press(MAYA, 'press:B9:0:1');
@@ -109,7 +109,7 @@ test('end vote now: a lead gets a confirm, confirms, and the vote ends; a non-le
   assert.deepEqual(forged.effects, [{ type: 'ignored', by: MAYA, why: 'not-lead' }]);
 });
 
-test('a tie-break: only a lead, only a tied option, only on a tied part; then the batch closes', async () => {
+test('a tie-break: only a sage-lead, only a tied option, only on a tied part; then the batch closes', async () => {
   const b = bridge(['B7'], clock(14, 31));
   b.now = clock(14, 40);
   await b.press(ERICK, 'press:B7:0:0'); await b.press(JON, 'press:B7:0:0');

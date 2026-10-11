@@ -79,7 +79,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
     ['tiebreak:B7:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B7:1:1 Part 2, break the tie: B (sage-lead only) s4'],
     ['press:B7:2:0 Part 3, A: reports-2026-10-04.csv s3 off', 'press:B7:2:1 Part 3, B: The report title and the date s2 off'],
   ]);
-  // A part with no votes offers every option to the lead, and the lead's early end says so (F-T27-18), not "closed".
+  // A part with no votes offers every option to the sage-lead, and the sage-lead's early end says so (F-T27-18), not "closed".
   const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
   assert.equal(e.embeds[0].description, `Ended early by Jon (sage-lead) at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);

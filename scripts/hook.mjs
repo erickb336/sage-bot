@@ -10,7 +10,7 @@ import { basename } from 'node:path';
 import { forTerminal } from '../src/clean.js';
 import { loadProjects } from '../src/projects.js';
 import { record, sessionsPathOf } from '../src/sessions.js';
-import { defaultConfigPath } from '../src/lead-policy.js';
+import { defaultConfigPath } from '../src/session-policy.js';
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash']);
 

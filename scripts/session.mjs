@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { forTerminal } from '../src/clean.js';
 import { load, SESSION_ID } from '../src/state.js';
-import { defaultConfigPath } from '../src/lead-policy.js';
+import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/session.mjs [--config <config.json>] thread <session id>';
 

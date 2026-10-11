@@ -26,7 +26,7 @@ test('F-T1-66: a part with no counted votes is tied, with one option or two, and
   }
 });
 
-test('F-T1-66: a one-option part with one vote is decided by votes; with no votes a lead decides it', () => {
+test('F-T1-66: a one-option part with one vote is decided by votes; with no votes a sage-lead decides it', () => {
   const gate = openGate({ id: 'g', kind: 'batch', parts: [['only'], ['only']], askedBy: ERICK, at: T0 });
   const voted = step(gate, { type: 'press', by: MAYA, part: 0, option: 'only', at: T0, via: 'discord' }, HOLDERS, [LEA]).gate;
   const ended = step(voted, { type: 'tick', at: END }, HOLDERS, [LEA]).gate;

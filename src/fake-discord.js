@@ -7,7 +7,7 @@ import { MessageFlags, MessageFlagsBitField } from 'discord.js';
  * with kind 'reply' (a message, private when its flags say so), 'update' (the message with the buttons) or 'modal'.
  * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean, refuse?: Error, message?: string }} o
  *   `fields` are the modal's inputs by custom_id; a button press has none. `ephemeral` says that the pressed message
- *   was private (the lead's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
+ *   was private (the sage-lead's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
  *   reply rejects with that error and records nothing, as Discord does for an unknown interaction (F-T27-20). `message` is the id of
  *   the message with the button, as discord.js shows it in `interaction.message.id`.
  */

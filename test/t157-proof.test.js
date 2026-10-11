@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { LEAD_PATH, launchOf, settingsOf } from '../src/lead-policy.js';
+import { BRIDGE_PATH, launchOf, settingsOf } from '../src/session-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { ROWS, out, prove, statusOf, verdict } from '../scripts/proof/run.mjs';
@@ -22,8 +22,8 @@ function world() {
   return { root, w, done: () => { rmSync(root, { recursive: true, force: true }); rmSync(w.tempRoot, { recursive: true, force: true }); } };
 }
 const HOST_TOOLS = ['launchctl', 'crontab', 'security', 'gh'];
-/** The real host tools on the lead PATH, by their real paths (the seatbelt test refuses to exec them, F-T165-41). */
-const REAL_HOST_TOOLS = [...new Set(LEAD_PATH.split(':').flatMap((d) => HOST_TOOLS.map((t) => join(d, t))).filter((p) => existsSync(p)).map((p) => realpathSync.native(p)))];
+/** The real host tools on the bridge-session PATH, by their real paths (the seatbelt test refuses to exec them, F-T165-41). */
+const REAL_HOST_TOOLS = [...new Set(BRIDGE_PATH.split(':').flatMap((d) => HOST_TOOLS.map((t) => join(d, t))).filter((p) => existsSync(p)).map((p) => realpathSync.native(p)))];
 /**
  * Logging fakes of the host tools in `<root>/bin` (G73, standing order 20): each appends its name to a log. gh prints the token of the
  * hosts file in GH_CONFIG_DIR, else in $HOME/.config/gh, and shows the read's error, so that a sandbox EPERM is a refusal; security

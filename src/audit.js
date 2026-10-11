@@ -1,26 +1,26 @@
-// The lead log and the kill switch (T131, G22 and G27). The log keeps every message of a sage-lead to sage-bot, and every message of an
-// apprentice in a lead thread, as one JSON line each, with a hash chain: each line holds the hash of the line before it, so an edit,
+// The sage-lead log and the kill switch (T131, G22 and G27). The log keeps every message of a sage-lead to sage-bot, and every message of an
+// apprentice in a sage-lead thread, as one JSON line each, with a hash chain: each line holds the hash of the line before it, so an edit,
 // a removal or a reorder of a line that has lines after it shows as a break (`verifyLog`). The chain has no key and no anchor (T135):
 // a cut tail, an older copy put back, or every line hashed again verifies as intact; only the #sage-audit copy shows those. Only the
 // bridge appends to it. Its folder is 0700 and outside every project folder, the file is 0600, and every open refuses a symlink. A
 // session runs as the same user, so these modes do not stop a session: the sandbox of the sessions must deny the state folder (T134).
-// The kill switch is a flag file: while it is there, nothing of a lead goes to sage. A flag that cannot be checked counts as set.
+// The kill switch is a flag file: while it is there, nothing of a sage-lead goes to sage. A flag that cannot be checked counts as set.
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, rmSync, statSync, writeSync } from 'node:fs';
 import { dirname, sep } from 'node:path';
 import { forModel, LOOKS_GT, LOOKS_LT } from './clean.js';
 import { readOwn, writeWhole } from './state.js';
 
-/** The lead log: `auditPath` in the config, else `<statePath>.leads.jsonl`, beside the gate file in its 0700 folder. */
+/** The sage-lead log: `auditPath` in the config, else `<statePath>.leads.jsonl`, beside the gate file in its 0700 folder. */
 export const auditPathOf = (config) => config.auditPath ?? `${config.statePath}.leads.jsonl`;
 /** The kill switch flag file: `killPath` in the config, else `<statePath>.leads-off`. */
 export const killPathOf = (config) => config.killPath ?? `${config.statePath}.leads-off`;
 
 /**
- * Lead text for sage, a MODEL reader (later, in a lead session). An allow-list: a newline, the plain space and every printable
+ * Sage-lead text for sage, a MODEL reader (later, in a bridge session). An allow-list: a newline, the plain space and every printable
  * character (letters, marks, numbers, punctuation, symbols) stay; every other character (control, format, bidi, tag, private use,
  * unassigned, other separators, default-ignorable) becomes one space. `<`, `>` and each character that looks like one (LOOKS_LT,
- * LOOKS_GT) become ‹ and ›, so no text of a lead can open or close a tag of sage's frame. A lead is trusted with words, not with hidden characters.
+ * LOOKS_GT) become ‹ and ›, so no text of a sage-lead can open or close a tag of sage's frame. A sage-lead is trusted with words, not with hidden characters.
  */
 const PRINTABLE = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}]--\p{Default_Ignorable_Code_Point}]$/v;
 export const forLead = (text) => Array.from(String(text).toWellFormed(), (ch) => {
@@ -44,14 +44,14 @@ function checkFolder(path, projects) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const st = lstatSync(dir);
   if (!st.isDirectory() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
-    throw new Error(`the lead log folder ${dir} must be a folder of this user with mode 0700. Nothing was started.`);
+    throw new Error(`the sage-lead log folder ${dir} must be a folder of this user with mode 0700. Nothing was started.`);
   }
   const real = realpathSync(dir);
   for (const p of projects) {
     let root;
     try { root = realpathSync(p.project); } catch { continue; }
     if (real === root || real.startsWith(root + sep)) {
-      throw new Error(`the lead log folder ${dir} is in the project folder of ${p.name}: a session there could change it. Put auditPath outside every project. Nothing was started.`);
+      throw new Error(`the sage-lead log folder ${dir} is in the project folder of ${p.name}: a session there could change it. Put auditPath outside every project. Nothing was started.`);
     }
   }
 }
@@ -62,7 +62,7 @@ function checkFolder(path, projects) {
  * the sha256 of the last line as it is. A missing log has no lines.
  */
 export function verifyLog(path) {
-  const text = readOwn(path, 'lead log') ?? '';
+  const text = readOwn(path, 'sage-lead log') ?? '';
   const raw = text.split('\n');
   if (raw.at(-1) === '') raw.pop();
   const lines = [];
@@ -81,7 +81,7 @@ export function verifyLog(path) {
 }
 
 /**
- * Opens the lead log for appends. Throws, and the bridge stops, for a folder or a file that is not safe. A log with a break stays as
+ * Opens the sage-lead log for appends. Throws, and the bridge stops, for a folder or a file that is not safe. A log with a break stays as
  * it is (it is evidence): the new lines chain on from its last line, and `broken` says where the break is, for the start log.
  * `has(id)` says whether a line of the log (also one after a break) is for the message `id`.
  * @returns {{ append: (line: object) => object, has: (id: string) => boolean, broken: { line: number, why: string } | null }}
@@ -101,11 +101,11 @@ export function openLog(path, projects) {
       line.hash = hashOf(line, prev);
       let fd;
       try { fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600); } catch (e) {
-        throw e.code === 'ELOOP' ? new Error(`the lead log ${path} is a symlink. Nothing was written.`) : e;
+        throw e.code === 'ELOOP' ? new Error(`the sage-lead log ${path} is a symlink. Nothing was written.`) : e;
       }
       try {
         const st = fstatSync(fd);
-        if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) throw new Error(`the lead log ${path} must be a regular file of this user with mode 0600. Nothing was written.`);
+        if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) throw new Error(`the sage-lead log ${path} must be a regular file of this user with mode 0600. Nothing was written.`);
         writeSync(fd, `${JSON.stringify(line)}\n`);
         fsyncSync(fd);
       } finally { closeSync(fd); }

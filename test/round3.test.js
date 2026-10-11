@@ -30,7 +30,7 @@ test('F-T1-41: holders and leads may be a Set or a Map\'s keys; a string or a nu
   for (const odd of [MAYA, 42, { [MAYA]: true }, undefined]) {
     assert.deepEqual(step(single(), answer, odd, []).effects, [{ type: 'ignored', by: MAYA, why: 'not-holder' }], String(odd));
   }
-  // Leads as a Set: a lead who is a holder ends the vote.
+  // Leads as a Set: a sage-lead who is a holder ends the vote.
   const out = step(batch(), { type: 'end', by: LEA, at: T0, via: 'discord' }, new Set([MAYA, LEA]), new Set([LEA]));
   assert.equal(out.gate.phase, 'tied');
 });

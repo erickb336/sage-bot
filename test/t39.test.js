@@ -43,12 +43,12 @@ test('T39: an end by time names nobody', () => {
     `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
 });
 
-test('T39: the lead name goes through the people lookup and safe(): markdown and mentions stay inert text', () => {
+test('T39: the sage-lead name goes through the people lookup and safe(): markdown and mentions stay inert text', () => {
   const names = new Map([...PEOPLE.names, [JON, '**@everyone** <@123>']]);
   const c = card(broken(), ASKS.B7, { ...PEOPLE, names });
   assert.equal(lastLine(c.embeds[0].fields[1].value), `**Decided: A** · tie broken by \\*\\*@everyone\\*\\* \\<@123\\> (sage-lead) at <t:${ts(BREAK)}:t>`);
   assert.deepEqual(c.allowedMentions, { parse: [] });
-  // A lead with no display name gets the same fallback as every other name, never the raw id.
+  // A sage-lead with no display name gets the same fallback as every other name, never the raw id.
   const noName = card(early(), ASKS.B9, { ...PEOPLE, names: new Map() }).embeds[0].description;
   assert.match(noName, /^Ended early by member \(sage-lead\) at /);
 });
@@ -82,7 +82,7 @@ test('T39: parseGate refuses a by, at or endedBy that step could not make', () =
     'a tie-break with an unknown field': forge(broken, (g) => { g.parts[1].outcome.via = 'discord'; }),
     'endedBy on a vote that is still open': forge(() => openAsk('B9', T0), (g) => { g.endedBy = JON; }),
     'endedBy null on an early end': forge(early, (g) => { g.endedBy = null; }),
-    'endedBy a lead on an end by time': forge(tied, (g) => { g.endedBy = JON; }),
+    'endedBy a sage-lead on an end by time': forge(tied, (g) => { g.endedBy = JON; }),
     'endedBy an empty id': forge(early, (g) => { g.endedBy = ''; }),
     'endedBy a number': forge(early, (g) => { g.endedBy = 1; }),
     'endedBy on a single gate': forge(() => openAsk('G5', T0), (g) => { g.endedBy = null; }),
@@ -94,7 +94,7 @@ test('T39: parseGate refuses a by, at or endedBy that step could not make', () =
   assert.equal(withdrawn.endedBy, JON);
 });
 
-test('T39: the two design sentences: the open intro says the work goes on; a tied part says sage reminds the leads', () => {
+test('T39: the two design sentences: the open intro says the work goes on; a tied part says sage reminds the sage-leads', () => {
   const open = run(openAsk('B7', T0), [ballot(MAYA, 0, 'A', T0 + MINUTE)]);
   assert.match(card(open, ASKS.B7, PEOPLE).embeds[0].description, /^3 product questions of T7\. Vote on each part; change your vote until the vote ends\. The work on the task goes on\. Closes at /);
   assert.equal(lastLine(card(tied(), ASKS.B7, PEOPLE).embeds[0].fields[1].value),

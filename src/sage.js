@@ -157,7 +157,7 @@ export const sagePlugin = (claudeDir) => ({
 export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skills', 'sage', 'sage.mjs');
 
 /**
- * Where the sage state tool is, for the demo, the bridge tests and the lead policy (src/lead-policy.js). In this order:
+ * Where the sage state tool is, for the demo, the bridge tests and the session policy (src/session-policy.js). In this order:
  * 1. SAGE_TOOL, when it is set;
  * 2. the newest sage.mjs (by modification time) in the sage plugin's cache, <cache>/sage/<version>/skills/sage/, in claudeDirOf;
  * 3. else an error that names SAGE_TOOL.

@@ -7,7 +7,7 @@ import { card, confirmEnd, ephemeral, note, parseCustomId, reasonModal, stamp } 
 
 /**
  * Who may answer and vote, from the guild members and the role ids of the config. A holder has the sage-apprentice or the
- * sage-lead role, and a lead the sage-lead role, so a lead is always a holder (T70). Nobody else counts, also not the owner
+ * sage-lead role, and a sage-lead the sage-lead role, so a sage-lead is always a holder (T70). Nobody else counts, also not the owner
  * (F-T27-12). A bot (discord.js `member.user.bot`) is neither.
  * @param {Iterable<{ id: string, name: string, roles: string[], bot?: boolean }>} members
  * @param {{ apprenticeRole: string, leadRole: string }} config
@@ -62,7 +62,7 @@ function decide(interaction, { gates, people, clock }) {
   const id = parseCustomId(interaction.customId);
   const entry = id && gates.get(id.gateId);
   const { action, part, index } = id ?? {};
-  // "End vote now" and "Cancel" exist only on the lead's private confirm: a press from any other message is unknown (F-T27-14).
+  // "End vote now" and "Cancel" exist only on the sage-lead's private confirm: a press from any other message is unknown (F-T27-14).
   const fromConfirm = interaction.message?.flags.has(MessageFlags.Ephemeral) === true;
   if (!entry || ((action === 'end!' || action === 'cancel') && !fromConfirm)) return reply(note('unknown-gate'), entry?.gate ?? null);
   const { gate, ask } = entry;
@@ -88,7 +88,7 @@ function decide(interaction, { gates, people, clock }) {
   // only the presses of members with a sage role (G20), so not-holder comes only from a leads-only question.
   const out = step(gate, event, ask.leads ? people.leads : people.holders, people.leads);
   const refused = out.effects.find((e) => e.type === 'ignored');
-  // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a lead, ended, closed, withdrawn,
+  // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a sage-lead, ended, closed, withdrawn,
   // or past the time limit by the clock), and the confirm shows only when the end would count (F-T27-13).
   if (action === 'end' && !refused) return reply(confirmEnd(gate, people), gate);
   const result = refused ? reply(note(refused.why === 'not-holder' ? 'leads-only' : refused.why, out.gate, people.names, ask), out.gate, out.effects)

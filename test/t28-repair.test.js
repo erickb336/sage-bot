@@ -35,7 +35,7 @@ test('acceptance, F-T28-26, G10 a: the owner (no roles) answers G1 at the termin
   assert.equal(b.lines.some((l) => l.startsWith('sage gate project/G1 answered')), false);
 });
 
-test('G10 a: the owner\'s answer after a loop closes the card; a later press of a lead changes nothing in sage', async () => {
+test('G10 a: the owner\'s answer after a loop closes the card; a later press of a sage-lead changes nothing in sage', async () => {
   const b = setup({ members: noRoles() });
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
@@ -89,7 +89,7 @@ test('F-T28-27, G10 a: in a batch the owner\'s terminal answer closes its part, 
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'q']);
   assert.match(lastCard(b).embeds[0].description, /Closed: every part is decided or answered at the terminal\. T7 goes on\./);
-  // Part 1 had no votes, which the vote rules call a tie, but it has the owner's answer: the leads get no ping.
+  // Part 1 had no votes, which the vote rules call a tie, but it has the owner's answer: the sage-leads get no ping.
   assert.deepEqual(pings(b, LEADR), []);
 });
 
@@ -209,7 +209,7 @@ test('G10 c: a question that a task adds after its card was posted gets its own 
   assert.equal(b.bridge.entry('project/G1+G2').gate.parts.length, 2);
 });
 
-test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the leads once; the next reminder keeps the 2-hour steps from the end of the vote', async () => {
+test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the sage-leads once; the next reminder keeps the 2-hour steps from the end of the vote', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T6', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T6', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');

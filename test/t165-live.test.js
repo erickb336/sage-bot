@@ -27,8 +27,8 @@ const scratch = () => realpathSync.native(tempFolder('sage-bot-t165-'));
 const inShared = (dir) => isWithin(`/private/tmp/claude-${UID}`, realpathSync.native(dir));
 const liveScratch = () => realpathSync.native(tempFolder('sage-bot-t165-', inShared(tmpdir()) ? '/private/tmp' : tmpdir()));
 const sb = (s) => JSON.stringify(s);
-/** The node arguments of `npm run proof:live <args>` in a child, with the rg control on `leadPath` (a fake's folder: no rg is on the lead
- * PATH of a test Mac, F-T165-38), or LEAD_PATH when it is undefined. */
+/** The node arguments of `npm run proof:live <args>` in a child, with the rg control on `leadPath` (a fake's folder: no rg is on the sage-lead
+ * PATH of a test Mac, F-T165-38), or BRIDGE_PATH when it is undefined. */
 const cli = (args, leadPath) => ['--input-type=module', '-e', `const [a, l] = JSON.parse(process.argv[1]); await (await import(${sb(LIVE)})).main(a, { leadPath: l });`, sb([args, leadPath])];
 const T165 = ['F-T165-1', 'F-T165-2', 'F-T165-4', 'F-T165-5', 'F-T165-6', 'F-T165-7', 'F-T165-8', 'F-T165-9', 'F-T165-10', 'F-T165-24'];
 const LIVE_ROWS = 23;
@@ -378,11 +378,11 @@ test('the checks of L2 and L3 (standing order 19): worked only with the tag, the
     assert.deepEqual(did('F-T134-4b'), { 'write-settings': null, 'write-mcp': null });
     assert.deepEqual(did('F-T134-15b'), { 'bash-unsandboxed': false });
     assert.deepEqual(checks['F-T134-16b'], []); // the subagent's probes are the row's checks
-    // F-T157-5 (R692): the lead PATH has rg, and the session's Bash finds none: rg-where fails, and "command not found" is no refusal.
+    // F-T157-5 (R692): the bridge-session PATH has rg, and the session's Bash finds none: rg-where fails, and "command not found" is no refusal.
     assert.deepEqual(did('F-T157-5'), { 'rg-where': true, 'rg-credential': null });
-    assert.equal(checks['F-T157-5'][0].why, 'command -v rg: rg exit 1; the lead PATH has /opt/homebrew/bin/rg');
-    // With no rg on the lead PATH, the row proves nothing.
-    assert.deepEqual(checksOf(w, s, { settingsBefore, hide, rg: null })['F-T157-5'], ['rg-where', 'rg-credential'].map((id) => ({ id, did: null, why: 'no rg on the lead PATH of this Mac: the row proves nothing until rg is installed there' })));
+    assert.equal(checks['F-T157-5'][0].why, 'command -v rg: rg exit 1; the bridge-session PATH has /opt/homebrew/bin/rg');
+    // With no rg on the bridge-session PATH, the row proves nothing.
+    assert.deepEqual(checksOf(w, s, { settingsBefore, hide, rg: null })['F-T157-5'], ['rg-where', 'rg-credential'].map((id) => ({ id, did: null, why: 'no rg on the bridge-session PATH of this Mac: the row proves nothing until rg is installed there' })));
     // The host's state counts too: a Write whose result says error but whose file is there worked.
     writeFileSync(join(w.home, 'proof-write.txt'), 'sample');
     assert.equal(checksOf(w, s, { settingsBefore, hide })['F-T134-10b'][0].did, true);
@@ -435,7 +435,7 @@ test('F-T165-14, F-T165-16: an unsandboxed Bash or an rg call with no tag and no
     assert.equal(did(stream('sh: rg: command not found', true, `rg sample ${w.credentials.ssh}`, {}), 'F-T157-5', 1), null); // "command not found" is never a refusal (R692)
     assert.equal(did(stream(`rg: ${w.credentials.ssh}: Operation not permitted (os error 1)`, true, `rg sample ${w.credentials.ssh}`, {}), 'F-T157-5', 1), false);
     assert.equal(did(stream('/opt/homebrew/bin/rg\nrg exit 0', false, 'command -v rg; echo "rg exit $?"', {}), 'F-T157-5', 0), false); // the session finds rg
-    assert.equal(did(stream('rg exit 1', false, 'command -v rg; echo "rg exit $?"', {}), 'F-T157-5', 0), true); // the lead PATH has rg, the session finds none: FAIL
+    assert.equal(did(stream('rg exit 1', false, 'command -v rg; echo "rg exit $?"', {}), 'F-T157-5', 0), true); // the bridge-session PATH has rg, the session finds none: FAIL
     assert.equal(did(stream('', false, 'command -v rg; echo "rg exit $?"', {}), 'F-T157-5', 0), null); // no sentinel line
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -925,18 +925,18 @@ test('F-T165-30: a launchd job that is still loaded after launchctl remove stops
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('F-T165-38, F-T165-39: the refusals come in the order gh, shared folder, home folder, folder not empty, rg, then the key; a used folder and a lead PATH with no rg read no key and make nothing', async () => {
+test('F-T165-38, F-T165-39: the refusals come in the order gh, shared folder, home folder, folder not empty, rg, then the key; a used folder and a bridge-session PATH with no rg read no key and make nothing', async () => {
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    assert.equal(spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: fake.env, encoding: 'utf8' }).stdout.trim(), join(fake.bin, 'rg')); // rg is on env.PATH, not on the lead PATH
+    assert.equal(spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: fake.env, encoding: 'utf8' }).stdout.trim(), join(fake.bin, 'rg')); // rg is on env.PATH, not on the bridge-session PATH
     const noRg = join(root, 'no-rg'), used = join(root, 'used'), out = join(root, 'run', 'a');
     mkdirSync(noRg);
     mkdirSync(used);
     writeFileSync(join(used, 'notes.txt'), 'sample\n');
     // F-T165-39: a folder that is not empty is refused before rg and before the key: no Keychain prompt for a run that cannot start.
     await assert.rejects(proveLive(used, { env: fake.env, leadPath: noRg }), (e) => e.exitCode === 2 && e.message === `the scratch folder ${used} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`);
-    // F-T165-38: no rg on the lead PATH: one line that names ripgrep and its install command, before the key and before any folder.
+    // F-T165-38: no rg on the bridge-session PATH: one line that names ripgrep and its install command, before the key and before any folder.
     const noRgLine = `ripgrep (rg) is not on the sessions' PATH ${noRg}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`;
     await assert.rejects(proveLive(out, { env: fake.env, leadPath: noRg }), (e) => e.message === noRgLine);
     const r = spawnSync(process.execPath, cli(['--out', out], noRg), { encoding: 'utf8', env: { PATH: fake.env.PATH, HOME: join(root, 'home'), TMPDIR: root } });

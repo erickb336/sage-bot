@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { forTerminal, reasonLines } from '../src/clean.js';
 import { loadProjects, pickProject, projectHere } from '../src/projects.js';
 import { keyOf, load, projectOfKey } from '../src/state.js';
-import { defaultConfigPath } from '../src/lead-policy.js';
+import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/reasons.mjs [--config <config.json>] [--project <name>] <gate id>';
 

@@ -58,7 +58,7 @@ test('G17: a deleted session thread: its open single and open batch are posted a
     'project/G1: its card moves to the parent channel, because the thread of Session 1 · project · Sun 4 Oct is gone (G17)',
     'project/G2+G3: its card moves to the parent channel, because the thread of Session 1 · project · Sun 4 Oct is gone (G17)']);
 
-  // A lead breaks the tie on the moved card: the press counts, the card in the parent channel changes, and the lead's post goes there.
+  // A sage-lead breaks the tie on the moved card: the press counts, the card in the parent channel changes, and the sage-lead's post goes there.
   await b.press(JON, 'tiebreak:project/G2+G3:1:1');
   assert.match(cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ').embeds[0].fields[1].value, /tie broken by Jon/);
   assert.equal(shown(b, CHANNEL).at(-1), 'Jon (sage-lead) broke the tie on part 2 of project/G2+G3: B.');
@@ -264,7 +264,7 @@ function refuseTieAlert(b) {
 const heldOf = (b, id) => JSON.parse(readFileSync(b.statePath, 'utf8')).entries.find((e) => e.gate.id === id).held;
 const tieAlerts = (b) => shown(b, CHANNEL).filter((t) => t.startsWith(`<@&${LEADR}> project/G2+G3 is tied after its vote`));
 
-test('F-T65-4: the moved card posts, Discord refuses its tie alert, then a lead breaks the tie: the tie-break note posts, the stale alert never does, the held list goes', async () => {
+test('F-T65-4: the moved card posts, Discord refuses its tie alert, then a sage-lead breaks the tie: the tie-break note posts, the stale alert never does, the held list goes', async () => {
   const b = await movedSetup();
   const refuse = refuseTieAlert(b);
   b.now += 30 * MINUTE;
@@ -300,7 +300,7 @@ test('F-T65-4: a reminder about a card whose tie alert is held goes after the al
   const refuse = refuseTieAlert(b);
   b.now += 30 * MINUTE;
   await b.bridge.loop();
-  b.now += 2 * HOUR + MINUTE; // past the leads' 2-hour reminder of G2+G3
+  b.now += 2 * HOUR + MINUTE; // past the sage-leads' 2-hour reminder of G2+G3
   await b.bridge.loop();
   assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')), []);
   refuse.on = false;

@@ -17,7 +17,7 @@ import { forTerminal } from '../src/clean.js';
 import { loadProjects, pickProject, projectHere } from '../src/projects.js';
 import { sageTool } from '../src/sage.js';
 import { GATE_ID, keyOf, leadsPathOf, loadLeads, loadVotes, migrateMarks, saveVotes, votesPathOf, withLock } from '../src/state.js';
-import { defaultConfigPath } from '../src/lead-policy.js';
+import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/vote.mjs [--config <config.json>] [--project <name>] <gate id> ... | --leads <gate id> | --unmark <gate id> ... | --list';
 

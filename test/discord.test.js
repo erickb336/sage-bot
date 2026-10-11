@@ -102,7 +102,7 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   assert.deepEqual(lines, ['the bridge could not handle a press: card: Discord allows 5 rows of buttons on one message']);
 });
 
-test('F-T28-21: a long display name is made safe, then cut to 32 characters, in the message that names the lead', async () => {
+test('F-T28-21: a long display name is made safe, then cut to 32 characters, in the message that names the sage-lead', async () => {
   const statePath = join(scratch(), 'gates.json');
   const long = `*${'Jonathan'.repeat(40)}`;
   const people = [{ id: OWNER, name: long, roles: [APPRENTICE, LEADR] }];

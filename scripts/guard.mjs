@@ -1,12 +1,12 @@
 // The guard hook (T133): a Claude Code PreToolUse hook for a sage session that sage-bot starts for a sage-lead.
 // node scripts/guard.mjs reads the hook's JSON on stdin. The rules are in src/guard.js.
 // - SAGE_ORIGIN is not "lead": exit 0, no output. The owner's own sessions are unaffected.
-// - A lead session: exit 0 with no output allows the tool call; a refusal prints the deny decision as JSON on stdout.
+// - A bridge session: exit 0 with no output allows the tool call; a refusal prints the deny decision as JSON on stdout.
 //   An input over 64 KB is refused before it is parsed.
 // - The deadline starts before the hook reads stdin, and the rules run in a worker thread. When the hook has not read stdin
 //   to its end and decided within DEADLINE_MS, it refuses (F-T133-62, F-T134-5): a hook that runs past Claude Code's timeout
 //   does not block the call (F-T134-13), so a stdin that never closes or a slow decision must not let the call run.
-// - Any failure in a lead session (a crash, a module that does not load) refuses: exit code 2 blocks the tool call in
+// - Any failure in a bridge session (a crash, a module that does not load) refuses: exit code 2 blocks the tool call in
 //   Claude Code, and the reason goes to stderr.
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 

@@ -6,7 +6,7 @@
 
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
-**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [The lead log and the kill switch](#the-lead-log-and-the-kill-switch)
+**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [The sage-lead log and the kill switch](#the-sage-lead-log-and-the-kill-switch)
 
 ## The checklist
 
@@ -161,11 +161,11 @@ node scripts/channels.mjs list                                       # print the
 
 sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
 
-## The lead log and the kill switch
+## The sage-lead log and the kill switch
 
-**#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each line of the lead log there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
+**#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each line of the sage-lead log there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
 
-The lead log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600. The kill switch is the flag file `<statePath>.leads-off`, or `killPath` in the config; a flag that the bridge cannot check counts as set. The [reference](reference.md#mention-threads) tells what the hash chain shows and what it does not.
+The sage-lead log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600. The kill switch is the flag file `<statePath>.leads-off`, or `killPath` in the config; a flag that the bridge cannot check counts as set. The [reference](reference.md#mention-threads) tells what the hash chain shows and what it does not.
 
 Check and change the link from Discord to sage at the terminal:
 
@@ -174,6 +174,6 @@ Check and change the link from Discord to sage at the terminal:
 node scripts/leads.mjs status    # is the link on or off?
 node scripts/leads.mjs stop      # turn the link off at the terminal
 node scripts/leads.mjs restore   # turn the link on again (only the owner, at the terminal)
-node scripts/leads.mjs verify    # check the hash chain of the lead log; exits 1 at a break
-node scripts/leads.mjs read 20   # print the last 20 lines of the lead log; a line from a break on starts with UNVERIFIED
+node scripts/leads.mjs verify    # check the hash chain of the sage-lead log; exits 1 at a break
+node scripts/leads.mjs read 20   # print the last 20 lines of the sage-lead log; a line from a break on starts with UNVERIFIED
 ```

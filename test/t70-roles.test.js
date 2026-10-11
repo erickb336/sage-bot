@@ -1,5 +1,5 @@
 // T70: two roles, sage-apprentice and sage-lead; sage-driver is gone. Holders are the members with either role, leads the
-// members with sage-lead. A new card pings both roles; a tie pings only the leads. An old config with driverRole stops.
+// members with sage-lead. A new card pings both roles; a tie pings only the sage-leads. An old config with driverRole stops.
 // SAMPLE DATA ONLY: every id and name is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +16,7 @@ const [APPRENTICE, LEAD] = ['300000000000000001', '300000000000000002'];
 const OLD_CONFIG = 'the config has driverRole: sage-driver is gone. Rename driverRole to apprenticeRole and give that role id to the sage-apprentice role.';
 const ROOT = new URL('..', import.meta.url).pathname;
 
-test('peopleOf: an apprentice is a holder, a lead with only the lead role is a holder and a lead, a member with both is a lead, a member with neither counts for nothing', () => {
+test('peopleOf: an apprentice is a holder, a sage-lead with only the sage-lead role is a holder and a sage-lead, a member with both is a sage-lead, a member with neither counts for nothing', () => {
   const p = peopleOf([
     { id: 'maya', name: 'Maya', roles: ['app'] },
     { id: 'jon', name: 'Jon', roles: ['ld'] },

@@ -2,7 +2,7 @@
 // decideText(stdin, env) gets the PreToolUse JSON of Claude Code and the hook's environment, and gives null (allow) or the
 // message of a refusal. With SAGE_ORIGIN not "lead" the hook allows everything: the owner's own sessions are unaffected.
 //
-// The guard is a thin allow-list of text: which tools a lead session may use, and which commands, subcommands and options a
+// The guard is a thin allow-list of text: which tools a bridge session may use, and which commands, subcommands and options a
 // Bash call may name. It reads no file and resolves no path. Where a program may read or write files, and which hosts it
 // may reach, is the job of the Claude Code sandbox and the permission rules that step 6 (T134) sets (F-T134-1, F-T134-6,
 // F-T134-15, F-T134-16): docs/reference.md.
@@ -13,7 +13,7 @@
 //   each of its options must be an entry of that command's option table by its full spelling; the rest is refused.
 // - GitHub (gh, git push, git fetch) goes through the sage-bot broker tools of the session: in-process MCP tools of the Agent
 //   SDK (G57 A, T158), which T134 adds to TOOLS. The hint names no command: the guard refuses each GitHub command (F-T133-63).
-// - The sage state tool is refused by its name (G30 A): a lead session reaches the logbook only through sage-bot (T134).
+// - The sage state tool is refused by its name (G30 A): a bridge session reaches the logbook only through sage-bot (T134).
 //   The guarantee is the sandbox of T134, which denies the sage plugin folder and every logbook (G44 A, F-T134-6); this check is a
 //   second layer. Its class rules: in a pipeline that runs or writes, every word is printable ASCII and has no [ wildcard; a
 //   redirect target is a word like any other; node runs no script from stdin (-) or from a path under /dev/ (a device); an
@@ -33,14 +33,14 @@ import { basename, posix } from 'node:path';
 /** The largest hook input that the guard reads, in bytes. */
 export const MAX_INPUT = 64 * 1024;
 
-/** The ending of a refusal with no safe form (R442 Q1 B): a lead session runs headless, so Erick is not at a terminal. */
+/** The ending of a refusal with no safe form (R442 Q1 B): a bridge session runs headless, so Erick is not at a terminal. */
 const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 // A rule can give the safe way to do the same thing (how) after this mark; that text replaces STOP.
 const MARK = '\u0001';
 const how = (why, safe) => `${why}${MARK}sage can do this instead: ${safe}.`;
 export const refusal = (why) => {
   const k = why.lastIndexOf(MARK);
-  return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a lead session. ${k < 0 ? STOP : why.slice(k + 1)}`;
+  return `sage-bot guard: ${k < 0 ? why : why.slice(0, k)} is refused in a bridge session. ${k < 0 ? STOP : why.slice(k + 1)}`;
 };
 
 // A word of the call as a refusal shows it: at most 200 characters, then an ellipsis (F-T133-57). A refusal can echo a word
@@ -243,7 +243,7 @@ function npm(args, env) {
 }
 // The commands that may read the output of the part before them through a |: read-only filters, never a shell.
 const PIPE = new Set(['head', 'tail', 'wc', 'sort', 'grep']);
-// The Keychain front ends (G63 b), refused by name as a second layer: a lead session reads no Keychain item.
+// The Keychain front ends (G63 b), refused by name as a second layer: a bridge session reads no Keychain item.
 const KEYCHAIN = new Set(['security', 'osascript', 'osacompile']);
 // The commands of the list that read a file operand: the hint of a | into one of them names that form (cat x | jq -> jq <options> x).
 const READERS = new Set(['cat', 'jq', 'cut', 'uniq', 'rg']);
@@ -372,7 +372,7 @@ const WRITES = new Set(['node', 'npm', 'cp', 'mv', 'git', 'tee', 'uniq']);
 const CHANGES = new Set(['touch', 'mkdir', 'rm', 'rmdir']);
 // The git subcommands that write no file of the work tree.
 const GIT_READS = new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'ls-files', 'blame', 'remote', 'rev-list', 'merge-base', 'shortlog']);
-const STATE_TOOL = 'a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot)';
+const STATE_TOOL = 'a call that may name the sage state tool (a bridge session reaches the logbook only through sage-bot)';
 const ASCII = /^[\x20-\x7e]*$/;
 const ASCII_SAFE = 'write such text to a file in the scratch folder with the Write tool and pass the file (git commit -F <file>), and give files names in printable ASCII';
 // The files and folders that Claude Code, git and npm load as settings: a .claude folder (the settings, and the skills,
@@ -437,7 +437,7 @@ function simple({ words }, env) {
   const [name, ...args] = texts.slice(i);
   if (!name) return 'a part with no command';
   if (i > 0 && name === 'git') return how('a variable in front of git (git reads its config from HOME)', 'run git with no variable in front of it');
-  if (KEYCHAIN.has(basename(fold(name)))) return `the Keychain front end ${say(name)} (G63 b: a lead session reads no Keychain item)`;
+  if (KEYCHAIN.has(basename(fold(name)))) return `the Keychain front end ${say(name)} (G63 b: a bridge session reads no Keychain item)`;
   // A word that starts with a wildcard can expand to a file name that starts with -, an option that no table checked. The
   // command's own name is looked up as it is (a wildcard in it names no command; `[` is the test command).
   const glob = words.slice(i + 1).find((w) => w.glob && /^[*?[]/.test(w.text));
@@ -585,7 +585,7 @@ export function decide(input, env) {
   return why ? refusal(why) : null;
 }
 
-/** decide() for the hook's raw stdin in a lead session: an input over MAX_INPUT bytes, or one that is not JSON, is refused before parsing. */
+/** decide() for the hook's raw stdin in a bridge session: an input over MAX_INPUT bytes, or one that is not JSON, is refused before parsing. */
 export function decideText(text, env) {
   if (Buffer.byteLength(text) > MAX_INPUT) return refusal(how(`a tool call over ${MAX_INPUT / 1024} KB`, 'write long text to a file in the scratch folder in parts of less than 64 KB, and pass the file'));
   let input;

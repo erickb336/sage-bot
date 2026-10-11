@@ -1,9 +1,9 @@
-// The probes of the proof (T157): each one tries one operation that a lead session's sandbox must refuse (or must allow), and prints
+// The probes of the proof (T157): each one tries one operation that a bridge session's sandbox must refuse (or must allow), and prints
 // one line to stdout: the sentinel SENTINEL, then the JSON { id, row, expect, did, code, why }. `did` is true when the operation worked,
 // false when it was refused, and null when the probe could not tell (it proves nothing). The runner reads the lines from the Bash
 // tool's result in the session's stream, never from a file that the session can write (F-T165-23); resultsOf parses them. The probes
 // test only the sandbox: they run with no guard hook.
-//   node probe.mjs <world.json>             in a lead session (T165): each probe, sandboxed
+//   node probe.mjs <world.json>             in a bridge session (T165): each probe, sandboxed
 //   node probe.mjs <world.json> --control   outside the sandbox, first: each operation must work there, or its probe is INVALID
 //   node probe.mjs <world.json> --control --only <needs or id>   only those probes (`keychain`: the control after the sessions)
 // The rule of every verdict (standing order 19): refused only on positive evidence of a sandbox denial (EPERM, or the error that a
@@ -50,7 +50,7 @@ const NO_COMMAND = /command not found|xcode-select/;
 export const HOST_OFF = 'only the live run touches launchd and crontab (G73)';
 const q = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
 const names = (cmd) => `${cmd} | cut -d= -f1 | sed 's/$/=/'`; // variable names only: no value leaves the command
-/** The variables of the model credential (MODEL_KEYS of src/lead-policy.js, repeated here: this script imports nothing of sage-bot). */
+/** The variables of the model credential (MODEL_KEYS of src/session-policy.js, repeated here: this script imports nothing of sage-bot). */
 const MODEL_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 /** A see-probe over variable names: PATH is in every environment, so a listing with no PATH= line told nothing (F-T157-29). */
 const seeNames = (see) => ({ see, sentinel: /^PATH=$/m });
@@ -88,7 +88,7 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-1', 'env-github', 'refused', names('env'), seeNames(['GH_TOKEN', 'GITHUB_TOKEN'])),
     // F-T134-2: the bridge's state files
     P('F-T134-2', 'state-gates', 'refused', `cat ${q(w.statePath)} >/dev/null`),
-    P('F-T134-2', 'state-lead-log', 'refused', `cat ${q(`${w.statePath}.leads.jsonl`)} >/dev/null`),
+    P('F-T134-2', 'state-sage-lead-log', 'refused', `cat ${q(`${w.statePath}.leads.jsonl`)} >/dev/null`),
     P('F-T134-2', 'state-kill-flag', 'refused', `rm ${q(`${w.statePath}.leads-off`)}`),
     P('F-T134-2', 'state-spool', 'refused', `ls ${q(`${w.statePath}.sessions`)} >/dev/null`),
     P('F-T134-2', 'state-votes', 'refused', `cat ${q(`${w.statePath}.votes`)} >/dev/null`),
@@ -157,7 +157,7 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T156-31', 'write-other-folder', 'refused', touchIn(w.other.folder, 'x')),
     P('F-T156-31', 'write-other-tmp', 'refused', touchIn(w.other.tmp, 'x')),
     P('F-T156-31', 'write-home', 'refused', 'touch "$HOME/x" && rm "$HOME/x"'),
-    // F-T173-1: the other session's transcript in the lead sessions' Claude Code config folder, and its projects folder, are refused,
+    // F-T173-1: the other session's transcript in the bridge sessions' Claude Code config folder, and its projects folder, are refused,
     // while a plain command still runs with that folder under denyRead (the Bash tool reads its shell snapshot there, R651): the
     // probe itself runs in that Bash, so a Bash that cannot run leaves every L1 probe with no result.
     P('F-T173-1', 'transcript-cat', 'refused', `cat ${q(w.transcript)} >/dev/null`),
@@ -169,7 +169,7 @@ export function probes(w, { pid = process.pid } = {}) {
     keychain('node', `node -e "process.stdout.write(require('child_process').execFileSync('/bin/sh', ['-c', process.argv[1]]))" ${q(find)}`),
     keychain('python3', `python3 -c "import subprocess, sys; sys.exit(subprocess.call(['/bin/sh', '-c', sys.argv[1]]))" ${q(find)}`),
     keychain('osascript', `osascript -e ${q(`do shell script "${find.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`)}`),
-    // F-T165-10 (G70 a): gh, on the lead PATH, prints no token in a session. The world's home has a gh config with a sample token
+    // F-T165-10 (G70 a): gh, on the bridge-session PATH, prints no token in a session. The world's home has a gh config with a sample token
     // (world.mjs: ghConfig), so the control proves that gh reads one from there (with the control world's sample GH_TOKEN unset: gh
     // prefers the variable), and the session's gh, whose HOME is that folder, must not (F-T165-18). A Mac with no gh skips the row.
     P('F-T165-10', 'gh-auth-token', 'refused', 'gh auth token', { shows: w.ghTokenId, control: `unset GH_TOKEN GITHUB_TOKEN; GH_CONFIG_DIR=${q(w.ghConfig)} gh auth token`, tool: 'gh' }),
@@ -200,7 +200,7 @@ export function didOf(p, r) {
   return DENIED.test(r.stderr) || p.refusedAs?.test(r.stderr) ? false : null;
 }
 
-/** The lead session's claude process: the nearest ancestor whose command has --max-budget-usd (the launch, src/lead-policy.js). */
+/** The bridge session's claude process: the nearest ancestor whose command has --max-budget-usd (the launch, src/session-policy.js). */
 function claudePid() {
   for (let pid = process.ppid; pid > 1;) {
     const r = spawnSync('ps', ['-o', 'ppid=', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });

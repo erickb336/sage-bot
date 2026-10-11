@@ -74,7 +74,7 @@ const G2 = '  A. Yes · B. No\n  Recommended: Yes';
 const BOARD = "**Board · project**\n2 task(s) · building 1 · framed 1\n2 task(s) left. Time left is not estimated yet: the project's records have no estimate.\n2 open question(s):\n- G1 (T1): Which sort is the default?\n  A. Name · B. Date\n- G2 (T2): Ship the wake note?\n  A. Yes · B. No";
 const GATES = `**Open questions · project** (2)\n- G1 (T1), team vote: Which sort is the default?\n${G1}\n- G2 (T2), answered at the terminal: Ship the wake note?\n${G2}`;
 
-test('each command answers an apprentice and a lead in public (G20), from the safe columns only', async (t) => {
+test('each command answers an apprentice and a sage-lead in public (G20), from the safe columns only', async (t) => {
   const b = world(t);
   for (const who of [MAYA, JON]) {
     assert.deepEqual(await b.cmd(who, 'board'), [{ content: BOARD, ...PUBLIC }]);
@@ -393,12 +393,12 @@ test('F-T71-1: /sage files sends at most 8 MB in one reply; the files that do no
   const s = site(t, b, Object.fromEntries(names.map((n) => [n, big])), ['shots/*.png']);
   const [got] = await files(s.ask);
   assert.deepEqual(got.files, [{ name: 'a01.png', size: 8 * 1024 * 1024 }]);
-  assert.equal(got.content, ['1 shared file(s) of site:', '- shots/a01.png', '9 more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.',
+  assert.equal(got.content, ['1 shared file(s) of site:', '- shots/a01.png', '9 more file(s) not attached: one reply holds at most 8 MB. Ask a sage-lead for them.',
     ...names.slice(1).map((n) => `- shots/${n}`)].join('\n'));
   // A smaller file after one that does not fit still comes: 5 + 3 MB fit, 4 MB does not.
   const mb = (n) => Buffer.alloc(n * 1024 * 1024);
   const mix = site(t, b, { 'b1.png': mb(5), 'b2.png': mb(4), 'b3.png': mb(3) }, ['shots/*.png']);
-  assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.\n- shots/b2.png',
+  assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 8 MB. Ask a sage-lead for them.\n- shots/b2.png',
     files: [{ name: 'b1.png', size: 5 * 1024 * 1024 }, { name: 'b3.png', size: 3 * 1024 * 1024 }], ...PUBLIC }]);
 });
 
@@ -459,7 +459,7 @@ test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #
   assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
 });
 
-test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, an apprentice, a build verb that starts a sentence', async (t) => {
+test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a sage-lead, an apprentice, a build verb that starts a sentence', async (t) => {
   const b = world(t);
   const say = async (who, text) => (await b.mention(who, text))[0]?.content;
   assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
@@ -467,7 +467,7 @@ test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a lead, an appren
   for (const text of ['<@1> any update?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
   b.now += HOUR; // a new hour, so that the limit does not end the list
   for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
-    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for sage-leads: ask a lead.`, text);
+    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for sage-leads: ask a sage-lead.`, text);
   }
 });
 
@@ -508,7 +508,7 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
   const defer = ['defer', {}]; // public (G20)
-  // Roles come from the member: an option that names the lead role changes nothing, and a member with no role gets nothing (G20).
+  // Roles come from the member: an option that names the sage-lead role changes nothing, and a member with no role gets nothing (G20).
   assert.deepEqual(await run(chat({ roles: [], strings: { role: LEADR, roles: LEADR } })), []);
   assert.deepEqual(await run(chat({ user: JON, roles: [LEADR] })), [defer, ['edit', BOARD]]);
   assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], guildId: '200000000000000002' })), []);
