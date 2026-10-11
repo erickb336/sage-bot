@@ -168,7 +168,8 @@ const M = [
   ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.config/git', '.claude.json']"],
   ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.claude.json']"],
   ['~/.claude.json not a credential file (F-T157-11)', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.config/git']"],
-  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
+  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir]', 'CREDENTIAL_FILES.map((f) => join(h, f))), claudeDir]'],
+  ['lead Claude config folder not a credential file (F-T173-1)', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir]', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs]'],
   // F-T156-16: the environment is an allow-list
   ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],
   ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],

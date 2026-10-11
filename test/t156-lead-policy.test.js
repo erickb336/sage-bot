@@ -33,9 +33,9 @@ const GIT_CONTROL = [
   `${S21}/.git/config`, `${S21}/.git/config.worktree`, `${S21}/.git/hooks`, `${S21}/.git/commondir`, `${S21}/.git/modules`,
   `${S21}/.git/info/attributes`, `${S21}/.git/worktrees`, `${S21}/*/**/.git`,
 ];
-// The credential files (F-T156-5), git's global files that blockReadsOutsideWorkingDirectories re-opens, and the owner's Claude Code
-// config folder (F-T156-15).
-const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'].map((f) => `/h/${f}`), '/h/.claude'];
+// The credential files (F-T156-5), git's global files that blockReadsOutsideWorkingDirectories re-opens, the owner's Claude Code
+// config folder (F-T156-15) and the lead sessions' own one (F-T173-1).
+const CREDENTIALS = [...['.ssh', '.aws', '.config/gh', '.git-credentials', '.netrc', '.npmrc', '.gnupg', '.docker', '.kube', '.gitconfig', '.config/git', '.claude.json'].map((f) => `/h/${f}`), '/h/.claude', '/h/.local/share/sage-bot/leads/claude'];
 /** A sage plugin cache with one version, v1, in a new Claude Code config folder below `root`; the state tool's path. */
 function pluginCache(root, tool = "console.log('lead-sessions 1')") {
   const at = join(root, 'claude-config', 'plugins', 'cache', 'sage', 'sage', 'v1', 'skills', 'sage');
