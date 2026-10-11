@@ -5,11 +5,15 @@
 // `delete-keychain` changes it again, so it saves the list first (in memory, and in <dir>/search-list-before.txt for a crash that no
 // finally block sees, such as a SIGKILL) and puts it back after, also on a failure (F-T157-9).
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const ACCOUNT = 'sage-bot-proof';
+/** The account of the sample item, and of the owner's key item (scripts/proof/live.mjs). */
+export const ACCOUNT = 'sage-bot-proof';
+/** The id of a run's scratch keychain from its world's tag: fixed for the run, so that both worlds and the fixture name one item, and
+ * not the tag itself, so that the report can name the service (the report refuses to hold the tag). */
+export const keychainIdOf = (tag) => createHash('sha256').update(tag).digest('hex').slice(0, 16);
 
 /**
  * The commands of one scratch keychain, as `security` arguments. `password` and `value` are sample values, never printed (printable).
@@ -22,6 +26,7 @@ export function keychainPlan(dir, id = randomBytes(8).toString('hex')) {
     path, service, password, value,
     save: ['list-keychains', '-d', 'user'],
     create: ['create-keychain', '-p', password, path],
+    settings: ['set-keychain-settings', path], // no lock timeout and no lock on sleep: the keychain stays open between the control and the sessions (F-T165-19)
     add: ['add-generic-password', '-a', ACCOUNT, '-s', service, '-w', value, path],
     probe: ['find-generic-password', '-a', ACCOUNT, '-s', service, path], // T165's probes name the scratch keychain by its path
     remove: ['delete-keychain', path],
@@ -32,11 +37,29 @@ export function keychainPlan(dir, id = randomBytes(8).toString('hex')) {
 /** The plan's commands for a report: each sample value shown as <sample>. @param {ReturnType<typeof keychainPlan>} plan */
 export function printable(plan) {
   const hide = (args) => ['security', ...args.map((a) => (a === plan.password || a === plan.value ? '<sample>' : a))].join(' ');
-  return [plan.save, plan.create, plan.add, plan.probe, plan.remove, plan.restore(['<each keychain of the saved list>']), plan.save].map(hide);
+  return [plan.save, plan.create, plan.settings, plan.add, plan.probe, plan.remove, plan.restore(['<each keychain of the saved list>']), plan.save].map(hide);
 }
 
 /** The keychain paths of `security list-keychains` output: one quoted path a line. @param {string} out */
 export const keychainsOf = (out) => [...out.matchAll(/^\s*"([^"]+)"\s*$/gm)].map((m) => m[1]);
+
+/** The scratch keychain that is in place now: its plan, the saved search list, and whether `create-keychain` ran. */
+let current = null;
+
+/**
+ * Takes the scratch keychain away and puts the user's search list back, once: the end of withScratchKeychain, and the signal handler of
+ * the live run, which exits before any finally block (F-T165-22). Nothing to do when no scratch keychain is in place.
+ */
+export function stopScratchKeychain() {
+  if (!current) return;
+  const { plan, saved, created, security } = current;
+  current = null;
+  try { if (created) security(plan.remove); } finally {
+    security(plan.restore(saved));
+    const now = keychainsOf(security(plan.save));
+    if (now.join('\n') !== saved.join('\n')) throw new Error(`the keychain search list is not as it was: it was ${saved.join(', ')}, it is ${now.join(', ')}. Put it back with: security list-keychains -d user -s ${saved.map((p) => `'${p}'`).join(' ')}`);
+  }
+}
 
 /**
  * Runs `fn(plan)` with the scratch keychain, and always puts the user's keychain search list back as it was before.
@@ -47,22 +70,22 @@ export const keychainsOf = (out) => [...out.matchAll(/^\s*"([^"]+)"\s*$/gm)].map
  */
 export async function withScratchKeychain(dir, fn, { env = process.env, id } = {}) {
   const plan = keychainPlan(dir, id);
-  const security = (args) => execFileSync('security', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // Each call in a process group of its own (detached), so that a second Ctrl-C at the terminal does not stop it mid-cleanup; a failure
+  // names the verb and the exit only, never the arguments, which hold the sample password and value (F-T165-30).
+  const security = (args) => {
+    try { return execFileSync('security', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], detached: true }); }
+    catch (e) { throw new Error(`security ${args[0]} failed (exit ${e.status ?? e.signal ?? e.code})`); }
+  };
   const saved = keychainsOf(security(plan.save));
   if (!saved.length) throw new Error('the keychain search list is empty or could not be read: nothing was changed.');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'search-list-before.txt'), `${saved.join('\n')}\n`); // the baseline survives a SIGKILL: put it back by hand from here
-  let created = false;
+  current = { plan, saved, created: false, security };
   try {
     security(plan.create);
-    created = true;
+    current.created = true;
+    security(plan.settings);
     security(plan.add);
     return await fn(plan);
-  } finally {
-    try { if (created) security(plan.remove); } finally {
-      security(plan.restore(saved));
-      const now = keychainsOf(security(plan.save));
-      if (now.join('\n') !== saved.join('\n')) throw new Error(`the keychain search list is not as it was: it was ${saved.join(', ')}, it is ${now.join(', ')}. Put it back with: security list-keychains -d user -s ${saved.map((p) => `'${p}'`).join(' ')}`);
-    }
-  }
+  } finally { stopScratchKeychain(); }
 }

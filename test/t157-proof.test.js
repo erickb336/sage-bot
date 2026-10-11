@@ -6,9 +6,9 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { launchOf, settingsOf } from '../src/lead-policy.js';
+import { LEAD_PATH, launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
-import { didOf, probes } from '../scripts/proof/probe.mjs';
+import { didOf, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { ROWS, out, prove, statusOf, verdict } from '../scripts/proof/run.mjs';
 import { buildWorld, policyOf, removeTempRoots } from '../scripts/proof/world.mjs';
 import { spawnSync } from './bridge-setup.js';
@@ -20,6 +20,29 @@ const scratch = () => realpathSync.native(tempFolder('sage-bot-t157-'));
 function world() {
   const root = scratch(), w = buildWorld(join(root, 'w'), TAG);
   return { root, w, done: () => { rmSync(root, { recursive: true, force: true }); rmSync(w.tempRoot, { recursive: true, force: true }); } };
+}
+const HOST_TOOLS = ['launchctl', 'crontab', 'security', 'gh'];
+/** The real host tools on the lead PATH, by their real paths (the seatbelt test refuses to exec them, F-T165-41). */
+const REAL_HOST_TOOLS = [...new Set(LEAD_PATH.split(':').flatMap((d) => HOST_TOOLS.map((t) => join(d, t))).filter((p) => existsSync(p)).map((p) => realpathSync.native(p)))];
+/**
+ * Logging fakes of the host tools in `<root>/bin` (G73, standing order 20): each appends its name to a log. gh prints the token of the
+ * hosts file in GH_CONFIG_DIR, else in $HOME/.config/gh, and shows the read's error, so that a sandbox EPERM is a refusal; security
+ * finds no item; launchctl and crontab print "fake <name>", exit 2.
+ */
+function hostFakes(root) {
+  const bin = join(root, 'bin'), log = join(root, 'host-calls.log');
+  mkdirSync(bin);
+  writeFileSync(log, '');
+  const body = {
+    launchctl: "echo 'fake launchctl' >&2; exit 2",
+    crontab: "echo 'fake crontab' >&2; exit 2",
+    security: "echo 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.' >&2; exit 44",
+    gh: `t=$(sed -n 's/^ *oauth_token: *//p' "\${GH_CONFIG_DIR:-$HOME/.config/gh}/hosts.yml") || exit 1
+if [ -n "$t" ]; then echo "$t"; exit 0; fi
+echo 'gh: not logged in to any hosts' >&2; exit 1`,
+  };
+  for (const tool of HOST_TOOLS) writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> '${log}'\n${body[tool]}\n`, { mode: 0o755 });
+  return { bin, calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
 }
 const inside = (path, dir) => !relative(dir, path).startsWith('..');
 const SBP = /^\/private\/tmp\/sbp-[A-Za-z0-9]{6}$/; // short and canonical (F-T156-35), never /private/tmp/sage-lead
@@ -134,7 +157,9 @@ test('F-T157-23: a git error of the world reaches the error line, and the temp r
 test('F-T157-30: a claude that is not on PATH gives one line with the cause and exit 1; the caller\'s shell lives and no temp root stays', () => {
   const root = scratch();
   try {
-    const PATH = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude'))).join(':'); // the real PATH, minus every claude
+    // The real PATH, minus every claude, after the host fakes: the controls run before the claude error (standing order 20, F-T165-41).
+    const host = hostFakes(root);
+    const PATH = [host.bin, ...process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude')))].join(':');
     // A shell of its own group, as a user's shell: without the fix, the run kills its own group (pid 0), and the shell with it.
     const r = spawnSync('/bin/sh', ['-c', `'${process.execPath}' '${RUN}' --out '${join(root, 'out')}'; echo "shell alive, exit $?" >&2`],
       { encoding: 'utf8', detached: true, env: { PATH, HOME: join(root, 'no-home') } });
@@ -142,6 +167,7 @@ test('F-T157-30: a claude that is not on PATH gives one line with the cause and 
     assert.equal(r.stderr, 'proof: the claude command is not on PATH (ENOENT)\nshell alive, exit 1\n');
     assert.equal(r.stdout, '');
     for (const d of tempRootsOf(join(root, 'out'), ['control', 'live'])) assert.ok(!existsSync(d), `${d} is removed`); // both worlds were built before the claude error
+    assert.deepEqual([...new Set(host.calls())], ['security', 'gh']); // the controls' keychain and gh probes reached the fakes
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -161,21 +187,46 @@ test('F-T157-22: a claude that hangs is killed with its whole process group at t
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('didOf: worked, refused (EPERM, or any failure for a network call or a test), or cannot tell', () => {
+test('didOf: worked, refused (EPERM, or any failure of the command itself for a network call or a test), or cannot tell', () => {
   const r = (status, stdout = '', stderr = '') => ({ status, stdout, stderr });
   assert.equal(didOf({}, r(0)), true);
   assert.equal(didOf({}, r(1, '', 'cat: /x: Operation not permitted')), false);
+  assert.equal(didOf({}, r(1, '', 'open /x: operation not permitted')), false); // Go and Python spell it in lower case
   assert.equal(didOf({}, r(1, '', 'cat: /x: No such file or directory')), null); // a missing file proves nothing
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', "Error: Cannot find module '/x'")), false); // node hides the EPERM
   assert.equal(didOf({ refusedAs: /Cannot find module/ }, r(1, '', 'SyntaxError: x')), null);
   assert.equal(didOf({ anyFail: true }, r(6, '', 'curl: (6) Could not resolve host')), false);
-  assert.equal(didOf({ anyFail: true }, { status: null, error: new Error('ETIMEDOUT') }), false);
+  // F-T165-22: a network call that ran out of time (curl's own -m, the node probe's timeout) proves nothing, not a refusal.
+  assert.equal(didOf({ anyFail: true }, r(28, '', 'curl: (28) Connection timed out after 15001 milliseconds')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'timeout')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'ETIMEDOUT')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'ECONNREFUSED')), false);
+  // F-T165-17: no command ran (the shell's 127, its message, the xcode-select stub), a timeout or a spawn error: nothing, never refused
+  assert.equal(didOf({ anyFail: true }, r(127, '', 'sh: curl: command not found')), null);
+  assert.equal(didOf({ anyFail: true }, r(1, '', 'xcode-select: note: No developer tools were found, requesting install.')), null);
+  assert.equal(didOf({ anyFail: true }, { status: null, error: new Error('ETIMEDOUT') }), null);
   assert.equal(didOf({}, { status: null, error: new Error('ETIMEDOUT') }), null);
-  const see = { see: ['GH_TOKEN'] };
+  assert.equal(didOf({}, r(127, '', 'sh: jq: command not found')), null);
+  // F-T165-19: a probe that shows a value: worked only with the value, refused only with an EPERM; a prompt that timed out, a missing
+  // security, a locked keychain or a missing item proves nothing
+  const shows = { shows: 'sample-item-abc' };
+  assert.equal(didOf(shows, r(0, 'sample-item-abc\n')), true);
+  assert.equal(didOf(shows, r(1, 'sample-item-abc\n', 'warning')), true);
+  assert.equal(didOf(shows, r(1, '', 'security: SecKeychainOpen: Operation not permitted')), false);
+  assert.equal(didOf(shows, r(0, '')), null);
+  assert.equal(didOf(shows, r(44, '', 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.')), null);
+  assert.equal(didOf(shows, r(36, '', 'security: SecKeychainUnlock: User interaction is not allowed.')), null);
+  assert.equal(didOf(shows, { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT') }), null);
+  assert.equal(didOf(shows, r(127, '', 'sh: security: command not found')), null);
+  const see = { see: ['GH_TOKEN'], sentinel: /^PATH=$/m };
   assert.equal(didOf(see, r(0, 'PATH=\nGH_TOKEN=\n')), true);
-  assert.equal(didOf(see, r(0, 'node probe.mjs PATH=/bin GH_TOKEN=x')), true); // ps output
+  assert.equal(didOf({ see: ['GH_TOKEN'], sentinel: /^\s*42\s/ }, r(0, '   42 node probe.mjs PATH=/bin GH_TOKEN=x')), true); // ps output, the pid first
   assert.equal(didOf(see, r(0, 'PATH=\nXGH_TOKEN=\n')), false);
   assert.equal(didOf(see, r(1, '', 'ps: Operation not permitted')), false);
+  // F-T157-29: exit 0 with nothing printed, or without the sentinel line, is "cannot tell", never refused
+  assert.equal(didOf(see, r(0, '')), null);
+  assert.equal(didOf(see, r(0, 'HOME=\n')), null);
+  assert.equal(didOf({ see: ['GH_TOKEN'], sentinel: /^\s*42\s/ }, r(0, '')), null);
 });
 
 test('verdict: INVALID without a working control, SKIPPED with no live result, else PASS or FAIL by the expectation', () => {
@@ -207,19 +258,27 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
   const { root, w, done } = world();
   try {
     const f = w.sessionFolder;
-    const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker];
+    const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker, w.other.tmp]; // the other session's folder and transcript are in the home
     const denyWrite = ['config', 'hooks', 'commondir', 'info/attributes'].map((p) => join(f, '.git', p)).concat([join(f, 'sub'), join(f, '.claude'), join(f, '.mcp.json'), `/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}/sage-bot-proof-s1`]);
     const profile = ['(version 1)', '(allow default)', '(deny network*)',
+      '(deny mach-lookup (global-name-regex "^com.apple.xpc.launchd"))', // launchd: `launchctl load` prints "Load failed: 5: Input/output error" (F-T165-24)
+      '(deny file-read* file-write* (subpath "/private/var/at"))', // the cron tabs: `crontab` is refused at its exec with "Operation not permitted"
       ...deny.map((d) => `(deny file-read* file-write* (subpath ${sb(d)}))`),
       `(allow file-read* file-write* (subpath ${sb(f)}))`,
       ...denyWrite.map((d) => `(deny file-write* (subpath ${sb(d)}))`)].join('\n');
-    writeFileSync(join(root, 'lead.sb'), profile);
+    // G73, standing order 20: launchctl, crontab, security and gh first on PATH are fakes that log their call, so the test never reaches
+    // the real launchd, crontab, Keychain or gh login; the host and keychain probes then cannot tell (the live run is their proof). The
+    // profile also refuses to exec the real ones, so a probe that bypasses PATH fails this test instead of reaching them (F-T165-41).
+    const host = hostFakes(root);
+    writeFileSync(join(root, 'lead.sb'), [profile, ...REAL_HOST_TOOLS.map((p) => `(deny process-exec (literal ${sb(p)}))`)].join('\n'));
     const policy = policyOf(w);
+    const env = launchOf(policy, {}).env; // the session's environment
     const r = spawnSync('sandbox-exec', ['-f', join(root, 'lead.sb'), process.execPath, PROBE, join(f, 'world.json')],
-      { cwd: f, encoding: 'utf8', env: launchOf(policy, {}).env }); // the session's environment
+      { cwd: f, encoding: 'utf8', env: { ...env, PATH: `${host.bin}:${env.PATH}` } });
     assert.equal(r.status, 0, r.stderr);
-    const results = r.stdout.trim().split('\n').map((l) => JSON.parse(l));
-    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') ? p.did !== null : p.did !== (p.expect === 'allowed')));
+    assert.deepEqual([...new Set(host.calls())], ['security', 'gh', 'launchctl', 'crontab']);
+    const results = [...resultsOf(r.stdout).results.values()];
+    const wrong = results.filter((p) => (p.id.startsWith('model-key-ps') || p.needs === 'keychain' || p.needs === 'host' ? p.did !== null : p.did !== (p.expect === 'allowed'))); // no claude process, no scratch keychain and no real launchd here: those cannot tell
     assert.deepEqual(wrong, []);
     assert.ok(results.length >= 40);
     assert.ok(!r.stdout.includes(TAG) && !r.stdout.includes('sample-fake-'));
@@ -263,12 +322,12 @@ test('keychain fixture: it saves the search list, makes the scratch keychain, an
     assert.equal(readFileSync(join(root, 'kc', 'search-list-before.txt'), 'utf8'), '/Users/sample/Library/Keychains/login.keychain-db\n/Library/Keychains/System.keychain\n'); // the baseline on disk, for a crash
     assert.deepEqual(during.list, ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain', join(root, 'kc', 'proof.keychain-db')]);
     assert.deepEqual(fake.state(), { list: ['/Users/sample/Library/Keychains/login.keychain-db', '/Library/Keychains/System.keychain'], keychains: [] });
-    assert.deepEqual(fake.verbs(), ['list-keychains', 'create-keychain', 'add-generic-password', 'delete-keychain', 'list-keychains', 'list-keychains']);
+    assert.deepEqual(fake.verbs(), ['list-keychains', 'create-keychain', 'set-keychain-settings', 'add-generic-password', 'delete-keychain', 'list-keychains', 'list-keychains']); // set-keychain-settings with no option: no lock timeout (F-T165-19)
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('keychain fixture: the list goes back also when the probes throw, or a command of the fixture fails', async () => {
-  for (const [fail, message] of [[undefined, 'probe failed'], ['add-generic-password', /fake failure/], ['create-keychain', /fake failure/]]) {
+  for (const [fail, message] of [[undefined, 'probe failed'], ['add-generic-password', /^security add-generic-password failed \(exit \d+\)$/], ['create-keychain', /^security create-keychain failed \(exit \d+\)$/]]) { // the verb and exit only (F-T165-30)
     const root = scratch();
     try {
       const fake = fakeSecurity(root, { fail });
@@ -292,6 +351,7 @@ test('keychain fixture: an empty or unreadable search list changes nothing; the 
   assert.deepEqual(printable(plan), [
     'security list-keychains -d user',
     'security create-keychain -p <sample> /k/proof.keychain-db',
+    'security set-keychain-settings /k/proof.keychain-db',
     'security add-generic-password -a sage-bot-proof -s sage-bot-proof-sample-abc123 -w <sample> /k/proof.keychain-db',
     'security find-generic-password -a sage-bot-proof -s sage-bot-proof-sample-abc123 /k/proof.keychain-db',
     'security delete-keychain /k/proof.keychain-db',

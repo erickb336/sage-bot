@@ -8,9 +8,9 @@ import { join } from 'node:path';
 const made = [];
 process.on('exit', () => { for (const dir of made) rmSync(dir, { recursive: true, force: true }); });
 
-/** A new empty folder `<TMPDIR>/<prefix><random>`, removed when the process exits. */
-export function tempFolder(prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+/** A new empty folder `<TMPDIR>/<prefix><random>` (or `<where>/<prefix><random>`), removed when the process exits. */
+export function tempFolder(prefix, where = tmpdir()) {
+  const dir = mkdtempSync(join(where, prefix));
   made.push(dir);
   return dir;
 }

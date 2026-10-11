@@ -12,7 +12,8 @@
     "check:guard-mutations": "node scripts/guard-mutations.mjs",
     "check:npmrc-probe": "node -e \"console.log('probe')\"",
     "demo": "node scripts/demo.mjs",
-    "proof": "node scripts/proof/run.mjs"
+    "proof": "node scripts/proof/run.mjs",
+    "proof:live": "node scripts/proof/live.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
