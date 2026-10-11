@@ -15,11 +15,18 @@ import { fileURLToPath } from 'node:url';
 const DENIED = /Operation not permitted|EPERM/;
 const q = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
 const names = (cmd) => `${cmd} | cut -d= -f1 | sed 's/$/=/'`; // variable names only: no value leaves the command
+/** The variables of the model credential (MODEL_KEYS of src/lead-policy.js, repeated here: this script imports nothing of sage-bot). */
+const MODEL_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+/** A see-probe over variable names: PATH is in every environment, so a listing with no PATH= line told nothing (F-T157-29). */
+const seeNames = (see) => ({ see, sentinel: /^PATH=$/m });
+/** A probe that touches a file in `dir` and takes it away again: a refusal shows as the EPERM of touch; nothing stays. */
+const touchIn = (dir, name) => `touch ${q(join(dir, name))} && rm ${q(join(dir, name))}`;
 
 /**
  * The probes, for one world (scripts/proof/world.mjs). Each: id, row (the finding it proves), expect ('refused' or 'allowed'), cmd (a
  * /bin/sh command, run in the session folder), and optionally control (the command outside the sandbox, when cmd itself must not run
- * there), see (variable names: the operation "worked" when one of them appears in its output), anyFail (any failure counts as refused,
+ * there), see (variable names: the operation "worked" when one of them appears in its output) with sentinel (a line that the output
+ * must have for the listing to count at all: without it, exit 0 with nothing printed is "cannot tell", not refused; F-T157-29), anyFail (any failure counts as refused,
  * not only an EPERM, for a network call or a test), refusedAs (the error that a refusal shows as, when the tool hides the EPERM: a
  * glob in a folder that cannot be listed stays as it is, and node reports a script that it cannot read as not found; the control proves
  * that the path is there), shows (a sample value's id: the operation "worked" only when the command printed it; any failure, prompt or
@@ -41,7 +48,7 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-1', 'net-curl', 'refused', 'curl -sS -m 15 -o /dev/null https://github.com', { anyFail: true }),
     P('F-T134-1', 'net-node', 'refused', `node -e "require('https').get('https://github.com', () => process.exit(0)).on('error', (e) => { console.error(e.code || e.message); process.exit(1); }).setTimeout(15000, function () { this.destroy(new Error('timeout')); })"`, { anyFail: true }),
     P('F-T134-1', 'net-git', 'refused', 'git ls-remote https://github.com/git/git HEAD >/dev/null', { anyFail: true }),
-    P('F-T134-1', 'env-github', 'refused', names('env'), { see: ['GH_TOKEN', 'GITHUB_TOKEN'] }),
+    P('F-T134-1', 'env-github', 'refused', names('env'), seeNames(['GH_TOKEN', 'GITHUB_TOKEN'])),
     // F-T134-2: the bridge's state files
     P('F-T134-2', 'state-gates', 'refused', `cat ${q(w.statePath)} >/dev/null`),
     P('F-T134-2', 'state-lead-log', 'refused', `cat ${q(`${w.statePath}.leads.jsonl`)} >/dev/null`),
@@ -80,9 +87,11 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-6', 'hook-state', 'refused', `mkdir -p ${q(w.hooksState)} && echo x > ${q(join(w.hooksState, 'x'))}`),
     // F-T134-7: sage's hook-state folders in the per-user temp folder, in /private/tmp and in sage's root (world.json: hookDirs, from
     // the policy). The one outside the world is the host's own: its control only checks that its folder is writable, as for shared-tmp.
+    // The host's folder: no `mkdir -p` (F-T165-9), so that a sandbox that fails open leaves nothing: a file in a folder that is there goes
+    // again, and a folder that the probe made goes again. Its control checks only that the folder above is writable.
     ...w.hookDirs.map((d, i) => (inWorld(d)
       ? P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && echo x > ${q(join(d, 'x'))}`)
-      : P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `mkdir -p ${q(d)} && touch ${q(join(d, `sage-bot-proof-${w.session}`))} && rm ${q(join(d, `sage-bot-proof-${w.session}`))}`, { control: `test -w ${q(dirname(d))}` }))),
+      : P('F-T134-7', `hook-dir-${i + 1}`, 'refused', `if [ -d ${q(d)} ]; then ${touchIn(d, `sage-bot-proof-${w.session}`)}; else mkdir ${q(d)} && rmdir ${q(d)}; fi`, { control: `test -w ${q(dirname(d))}` }))),
     // F-T134-10: the project settings' SessionStart hook did not run (the control runs the hook's command itself)
     P('F-T134-10', 'session-start-hook', 'refused', `test -e ${q(w.marker)}`, { control: `touch ${q(w.marker)} && test -e ${q(w.marker)}`, anyFail: true }),
     // F-T134-12: sage's root and the plugin's marketplace copy
@@ -100,9 +109,23 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-15a', 'cred-git-xdg-cat', 'refused', `cat ${q(c.gitXdg)} >/dev/null`),
     P('F-T134-15a', 'cred-claude-json-node', 'refused', `node -e "require('fs').readFileSync(process.argv[1])" ${q(c.claudeJson)}`), // F-T157-11
     // F-T157-4: no model credential in any command's view of the environment
-    ...[['env', names('env')], ['printenv', names('printenv')], ['node', `node -e "for (const k of Object.keys(process.env)) console.log(k + '=')"`],
-      ['ps-E', `ps -E -ww -o command= -p ${pid}`], ['ps-eww', `ps eww -o command= -p ${pid}`]]
-      .map(([how, cmd]) => P('F-T157-4', `model-key-${how}`, 'refused', cmd, { see: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'] })),
+    // The ps probes print the pid first: a line that starts with it is the sentinel (the process was listed); nothing printed tells nothing.
+    ...[['env', names('env'), seeNames(MODEL_KEYS)], ['printenv', names('printenv'), seeNames(MODEL_KEYS)],
+      ['node', `node -e "for (const k of Object.keys(process.env)) console.log(k + '=')"`, seeNames(MODEL_KEYS)],
+      ['ps-E', `ps -E -ww -o pid= -o command= -p ${pid}`, { see: MODEL_KEYS, sentinel: new RegExp(`^\\s*${pid}\\s`) }],
+      ['ps-eww', `ps eww -o pid= -o command= -p ${pid}`, { see: MODEL_KEYS, sentinel: new RegExp(`^\\s*${pid}\\s`) }]]
+      .map(([how, cmd, more]) => P('F-T157-4', `model-key-${how}`, 'refused', cmd, more)),
+    // F-T156-31, F-T156-34: no write to the other session's folder or temp folder, nor to $HOME (the world's home folder, outside the
+    // session's two folders): each is the EPERM of touch, and the control takes its file away again.
+    P('F-T156-31', 'write-other-folder', 'refused', touchIn(w.other.folder, 'x')),
+    P('F-T156-31', 'write-other-tmp', 'refused', touchIn(w.other.tmp, 'x')),
+    P('F-T156-31', 'write-home', 'refused', 'touch "$HOME/x" && rm "$HOME/x"'),
+    // F-T173-1: the other session's transcript in the lead sessions' Claude Code config folder, and its projects folder, are refused,
+    // while a plain command still runs with that folder under denyRead (the Bash tool reads its shell snapshot there, R651): the
+    // probe itself runs in that Bash, so a Bash that cannot run leaves every L1 probe with no result.
+    P('F-T173-1', 'transcript-cat', 'refused', `cat ${q(w.transcript)} >/dev/null`),
+    P('F-T173-1', 'projects-ls', 'refused', `ls ${q(join(w.claudeDir, 'projects'))} >/dev/null`),
+    P('F-T173-1', 'bash-plain', 'allowed', 'echo ok=1', { see: ['ok'], sentinel: /^ok=/m }),
     // F-T165-2 (G63 b): the run's scratch Keychain item, by its path, through security and through other processes that call it.
     // Each prints the value only when it got it; the probe reports only whether the value's id appeared, never the value.
     keychain('security', find),
@@ -116,12 +139,16 @@ export function probes(w, { pid = process.pid } = {}) {
 
 /**
  * Whether the operation worked (true), was refused (false), or the probe cannot tell (null), from its command's result.
- * @param {{ see?: string[], anyFail?: boolean, refusedAs?: RegExp }} p @param {{ status: number | null, stdout: string, stderr: string, error?: Error }} r
+ * @param {{ see?: string[], sentinel?: RegExp, anyFail?: boolean, refusedAs?: RegExp }} p @param {{ status: number | null, stdout: string, stderr: string, error?: Error }} r
  */
 export function didOf(p, r) {
   if (p.shows) return r.status === 0 && r.stdout.includes(p.shows); // only a printed value counts; a failure, a prompt or a timeout is a refusal
   if (r.error || r.status === null) return p.anyFail ? false : null; // a timeout or a spawn error
-  if (r.status === 0) return p.see ? p.see.some((n) => r.stdout.split('\n').some((l) => l.startsWith(`${n}=`) || l.includes(` ${n}=`))) : true;
+  if (r.status === 0 && p.see) { // F-T157-29: a listing without its sentinel line (nothing printed) is no evidence
+    if (!p.sentinel.test(r.stdout)) return null;
+    return p.see.some((n) => r.stdout.split('\n').some((l) => l.startsWith(`${n}=`) || l.includes(` ${n}=`)));
+  }
+  if (r.status === 0) return true;
   if (p.anyFail) return false;
   return DENIED.test(r.stderr) || p.refusedAs?.test(r.stderr) ? false : null;
 }

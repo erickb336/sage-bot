@@ -1,5 +1,5 @@
-// The scratch world of the proof (T157): one lead session's home folder, state files, sage plugin and session folder, all below one
-// scratch folder, and its temp root, a short new folder in /private/tmp (the policy's 44-byte limit, F-T156-35). SAMPLE DATA ONLY: every credential file and variable holds an obviously fake value that ends in the world's tag, so a
+// The scratch world of the proof (T157): one lead session's home folder, state files, sage plugin and session folder, a second
+// session's folders and transcript (T165), all below one scratch folder, and its temp root, a short new folder in /private/tmp (the policy's 44-byte limit, F-T156-35). SAMPLE DATA ONLY: every credential file and variable holds an obviously fake value that ends in the world's tag, so a
 // probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root (`root` is
 // a new folder: the run refuses one that is not empty, F-T157-23), and every temp root is recorded, so that the run removes it at its end
 // (removeTempRoots), also when it fails or is stopped (F-T157-10).
@@ -10,8 +10,10 @@ import { leadPolicy } from '../../src/lead-policy.js';
 import { claudeDirOf, sagePlugin, sageToolIn } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, keychainPlan } from './keychain.mjs';
 
-/** The session of the proof, and the version folder of the dummy sage plugin. */
+/** The session of the proof, the other session of its world (F-T156-31: a write to its folders must be refused), and the version
+ * folder of the dummy sage plugin. */
 export const SESSION = 's1';
+export const OTHER_SESSION = 's2';
 const VERSION = 'proof1';
 
 /**
@@ -76,10 +78,17 @@ function fill(root, tag, tempRoot) {
     config: join(policy.denied.find((d) => dirname(d) === join(home, '.config')), 'config.json'),
     sessionFolder: policy.folder, sessionTmp: policy.tmp, hooksState: policy.hooksState,
     hookDirs: policy.denied.filter((d) => [w.userTemp, '/private/tmp', sageRoot].includes(dirname(d))),
+    // The other session's folder and temp folder (F-T156-31, F-T156-34), and a transcript of its own in the lead sessions' Claude Code
+    // config folder (F-T173-1): a session reads and writes none of them.
+    other: { session: OTHER_SESSION, folder: join(policy.sessions, OTHER_SESSION), tmp: join(policy.tempRoot, OTHER_SESSION) },
+    claudeDir: policy.claudeDir,
+    transcript: join(policy.claudeDir, 'projects', `-sessions-${OTHER_SESSION}`, 'sample-transcript.jsonl'),
   });
   const sessionFolder = w.sessionFolder;
   // The session's folders as the user's own, writable by no other user, which the policy requires (F-T156-29), whatever the umask.
-  for (const d of [sessionFolder, w.sessionTmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
+  for (const d of [sessionFolder, w.sessionTmp, w.other.folder, w.other.tmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
+  file(join(w.other.folder, 'README.md'), 'sample folder of the other session\n');
+  file(w.transcript, `${JSON.stringify({ type: 'user', text: sample('transcript', tag) })}\n`);
   // The bridge's files (F-T134-2): sample config, gate file, lead log, kill flag, spool and votes.
   file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
   file(statePath, '{"gates":[]}\n');

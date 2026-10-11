@@ -8,12 +8,12 @@
 // row is SKIPPED, and the fixture and the leak scan run for real. Exit 1 on FAIL, INVALID or a leak.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir, userInfo } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACCOUNT, keychainIdOf, withScratchKeychain } from './keychain.mjs';
-import { ROWS, OWNER_COMMAND, prove, statusOf, verdict } from './run.mjs';
+import { ROWS, OWNER_COMMAND, prove, refuseUsed, statusOf, verdict } from './run.mjs';
 import { dummyClaude, startSession } from './session.mjs';
 import { removeTempRoots } from './world.mjs';
 
@@ -26,7 +26,7 @@ export const ADD_KEY = `security add-generic-password -a ${ACCOUNT} -s ${SERVICE
 export const GH_LOGOUT = 'gh auth logout --hostname github.com';
 /**
  * The open findings of T165, each with the rows that prove it (ROWS, scripts/proof/run.mjs). F-T165-8 (the world is not in
- * /tmp/claude-<uid>) is also a refusal of proveLive, and F-T165-9 (the host's hook folder) a cleanup of sessionsOf.
+ * /tmp/claude-<uid>) is also a refusal of proveLive; F-T165-9 (the host's hook folder) is the shape of the hook-dir probe (probe.mjs).
  */
 export const FINDINGS = {
   'F-T165-1': ['F-T157-1', 'F-T134-13'], // autoAllowBashIfSandboxed: the status says so, and a sandboxed Bash ran with no prompt (own-tmpdir)
@@ -189,13 +189,18 @@ async function sessionsOf({ root, world: w, policy, tag, controls }, { key, env,
   const settingsBefore = readFileSync(join(w.sessionFolder, '.claude', 'settings.json'), 'utf8');
   const ask = prompts(w);
   mkdirSync(join(root, 'sessions'), { recursive: true });
-  // F-T165-9: the one hook-state folder of F-T134-7 outside the world is the host's own; what a session leaves there goes at the end.
-  const hostHooks = w.hookDirs.find((d) => relative(w.root, d).startsWith('..')), hooksBefore = existsSync(hostHooks);
   const results = new Map(), rows = {}, sessions = [];
-  const missing = dryRun ? undefined : { did: null, why: skipped };
-  const probed = (file) => { // the probes that a session (or its subagent) ran, each with its verdict from its control and its result
+  const probed = (file, missing) => { // the probes that a session (or its subagent) ran, each with its verdict from its control and its result
     const got = probeResults(file);
     return [...controls.values()].map((p) => ({ id: p.id, expect: p.expect, live: got.get(p.id) ?? missing, verdict: verdict(p.expect, p, got.get(p.id) ?? missing) }));
+  };
+  // The reason of a probe with no result: in a dry run none (SKIPPED); else the Bash call that ran the probes failed (R651: a Bash that
+  // cannot read its shell snapshot under CLAUDE_CONFIG_DIR runs nothing, and every L1 probe is INVALID with that error), or the session
+  // gave nothing.
+  const noResult = (s) => {
+    if (dryRun) return undefined;
+    const bash = s.calls.find((x) => x.name === 'Bash' && /probe\.mjs/.test(String(x.input.command ?? '')));
+    return { did: null, why: bash?.error ? `the session's Bash call failed: ${hide(bash.text).split('\n').find(Boolean)?.slice(0, 200) ?? ''}` : skipped };
   };
   for (const group of ['L1', 'L2', 'L3']) {
     const r = await startSession(policy, env, model, ask[group]);
@@ -212,22 +217,19 @@ async function sessionsOf({ root, world: w, policy, tag, controls }, { key, env,
     const s = callsOf(text);
     sessions.push({ group, outcome: r.timedOut ? 'timed out' : s.result ? `${s.result.subtype}${s.result.is_error ? ' (error)' : ''}` : `exit ${r.status}, no result`, turns: s.result?.num_turns ?? 0, costUsd: s.result?.total_cost_usd ?? 0, denials: s.result?.permission_denials?.length ?? 0, leakedKey, tools: s.tools, calls: s.calls.map((x) => ({ name: x.name, error: x.error, denied: x.denied })) });
     if (group === 'L1') {
-      for (const p of probed(join(w.sessionFolder, 'probe.jsonl'))) if (p.live) results.set(p.id, p.live);
+      for (const p of probed(join(w.sessionFolder, 'probe.jsonl'), noResult(s))) if (p.live) results.set(p.id, p.live);
       continue;
     }
     const checks = checksOf(w, s, { settingsBefore, hide });
     for (const row of groupRows) {
       const cs = checks[row].map((x) => ({ ...x, verdict: checkStatus(x.did, dryRun) }));
-      if (row === 'F-T134-16b') cs.push(...probed(join(w.sessionFolder, 'probe-sub.jsonl'))); // the subagent's probes, as in L1
+      if (row === 'F-T134-16b') cs.push(...probed(join(w.sessionFolder, 'probe-sub.jsonl'), noResult(s))); // the subagent's probes, as in L1
       const bad = cs.filter((x) => x.verdict === 'FAIL' || x.verdict === 'INVALID'), skips = cs.filter((x) => x.verdict === 'SKIPPED').length;
       const why = bad.length ? `${bad.slice(0, 5).map((x) => `${x.id}: ${x.verdict} (${x.why ?? x.live?.why ?? ''})`).join('; ')}${bad.length > 5 ? `; and ${bad.length - 5} more` : ''}` : skips ? `${skips} of ${cs.length} checks skipped: ${skipped}` : `${cs.length} checks PASS`;
       rows[row] = { status: statusOf(cs.map((x) => x.verdict)), why, checks: cs };
     }
   }
-  const stray = join(hostHooks, `sage-bot-proof-${w.session}`), cleanup = [];
-  if (existsSync(stray)) { rmSync(stray, { force: true }); cleanup.push(stray); }
-  if (!hooksBefore && existsSync(hostHooks) && readdirSync(hostHooks).length === 0) { rmdirSync(hostHooks); cleanup.push(hostHooks); }
-  return { results, rows, skipped, sessions, cleanup };
+  return { results, rows, skipped, sessions };
 }
 
 /**
@@ -237,19 +239,25 @@ async function sessionsOf({ root, world: w, policy, tag, controls }, { key, env,
  * @returns {Promise<{ report: object, summary: string }>}
  */
 export async function proveLive(root, { env = process.env, dryRun = false, claude } = {}) {
+  if (!dryRun) refuseWhileGhLoggedIn(env); // first, before any folder: a refusal makes and leaves nothing
+  const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
+  const made = !existsSync(root);
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
   const uid = userInfo().uid;
-  for (const shared of [`/tmp/claude-${uid}`, `/private/tmp/claude-${uid}`]) if (!relative(shared, root).startsWith('..')) throw new Error(`the scratch folder ${root} is in the shared ${shared}: use --out with a folder outside it (F-T165-8). Nothing was started.`);
-  if (!dryRun) refuseWhileGhLoggedIn(env);
-  const key = dryRun ? null : keyFromKeychain(env); // first: no fixture and no world before the key is there
+  for (const shared of [`/tmp/claude-${uid}`, `/private/tmp/claude-${uid}`]) {
+    if (relative(shared, root).startsWith('..')) continue;
+    if (made) rmdirSync(root);
+    throw new Error(`the scratch folder ${root} is in the shared ${shared}: use --out with a folder outside it (F-T165-8). Nothing was started.`);
+  }
+  refuseUsed(root); // F-T157-23: before the keychain and the dummy go in
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
   let saved = [];
   const { report, summary } = await withScratchKeychain(join(root, 'keychain'), async () => {
     saved = readFileSync(join(root, 'keychain', 'search-list-before.txt'), 'utf8').split('\n').filter(Boolean);
     const live = async (ctx) => ({ ...(await sessionsOf(ctx, { key, env, dryRun })), keychain: { run: true, searchList: saved, item: `${ctx.world.keychain.service} in ${ctx.world.keychain.path} (removed at the end of the run)` } });
-    return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], live });
+    return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], made: ['keychain', 'dummy'], live });
   }, { env, id: keychainIdOf(tag) });
   const leaks = key ? redactLeaks(root, key) : [];
   const findings = Object.fromEntries(Object.entries(FINDINGS).map(([k, rs]) => [k, { rows: rs, status: statusOf(rs.map((r) => report.rows.find((x) => x.row === r).status)) }]));
@@ -259,7 +267,6 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
     summary.replace(/^sage-bot proof \([^)]*\)/, `sage-bot proof (${report.proof})`),
     ...Object.entries(findings).map(([k, f]) => `${f.status.padEnd(8)} ${k.padEnd(11)} by ${f.rows.join(', ')}`),
     `Leak scan: ${key ? (leaks.length ? `THE KEY WAS IN ${leaks.length} FILE(S), now redacted: ${leaks.join(', ')}` : 'no file in the scratch folder holds the key') : 'no key in a dry run'}.`,
-    `Host hook folder: ${report.hostHooksCleanup.length ? `removed ${report.hostHooksCleanup.join(', ')}` : 'nothing left there'}.`,
   ];
   if (key && lines.some((l) => l.includes(key))) throw new Error('the summary holds the key: nothing was printed.');
   return { report, summary: lines.join('\n') };
@@ -271,9 +278,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const rest = args.filter((a) => a !== '--dry-run');
   const at = rest.indexOf('--out');
   if ((at !== -1 && !rest[at + 1]) || rest.length !== (at === -1 ? 0 : 2)) { console.error(`usage: ${OWNER_COMMAND} [-- --out <a new scratch folder>] [--dry-run]`); process.exit(2); }
-  const root = at === -1 ? mkdtempSync(join(tmpdir(), 'sage-bot-proof-live-')) : rest[at + 1];
+  // A new name in TMPDIR, made by proveLive after its refusals, so that a refused run leaves no folder (the proof's own run.mjs refuses a
+  // folder that is not empty, F-T157-23, so a name that exists is refused, not reused).
+  const root = at === -1 ? join(tmpdir(), `sage-bot-proof-live-${randomBytes(6).toString('hex')}`) : rest[at + 1];
   for (const signal of ['SIGINT', 'SIGHUP', 'SIGTERM']) process.once(signal, () => { removeTempRoots(); process.exit(128 + constants.signals[signal]); }); // F-T157-10
-  const { report, summary } = await proveLive(root, { dryRun });
-  console.log(summary);
-  if (report.counts.FAIL || report.counts.INVALID || report.leaks.length) process.exitCode = 1;
+  try {
+    const { report, summary } = await proveLive(root, { dryRun });
+    console.log(summary);
+    if (report.counts.FAIL || report.counts.INVALID || report.leaks.length) process.exitCode = 1;
+  } catch (e) { // one line, never a stack (F-T157-21): the refusal names what is missing (the key item, gh logged in, the folder)
+    console.error(`proof:live: ${String(e?.message ?? e).split('\n').find(Boolean)}`);
+    process.exit(e?.exitCode ?? 1);
+  }
 }

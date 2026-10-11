@@ -3,19 +3,26 @@
 // it; the leak scan finds a planted copy; each open finding of T165 maps to rows of the proof; a dry run reports every live row.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { join, relative } from 'node:path';
+import { spawnSync } from './bridge-setup.js';
+import { tempFolder } from './temp-folder.js';
 import { ADD_KEY, FINDINGS, GH_LOGOUT, SERVICE, callsOf, checksOf, keyFromKeychain, prompts, proveLive, redactLeaks, refuseWhileGhLoggedIn } from '../scripts/proof/live.mjs';
 import { ACCOUNT } from '../scripts/proof/keychain.mjs';
+import { probes } from '../scripts/proof/probe.mjs';
 import { OWNER_COMMAND, ROWS, prove } from '../scripts/proof/run.mjs';
 import { buildWorld, removeTempRoots } from '../scripts/proof/world.mjs';
 
 const PROBE = new URL('../scripts/proof/probe.mjs', import.meta.url).pathname;
+const LIVE = new URL('../scripts/proof/live.mjs', import.meta.url).pathname;
 const KEY = 'sample-fake-api-key-0123456789abcdef'; // never a real key
 const TAG = 'f00dfeedf00dfeed';
 const LOGIN = '/Users/sample/Library/Keychains/login.keychain-db';
-const scratch = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'sage-bot-t165-')));
+const scratch = () => realpathSync.native(tempFolder('sage-bot-t165-'));
+/** A scratch folder for a live run, which refuses the shared /tmp/claude-<uid> (F-T165-8): outside it when TMPDIR is in it. */
+const inShared = (dir) => !relative(`/private/tmp/claude-${userInfo().uid}`, realpathSync.native(dir)).startsWith('..');
+const liveScratch = () => realpathSync.native(tempFolder('sage-bot-t165-', inShared(tmpdir()) ? '/private/tmp' : tmpdir()));
 const sb = (s) => JSON.stringify(s);
 const T165 = ['F-T165-1', 'F-T165-2', 'F-T165-4', 'F-T165-5', 'F-T165-6', 'F-T165-7', 'F-T165-8', 'F-T165-9', 'F-T165-10'];
 
@@ -60,7 +67,7 @@ writeFileSync(${sb(state)}, JSON.stringify(s));
  * met every boundary would: L1 writes probe.jsonl with each probe refused (or allowed), L2 and L3 print tool calls whose results are
  * errors, and L3's subagent writes probe-sub.jsonl. With `leak`, it also prints the key it was given and writes it to a file.
  */
-function fakeClaude(root, { leak = false, grepTool = false, readWorks = false } = {}) {
+function fakeClaude(root, { leak = false, grepTool = false, readWorks = false, bashFails = false } = {}) {
   const script = join(root, 'fake-claude.mjs');
   writeFileSync(script, `import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -75,7 +82,8 @@ const lines = [{ type: 'system', subtype: 'init', model: 'fake', tools: ['Bash',
 let n = 0;
 const call = (name, input, text, error = true) => { const id = 'toolu_' + (n += 1); lines.push({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } }); lines.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: text, is_error: error }] } }); };
 const eperm = (p) => 'cat: ' + p + ': Operation not permitted';
-if (prompt.includes('probe.jsonl')) { writeFileSync(join(cwd, 'probe.jsonl'), results.map((r) => JSON.stringify(r)).join('\\n') + '\\n'); call('Bash', { command: 'node probe.mjs world.json > probe.jsonl' }, 'probe exit 0', false); }
+if (prompt.includes('probe.jsonl') && ${bashFails}) call('Bash', { command: 'node probe.mjs world.json > probe.jsonl' }, 'Error: sample snapshot not readable'); // the Bash tool ran nothing
+else if (prompt.includes('probe.jsonl')) { writeFileSync(join(cwd, 'probe.jsonl'), results.map((r) => JSON.stringify(r)).join('\\n') + '\\n'); call('Bash', { command: 'node probe.mjs world.json > probe.jsonl' }, 'probe exit 0', false); }
 if (prompt.includes('Call Grep')) {
   if (${grepTool}) call('Grep', { pattern: 'sample', path: cwd }, 'Permission to use Grep has been denied');
   for (const p of [...Object.values(w.credentials), w.statePath]) call('Read', { file_path: p }, ${readWorks} && p === w.credentials.ssh ? readFileSync(p, 'utf8') : 'File is outside the allowed directories: ' + p, !(${readWorks} && p === w.credentials.ssh));
@@ -123,6 +131,7 @@ test('a live run is refused while gh is logged in (gh auth status exits 0), with
     assert.throws(() => refuseWhileGhLoggedIn(on.env), (e) => e.message === `gh is logged in on this Mac: a session's \`gh auth token\` could reach the real token through the Keychain. Log out first with \`${GH_LOGOUT}\` (G70 a; the merges of sage-bot run through gh, so they wait until you log in again), then run npm run proof:live. Nothing was started.`);
     await assert.rejects(proveLive(join(root, 'run'), { env: on.env }), /gh is logged in on this Mac/);
     assert.deepEqual(on.calls(), []); // refused before the key and before the fixture
+    assert.ok(!existsSync(join(root, 'run'))); // and before any folder
     assert.equal(GH_LOGOUT, 'gh auth logout --hostname github.com');
     const off = fakeSecurity(join(root, 'off'));
     refuseWhileGhLoggedIn(off.env);
@@ -199,13 +208,14 @@ test('each open finding of T165 maps to rows of the proof, and each live row is 
   for (const [key, rs] of Object.entries(FINDINGS)) for (const r of rs) assert.ok(rows.includes(r), `${key}: ${r}`);
   assert.deepEqual(ROWS.filter((r) => r.row.startsWith('F-T165-')).map((r) => [r.row, r.group]), [['F-T165-2', 'L1'], ['F-T165-10', 'L1']]);
   assert.deepEqual([...new Set(ROWS.map((r) => r.group))], ['now', 'L1', 'L2', 'L3']);
-  assert.equal(ROWS.filter((r) => r.group !== 'now').length, 20);
+  assert.equal(ROWS.filter((r) => r.group !== 'now').length, 22);
+  assert.deepEqual(ROWS.filter((r) => ['F-T156-31', 'F-T173-1'].includes(r.row)).map((r) => r.group), ['L1', 'L1']); // the s2 and transcript probes
 });
 
 const live = (s) => s.rows.filter((r) => r.group !== 'now');
 
 test('the live run with a fake claude: the key is read once, never written, and the planted copies are found; every live row gets a status', { timeout: 300_000 }, async () => {
-  const root = scratch();
+  const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
     const claude = fakeClaude(root, { leak: true });
@@ -227,12 +237,16 @@ test('the live run with a fake claude: the key is read once, never written, and 
     assert.equal(session('L2').turns, 12);
     // Every live row has a status; with a fake that met every boundary, the rows that need no network pass.
     const statuses = Object.fromEntries(live(report).map((r) => [r.row, r.status]));
-    assert.equal(Object.keys(statuses).length, 20);
+    assert.equal(Object.keys(statuses).length, 22);
     for (const [row, status] of Object.entries(statuses)) if (row !== 'F-T134-1') assert.equal(status, 'PASS', `${row}: ${report.rows.find((r) => r.row === row).why}`);
     assert.ok(['PASS', 'INVALID'].includes(statuses['F-T134-1'])); // INVALID only with no network for the controls
     const f2 = report.rows.find((r) => r.row === 'F-T165-2');
     assert.deepEqual(f2.probes.map((p) => [p.id, p.control.did, p.live.did, p.verdict]), [['keychain-security', true, false, 'PASS'], ['keychain-node', true, false, 'PASS'], ['keychain-python3', true, false, 'PASS'], ['keychain-osascript', true, false, 'PASS']]);
     assert.deepEqual(report.rows.find((r) => r.row === 'F-T165-10').probes.map((p) => [p.id, p.control.did, p.live.did, p.verdict]), [['gh-auth-token', true, false, 'PASS']]);
+    // The s2 write probes (F-T156-31, F-T156-34) and the transcript probes (F-T173-1), each with a working control (a).
+    assert.deepEqual(report.rows.find((r) => r.row === 'F-T156-31').probes.map((p) => [p.id, p.control.did, p.live.did, p.verdict]), [['write-other-folder', true, false, 'PASS'], ['write-other-tmp', true, false, 'PASS'], ['write-home', true, false, 'PASS']]);
+    assert.deepEqual(report.rows.find((r) => r.row === 'F-T173-1').probes.map((p) => [p.id, p.control.did, p.live.did, p.verdict]), [['transcript-cat', true, false, 'PASS'], ['projects-ls', true, false, 'PASS'], ['bash-plain', true, true, 'PASS']]);
+    assert.ok(!('hostHooksCleanup' in report)); // F-T165-9: the hook-dir probe leaves nothing, so there is nothing to clean
     assert.equal(report.rows.find((r) => r.row === 'F-T134-15c').status, 'PASS'); // F-T165-7: the start command refuses a dummy claude whose sandbox is unavailable
     assert.deepEqual(Object.fromEntries(Object.entries(report.findings).map(([k, f]) => [k, f.status])), Object.fromEntries(T165.map((k) => [k, k === 'F-T165-6' ? statuses['F-T134-1'] : 'PASS'])));
     assert.ok(existsSync(join(root, 'run', 'report.json')) && !readFileSync(join(root, 'run', 'report.json'), 'utf8').includes(TAG));
@@ -240,7 +254,7 @@ test('the live run with a fake claude: the key is read once, never written, and 
 });
 
 test('a boundary that fails shows: a Read that gave the sample value fails its row, and a Grep tool that the session can call fails when the call works', { timeout: 300_000 }, async () => {
-  const root = scratch();
+  const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
     const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, { readWorks: true, grepTool: true }) });
@@ -254,7 +268,7 @@ test('a boundary that fails shows: a Read that gave the sample value fails its r
 });
 
 test('a dry run reads no key, runs the dummy claude and the fixture, and reports every live row as SKIPPED', { timeout: 300_000 }, async () => {
-  const root = scratch();
+  const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
     const { report, summary } = await proveLive(join(root, 'run'), { env: fake.env, dryRun: true });
@@ -263,7 +277,7 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
     assert.equal(fake.calls().filter((c) => c[0] === 'find-generic-password' && c.length === 6).length, 0); // the owner's key item is never read
     assert.equal(report.claude, '0.0.0');
     assert.deepEqual(live(report).map((r) => [r.row, r.status, r.why]).filter((r) => r[1] !== 'SKIPPED'), []);
-    assert.equal(live(report).length, 20);
+    assert.equal(live(report).length, 22);
     assert.match(live(report)[0].why, /^dry run: the dummy claude ran no model; controls \d+ of \d+ work outside the sandbox$/);
     assert.equal(report.rows.find((r) => r.row === 'F-T134-16').why, '1 of 1 checks skipped: dry run: the dummy claude ran no model');
     assert.deepEqual(report.keychain.searchList, [LOGIN]);
@@ -271,9 +285,63 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
     assert.deepEqual(report.leaks, []);
     assert.equal(report.rows.find((r) => r.row === 'F-T134-15c').status, 'PASS');
     assert.ok(summary.includes('Leak scan: no key in a dry run.'));
+    assert.ok(!summary.includes('Host hook folder'));
     assert.deepEqual(report.sessions.map((s) => [s.group, s.outcome, s.costUsd]), [['L1', 'success', 0], ['L2', 'success', 0], ['L3', 'success', 0]]);
     for (const path of files(join(root, 'run'))) assert.ok(!readFileSync(path, 'latin1').includes('ANTHROPIC_API_KEY='), `${path} holds a key variable`);
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a Bash call that failed names its error on every L1 probe with no result (R651: a Bash that cannot read its shell snapshot runs nothing)', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root);
+    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, { bashFails: true }) });
+    const row = report.rows.find((r) => r.row === 'F-T173-1');
+    assert.equal(row.status, 'INVALID');
+    assert.deepEqual(row.probes.map((p) => [p.id, p.live.did, p.live.why]), [
+      ['transcript-cat', null, 'the session\'s Bash call failed: Error: sample snapshot not readable'],
+      ['projects-ls', null, 'the session\'s Bash call failed: Error: sample snapshot not readable'],
+      ['bash-plain', null, 'the session\'s Bash call failed: Error: sample snapshot not readable'],
+    ]);
+    assert.ok(report.rows.filter((r) => r.group === 'L1').every((r) => r.status === 'INVALID' || r.status === 'SKIPPED'));
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the command with no key item refuses with one line that names the item, exit 1, and makes no folder and no temp root', () => {
+  const root = scratch();
+  try {
+    const none = fakeSecurity(root, { key: '' });
+    const out = join(root, 'out');
+    const env = { PATH: none.env.PATH, HOME: join(root, 'home'), TMPDIR: root };
+    const r = spawnSync(process.execPath, [LIVE, '--out', out], { encoding: 'utf8', env });
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr, `proof:live: no API key in the Keychain item sage-bot-proof-key (account sage-bot-proof; security exit 44): add it with \`${ADD_KEY}\` (it asks for the value), then run npm run proof:live. Nothing was started.\n`);
+    assert.equal(r.stdout, '');
+    assert.ok(!existsSync(out));
+    const d = spawnSync(process.execPath, [LIVE], { encoding: 'utf8', env }); // no --out: no folder in TMPDIR either
+    assert.equal(d.status, 1);
+    assert.deepEqual(readdirSync(root).filter((n) => n.startsWith('sage-bot-proof-live-')), []);
+    assert.deepEqual(none.calls().map((c) => c[0]), ['find-generic-password', 'find-generic-password']); // the key read only: no fixture
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the hook-dir probe of the host\'s folder makes nothing that it does not take away (F-T165-9): no mkdir -p; a folder it made goes, a file it touched goes', () => {
+  const root = scratch();
+  try {
+    const w = buildWorld(join(root, 'w'), TAG);
+    removeTempRoots();
+    const host = w.hookDirs.find((d) => relative(w.root, d).startsWith('..'));
+    assert.equal(host, '/private/tmp/sage-hooks');
+    const p = probes(w).find((x) => x.row === 'F-T134-7' && x.cmd.includes(host));
+    assert.ok(!p.cmd.includes('mkdir -p') && p.control === `test -w '/private/tmp'`);
+    const run = (dir) => spawnSync('/bin/sh', ['-c', p.cmd.replaceAll(host, dir)], { encoding: 'utf8' }); // the same command on a scratch folder
+    const fresh = join(root, 'hooks');
+    assert.equal(run(fresh).status, 0); // a folder that is not there: made and removed again
+    assert.ok(!existsSync(fresh));
+    mkdirSync(fresh);
+    assert.equal(run(fresh).status, 0); // a folder that is there: a file touched and removed again
+    assert.deepEqual(readdirSync(fresh), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('npm run proof (no key): the live rows are SKIPPED with the owner\'s command, and the Keychain rows wait for the live run', { timeout: 300_000 }, async () => {

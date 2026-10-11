@@ -171,11 +171,15 @@ test('didOf: worked, refused (EPERM, or any failure for a network call or a test
   assert.equal(didOf({ anyFail: true }, r(6, '', 'curl: (6) Could not resolve host')), false);
   assert.equal(didOf({ anyFail: true }, { status: null, error: new Error('ETIMEDOUT') }), false);
   assert.equal(didOf({}, { status: null, error: new Error('ETIMEDOUT') }), null);
-  const see = { see: ['GH_TOKEN'] };
+  const see = { see: ['GH_TOKEN'], sentinel: /^PATH=$/m };
   assert.equal(didOf(see, r(0, 'PATH=\nGH_TOKEN=\n')), true);
-  assert.equal(didOf(see, r(0, 'node probe.mjs PATH=/bin GH_TOKEN=x')), true); // ps output
+  assert.equal(didOf({ see: ['GH_TOKEN'], sentinel: /^\s*42\s/ }, r(0, '   42 node probe.mjs PATH=/bin GH_TOKEN=x')), true); // ps output, the pid first
   assert.equal(didOf(see, r(0, 'PATH=\nXGH_TOKEN=\n')), false);
   assert.equal(didOf(see, r(1, '', 'ps: Operation not permitted')), false);
+  // F-T157-29: exit 0 with nothing printed, or without the sentinel line, is "cannot tell", never refused
+  assert.equal(didOf(see, r(0, '')), null);
+  assert.equal(didOf(see, r(0, 'HOME=\n')), null);
+  assert.equal(didOf({ see: ['GH_TOKEN'], sentinel: /^\s*42\s/ }, r(0, '')), null);
 });
 
 test('verdict: INVALID without a working control, SKIPPED with no live result, else PASS or FAIL by the expectation', () => {
@@ -207,7 +211,7 @@ test('seatbelt: each probe sees a refusal as refused, not as an error, and the a
   const { root, w, done } = world();
   try {
     const f = w.sessionFolder;
-    const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker];
+    const deny = [w.home, join(root, 'w', 'state'), ...w.hookDirs, w.marker, w.other.tmp]; // the other session's folder and transcript are in the home
     const denyWrite = ['config', 'hooks', 'commondir', 'info/attributes'].map((p) => join(f, '.git', p)).concat([join(f, 'sub'), join(f, '.claude'), join(f, '.mcp.json'), `/tmp/claude-${process.getuid()}`, `/private/tmp/claude-${process.getuid()}/sage-bot-proof-s1`]);
     const profile = ['(version 1)', '(allow default)', '(deny network*)',
       ...deny.map((d) => `(deny file-read* file-write* (subpath ${sb(d)}))`),
