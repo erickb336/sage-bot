@@ -343,7 +343,7 @@ test('the script prints the settings of a sample config, and the preflight state
 test('one resolver: no module but src/session-policy.js (and sagePlugin in src/sage.js) names the paths it resolves; the mutation run is left out', () => {
   const out = spawnSync('grep', ['-rnE', "sage-hooks|'\\.hooks'|DARWIN_USER_TEMP_DIR|CLAUDE_CODE_TMPDIR|SAGE_HOOKS_STATE|'\\.config', 'sage-bot'|marketplaces|'plugins', 'cache'", '--exclude=session-policy-mutations.mjs', 'src', 'scripts'], { cwd: ROOT, encoding: 'utf8' }).stdout;
   const files = [...new Set(out.split('\n').filter(Boolean).map((l) => l.split(':')[0]))].sort();
-  assert.deepEqual(files, ['src/session-policy.js', 'src/sage.js']);
+  assert.deepEqual(files, ['src/sage.js', 'src/session-policy.js']);
   assert.match(out, /src\/sage\.js:\d+:  cache: join\(claudeDir, 'plugins', 'cache', 'sage'\),/); // sagePlugin: one place for the plugin folders
 });
 
