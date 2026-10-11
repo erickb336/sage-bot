@@ -118,6 +118,21 @@ test('F-T157-23: a git error of the world reaches the error line, and the temp r
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('F-T157-30: a claude that is not on PATH gives one line with the cause and exit 1; the caller\'s shell lives and no temp root stays', () => {
+  const root = scratch();
+  try {
+    const PATH = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude'))).join(':'); // the real PATH, minus every claude
+    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
+    // A shell of its own group, as a user's shell: without the fix, the run kills its own group (pid 0), and the shell with it.
+    const r = spawnSync('/bin/sh', ['-c', `'${process.execPath}' '${RUN}' --out '${join(root, 'out')}'; echo "shell alive, exit $?" >&2`],
+      { encoding: 'utf8', detached: true, env: { PATH, HOME: join(root, 'no-home') } });
+    assert.equal(r.signal, null);
+    assert.equal(r.stderr, 'proof: the claude command is not on PATH (ENOENT)\nshell alive, exit 1\n');
+    assert.equal(r.stdout, '');
+    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('F-T157-22: a claude that hangs is killed with its whole process group at the timeout: no child of it stays', () => {
   const root = scratch();
   try {

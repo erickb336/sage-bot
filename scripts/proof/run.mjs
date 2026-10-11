@@ -62,11 +62,14 @@ export const statusOf = (verdicts) => ['FAIL', 'INVALID', 'SKIPPED'].find((v) =>
 
 /**
  * The text of a command's output, or null when it fails. The command runs in a process group of its own (detached), and at the timeout
- * (30 s) the whole group gets SIGKILL, so that no child of a hung `claude` stays (F-T157-22).
+ * (30 s) the whole group gets SIGKILL, so that no child of a hung `claude` stays (F-T157-22). A command that cannot start (not on PATH,
+ * not executable) throws, with its cause: it has no child and no group (r.pid is 0, the runner's own group), so nothing is killed
+ * and the run ends through its normal error line (F-T157-30).
  */
 export function out(file, args, o) {
   const r = spawnSync(file, args, { encoding: 'utf8', timeout: 30_000, detached: true, killSignal: 'SIGKILL', ...o });
-  if (r.error) try { process.kill(-r.pid, 'SIGKILL'); } catch { /* the group is gone */ }
+  if (r.error?.code === 'ETIMEDOUT' && r.pid > 0) try { process.kill(-r.pid, 'SIGKILL'); } catch { /* the group is gone */ }
+  else if (r.error && !r.pid) throw new Error(`the ${file} command ${r.error.code === 'ENOENT' ? 'is not on PATH' : 'cannot start'} (${r.error.code})`);
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
