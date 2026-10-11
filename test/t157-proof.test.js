@@ -22,6 +22,18 @@ function world() {
   return { root, w, done: () => { rmSync(root, { recursive: true, force: true }); rmSync(w.tempRoot, { recursive: true, force: true }); } };
 }
 const inside = (path, dir) => !relative(dir, path).startsWith('..');
+const SBP = /^\/private\/tmp\/sbp-[A-Za-z0-9]{6}$/; // short and canonical (F-T156-35), never /private/tmp/sage-lead
+/** The error that `fn` throws. */
+const thrown = (fn) => { try { fn(); } catch (e) { return e; } assert.fail('no error'); };
+/** The world's session folder below `root`, where world.json is. */
+const sessionFolder = (root) => join(root, 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's1');
+/** The temp roots that the worlds under `root` name in their world.json, each of the sbp- shape. T174: a test checks only its own temp
+ * roots, never every sbp-* name in the shared /private/tmp, which another proof run on the Mac fills at the same time. */
+function tempRootsOf(root, worlds) {
+  const roots = worlds.map((w) => JSON.parse(readFileSync(join(sessionFolder(join(root, w)), 'world.json'), 'utf8')).tempRoot);
+  for (const d of roots) assert.match(d, SBP);
+  return roots;
+}
 
 test('the world: every state file, plugin file and credential file that a probe refuses is in a denied path of the policy, never re-opened', () => {
   const { w, done } = world();
@@ -31,7 +43,7 @@ test('the world: every state file, plugin file and credential file that a probe 
     assert.equal(policy.tmp, w.sessionTmp);
     assert.equal(policy.sageTool, w.tool); // the dummy state tool is the one that the policy finds
     assert.deepEqual(w.hookDirs, [join(w.userTemp, 'sage-hooks'), '/private/tmp/sage-hooks', join(w.sageRoot, '.hooks')]); // F-T156-40: never TMPDIR
-    assert.match(w.tempRoot, /^\/private\/tmp\/sbp-[A-Za-z0-9]{6}$/); // short and canonical (F-T156-35), never /private/tmp/sage-lead
+    assert.match(w.tempRoot, SBP);
     assert.equal(lstatSync(w.tempRoot).mode & 0o777, 0o700);
     const { denyRead, allowRead } = settingsOf(policy).sandbox.filesystem;
     const targets = [w.statePath, `${w.statePath}.leads.jsonl`, `${w.statePath}.leads-off`, `${w.statePath}.votes`, w.config, w.tool, w.logbook, w.marketplace, ...Object.values(w.credentials)];
@@ -48,19 +60,19 @@ test('the world: every state file, plugin file and credential file that a probe 
 });
 
 test('F-T157-10: the temp roots in /private/tmp go at the end of a run, also when the world cannot be built', () => {
-  const sbp = () => new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
   const root = scratch();
   try {
-    const before = sbp();
     const w = buildWorld(join(root, 'w'), TAG);
     assert.ok(existsSync(w.tempRoot));
     removeTempRoots();
     assert.ok(!existsSync(w.tempRoot), `${w.tempRoot} is removed`);
-    // A build that fails after it made its temp root (the folder is read-only, so the first file cannot be written) leaves none.
+    // A build that fails after it made its temp root (the folder is read-only, so the first file cannot be written) removes it. The
+    // error names the root: no world.json is written before the failure.
     mkdirSync(join(root, 'ro'), { mode: 0o500 });
-    assert.throws(() => buildWorld(join(root, 'ro'), TAG), { code: 'EACCES' });
-    const left = [...sbp()].filter((n) => !before.has(n));
-    assert.deepEqual(left, [], `no new temp root stays: ${left.join(', ')}`);
+    const e = thrown(() => buildWorld(join(root, 'ro'), TAG));
+    assert.equal(e.code, 'EACCES');
+    assert.match(e.tempRoot, SBP);
+    assert.ok(!existsSync(e.tempRoot), `${e.tempRoot} is removed`);
   } finally { chmodSync(join(root, 'ro'), 0o700); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -88,14 +100,14 @@ test('F-T157-23, F-T167-1: a scratch folder that is not empty is refused with on
   const root = scratch();
   try {
     writeFileSync(join(root, 'report.json'), '{}\n');
-    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
     await assert.rejects(prove(root), { exitCode: 2, message: `the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.` });
+    // No world folder in the scratch folder means no temp root: a world makes its folder before its temp root (buildWorld).
     assert.deepEqual(readdirSync(root), ['report.json']);
-    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
     const r = spawnSync(process.execPath, [RUN, '--out', root], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: join(root, 'no-home') } });
     assert.equal(r.status, 2);
     assert.equal(r.stderr, `proof: the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.\n`);
     assert.equal(r.stdout, '');
+    assert.deepEqual(readdirSync(root), ['report.json']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -109,12 +121,13 @@ test('F-T157-21: a TMPDIR that is no folder gives one line and exit 1, no stack'
 test('F-T157-23: a git error of the world reaches the error line, and the temp root goes', () => {
   const root = scratch();
   try {
-    const folder = join(root, 'w', 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's1');
+    const folder = sessionFolder(join(root, 'w'));
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     writeFileSync(join(folder, '.git'), 'not a gitfile\n');
-    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
-    assert.throws(() => buildWorld(join(root, 'w'), TAG), { message: `git init -q in ${folder}: fatal: invalid gitfile format: ${join(folder, '.git')}` });
-    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
+    const e = thrown(() => buildWorld(join(root, 'w'), TAG));
+    assert.equal(e.message, `git init -q in ${folder}: fatal: invalid gitfile format: ${join(folder, '.git')}`);
+    assert.match(e.tempRoot, SBP);
+    assert.ok(!existsSync(e.tempRoot), `${e.tempRoot} is removed`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -122,14 +135,13 @@ test('F-T157-30: a claude that is not on PATH gives one line with the cause and 
   const root = scratch();
   try {
     const PATH = process.env.PATH.split(':').filter((d) => !existsSync(join(d, 'claude'))).join(':'); // the real PATH, minus every claude
-    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
     // A shell of its own group, as a user's shell: without the fix, the run kills its own group (pid 0), and the shell with it.
     const r = spawnSync('/bin/sh', ['-c', `'${process.execPath}' '${RUN}' --out '${join(root, 'out')}'; echo "shell alive, exit $?" >&2`],
       { encoding: 'utf8', detached: true, env: { PATH, HOME: join(root, 'no-home') } });
     assert.equal(r.signal, null);
     assert.equal(r.stderr, 'proof: the claude command is not on PATH (ENOENT)\nshell alive, exit 1\n');
     assert.equal(r.stdout, '');
-    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
+    for (const d of tempRootsOf(join(root, 'out'), ['control', 'live'])) assert.ok(!existsSync(d), `${d} is removed`); // both worlds were built before the claude error
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
