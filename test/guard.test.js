@@ -60,14 +60,14 @@ function hook(stdin, env = LEAD) {
 }
 const tool = (tool_name, tool_input) => ({ session_id: 'aaaaaaaa-0000-4000-8000-000000000133', hook_event_name: 'PreToolUse', cwd: F.WT, tool_name, tool_input: fill(tool_input) });
 const bash = (command) => tool('Bash', { command });
-const MESSAGE = /^sage-bot guard: .+ is refused in a lead session\. (sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
-const STATE = 'sage-bot guard: a call that may name the sage state tool (a lead session reaches the logbook only through sage-bot) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
+const MESSAGE = /^sage-bot guard: .+ is refused in a bridge session\. (sage can do this instead: .+\.|This needs Erick; tell the sage-lead and stop this action\.)$/s;
+const STATE = 'sage-bot guard: a call that may name the sage state tool (a bridge session reaches the logbook only through sage-bot) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.';
 const STOP = 'This needs Erick; tell the sage-lead and stop this action.';
 const WILDCARD = 'sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.';
 const BROKER = 'sage can do this instead: the sage-bot broker tools of the session (fetch, open a pull request, upload your branch).';
 const ASCII_HINT = 'sage can do this instead: write such text to a file in the scratch folder with the Write tool and pass the file (git commit -F <file>), and give files names in printable ASCII.';
 const NODE_HINT = 'sage can do this instead: write the code to a .mjs file in the scratch folder with the Write tool, then node <file>.mjs.';
-const SETTINGS = '(a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.';
+const SETTINGS = '(a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.';
 
 test(`T133: the corpus holds Bash commands to refuse (${CORPUS.refuse.length}), for the broker (${CORPUS.broker.length}), to allow (${CORPUS.allow.length}), for the sandbox (${CORPUS.sandbox.length}), of the state tool (${CORPUS.state.length}), of wildcards (${CORPUS.wildcard.length}) and of pattern characters (${CORPUS.pattern.length}), each once`, () => {
   assert.ok(CORPUS.refuse.length >= 250 && CORPUS.broker.length >= 50 && CORPUS.allow.length >= 80 && CORPUS.state.length >= 70 && CORPUS.wildcard.length >= 20 && CORPUS.pattern.length >= 15 && CORPUS.tools.refuse.length >= 80 && CORPUS.tools.allow.length >= 45 && CORPUS.tools.state.length >= 6 && CORPUS.session.length >= 15);
@@ -85,7 +85,7 @@ test('T133: with SAGE_ORIGIN unset or not "lead", the guard allows every corpus 
   assert.equal(hook('x'.repeat(100_000), {}).decision, 'allow');
 });
 
-test('T133: in a lead session, every Bash command of the corpus that is not on the allow-list is refused, and the refusal says how to rephrase or that Erick approves', () => {
+test('T133: in a bridge session, every Bash command of the corpus that is not on the allow-list is refused, and the refusal says how to rephrase or that Erick approves', () => {
   const results = CORPUS.refuse.map((c) => [c, guard(bash(c))]);
   assert.deepEqual(results.filter(([, r]) => r.decision !== 'deny').map(([c]) => c), []);
   assert.deepEqual(results.filter(([, r]) => !MESSAGE.test(r.reason)).map(([c, r]) => [c, r.reason]), []);
@@ -93,16 +93,16 @@ test('T133: in a lead session, every Bash command of the corpus that is not on t
 
 test('T133: gh, git push and git fetch are refused with the hint to the broker tools of the session', () => {
   assert.deepEqual(CORPUS.broker.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(BROKER)), []);
-  assert.equal(guard(bash('gh pr merge 12')).reason, `sage-bot guard: gh is refused in a lead session. ${BROKER}`);
-  assert.equal(guard(bash('git push origin x')).reason, `sage-bot guard: git push is refused in a lead session. ${BROKER}`);
-  assert.equal(guard(bash('gh pr create')).reason, `sage-bot guard: gh is refused in a lead session. ${BROKER}`);
-  assert.equal(guard(bash('git fetch origin')).reason, `sage-bot guard: git fetch is refused in a lead session. ${BROKER}`);
+  assert.equal(guard(bash('gh pr merge 12')).reason, `sage-bot guard: gh is refused in a bridge session. ${BROKER}`);
+  assert.equal(guard(bash('git push origin x')).reason, `sage-bot guard: git push is refused in a bridge session. ${BROKER}`);
+  assert.equal(guard(bash('gh pr create')).reason, `sage-bot guard: gh is refused in a bridge session. ${BROKER}`);
+  assert.equal(guard(bash('git fetch origin')).reason, `sage-bot guard: git fetch is refused in a bridge session. ${BROKER}`);
 });
 
-test('F-T133-63: the broker hint names no command that the guard refuses, so a lead session can finish the pull request step', () => {
+test('F-T133-63: the broker hint names no command that the guard refuses, so a bridge session can finish the pull request step', () => {
   // The refused GitHub commands: the command name (quotes joined) of each broker case, and the old broker CLI.
   const names = new Set(CORPUS.broker.map((c) => c.split(' ')[0].replace(/["']/g, '')).concat('sage-bot-github', 'git push', 'git fetch'));
-  assert.equal(guard(bash('sage-bot-github pr create')).reason, `sage-bot guard: the command sage-bot-github is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash('sage-bot-github pr create')).reason, `sage-bot guard: the command sage-bot-github is refused in a bridge session. ${STOP}`);
   const hint = guard(bash('git push origin x')).reason.split('sage can do this instead: ')[1];
   const words = ` ${hint.replace(/[(),.]/g, ' ')} `;
   assert.deepEqual([...names].filter((n) => words.includes(` ${n} `)), []);
@@ -110,10 +110,10 @@ test('F-T133-63: the broker hint names no command that the guard refuses, so a l
 
 test('F-T133-64: sed and awk stay refused, with the hint to head, tail or the Read tool, and the guard allows the commands of the hint', () => {
   const LINES = 'sage can do this instead: to read lines of a file: head -n 40 <file>, tail -n +20 <file> | head -n 20, or the Read tool with offset and limit; to change a file: the Edit tool.';
-  assert.equal(guard(bash('sed -n 1,40p src/a.js')).reason, `sage-bot guard: sed is refused in a lead session. ${LINES}`);
-  assert.equal(guard(bash('awk "NR<40" src/a.js')).reason, `sage-bot guard: awk is refused in a lead session. ${LINES}`);
+  assert.equal(guard(bash('sed -n 1,40p src/a.js')).reason, `sage-bot guard: sed is refused in a bridge session. ${LINES}`);
+  assert.equal(guard(bash('awk "NR<40" src/a.js')).reason, `sage-bot guard: awk is refused in a bridge session. ${LINES}`);
   // F-T133-69: sed -i edits a file; the same hint names the Edit tool for that.
-  assert.equal(guard(bash('sed -i s/a/b/ src/a.js')).reason, `sage-bot guard: sed is refused in a lead session. ${LINES}`);
+  assert.equal(guard(bash('sed -i s/a/b/ src/a.js')).reason, `sage-bot guard: sed is refused in a bridge session. ${LINES}`);
   for (const c of ['head -n 40 src/a.js', 'tail -n +20 src/a.js | head -n 20']) assert.equal(guard(bash(c)).decision, 'allow', c);
   assert.equal(guard(tool('Read', { file_path: '/sample/repo/wt/src/a.js', offset: 20, limit: 20 })).decision, 'allow');
 });
@@ -135,38 +135,38 @@ test('T133: the sage state tool is refused in every form, with the stop ending (
 
 test('T133 (G44 A): a wildcard in a part that runs or writes that may match the state tool, and any [ there, are refused with the hint to name the files', () => {
   assert.deepEqual(CORPUS.wildcard.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !why?.endsWith(WILDCARD)), []);
-  assert.equal(guard(bash('git add scripts/*.mjs')).reason, `sage-bot guard: the wildcard scripts/*.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(guard(bash('cp {SCRATCH}/[ab].txt {SCRATCH}/c.txt')).reason, `sage-bot guard: the wildcard [ in /sample/scratch/[ab].txt (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(guard(bash('git add scripts/*.mjs')).reason, `sage-bot guard: the wildcard scripts/*.mjs (it can match the sage state tool) is refused in a bridge session. ${WILDCARD}`);
+  assert.equal(guard(bash('cp {SCRATCH}/[ab].txt {SCRATCH}/c.txt')).reason, `sage-bot guard: the wildcard [ in /sample/scratch/[ab].txt (in a part that runs or writes) is refused in a bridge session. ${WILDCARD}`);
   // A real file name with [ (a Next.js route folder) gets the folder form too (F-T133-55).
-  assert.equal(guard(bash("git add 'app/[id]/page.tsx'")).reason, "sage-bot guard: the wildcard [ in app/[id]/page.tsx (in a part that runs or writes) is refused in a lead session. sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.");
+  assert.equal(guard(bash("git add 'app/[id]/page.tsx'")).reason, "sage-bot guard: the wildcard [ in app/[id]/page.tsx (in a part that runs or writes) is refused in a bridge session. sage can do this instead: name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>.");
   assert.equal(guard(bash('git add app/')).decision, 'allow');
   // A quoted [ is no wildcard, and a wildcard that cannot match the name passes.
   for (const c of ["git commit -m '[T133] x'", 'node --test {WT}/test/*.test.js', 'cp {SCRATCH}/*.txt {SCRATCH}/out', 'cp {SCRATCH}/a?.json {SCRATCH}/out']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
 test('T133 (G46 A, F-T133-46): git and node --test expand a quoted pattern in an operand themselves, so it is a wildcard too', () => {
-  const wild = (w) => `sage-bot guard: the wildcard ${w} (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`;
+  const wild = (w) => `sage-bot guard: the wildcard ${w} (it can match the sage state tool) is refused in a bridge session. ${WILDCARD}`;
   assert.equal(guard(bash('node --test "{SCRATCH}/s*"')).reason, wild('/sample/scratch/s*'));
   assert.equal(guard(bash("git rm --cached '{SCRATCH}/sag?.mjs'")).reason, wild('/sample/scratch/sag?.mjs'));
-  assert.equal(guard(bash('git add -- "./[s]age.mjs"')).reason, `sage-bot guard: the wildcard [ in ./[s]age.mjs (in a part that runs or writes) is refused in a lead session. ${WILDCARD}`);
+  assert.equal(guard(bash('git add -- "./[s]age.mjs"')).reason, `sage-bot guard: the wildcard [ in ./[s]age.mjs (in a part that runs or writes) is refused in a bridge session. ${WILDCARD}`);
   // Any other pattern character (node's braces and extglobs, git's backslash) is refused too, with the stop ending (F-T133-51).
-  assert.equal(guard(bash('node --test "./sa{g,x}e.mjs"')).reason, `sage-bot guard: the character { in the operand ./sa{g,x}e.mjs (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
-  assert.equal(guard(bash("git add 'sag\\e.mjs'")).reason, `sage-bot guard: the character \\ in the operand sag\\e.mjs (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash('node --test "./sa{g,x}e.mjs"')).reason, `sage-bot guard: the character { in the operand ./sa{g,x}e.mjs (git and node --test can read it as a pattern) is refused in a bridge session. ${STOP}`);
+  assert.equal(guard(bash("git add 'sag\\e.mjs'")).reason, `sage-bot guard: the character \\ in the operand sag\\e.mjs (git and node --test can read it as a pattern) is refused in a bridge session. ${STOP}`);
   // A pattern that cannot match the name, and a quoted text that is no operand (a commit message), pass.
   for (const c of ['node --test "test/*.test.js"', "git commit -m '[T133] {x} sage*'", 'git log --oneline -- "src/guard.js"', 'node {SCRATCH}/x.mjs "s*"']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
 test('T133 (G47 A, F-T133-51): any other pattern character than [ in a git or node --test operand has no safe form, so it gets the stop ending', () => {
-  const PATTERN = /^sage-bot guard: the character .+ in the operand .+ \(git and node --test can read it as a pattern\) is refused in a lead session\. This needs Erick; tell the sage-lead and stop this action\.$/;
+  const PATTERN = /^sage-bot guard: the character .+ in the operand .+ \(git and node --test can read it as a pattern\) is refused in a bridge session\. This needs Erick; tell the sage-lead and stop this action\.$/;
   assert.deepEqual(CORPUS.pattern.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => !PATTERN.test(why)), []);
-  assert.equal(guard(bash('git add src/c++.js')).reason, `sage-bot guard: the character + in the operand src/c++.js (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
-  assert.equal(guard(bash("git show 'HEAD@{1}'")).reason, `sage-bot guard: the character @ in the operand HEAD@{1} (git and node --test can read it as a pattern) is refused in a lead session. ${STOP}`);
+  assert.equal(guard(bash('git add src/c++.js')).reason, `sage-bot guard: the character + in the operand src/c++.js (git and node --test can read it as a pattern) is refused in a bridge session. ${STOP}`);
+  assert.equal(guard(bash("git show 'HEAD@{1}'")).reason, `sage-bot guard: the character @ in the operand HEAD@{1} (git and node --test can read it as a pattern) is refused in a bridge session. ${STOP}`);
   // The same characters in a word that is no pattern operand pass.
   for (const c of ["git commit -m 'c++ and @types'", 'cat src/@types/x.d.ts', 'git stash pop']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
 test('T133 (F-T133-52): git checkout -- <file> is refused with the hint to git restore, which the guard allows', () => {
-  assert.equal(guard(bash('git checkout -- src/a.js')).reason, 'sage-bot guard: git checkout with the option -- is refused in a lead session. sage can do this instead: git restore <file> to undo the changes of a file, or git checkout -b <branch>.');
+  assert.equal(guard(bash('git checkout -- src/a.js')).reason, 'sage-bot guard: git checkout with the option -- is refused in a bridge session. sage can do this instead: git restore <file> to undo the changes of a file, or git checkout -b <branch>.');
   assert.equal(guard(bash('git restore src/a.js')).decision, 'allow');
 });
 
@@ -200,19 +200,19 @@ test('T133 (F-T133-50): a file tool input nested 30,000 deep, or 64 KB of any sh
 });
 
 test('T133 (G46 A, F-T133-47): when one part of a pipeline runs or writes, every part of it is checked', () => {
-  assert.equal(guard(bash('cat ./sag?.mjs | head -n 99999 > ./x.mjs && node ./x.mjs')).reason, `sage-bot guard: the wildcard ./sag?.mjs (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(guard(bash('cat "./café.txt" | head > ./x.txt')).reason, `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${ASCII_HINT}`);
+  assert.equal(guard(bash('cat ./sag?.mjs | head -n 99999 > ./x.mjs && node ./x.mjs')).reason, `sage-bot guard: the wildcard ./sag?.mjs (it can match the sage state tool) is refused in a bridge session. ${WILDCARD}`);
+  assert.equal(guard(bash('cat "./café.txt" | head > ./x.txt')).reason, `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a bridge session. ${ASCII_HINT}`);
   // A pipeline that only reads, and a read before a && that writes, run nothing.
   for (const c of ['ls ./s* | head -5', 'cat ./sag?.mjs && npm test', 'npm run check 2>&1 | tail -20']) assert.equal(guard(bash(c)).reason, undefined, c);
 });
 
 test('T133 (G44 A): in a part that runs or writes, and in a file tool path, a character that is not printable ASCII is refused with the stop ending', () => {
   // F-T144-L1: the text goes to a file, and git commit -F takes it.
-  const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a lead session. ${ASCII_HINT}`;
+  const ascii = `sage-bot guard: a character that is not printable ASCII in a part that runs or writes is refused in a bridge session. ${ASCII_HINT}`;
   for (const c of ['cp "{SCRATCH}/caf\u00e9.txt" {SCRATCH}/x.txt', 'node "{SCRATCH}/x\u200b.mjs"', 'echo x > "{SCRATCH}/\u00e9.txt"', 'ls | tee "{SCRATCH}/\u00e9.txt"', 'git commit -m "x\ty"', 'git commit -m "a\nb"']) {
     assert.equal(guard(bash(c)).reason, ascii, c);
   }
-  const path = `sage-bot guard: a file path with a character that is not printable ASCII is refused in a lead session. ${STOP}`;
+  const path = `sage-bot guard: a file path with a character that is not printable ASCII is refused in a bridge session. ${STOP}`;
   assert.equal(guard(tool('Write', { file_path: '{WT}/caf\u00e9.md', content: 'x' })).reason, path);
   assert.equal(guard(tool('NotebookEdit', { notebook_path: '{WT}/\u00e9.ipynb', new_source: 'x' })).reason, path);
   // A read runs nothing, and a file's text may hold any character.
@@ -236,23 +236,23 @@ test('T133 (G44 A): every code point that folds to a letter of the name (NFKC, t
 });
 
 test('T133 (G44 A): node never reads its script from stdin or a device, and a broken input refuses with the stop ending', () => {
-  const stdin = `sage-bot guard: node with no script file (code from stdin) is refused in a lead session. ${STOP}`;
+  const stdin = `sage-bot guard: node with no script file (code from stdin) is refused in a bridge session. ${STOP}`;
   assert.equal(guard(bash('node - status < {SCRATCH}/x.mjs')).reason, stdin);
   assert.equal(guard(bash('node --test -')).reason, stdin);
   assert.equal(guard(bash('node {SCRATCH}/x.mjs -')).decision, 'allow');
   // F-T133-48 (G46 A): nor from a device, a script path under /dev/ in any spelling; node --test checks each of its files.
-  const dev = (p) => `sage-bot guard: node with the script ${p} (a script file ends in .js, .mjs or .cjs) is refused in a lead session. ${NODE_HINT}`;
+  const dev = (p) => `sage-bot guard: node with the script ${p} (a script file ends in .js, .mjs or .cjs) is refused in a bridge session. ${NODE_HINT}`;
   for (const p of ['/dev/stdin', '/dev/fd/0', '//dev/./stdin', '../../../dev/stdin', '/x/../dev/fd/3']) assert.equal(guard(bash(`node ${p} < {SCRATCH}/x.mjs`)).reason, dev(p));
   assert.equal(guard(bash('node --test test/a.test.js /dev/stdin')).reason, dev('/dev/stdin'));
   for (const c of ['node {SCRATCH}/x.mjs /dev/null', 'node test/dev/x.mjs', 'node --test test/dev/x.test.js']) assert.equal(guard(bash(c)).decision, 'allow', c);
-  for (const input of [{}, { command: 42 }, { command: null }]) assert.equal(guard(tool('Bash', input)).reason, `sage-bot guard: a Bash call with no command text is refused in a lead session. ${STOP}`);
-  for (const name of ['Agent', 'Write', 'Bash']) assert.equal(guard(tool(name, [])).reason, `sage-bot guard: a hook input that is not a tool call is refused in a lead session. ${STOP}`);
+  for (const input of [{}, { command: 42 }, { command: null }]) assert.equal(guard(tool('Bash', input)).reason, `sage-bot guard: a Bash call with no command text is refused in a bridge session. ${STOP}`);
+  for (const name of ['Agent', 'Write', 'Bash']) assert.equal(guard(tool(name, [])).reason, `sage-bot guard: a hook input that is not a tool call is refused in a bridge session. ${STOP}`);
 });
 
 test('T133: an Agent or Task call with an isolation field is refused; one without it is allowed', () => {
   for (const name of ['Agent', 'Task']) {
     for (const isolation of ['remote', 'worktree']) {
-      assert.equal(guard(tool(name, { prompt: 'x', isolation })).reason, `sage-bot guard: an agent with the isolation "${isolation}" is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.`);
+      assert.equal(guard(tool(name, { prompt: 'x', isolation })).reason, `sage-bot guard: an agent with the isolation "${isolation}" is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.`);
     }
     assert.equal(guard(tool(name, { prompt: 'x' })).decision, 'allow');
   }
@@ -261,10 +261,10 @@ test('T133: an Agent or Task call with an isolation field is refused; one withou
 test('T133: WebFetch, by the host text in the URL: an address must be global unicast, so each special-purpose range, multicast, 240/4, the broadcast address and IPv6 outside 2000::/3 are refused', () => {
   const fetch = (host) => guard(tool('WebFetch', { url: `https://${host}/`, prompt: 'x' })).reason ?? null;
   for (const host of ['198.18.0.1', '198.19.255.254', '192.0.0.1', '224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255', '0.1.2.3']) {
-    assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.`);
+    assert.equal(fetch(host), `sage-bot guard: a fetch of ${host} (not a global unicast address) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.`);
   }
   for (const host of ['::1', '::', 'fe80::1', 'fd00::1', 'ff02::1', '2001:db8::1', '2002:a00:1::1', '64:ff9b::7f00:1', '100::1']) assert.match(fetch(`[${host}]`), /\(not a global unicast address\)/, host);
-  assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(fetch('[::ffff:127.0.0.1]'), 'sage-bot guard: a fetch of ::ffff:7f00:1 (not a global unicast address) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
   for (const host of ['8.8.8.8', '198.20.0.1', '223.255.254.1', '[2606:4700:4700::1111]', 'example.com']) assert.equal(fetch(host), null, host);
   // An IPv4-mapped address (::ffff:0:0/96) is checked as its IPv4 address (F-T133-59): a public one passes, a local one is refused.
   assert.equal(fetch('[::ffff:8.8.8.8]'), null);
@@ -273,7 +273,7 @@ test('T133: WebFetch, by the host text in the URL: an address must be global uni
   for (const host of ['127.0.0.1.nip.io', 'localtest.me:8080']) assert.equal(fetch(host), null, host);
 });
 
-test('T133: in a lead session, every normal developer command of the corpus is allowed', () => {
+test('T133: in a bridge session, every normal developer command of the corpus is allowed', () => {
   assert.deepEqual(CORPUS.allow.map((c) => [c, guard(bash(c)).reason]).filter(([, why]) => why), []);
 });
 
@@ -295,34 +295,34 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   const why = (c) => guard(bash(c)).reason;
   // The usual commit form, a heredoc in $( ), stays refused, and the message says how to give the text instead.
   assert.match(why("git commit -m \"$(cat <<'EOF'\nT133\nEOF\n)\""), /cannot read \(a \$ inside double quotes\) is refused .* sage can do this instead: .*put long or special text in a file in the scratch folder and pass it with git commit -F <file>\.$/s);
-  assert.equal(why('HOME={SCRATCH} git status'), 'sage-bot guard: a variable in front of git (git reads its config from HOME) is refused in a lead session. sage can do this instead: run git with no variable in front of it.');
-  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a lead session. sage can do this instead: set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command.');
+  assert.equal(why('HOME={SCRATCH} git status'), 'sage-bot guard: a variable in front of git (git reads its config from HOME) is refused in a bridge session. sage can do this instead: run git with no variable in front of it.');
+  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a bridge session. sage can do this instead: set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command.');
   // Each option must be an entry of the command's table by its full spelling; the message lists the entries.
-  assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a lead session. sage can do this instead: rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
-  assert.equal(why('pwd -L'), 'sage-bot guard: pwd with the option -L is refused in a lead session. sage can do this instead: give pwd no option.');
-  assert.equal(why('node --test-reporter=x.mjs --test'), 'sage-bot guard: node --test-reporter x.mjs (only spec, tap, dot, junit) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('head -n'), 'sage-bot guard: head -n with no value is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C and --no-pager) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git -C'), 'sage-bot guard: git -C with no folder is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git stash clear'), 'sage-bot guard: git stash clear is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git worktree remove x'), 'sage-bot guard: git worktree remove is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('git remote add x y'), 'sage-bot guard: git remote: a change of a remote is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('sh -c x'), 'sage-bot guard: the command sh is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('npm install x'), 'sage-bot guard: npm install (only ci, test, run, ls and outdated) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('npm run deploy'), 'sage-bot guard: npm run deploy (a deploy) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('node'), 'sage-bot guard: node with no script file (code from stdin) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(why('cd src'), 'sage-bot guard: cd other than as the first part of cd <folder> && <command> is refused in a lead session. sage can do this instead: cd <folder> && <command>, or name the full path in the command.');
+  assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a bridge session. sage can do this instead: rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
+  assert.equal(why('pwd -L'), 'sage-bot guard: pwd with the option -L is refused in a bridge session. sage can do this instead: give pwd no option.');
+  assert.equal(why('node --test-reporter=x.mjs --test'), 'sage-bot guard: node --test-reporter x.mjs (only spec, tap, dot, junit) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('head -n'), 'sage-bot guard: head -n with no value is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git merge feature'), 'sage-bot guard: git merge (only the listed subcommands; no global option but -C and --no-pager) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git -C'), 'sage-bot guard: git -C with no folder is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git stash clear'), 'sage-bot guard: git stash clear is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git worktree remove x'), 'sage-bot guard: git worktree remove is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('git remote add x y'), 'sage-bot guard: git remote: a change of a remote is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('sh -c x'), 'sage-bot guard: the command sh is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('npm install x'), 'sage-bot guard: npm install (only ci, test, run, ls and outdated) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('npm run deploy'), 'sage-bot guard: npm run deploy (a deploy) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('node'), 'sage-bot guard: node with no script file (code from stdin) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('cd src'), 'sage-bot guard: cd other than as the first part of cd <folder> && <command> is refused in a bridge session. sage can do this instead: cd <folder> && <command>, or name the full path in the command.');
   assert.match(why('cd src ; ls'), /cannot read \(the operator ; \(only && joins parts\)\) is refused .* instead: one command per call, or commands joined only by && /);
-  assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
-  assert.equal(why('cat package.json | jq .scripts'), 'sage-bot guard: a | into jq is refused in a lead session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or give jq the file (jq <options> <file>), or run the commands one by one.');
-  assert.equal(why('rm -rf *'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./*.');
+  assert.equal(why('ls | sh'), 'sage-bot guard: a | into sh is refused in a bridge session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or run the commands one by one.');
+  assert.equal(why('cat package.json | jq .scripts'), 'sage-bot guard: a | into jq is refused in a bridge session. sage can do this instead: pipe only into head, tail, wc, sort or grep, or give jq the file (jq <options> <file>), or run the commands one by one.');
+  assert.equal(why('rm -rf *'), 'sage-bot guard: the word * (a wildcard at its start can expand to an option) is refused in a bridge session. sage can do this instead: start the word with a folder, for example ./*.');
   // In a part that runs or writes, a wildcard that can match the state tool gets the hint to name the files first.
-  assert.equal(why('cp * {SCRATCH}'), `sage-bot guard: the wildcard * (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(why('cp ./* {SCRATCH}'), `sage-bot guard: the wildcard ./* (it can match the sage state tool) is refused in a lead session. ${WILDCARD}`);
-  assert.equal(guard(tool('Grep', { pattern: 'x' })).reason, 'sage-bot guard: the Grep tool (the sandbox does not cover it) is refused in a lead session. sage can do this instead: search with rg in Bash, for example rg -n <pattern> <folder>.');
-  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
-  assert.equal(guard(tool('Monitor', { command: 'ls' })).reason, 'sage-bot guard: the tool Monitor is refused in a lead session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(why('cp * {SCRATCH}'), `sage-bot guard: the wildcard * (it can match the sage state tool) is refused in a bridge session. ${WILDCARD}`);
+  assert.equal(why('cp ./* {SCRATCH}'), `sage-bot guard: the wildcard ./* (it can match the sage state tool) is refused in a bridge session. ${WILDCARD}`);
+  assert.equal(guard(tool('Grep', { pattern: 'x' })).reason, 'sage-bot guard: the Grep tool (the sandbox does not cover it) is refused in a bridge session. sage can do this instead: search with rg in Bash, for example rg -n <pattern> <folder>.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://127.0.0.1/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of 127.0.0.1 (not a global unicast address) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(guard(tool('WebFetch', { url: 'http://printer.local/', prompt: 'x' })).reason, 'sage-bot guard: a fetch of printer.local (this Mac or the local network) is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
+  assert.equal(guard(tool('Monitor', { command: 'ls' })).reason, 'sage-bot guard: the tool Monitor is refused in a bridge session. This needs Erick; tell the sage-lead and stop this action.');
 });
 
 test('T133: the hook answers allow with no output and deny with the PreToolUse JSON; a malformed stdin or a tool call with no input refuses (fail closed)', () => {
@@ -339,7 +339,7 @@ test('T133: the hook answers allow with no output and deny with the PreToolUse J
 test('T133: an input over 64 KB is refused before it is parsed, quickly; a large input under the limit is decided quickly too', () => {
   const over = JSON.stringify(bash(`echo ${'a'.repeat(64 * 1024)}`));
   const r = hook(over);
-  assert.equal(r.reason, 'sage-bot guard: a tool call over 64 KB is refused in a lead session. sage can do this instead: write long text to a file in the scratch folder in parts of less than 64 KB, and pass the file.');
+  assert.equal(r.reason, 'sage-bot guard: a tool call over 64 KB is refused in a bridge session. sage can do this instead: write long text to a file in the scratch folder in parts of less than 64 KB, and pass the file.');
   assert.ok(r.ms < 3000, `${r.ms} ms`);
   const huge = hook(JSON.stringify(bash(`echo ${'a '.repeat(2_800_000)}`)));
   assert.equal(huge.decision, 'deny');
@@ -360,7 +360,7 @@ test('T133: an input over 64 KB is refused before it is parsed, quickly; a large
 
 // F-T133-62: a regex with .* for each * backtracked, and node ./ + 48 stars + q && … took 84 s, past the 30 s hook timeout.
 test('F-T133-62: a wildcard word of many stars decides in under 1 s in each form (a run, a redirect, a quoted operand, a copy), up to 64 KB', () => {
-  const PYTHON = `sage-bot guard: the command python3 is refused in a lead session. ${STOP}`;
+  const PYTHON = `sage-bot guard: the command python3 is refused in a bridge session. ${STOP}`;
   const fill64 = (form, unit) => {
     const b = Buffer.byteLength(JSON.stringify(bash(form.replace('{STARS}', ''))));
     return form.replace('{STARS}', unit.repeat(Math.floor((64 * 1024 - b - 10) / unit.length)));
@@ -396,11 +396,11 @@ test('F-T133-62: when the rules do not decide in 5 s, the hook writes a whole de
   const r = run(join(dir, 'scripts', 'guard.mjs'), JSON.stringify(bash('git status')), LEAD);
   const ms = Date.now() - t;
   assert.equal(r.status, 0, `status ${r.status} after ${ms} ms`);
-  assert.deepEqual(JSON.parse(r.stdout), { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `sage-bot guard: a tool call that the guard did not decide in 5 s is refused in a lead session. ${STOP}` } });
+  assert.deepEqual(JSON.parse(r.stdout), { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `sage-bot guard: a tool call that the guard did not decide in 5 s is refused in a bridge session. ${STOP}` } });
   assert.ok(ms >= 5000 && ms < 8000, `${ms} ms`);
 });
 
-test('T133: a crash of the hook refuses in a lead session (exit code 2)', () => {
+test('T133: a crash of the hook refuses in a bridge session (exit code 2)', () => {
   // The rules module throws on load: a copy of the hook next to a broken src/guard.js.
   const dir = mkdtempSync(join(base, 'broken-'));
   mkdirSync(join(dir, 'scripts')); mkdirSync(join(dir, 'src'));
@@ -438,7 +438,7 @@ test('F-T133-57: a refusal of a 60 KB input reaches the reader whole, through a 
   assert.ok(input.length > 59_000 && input.length < 64 * 1024, `${input.length}`);
   const word = `*${'A'.repeat(199)}…`;
   for (const wait of [0, 0, 0, 300, 300]) {
-    assert.equal(deny(await piped(HOOK, input, LEAD, wait)), `sage-bot guard: the word ${word} (a wildcard at its start can expand to an option) is refused in a lead session. sage can do this instead: start the word with a folder, for example ./${word}.`);
+    assert.equal(deny(await piped(HOOK, input, LEAD, wait)), `sage-bot guard: the word ${word} (a wildcard at its start can expand to an option) is refused in a bridge session. sage can do this instead: start the word with a folder, for example ./${word}.`);
   }
 });
 
@@ -472,7 +472,7 @@ test('F-T133-57: the hook writes a deny of any length whole before it exits, wit
 test('F-T133-71: npm --version and npm -v alone are allowed; npm version (it can change package.json) gets the hint to npm --version', () => {
   const why = (c) => guard(bash(c)).reason;
   for (const c of ['npm --version', 'npm -v', 'node --version', 'node -v']) assert.equal(why(c), undefined, c);
-  const hint = 'sage-bot guard: npm version (it can change package.json) is refused in a lead session. sage can do this instead: npm --version, to print the version of npm.';
+  const hint = 'sage-bot guard: npm version (it can change package.json) is refused in a bridge session. sage can do this instead: npm --version, to print the version of npm.';
   assert.equal(why('npm version'), hint);
   assert.equal(why('npm version patch'), hint);
   // The version alone: anything after it is checked by the option table, and refused.
@@ -501,9 +501,9 @@ test('F-T133-72: a write under a .claude folder is refused with the stop ending,
   assert.equal(guard(tool('Write', { file_path: '{SCRATCH}/notes.md', content: 'see {WT}/.claude/settings.json' })).reason, undefined);
 });
 
-// ---- T144: the follow-ups before lead sessions start (T134) ---------------------------------------------------------------
+// ---- T144: the follow-ups before bridge sessions start (T134) ---------------------------------------------------------------
 
-const refused = (why, end = STOP) => `sage-bot guard: ${why} is refused in a lead session. ${end}`;
+const refused = (why, end = STOP) => `sage-bot guard: ${why} is refused in a bridge session. ${end}`;
 const hint = (why, safe) => refused(why, `sage can do this instead: ${safe}.`);
 const reasons = (cases, at = (c) => guard(bash(c)).reason) => Object.fromEntries(cases.map((c) => [c, at(c) ?? 'allow']));
 
@@ -525,7 +525,7 @@ test('F-T134-5: a stdin that never closes gets a whole deny within the 5 s deadl
 });
 
 test('F-T144-M1 (G63 b): each Keychain front end is refused by name, with any path, as a second layer', () => {
-  const front = (name) => refused(`the Keychain front end ${name} (G63 b: a lead session reads no Keychain item)`);
+  const front = (name) => refused(`the Keychain front end ${name} (G63 b: a bridge session reads no Keychain item)`);
   assert.deepEqual(reasons(['security find-generic-password -s x -w', '/usr/bin/security dump-keychain', 'osascript -e x', 'NO_COLOR=1 osacompile x']), {
     'security find-generic-password -s x -w': front('security'),
     '/usr/bin/security dump-keychain': front('/usr/bin/security'),

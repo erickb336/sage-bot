@@ -162,7 +162,7 @@ function press(user, roles, customId, age = 0) {
     update: async (p) => { replies.push({ kind: 'update', ...p }); }, reply: async (p) => { replies.push({ kind: 'reply', ...p }); } };
 }
 
-test('T130 unregister: a lead unregisters with a confirm; an apprentice is refused; a member with no role gets nothing; the home cannot go', async (t) => {
+test('T130 unregister: a sage-lead unregisters with a confirm; an apprentice is refused; a member with no role gets nothing; the home cannot go', async (t) => {
   const b = world(t);
   const lines = [];
   const channels = openChannels(b.config, loadProjects(b.config));
@@ -173,15 +173,15 @@ test('T130 unregister: a lead unregisters with a confirm; an apprentice is refus
   const none = press(SAM, [], `${UNREGISTER}${ASK}`);
   await ask.press(none);
   assert.deepEqual(none.replies, []);
-  // An apprentice: refused, also when they press a lead's confirm; the confirm stays and the registry does not change.
-  assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'unregister'))[1].content, 'Only a sage-lead can unregister a channel. Ask a lead.');
+  // An apprentice: refused, also when they press a sage-lead's confirm; the confirm stays and the registry does not change.
+  assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'unregister'))[1].content, 'Only a sage-lead can unregister a channel. Ask a sage-lead.');
   const apprentice = press(MAYA, [APPRENTICE], `${UNREGISTER}${ASK}`);
   await ask.press(apprentice);
   assert.deepEqual(apprentice.replies, [{ kind: 'reply', content: 'Only a sage-lead can unregister a channel. Nothing changed.', allowedMentions: { parse: [] } }]);
-  // The home channel: refused for a lead too.
+  // The home channel: refused for a sage-lead too.
   assert.equal((await b.cmd(ask, JON, [LEADR], CHANNEL, 'unregister'))[1].content, `<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
-  // A lead, in a thread of the channel: the confirm names the channel and has one button for it.
+  // A sage-lead, in a thread of the channel: the confirm names the channel and has one button for it.
   const confirm = (await b.cmd(ask, JON, [LEADR], THREAD, 'unregister', {}, ASK))[1];
   assert.equal(confirm.content, `Unregister <#${ASK}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`);
   assert.deepEqual(confirm.components, [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${ASK}` },
@@ -329,7 +329,7 @@ const button = ({ user = JON, roles = [LEADR], channelId = ASK, customId, age = 
     update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
 };
 
-test('F-T130-9 and F-T130-6: routes take an unregister press in any registered channel to ask.press; the log names the lead and their id', async (t) => {
+test('F-T130-9 and F-T130-6: routes take an unregister press in any registered channel to ask.press; the log names the sage-lead and their id', async (t) => {
   const b = world(t);
   const channels = openChannels(b.config, loadProjects(b.config));
   const lines = [];

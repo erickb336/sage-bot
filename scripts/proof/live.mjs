@@ -1,4 +1,4 @@
-// The live proof of the lead-session sandbox (T165, T134 PR 2b): `npm run proof:live [-- --out <folder>] [--dry-run]`.
+// The live proof of the bridge-session sandbox (T165, T134 PR 2b): `npm run proof:live [-- --out <folder>] [--dry-run]`.
 // The owner runs it (G67 a). It takes the owner's spend-capped API key from the Keychain item `sage-bot-proof-key` (account
 // `sage-bot-proof`, the login keychain, by `security find-generic-password -w`; never from a file or an argument), makes the scratch
 // keychain (scripts/proof/keychain.mjs, F-T165-2), runs the T157 proof (scripts/proof/run.mjs) with three sessions of Haiku 4.5 at 1 USD
@@ -21,7 +21,7 @@ import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftrunca
 import { constants, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LEAD_PATH } from '../../src/lead-policy.js';
+import { BRIDGE_PATH } from '../../src/session-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, stopScratchKeychain, withScratchKeychain } from './keychain.mjs';
 import { HOST_OFF, isWithin, resultsOf } from './probe.mjs';
@@ -252,9 +252,9 @@ const checkStatus = (did, dryRun) => (did === null ? (dryRun ? 'SKIPPED' : 'INVA
  * (standing order 19): worked only when the tag came out, the host's state shows the work, or the tool gave its listing; refused only when
  * the permission system denied the call or its output has the sandbox's EPERM; anything else (another error, an empty result, no call)
  * is no evidence. `hide` cuts the tag and the key out of a `why`. A file of the session folder that the checks read must be a plain file
- * (no link, no pipe), else its check is INVALID (F-T165-23). `rg`: the path of the rg that the lead PATH holds, from the runner's control
+ * (no link, no pipe), else its check is INVALID (F-T165-23). `rg`: the path of the rg that the bridge-session PATH holds, from the runner's control
  * outside the sandbox, or null: with no rg there, F-T157-5 proves nothing ("command not found" is never a refusal), and with one, a
- * session whose `command -v rg` finds no rg fails rg-where (its PATH is not the lead PATH).
+ * session whose `command -v rg` finds no rg fails rg-where (its PATH is not the bridge-session PATH).
  * @param {object} w @param {ReturnType<typeof callsOf>} s @param {{ settingsBefore: string, hide: (t: string) => string, rg?: string | null }} o
  */
 export function checksOf(w, { tools, calls }, { settingsBefore, hide, rg = null }) {
@@ -292,9 +292,9 @@ export function checksOf(w, { tools, calls }, { settingsBefore, hide, rg = null 
       : { id: 'bash-unsandboxed', did: null, why: 'no Bash call with dangerouslyDisableSandbox true' }],
     'F-T134-16b': [], // the subagent's probes, added by the runner from the Agent call's result
     'F-T157-5': rg ? [
-      { id: 'rg-where', did: rgExit === undefined ? null : rgExit !== '0', why: rgWhere ? `command -v rg: ${first(rgWhere.text) || '(no output)'}; the lead PATH has ${rg}` : 'no Bash call with command -v rg' },
+      { id: 'rg-where', did: rgExit === undefined ? null : rgExit !== '0', why: rgWhere ? `command -v rg: ${first(rgWhere.text) || '(no output)'}; the bridge-session PATH has ${rg}` : 'no Bash call with command -v rg' },
       rgRead ? { id: 'rg-credential', did: didOf(rgRead), why: why(rgRead) } : { id: 'rg-credential', did: null, why: 'no Bash call with rg on the ssh file' },
-    ] : ['rg-where', 'rg-credential'].map((id) => ({ id, did: null, why: 'no rg on the lead PATH of this Mac: the row proves nothing until rg is installed there' })),
+    ] : ['rg-where', 'rg-credential'].map((id) => ({ id, did: null, why: 'no rg on the bridge-session PATH of this Mac: the row proves nothing until rg is installed there' })),
   };
 }
 
@@ -396,7 +396,7 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
 let current = null;
 /**
  * Stops a live run on a signal, in this order, each step whatever the one before did: kills every session's process group and the
- * process group of every other child (a preflight's command runs in a group of its own, src/lead-policy.js, F-T165-31), removes the
+ * process group of every other child (a preflight's command runs in a group of its own, src/session-policy.js, F-T165-31), removes the
  * run's job from launchd (G73), takes the scratch keychain away and puts the owner's search list back (the handler exits before any
  * finally block, F-T165-22), redacts the key from the scratch folder, and removes the temp roots (F-T165-15) and the preflights' temp
  * folder. A step that fails prints one line.
@@ -425,7 +425,7 @@ function wouldBe(path) {
 }
 
 /**
- * The rg that a session's Bash should find: the one of the lead PATH, looked up outside the sandbox (F-T157-5), or null. The one lookup
+ * The rg that a session's Bash should find: the one of the bridge-session PATH, looked up outside the sandbox (F-T157-5), or null. The one lookup
  * of rg (standing order 15): the preflight (F-T165-38) and the F-T157-5 row both use its result. @param {string} leadPath
  */
 function rgOn(leadPath) {
@@ -437,11 +437,11 @@ function rgOn(leadPath) {
  * Runs the live proof in `root`. @param {string} root
  * @param {{ env?: NodeJS.ProcessEnv, dryRun?: boolean, claude?: string, leadPath?: string, home?: string }} [o]  env: the host's (its PATH finds
  *   `security`, `launchctl` and `claude`); dryRun: no key, a dummy claude; claude: a claude to run in place of the one on PATH (the
- *   tests' fake); leadPath: the PATH in which the rg control looks for rg, the sessions' own LEAD_PATH (a fake's folder, in the tests);
+ *   tests' fake); leadPath: the PATH in which the rg control looks for rg, the sessions' own BRIDGE_PATH (a fake's folder, in the tests);
  *   home: the owner's home folder, which the sandbox denies to the sessions (a scratch folder, in the tests: F-T165-35)
  * @returns {Promise<{ report: object, summary: string }>}
  */
-export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = LEAD_PATH, home = ownerHome() } = {}) {
+export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = BRIDGE_PATH, home = ownerHome() } = {}) {
   // gh, the folder, rg, then the key, each before any folder is made: a refusal makes and leaves nothing (a refused --out a/b/c leaves no
   // a/b, F-T165-15), and no refusal comes after a Keychain prompt (F-T165-39).
   if (!dryRun) refuseWhileGhLoggedIn(env);
@@ -454,14 +454,14 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   home = realpathSync.native(home);
   if (inside(home)) throw new Error(`the scratch folder ${root} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
   if (existsSync(root)) refuseUsed(root); // F-T157-23: before the keychain, the dummy and the temp folder go in
-  // F-T165-38: with no rg on the lead PATH, row F-T157-5 is INVALID only after the three paid sessions.
+  // F-T165-38: with no rg on the bridge-session PATH, row F-T157-5 is INVALID only after the three paid sessions.
   const rg = rgOn(leadPath);
   if (!rg && !dryRun) throw new Error(`ripgrep (rg) is not on the sessions' PATH ${leadPath}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
   mkdirSync(root, { recursive: true });
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
-  // The preflights' temp folders (sage-bot-preflight-*, src/lead-policy.js makes them in os.tmpdir()) go in the run's own folder, which
+  // The preflights' temp folders (sage-bot-preflight-*, src/session-policy.js makes them in os.tmpdir()) go in the run's own folder, which
   // the signal handler removes: a signal during a preflight leaves none in the shared TMPDIR (F-T165-31).
   const tmp = join(root, 'tmp'), tmpWas = process.env.TMPDIR;
   mkdirSync(tmp);
@@ -497,7 +497,7 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
 
 /**
  * The command `npm run proof:live`, with its arguments. @param {string[]} args @param {{ leadPath?: string }} [o]  leadPath: for the
- * tests only (a fake's folder, as rg is on no lead PATH of a test Mac); the command itself always gives LEAD_PATH
+ * tests only (a fake's folder, as rg is on no bridge-session PATH of a test Mac); the command itself always gives BRIDGE_PATH
  */
 export async function main(args, { leadPath } = {}) {
   const dryRun = args.includes('--dry-run');

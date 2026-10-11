@@ -35,7 +35,7 @@ const QUIET = { ...NO_MENTIONS, repliedUser: false };
 const REPLY = 2000;
 
 export const POINTER = 'I answer read asks here with no AI: mention me with board, gates, files or a task id such as T7, or use /sage. I do not answer free questions yet.';
-export const BUILDS = 'Builds are for sage-leads: ask a lead.';
+export const BUILDS = 'Builds are for sage-leads: ask a sage-lead.';
 export const LEAD_BUILDS = 'Builds from Discord are not ready yet.';
 /**
  * A mention that asks for a build: a sentence that starts with one of these verbs, also after "please" or "can you" (G18 D3). A word
@@ -140,14 +140,14 @@ const NO_RIGHT = new Set([50001, 50013]);
 /**
  * The read commands and the mention threads for one bridge. `config` is the bridge config (apprenticeRole, leadRole, ownerId, project,
  * sagePath, statePath, projects, and optionally auditPath and killPath). `channels` is the channel registry (src/channels.js
- * openChannels); `projects` are the bridge's (src/projects.js loadProjects). A lead's unregister changes it and saves it. `audit` posts a copy of each lead log line to #sage-audit (none: the
+ * openChannels); `projects` are the bridge's (src/projects.js loadProjects). A sage-lead's unregister changes it and saves it. `audit` posts a copy of each sage-lead log line to #sage-audit (none: the
  * log only). `env` goes to the sage state tool (the tests give a scratch HOME). Throws for a config that is not safe, and for a
- * thread map or a lead log that is not safe.
+ * thread map or a sage-lead log that is not safe.
  */
 export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit }) {
   const threadsPath = threadsPathOf(config);
   const threads = loadThreads(threadsPath); // thread id → { kind, channel, project, by, at }
-  const leadLog = openLog(auditPathOf(config), projects);
+  const sageLeadLog = openLog(auditPathOf(config), projects);
   const killPath = killPathOf(config);
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
   const asks = new Map(); // person id → the times of their asks in the last hour; only in memory
@@ -175,7 +175,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   const limited = (at) => `You asked ${ASK_LIMIT} times in the last hour; that is the limit. Your next ask works at ${stamp(at)}.`;
   const isHolder = (roles) => roles.includes(config.apprenticeRole) || roles.includes(config.leadRole);
   const isLead = (roles) => roles.includes(config.leadRole);
-  if (leadLog.broken) say(`the lead log ${auditPathOf(config)} has a break at line ${leadLog.broken.line}: it ${leadLog.broken.why}. New lines chain on from its last line. Run: node scripts/leads.mjs verify`);
+  if (sageLeadLog.broken) say(`the sage-lead log ${auditPathOf(config)} has a break at line ${sageLeadLog.broken.line}: it ${sageLeadLog.broken.why}. New lines chain on from its last line. Run: node scripts/leads.mjs verify`);
   /**
    * The registered channel of a place: the channel, or the parent of a thread (F-T71-5, as `accepts` does for the home channel), as its
    * id; null when neither is registered. `parentId` is a thread's parent, or a promise of it.
@@ -199,7 +199,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       const { attached, over } = readShared(sharedFiles(p));
       if (!attached.length && !over.length) return { content: `${p.name} shares no files.` };
       return { content: [`${attached.length} shared file(s) of ${p.name}:`, ...attached.map((f) => `- ${shown(f.name, 200)}`),
-        ...(over.length ? [`${over.length} more file(s) not attached: one reply holds at most 8 MB. Ask a lead for them.`, ...over.map((name) => `- ${shown(name, 200)}`)] : [])].join('\n'),
+        ...(over.length ? [`${over.length} more file(s) not attached: one reply holds at most 8 MB. Ask a sage-lead for them.`, ...over.map((name) => `- ${shown(name, 200)}`)] : [])].join('\n'),
         files: attached.map((f) => ({ attachment: f.data, name: attachmentName(basename(f.name)) })) };
     }
     let data;
@@ -215,7 +215,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
 
   /** The answer to /sage unregister: a confirm button for a sage-lead, a refusal for anyone else and for the home channel. */
   function unregisterAsk(roles, at) {
-    if (!roles.includes(config.leadRole)) return { content: 'Only a sage-lead can unregister a channel. Ask a lead.' };
+    if (!roles.includes(config.leadRole)) return { content: 'Only a sage-lead can unregister a channel. Ask a sage-lead.' };
     if (channels.get(at).home) return { content: `<#${at}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.` };
     return { content: `Unregister <#${at}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`,
       components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${at}` },
@@ -224,21 +224,21 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
 
   /** The answer to /sage stop: a confirm button for a sage-lead or Erick, a refusal for anyone else. */
   function stopAsk(user, roles) {
-    if (!isLead(roles) && user.id !== config.ownerId) return { content: 'Only a sage-lead or Erick can turn off the link from Discord to sage. Ask a lead.' };
+    if (!isLead(roles) && user.id !== config.ownerId) return { content: 'Only a sage-lead or Erick can turn off the link from Discord to sage. Ask a sage-lead.' };
     if (linkOff(killPath)) return { content: 'The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.' };
-    return { content: 'Turn off the link from Discord to sage? Then nothing of a lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.',
+    return { content: 'Turn off the link from Discord to sage? Then nothing of a sage-lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.',
       components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: STOP_CANCEL }] }] };
   }
 
   /**
-   * Writes one line of the lead log for a message (or a /sage stop), then posts its copy to #sage-audit, which pings nobody. A lead's
+   * Writes one line of the sage-lead log for a message (or a /sage stop), then posts its copy to #sage-audit, which pings nobody. A sage-lead's
    * text goes in cleaned by forLead; an apprentice's as quoted data. Throws when the log cannot be written: then nothing goes further.
    */
   function record(m, { thread = null, project = null, outcome }) {
     const raw = m.content ?? '';
-    const line = leadLog.append(entryOf({ at: now(), message: m.id ?? null, author: m.user.id, roles: m.roles ?? [], raw,
+    const line = sageLeadLog.append(entryOf({ at: now(), message: m.id ?? null, author: m.user.id, roles: m.roles ?? [], raw,
       text: isLead(m.roles ?? []) ? forLead(raw) : quoted(raw), thread, project, outcome }));
-    const copy = [`**Lead log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
+    const copy = [`**Sage-lead log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
       shown(line.text, 1500)].join('\n');
     audit?.({ content: copy, allowedMentions: NO_MENTIONS }).catch((e) => say(`Discord refused the #sage-audit copy: code ${e?.code ?? '-'}: ${e?.message}`));
     return line;
@@ -250,19 +250,19 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   }
 
   /**
-   * The reply to a mention in a thread of sage-bot: `t` is its entry in the thread map. A lead's talk, and every message in a lead
+   * The reply to a mention in a thread of sage-bot: `t` is its entry in the thread map. A sage-lead's talk, and every message in a sage-lead
    * thread, would go to sage: it is logged (an apprentice's as quoted data) and gets the dry-run reply, or the fixed reply while the
-   * kill switch is set. A lead's talk in an answer thread first turns it into a lead thread and logs its held apprentice mentions,
-   * in order, as quoted data (G27). No session starts here (T131 is a dry run). Any other mention is a read ask; a lead's is logged
+   * kill switch is set. A sage-lead's talk in an answer thread first turns it into a sage-lead thread and logs its held apprentice mentions,
+   * in order, as quoted data (G27). No session starts here (T131 is a dry run). Any other mention is a read ask; a sage-lead's is logged
    * too, and an apprentice's in an answer thread is held in the thread map.
    */
   async function inThread(m, t, thread) {
     const lead = isLead(m.roles);
     if (t.kind === 'lead' || (lead && isTalk(m.content))) {
       const off = linkOff(killPath); // checked before each would-be delivery; a flag that cannot be checked counts as set
-      if (t.kind === 'answer') { // a lead's talk turns an answer thread into a lead thread; its apprentices' text goes first, as quoted data (G27)
+      if (t.kind === 'answer') { // a sage-lead's talk turns an answer thread into a sage-lead thread; its apprentices' text goes first, as quoted data (G27)
         // Safe to repeat (F-T131-13): a held mention that the log already holds (a failed save of the thread map, then a restart) is not logged again.
-        for (const h of t.held) if (!leadLog.has(h.id)) record({ ...h, user: { id: h.user } }, { thread, project: t.project, outcome: 'earlier' });
+        for (const h of t.held) if (!sageLeadLog.has(h.id)) record({ ...h, user: { id: h.user } }, { thread, project: t.project, outcome: 'earlier' });
         delete t.held;
         t.kind = 'lead';
         keep(thread);
@@ -294,8 +294,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     else try {
       setLinkOff(killPath, b.user.id, now());
       say(`${b.user.id} turned off the link from Discord to sage (the kill switch ${killPath}). Turn it on again with: node scripts/leads.mjs restore`);
-      content = `<@${b.user.id}> turned off the link from Discord to sage. Nothing of a lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.`;
-      try { record({ ...b, roles, content: '/sage stop' }, { outcome: 'link-off-set' }); } catch (e) { say(`the lead log could not record the stop: ${e?.message}`); }
+      content = `<@${b.user.id}> turned off the link from Discord to sage. Nothing of a sage-lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.`;
+      try { record({ ...b, roles, content: '/sage stop' }, { outcome: 'link-off-set' }); } catch (e) { say(`the sage-lead log could not record the stop: ${e?.message}`); }
     } catch (e) {
       say(`the kill switch ${killPath} could not be set: ${e?.message}`);
       content = 'I could not turn off the link just now. Ask Erick to turn it off at the terminal with: node scripts/leads.mjs stop';
@@ -383,9 +383,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     /**
      * A press of a button of the /sage unregister confirm or the /sage stop confirm: `{ user: { id, name, bot }, roles, customId, sentAt,
      * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL go to the kill switch (stopPress). A sage-lead's press of
-     * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the lead's name and id, and
+     * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the sage-lead's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. An
-     * apprentice's press changes nothing and gets a reply of its own, so the lead's confirm stays. A member with neither sage role, and a
+     * apprentice's press changes nothing and gets a reply of its own, so the sage-lead's confirm stays. A member with neither sage role, and a
      * custom_id that is not STOP, STOP_CANCEL, CANCEL or a channel id, get nothing. Never rejects.
      */
     async press(b) {
@@ -425,10 +425,10 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * One message that mentions the bot: `{ id, user: { id, bot }, roles, channelId, parentId, forum, content, reply, startThread, post }`.
      * `parentId` is a thread's parent (or a promise of it), `forum` whether that parent is a forum; `reply` answers in place,
      * `startThread(name)` opens a public thread from the message and gives its id, `post(thread, payload)` posts in a thread.
-     * - In a registered channel: opens a thread named from the request, and answers there (src/threads.js). A lead's talk opens a lead thread.
+     * - In a registered channel: opens a thread named from the request, and answers there (src/threads.js). A sage-lead's talk opens a sage-lead thread.
      * - In a thread that sage-bot opened: continues it. In another thread of a registered channel, or a forum post: one pointer in place.
      * - Elsewhere: one pointer to a registered channel per person per UTC day (shared with /sage).
-     * Every message of a sage-lead, and of an apprentice in a lead thread, goes into the lead log first. The limit counts each mention
+     * Every message of a sage-lead, and of an apprentice in a sage-lead thread, goes into the sage-lead log first. The limit counts each mention
      * in a registered place once; over it, one note until the hour frees up. A bot and a member with neither sage role get nothing,
      * nothing counts and nothing is logged (G20). Never rejects.
      */

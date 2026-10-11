@@ -1,4 +1,4 @@
-// T156 (F-T156-13): the git control paths of a lead session. Real git, outside any sandbox, runs each attack of the security re-check
+// T156 (F-T156-13): the git control paths of a bridge session. Real git, outside any sandbox, runs each attack of the security re-check
 // (R518) on a fixture session folder: the sandbox must stop each operation of the attack's control step, and a normal add, commit and
 // branch switch must make only operations that the sandbox allows. On macOS, the same attacks then run under a seatbelt profile made
 // from the generated denyWrite, to check the model of the rules below against the kernel. SAMPLE DATA ONLY: the fixture is a new temp
@@ -9,7 +9,7 @@ import { spawnSync } from './bridge-setup.js';
 import { cpSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { leadPolicy, settingsOf } from '../src/lead-policy.js';
+import { sessionPolicy, settingsOf } from '../src/session-policy.js';
 
 // How Claude Code 2.1.289 turns a denyWrite entry into seatbelt rules on macOS (read from its binary: functions ZBt, cGr, lc and mT):
 // - a glob denies every write to a path it matches, and to everything below that path (the regex ends in "(/.*)?$");
@@ -31,7 +31,7 @@ function denied(denyWrite, path, kind) {
 
 const ROOT = realpathSync(tempFolder('sage-bot-git-control-'));
 process.on('exit', () => rmSync(ROOT, { recursive: true, force: true }));
-const POLICY = leadPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: ROOT }, 's1', { env: {}, home: '/h', userTemp: '/u' });
+const POLICY = sessionPolicy({ statePath: '/s/state/gates.json', leadSessionsPath: ROOT }, 's1', { env: {}, home: '/h', userTemp: '/u' });
 const F = POLICY.folder, TEMPLATE = join(ROOT, 'template'), MARK = join(ROOT, 'pwned');
 const DENY_WRITE = settingsOf(POLICY).sandbox.filesystem.denyWrite;
 const ENV = { PATH: process.env.PATH, HOME: ROOT, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't',

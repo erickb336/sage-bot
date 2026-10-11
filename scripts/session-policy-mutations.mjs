@@ -1,11 +1,11 @@
-// The mutation run of the lead policy (T156): each mutation removes or weakens one rule of src/lead-policy.js (or, where it says so, of
-// src/sage.js or scripts/lead-policy.mjs), and the tests of
-// test/t156-lead-policy.test.js, test/t156-git-control.test.js, test/t156-path-shapes.test.js and test/t157-lead-policy.test.js must fail for each. It mutates a copy of src, scripts and test in
-// new temp folders (one for each of WORKERS runs at the same time), never the worktree: a mutation in place leaked into a review's `lead-policy.mjs settings` that ran at the same time (F-T156-7).
+// The mutation run of the session policy (T156): each mutation removes or weakens one rule of src/session-policy.js (or, where it says so, of
+// src/sage.js or scripts/session-policy.mjs), and the tests of
+// test/t156-session-policy.test.js, test/t156-git-control.test.js, test/t156-path-shapes.test.js and test/t157-session-policy.test.js must fail for each. It mutates a copy of src, scripts and test in
+// new temp folders (one for each of WORKERS runs at the same time), never the worktree: a mutation in place leaked into a review's `session-policy.mjs settings` that ran at the same time (F-T156-7).
 // A mutation is KILLED only when the mutated file still parses and at least one test fails. A mutation that breaks the syntax, or a
 // run that fails with no failing test (a test file or the runner crashed, and nothing else failed), is INVALID: it proves nothing
 // about the tests (F-T156-23). A test file that crashes at load because the policy changed is not a test that failed.
-//   node scripts/lead-policy-mutations.mjs     prints KILLED, SURVIVED or INVALID for each mutation; exits 1 unless all are killed
+//   node scripts/session-policy-mutations.mjs     prints KILLED, SURVIVED or INVALID for each mutation; exits 1 unless all are killed
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /** How many mutations run at the same time, each in its own copy: half the CPUs, 2 to 6. */
 const WORKERS = Math.min(6, Math.max(2, Math.floor(availableParallelism() / 2)));
-const FILES = ['test/t156-lead-policy.test.js', 'test/t156-git-control.test.js', 'test/t156-path-shapes.test.js', 'test/t157-lead-policy.test.js'];
+const FILES = ['test/t156-session-policy.test.js', 'test/t156-git-control.test.js', 'test/t156-path-shapes.test.js', 'test/t157-session-policy.test.js'];
 
 /**
  * The verdict of one mutation from its run of `node --test --test-reporter=tap` on test files. A failure named after a test file is
@@ -42,7 +42,7 @@ const copy = () => {
   symlinkSync(join(ROOT, 'node_modules'), join(W, 'node_modules'));
   return W;
 };
-const POLICY = 'src/lead-policy.js', SAGE = 'src/sage.js', SCRIPT = 'scripts/lead-policy.mjs';
+const POLICY = 'src/session-policy.js', SAGE = 'src/sage.js', SCRIPT = 'scripts/session-policy.mjs';
 const GIT_CONTROL = ['config', 'config.worktree', 'hooks', 'commondir', 'modules', 'info/attributes', 'worktrees'];
 const LIST = `[${GIT_CONTROL.map((n) => `'${n}'`).join(', ')}]`;
 const CONFIG_PATHS = ['statePath', 'auditPath', 'killPath', 'sessionsPath', 'votesPath', 'leadSessionsPath'];
@@ -97,11 +97,11 @@ const M = [
   // F-T157-20: the owner's real ~/.claude is a credential file and a denied path with a scratch HOME
   ['~/.claude only in $HOME', "...homes.map((h) => join(h, '.claude'))", "join(home, '.claude')"],
   ['~/.claude not denied', '    ...claudeDirs, // F-T157-20\n', ''],
-  ['GitHub on the host list', 'export const LEAD_HOSTS = [];', "export const LEAD_HOSTS = ['github.com'];"],
+  ['GitHub on the host list', 'export const BRIDGE_HOSTS = [];', "export const BRIDGE_HOSTS = ['github.com'];"],
   ['GH_TOKEN not denied', "['GH_TOKEN', 'GITHUB_TOKEN',", "['GITHUB_TOKEN',"],
   ['budget 10', 'export const MAX_USD = 5;', 'export const MAX_USD = 10;'],
   ['state folder not denied', '    stateDir, config.statePath, ...[auditPathOf', '    config.statePath, ...[auditPathOf'],
-  ['lead log not denied', '[auditPathOf, killPathOf,', '[killPathOf,'],
+  ['sage-lead log not denied', '[auditPathOf, killPathOf,', '[killPathOf,'],
   ['kill switch not denied', '[auditPathOf, killPathOf,', '[auditPathOf,'],
   ['spool and votes not denied', ', sessionsPathOf, votesPathOf, leadsPathOf]', ']'],
   ['statePath not checked when not set', "if (config[key] !== undefined || key === 'statePath') canonicalPath", "if (config[key] !== undefined) canonicalPath"],
@@ -142,7 +142,7 @@ const M = [
   ['DARWIN_USER_TEMP_DIR sage-hooks not denied (F-T156-40)', "join(userTempDir, 'sage-hooks'), ", ''],
   ['/private/tmp sage-hooks not denied (F-T156-40)', "'/private/tmp/sage-hooks', join(sageRoot", 'join(sageRoot'],
   ['sageRoot/.hooks not denied', "join(sageRoot, '.hooks'), // F-T134-7", '// F-T134-7'],
-  ['lead claude dir not denied', '    claudeDir, // F-T134-10\n', ''],
+  ['bridge-session claude dir not denied', '    claudeDir, // F-T134-10\n', ''],
   ['no overlap refusal (F-T156-34)', 'if (i !== j && (within(path, d) || within(d, path))) throw', 'if (false) throw'],
   ['overlap by letter case (F-T156-44)', 'relative(outer.toLowerCase(), inner.toLowerCase())', 'relative(outer, inner)'],
   ['overlap: only "in", not "holds"', 'if (i !== j && (within(path, d) || within(d, path)))', 'if (i !== j && (within(path, d)))'],
@@ -169,10 +169,10 @@ const M = [
   ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.claude.json']"],
   ['~/.claude.json not a credential file (F-T157-11)', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.config/git']"],
   ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir]', 'CREDENTIAL_FILES.map((f) => join(h, f))), claudeDir]'],
-  ['lead Claude config folder not a credential file (F-T173-1)', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir]', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs]'],
+  ['bridge-session Claude config folder not a credential file (F-T173-1)', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs, claudeDir]', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs]'],
   // F-T156-16: the environment is an allow-list
   ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],
-  ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],
+  ['the host PATH', 'PATH: BRIDGE_PATH, ', 'PATH: env.PATH, '],
   ['no HOME', 'HOME: policy.home, ', ''],
   ['no TMPDIR', 'HOME: policy.home, TMPDIR: policy.tmp, ', 'HOME: policy.home, '],
   ['git reads the system config', "GIT_CONFIG_NOSYSTEM: '1', ", ''],
@@ -220,8 +220,8 @@ const M = [
   ['/tmp/sage-hooks, not its real form', "'/private/tmp/sage-hooks', join(sageRoot", "'/tmp/sage-hooks', join(sageRoot"],
   ['DARWIN_USER_TEMP_DIR by its text', "try { return realpathSync.native(execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }", "try { return execFileSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }"],
   ['getconf failure not refused (F-T156-40)', '    throw new Error(`getconf DARWIN_USER_TEMP_DIR gave no folder', '    return undefined; throw new Error(`getconf DARWIN_USER_TEMP_DIR gave no folder'],
-  // F-T156-29, F-T156-34: the folders that the lead sessions own
-  ['an own folder by any letter case', "  return canonicalPath(`the lead session's ${what}`, path);\n}", '  return path;\n}'],
+  // F-T156-29, F-T156-34: the folders that the bridge sessions own
+  ['an own folder by any letter case', "  return canonicalPath(`the bridge session's ${what}`, path);\n}", '  return path;\n}'],
   ['this session folder not checked', "own('session folder', join(sessions, session)); ", ''],
   ['this temp folder not checked', " own('temp folder', join(temps, session));", ''],
   ['a .DS_Store in the sessions folder checked (F-T156-41)', "own('session folder', join(sessions, session));", "for (const n of [session, '.DS_Store']) own('session folder', join(sessions, n));"],

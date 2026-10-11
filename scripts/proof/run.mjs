@@ -1,4 +1,4 @@
-// The proof of the lead-session sandbox (T157, T134 PR 2a), with no key: `npm run proof [-- --out <folder>]`.
+// The proof of the bridge-session sandbox (T157, T134 PR 2a), with no key: `npm run proof [-- --out <folder>]`.
 // It builds two scratch worlds (scripts/proof/world.mjs), runs every probe outside the sandbox in the control world as its control,
 // runs the rows that need no model against the real `claude` (sandbox status and the preflight; never `claude -p`), and reports the
 // rows that need a session as SKIPPED, with the owner's command for them (`npm run proof:live`, scripts/proof/live.mjs, which runs
@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from
 import { constants, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchOf, preflight, settingsOf } from '../../src/lead-policy.js';
+import { launchOf, preflight, settingsOf } from '../../src/session-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { keychainIdOf, keychainPlan, printable } from './keychain.mjs';
 import { resultsOf } from './probe.mjs';
@@ -36,7 +36,7 @@ export const ROWS = [
   ['F-T157-3', 'now', 'the platform that the proof holds for'],
   ['F-T134-15c', 'now', 'preflight and start refused with the sandbox unavailable'],
   ['F-T134-1', 'L1', 'no host (curl, node, git ls-remote to github.com); no GH_TOKEN or GITHUB_TOKEN'],
-  ['F-T134-2', 'L1', 'the bridge\'s state files: gate file, lead log, kill flag, spool, votes, config'],
+  ['F-T134-2', 'L1', 'the bridge\'s state files: gate file, sage-lead log, kill flag, spool, votes, config'],
   ['F-T134-3', 'L1', 'git control files and a nested repository refused; a normal commit works'],
   ['F-T134-4', 'L1', '.claude settings and .mcp.json, also by a relative path or a glob'],
   ['F-T134-6', 'L1', 'the state tool: read by any spelling, run any way, copied, changed; logbook and hook state'],

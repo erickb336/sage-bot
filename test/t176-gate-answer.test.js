@@ -91,7 +91,7 @@ test('R677: a stored leads-only recommendation never counts as the owner\'s term
   await b.bridge.loop();
   assert.equal(b.bridge.entry(key('G1')).ask.parts[0].final, undefined);
   assert.equal(b.lines.some((l) => l.includes('answered at the terminal')), false, b.lines.join('\n'));
-  // The leads can still recommend: Jon's press records the recommendation again.
+  // The sage-leads can still recommend: Jon's press records the recommendation again.
   await b.press(JON, `press:${key('G1')}:0:1`);
   assert.equal(b.answerOf('G1'), `${OTHER}B. No${RECOMMENDED}`);
 });

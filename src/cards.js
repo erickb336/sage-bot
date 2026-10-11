@@ -103,7 +103,7 @@ export const stamp = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>
 /** A person's name made safe; when it is missing or visibly empty, "member …6789" (the last 4 digits of a Discord id) or "member" for any other id, never the raw id (F-T27-29, F-T27-33). */
 const who = (id, names) => safe(names.get(id) ?? '') || (/^\d{4,}$/.test(id) ? `member …${id.slice(-4)}` : 'member');
 const label = (p, key) => p.options[key] ?? key;
-/** The lead who acted, "Jon (sage-lead)", or "a sage-lead" when the gate does not know (a gate saved before T39). */
+/** The sage-lead who acted, "Jon (sage-lead)", or "a sage-lead" when the gate does not know (a gate saved before T39). */
 const lead = (id, names) => id ? `${who(id, names)} (${LEAD})` : `a ${LEAD}`;
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** `items` joined with ', ' within `cap` characters, the rest as "and N more"; the first item always shows. */
@@ -222,7 +222,7 @@ function single(gate, ask, names, shut) {
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first ${LEAD} answer is the leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first ${LEAD} answer is the sage-leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
         `**Who can answer:** every ${LEAD}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
@@ -320,7 +320,7 @@ export function reasonModal(gate, ask, part, index) {
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 
-/** The private confirm before a lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters. */
+/** The private confirm before a sage-lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters. */
 export function confirmEnd(gate, { holders, names }) {
   const tallies = gate.parts.map((part) => tally(part, holders));
   const text = (cap) => [`**End ${gate.id} now?**`, ...tallies.map((counts, i) => {

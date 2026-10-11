@@ -305,7 +305,7 @@ test('F-T73-5: a press after the recommendation, also Erick\'s own, gets a note 
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), 'other: A. Yes (sage-leads recommend; the owner decides)');
 
-  // Erick holds sage-lead too: his press in Discord is a recommendation like any lead's, never his final answer (G10).
+  // Erick holds sage-lead too: his press in Discord is a recommendation like any sage-lead's, never his final answer (G10).
   const own = await asked();
   own.now += MINUTE;
   await own.press(OWNER, 'press:project/G1:0:1');
@@ -324,7 +324,7 @@ test('F-T73-6: with the owner missing from the member list, every leads-only tex
     `<@&${LEAD}> project T1 asks the sage-leads for a recommendation to Erick. The first sage-lead answer is the recommendation; Erick decides at the terminal.`,
     'Recommend for Erick: Question project/G1 · T1 Ship the export page',
   ]]);
-  assert.match(text(b), /\*\*Rule:\*\* the first sage-lead answer is the leads' recommendation to Erick · Erick decides at the terminal ·/);
+  assert.match(text(b), /\*\*Rule:\*\* the first sage-lead answer is the sage-leads' recommendation to Erick · Erick decides at the terminal ·/);
   b.now += MINUTE;
   assert.deepEqual(await b.press(MAYA, 'press:project/G1:0:0'), [NOTE]);
   await b.press(JON, 'press:project/G1:0:1');

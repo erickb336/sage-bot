@@ -40,7 +40,7 @@ moment('01-single-open', 'A single question', 'The first answer of a sage-appren
 await press(MAYA, 'press:G5:0:0', clock(14, 22));
 const late = await press(JON, 'press:G5:0:1', clock(14, 22, 1));
 moment('02-already-answered', 'Maya answered first; Jon presses one second later', 'Only Jon sees the private note.', 'G5', { note: late });
-// 3 to 6: the batch vote of T7, with reasons, the time limit, a tie and the lead's tie-break.
+// 3 to 6: the batch vote of T7, with reasons, the time limit, a tie and the sage-lead's tie-break.
 open('B7', clock(14, 31));
 send('B7', { type: 'press', by: ERICK, part: 0, option: 'A', at: clock(14, 33), via: 'terminal' });
 await press(JON, 'press:B7:0:0', clock(14, 35)); // Jon dismisses the reason modal: the vote still counts
@@ -58,16 +58,16 @@ await press(MAYA, 'press:B7:0:0', clock(14, 45)); await press(MAYA, 'press:B7:2:
 send('B7', { type: 'tick', at: clock(15, 1) }); ctx.now = clock(15, 1);
 moment('05-tie-at-limit', 'At 30 minutes the vote ends; part 2 is tied 1-1-1', 'Parts 1 and 3 are provisional; the tie-break buttons show the tied options only.', 'B7');
 await press(JON, 'tiebreak:B7:1:0', clock(17, 5));
-moment('06-lead-tie-break', 'Jon, a lead, breaks the tie: the batch is decided', 'Every part is decided; T7 goes on.', 'B7');
-// 7 to 10: the batch vote of T9: a lead ends it early; a non-lead presses End vote now; then a withdraw.
+moment('06-lead-tie-break', 'Jon, a sage-lead, breaks the tie: the batch is decided', 'Every part is decided; T7 goes on.', 'B7');
+// 7 to 10: the batch vote of T9: a sage-lead ends it early; a non-sage-lead presses End vote now; then a withdraw.
 open('B9', clock(15, 10));
 for (const [who, option] of [[ERICK, 0], [JON, 0], [MAYA, 1]]) await press(who, `press:B9:0:${option}`, clock(15, 15));
 const confirm = await press(JON, 'end:B9', clock(15, 28));
-moment('07-end-early-confirm', 'Jon, a lead, presses End vote now', 'The private confirm says what each part gets with the votes so far.', 'B9', { confirm });
+moment('07-end-early-confirm', 'Jon, a sage-lead, presses End vote now', 'The private confirm says what each part gets with the votes so far.', 'B9', { confirm });
 const notLead = await press(MAYA, 'end:B9', clock(15, 28, 10));
-moment('08-not-a-lead', 'Maya is not a lead and presses End vote now', 'Discord shows every button to everyone; only a lead can end the vote.', 'B9', { note: notLead });
+moment('08-not-a-lead', 'Maya is not a sage-lead and presses End vote now', 'Discord shows every button to everyone; only a sage-lead can end the vote.', 'B9', { note: notLead });
 const ended = await press(JON, 'end!:B9', clock(15, 28, 20), undefined, true); // from the private confirm
-moment('09-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a lead.', 'B9', { note: ended });
+moment('09-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a sage-lead.', 'B9', { note: ended });
 send('B9', { type: 'withdraw', by: ERICK, at: clock(15, 30) }); ctx.now = clock(15, 30);
 moment('10-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
 // 11: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9), and display names

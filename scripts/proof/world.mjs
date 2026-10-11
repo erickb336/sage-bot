@@ -1,4 +1,4 @@
-// The scratch world of the proof (T157): one lead session's home folder, state files, sage plugin and session folder, a second
+// The scratch world of the proof (T157): one bridge session's home folder, state files, sage plugin and session folder, a second
 // session's folders and transcript (T165), all below one scratch folder, and its temp root, a short new folder in /private/tmp (the policy's 44-byte limit, F-T156-35). SAMPLE DATA ONLY: every credential file and variable holds an obviously fake value that ends in the world's tag, so a
 // probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root (`root` is
 // a new folder: the run refuses one that is not empty, F-T157-23), and every temp root is recorded, so that the run removes it at its end
@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { leadPolicy } from '../../src/lead-policy.js';
+import { sessionPolicy } from '../../src/session-policy.js';
 import { claudeDirOf, sagePlugin, sageToolIn } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, keychainPlan } from './keychain.mjs';
 
@@ -30,9 +30,9 @@ export function removeTempRoots() {
     try { rmSync(d, { recursive: true, force: true }); tempRoots.delete(d); } catch (e) { console.error(`proof: could not remove the temp root ${d}: ${String(e.message).split('\n')[0]}`); }
   }
 }
-/** The lead policy of a world: the one resolver of its paths (src/lead-policy.js), with the world's home and temp folders. The
+/** The session policy of a world: the one resolver of its paths (src/session-policy.js), with the world's home and temp folders. The
  * owner's home folder is the real one (ownerHome): the proof checks that it stays denied with the world's HOME (F-T157-7). */
-export const policyOf = (w) => leadPolicy({ statePath: w.statePath }, SESSION, { env: { PATH: process.env.PATH }, home: w.home, userTemp: w.userTemp, tempRoot: w.tempRoot });
+export const policyOf = (w) => sessionPolicy({ statePath: w.statePath }, SESSION, { env: { PATH: process.env.PATH }, home: w.home, userTemp: w.userTemp, tempRoot: w.tempRoot });
 /** The label of the run's no-op launchd job (F-T165-24): one a run, from the tag, so that the live run can remove it by name (G73). */
 export const jobLabelOf = (tag) => `sage-bot-proof-${keychainIdOf(tag)}`;
 /** The variables that a session must never show to a command: GitHub (F-T134-1) and the model (F-T157-4). */
@@ -75,7 +75,7 @@ function fill(root, tag, tempRoot) {
     },
   };
   const file = (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); };
-  file(w.tool, "console.log('lead-sessions 1');\n"); // the dummy sage plugin (F-T134-6): its state tool prints the capability line
+  file(w.tool, "console.log('bridge-sessions 1');\n"); // the dummy sage plugin (F-T134-6): its state tool prints the capability line
   file(join(cache, 'sage', VERSION, '.claude-plugin', 'plugin.json'), '{"name":"sage"}\n'); // a plugin that --plugin-dir loads (T165)
   // The rest from the policy: the bridge's config file, the session's folders, and sage's hook-state folders (the denied paths in the
   // per-user temp folder, in /private/tmp and in sage's root; the one in /private/tmp is the host's own, and only a probe's control reads it).
@@ -85,7 +85,7 @@ function fill(root, tag, tempRoot) {
     sessionFolder: policy.folder, sessionTmp: policy.tmp, hooksState: policy.hooksState,
     launchd: { plist: join(policy.folder, 'sage-bot-proof.plist'), label: jobLabelOf(tag) }, // F-T165-24: a no-op job (/usr/bin/true, not run at load), one label a run
     hookDirs: policy.denied.filter((d) => [w.userTemp, '/private/tmp', sageRoot].includes(dirname(d))),
-    // The other session's folder and temp folder (F-T156-31, F-T156-34), and a transcript of its own in the lead sessions' Claude Code
+    // The other session's folder and temp folder (F-T156-31, F-T156-34), and a transcript of its own in the bridge sessions' Claude Code
     // config folder (F-T173-1): a session reads and writes none of them.
     other: { session: OTHER_SESSION, folder: join(policy.sessions, OTHER_SESSION), tmp: join(policy.tempRoot, OTHER_SESSION) },
     claudeDir: policy.claudeDir,
@@ -96,7 +96,7 @@ function fill(root, tag, tempRoot) {
   for (const d of [sessionFolder, w.sessionTmp, w.other.folder, w.other.tmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
   file(join(w.other.folder, 'README.md'), 'sample folder of the other session\n');
   file(w.transcript, `${JSON.stringify({ type: 'user', text: sample('transcript', tag) })}\n`);
-  // The bridge's files (F-T134-2): sample config, gate file, lead log, kill flag, spool and votes.
+  // The bridge's files (F-T134-2): sample config, gate file, sage-lead log, kill flag, spool and votes.
   file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
   file(statePath, `${JSON.stringify({ gates: [], sample: sample('gates', tag) })}\n`); // a sample value: a Read that works shows it (F-T165-22)
   file(`${statePath}.leads.jsonl`, '{"at":0,"event":"sample"}\n');

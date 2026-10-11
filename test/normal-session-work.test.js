@@ -1,4 +1,4 @@
-// T133 (G64 A): the normal work of a lead session, test/normal-lead-work.json, through the real guard hook.
+// T133 (G64 A): the normal work of a bridge session, test/normal-session-work.json, through the real guard hook.
 // Each entry goes to scripts/guard.mjs as a child process with SAGE_ORIGIN=lead, as Claude Code gives it. An "allow" entry
 // must be allowed. A "hint" entry must be refused with a hint ("sage can do this instead: ...") whose text names the form of
 // the entry it leads to, and that entry must be an "allow" entry (or T158: the broker tools, which T158 adds).
@@ -12,7 +12,7 @@ import { tempFolder } from './temp-folder.js';
 import { spawn } from './bridge-setup.js';
 
 const HOOK = fileURLToPath(new URL('../scripts/guard.mjs', import.meta.url));
-const { entries } = JSON.parse(readFileSync(new URL('./normal-lead-work.json', import.meta.url), 'utf8'));
+const { entries } = JSON.parse(readFileSync(new URL('./normal-session-work.json', import.meta.url), 'utf8'));
 const byId = new Map(entries.map((e) => [e.id, e]));
 const ENV = { PATH: process.env.PATH, SAGE_ORIGIN: 'lead', SAGE_TOOL: '/sample/plugin/state.mjs' };
 const HINT = 'sage can do this instead: ';
@@ -52,7 +52,7 @@ async function answers() {
 // A form in a hint, as a pattern for the call of its target: a <placeholder> is one word or more.
 const form = (names) => new RegExp(names.split(/<[^>]+>/).map((t) => t.replace(/[.*+?^$()[\]{}|\\]/g, '\\$&')).join('\\S+'));
 
-test(`G64 A: the normal lead work has 180 to 220 entries (${entries.length}), each id once, each a hint to an allowed entry or to T158`, () => {
+test(`G64 A: the normal bridge-session work has 180 to 220 entries (${entries.length}), each id once, each a hint to an allowed entry or to T158`, () => {
   assert.ok(entries.length >= 180 && entries.length <= 220, String(entries.length));
   assert.equal(byId.size, entries.length);
   const bad = entries.filter((e) => e.expect === 'hint').filter((e) => {

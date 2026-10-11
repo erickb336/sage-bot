@@ -1,11 +1,11 @@
-// F-T156-23: the mutation run of the lead policy counts a mutation as killed only when the mutated file parses and a test fails; a test
+// F-T156-23: the mutation run of the session policy counts a mutation as killed only when the mutated file parses and a test fails; a test
 // file that does not load is no failing test. Each case runs the real test runner on sample test files in a new temp folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { parses, verdictOf } from '../scripts/lead-policy-mutations.mjs';
+import { parses, verdictOf } from '../scripts/session-policy-mutations.mjs';
 import { spawnSync } from './bridge-setup.js';
 
 const FILES = ['a.test.js', 'b.test.js'];

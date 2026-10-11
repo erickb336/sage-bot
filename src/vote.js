@@ -44,7 +44,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPT
  * @typedef {{ option: string, at: number, via: 'discord' | 'terminal', reason?: string }} Ballot
  * @typedef {{ status: 'open' } | { status: 'decided', option: string, how: 'votes' }
  *   | { status: 'decided', option: string, how: 'lead-tiebreak', by?: string, at?: number }} PartOutcome
- *   by and at: the lead who broke the tie and when (missing in a gate saved before T39)
+ *   by and at: the sage-lead who broke the tie and when (missing in a gate saved before T39)
  * @typedef {{ options: string[], ballots: [string, Ballot][], outcome: PartOutcome, tied?: string[] }} Part  read ballots with ballotsOf
  * @typedef {{ id: string, kind: 'single', askedBy: string, openedAt: number, lastAt: number,
  *   phase: 'open' | 'closed', options: string[],
@@ -53,7 +53,7 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPT
  * @typedef {{ id: string, kind: 'batch', askedBy: string, openedAt: number, lastAt: number,
  *   phase: 'voting' | 'tied' | 'closed', endsAt: number, votingEndedAt: number | null,
  *   endedBy?: string | null, parts: Part[],
- *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate  endedBy: after the vote ended, the lead who
+ *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate  endedBy: after the vote ended, the sage-lead who
  *   ended it early, or null at the time limit (missing in a gate saved before T39)
  * @typedef {SingleGate | BatchGate} Gate
  * @typedef {{ type: 'press', by: string, option: string, part?: number, at: number, via: 'discord' | 'terminal', reason?: string }
@@ -150,7 +150,7 @@ function apply(gate, event, { holders, leads }) {
     return event.by === gate.askedBy ? withdraw(gate) : ignore(gate, event, 'not-asker');
   }
   if (event.type === 'press') return gate.kind === 'single' ? answer(gate, event) : vote(gate, event);
-  // A lead action: end or tiebreak. Only on a batch, only from Discord, only from a lead who is also a holder.
+  // A sage-lead action: end or tiebreak. Only on a batch, only from Discord, only from a sage-lead who is also a holder.
   if (gate.kind !== 'batch') return ignore(gate, event, 'wrong-kind');
   if (event.via !== 'discord') return ignore(gate, event, 'lead-needs-discord');
   if (!leads.has(event.by)) return ignore(gate, event, 'not-lead');
@@ -195,7 +195,7 @@ function endVoting(gate, by, holders, at) {
   return finish({ ...gate, phase: 'tied', votingEndedAt: at, endedBy: by, parts }, effects);
 }
 
-/** A lead picks one option of an open part after the vote ended. */
+/** A sage-lead picks one option of an open part after the vote ended. */
 function tiebreak(gate, event) {
   const part = Number.isInteger(event.part) ? gate.parts[event.part] : undefined;
   if (!part) return ignore(gate, event, 'unknown-part');
@@ -273,7 +273,7 @@ const BATCH_KEYS = [...SINGLE_KEYS.slice(0, -1), 'endsAt', 'votingEndedAt', 'par
 
 /** What is wrong with a gate, or '' when it is a gate that openGate and step could make. */
 function gateProblem(g) {
-  // A batch saved before T39 has no endedBy: it still loads, with the lead unknown.
+  // A batch saved before T39 has no endedBy: it still loads, with the sage-lead unknown.
   if (!keysAre(g, ...(g?.kind === 'batch' ? [BATCH_KEYS, ['endedBy']] : [SINGLE_KEYS])) || !KINDS.has(g.kind)) return 'unknown fields or kind';
   if (!isId(g.id) || !isId(g.askedBy)) return 'no id or askedBy';
   const inTime = (t) => Number.isSafeInteger(t) && t >= g.openedAt && t <= g.lastAt;
@@ -290,7 +290,7 @@ function gateProblem(g) {
   if (g.endsAt !== g.openedAt + BATCH_LIMIT) return 'endsAt is not 30 minutes after openedAt';
   const ended = g.votingEndedAt;
   if (ended !== null && !(inTime(ended) && ended <= g.endsAt)) return 'votingEndedAt is not a time';
-  // A lead ends the vote only before the time limit; at the limit nobody ends it.
+  // A sage-lead ends the vote only before the time limit; at the limit nobody ends it.
   const by = g.endedBy;
   if (by !== undefined && !(ended !== null && (ended < g.endsAt ? isId(by) : by === null))) return 'endedBy does not match votingEndedAt';
   if (!Array.isArray(g.parts) || g.parts.length === 0) return 'no parts';
@@ -315,7 +315,7 @@ function partProblem(part, inTime, breakTime) {
   const among = (option) => part.options.includes(option);
   if (part.tied !== undefined && !(isOptions(part.tied) && part.tied.every(among))) return 'a part has tied options that it does not have';
   const o = part.outcome;
-  // A tie-break saved before T39 has no by and at: it still loads, with the lead unknown.
+  // A tie-break saved before T39 has no by and at: it still loads, with the sage-lead unknown.
   const plain = keysAre(o, ['status', 'option', 'how']);
   const named = keysAre(o, ['status', 'option', 'how', 'by', 'at']) && isId(o.by) && breakTime(o.at);
   const decided = (plain || named) && o.status === 'decided' && among(o.option)
@@ -337,7 +337,7 @@ function partProblem(part, inTime, breakTime) {
 /**
  * The next reminder after `now`, or null (also for a `now` that is not a safe integer):
  * a single gate with no answer reminds the holders every 2 hours from opening;
- * a batch with tied parts after its vote ended reminds the leads every 2 hours from that end.
+ * a batch with tied parts after its vote ended reminds the sage-leads every 2 hours from that end.
  * Throws a TypeError for a missing or wrong gate, as step does.
  * @returns {{ at: number, to: 'holders' | 'leads' } | null}
  */

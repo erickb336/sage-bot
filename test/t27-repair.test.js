@@ -103,7 +103,7 @@ test('F-T27-13: End vote now on an ended, closed or withdrawn vote, or past the 
   assert.deepEqual(late.replies, [{ kind: 'reply', content: 'The vote on B7 ended at <t:1791126060:t>. Your press did not count.', ...PRIVATE }]);
   assert.equal(late.gate.phase, 'tied');
   assert.deepEqual(late.effects.map((e) => e.type), ['vote-ended', 'decided', 'ignored']);
-  // Ended (tied, waits for a lead): the same note.
+  // Ended (tied, waits for a sage-lead): the same note.
   assert.equal((await b.press(ERICK, 'end:B7')).reply.content, 'The vote on B7 ended at <t:1791126060:t>. Your press did not count.');
   // Withdrawn.
   b.send('B9', { type: 'withdraw', by: ERICK, at: b.now });

@@ -1,11 +1,11 @@
-// The start command of a proof session (T165): the preflight, then `claude -p` with the policy's launch (src/lead-policy.js) and a
+// The start command of a proof session (T165): the preflight, then `claude -p` with the policy's launch (src/session-policy.js) and a
 // prompt, in a process group of its own that a timeout kills whole. It refuses to start when the preflight is not ready (F-T134-15c).
 // It holds the model credential only in the child's environment, and it never prints or writes that environment.
 import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchOf, preflight } from '../../src/lead-policy.js';
+import { launchOf, preflight } from '../../src/session-policy.js';
 
 const DUMMY = fileURLToPath(new URL('dummy-claude.mjs', import.meta.url));
 /** The model of a proof session (G68 a), and its budget in USD (sage: 1 USD a session). */
@@ -35,7 +35,7 @@ export function dummyClaude(dir, mode) {
  * Starts one session: the preflight, then claude with the prompt. Resolves to `{ refused }` when the preflight is not ready (nothing
  * started), else to the session's stream (`--output-format stream-json --verbose`, one JSON object a line in `stdout`), `stderr`, exit
  * `status`, and `timedOut`. At `timeout` ms the whole process group gets SIGKILL.
- * @param {ReturnType<typeof import('../../src/lead-policy.js').leadPolicy>} policy @param {NodeJS.ProcessEnv} env  the host's environment
+ * @param {ReturnType<typeof import('../../src/session-policy.js').sessionPolicy>} policy @param {NodeJS.ProcessEnv} env  the host's environment
  * @param {Record<string, string>} model  the model credential for launchOf: `{ ANTHROPIC_API_KEY: key }`, or `{}` for a dummy claude
  * @param {string} prompt @param {{ timeout?: number }} [o]
  * @returns {Promise<{ refused: { state: string, why: string } } | { stdout: string, stderr: string, status: number | null, timedOut: boolean }>}

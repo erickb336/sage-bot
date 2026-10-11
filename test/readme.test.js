@@ -26,8 +26,8 @@ const LANGUAGES = new Set(['sh', 'json', 'js', 'text']);
 const sh = (command, home, env = {}) => spawnSync('/bin/sh', ['-c', command], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp'), ...env } });
 /** The scratch home's Claude Code config folder, with a copy of the tests' state tool in the sage plugin's cache, as the owner's install has it. */
 const claudeConfig = (home) => ({ CLAUDE_CONFIG_DIR: join(home, '.claude'), SAGE_TOOL: join(home, '.claude', 'plugins', 'cache', 'sage', 'sage', 'test', 'skills', 'sage', 'sage.mjs') });
-// The lead policy refuses a state tool outside the sage plugin's cache (F-T156-14), so its commands run with that copy.
-const envOf = (command, home) => (/^node scripts\/lead-policy\.mjs\b/.test(command) ? claudeConfig(home) : {});
+// The session policy refuses a state tool outside the sage plugin's cache (F-T156-14), so its commands run with that copy.
+const envOf = (command, home) => (/^node scripts\/session-policy\.mjs\b/.test(command) ? claudeConfig(home) : {});
 
 /** The language of each code block of a document (the word after its opening fence): { line, language }. */
 function fences(text) {

@@ -14,7 +14,7 @@ import { settled } from '../src/cards.js';
 import { change, channelsPathOf, FIRST, homeOf, loadChannels, migrate, NEEDED, saveChannels, staleOf } from '../src/channels.js';
 import { forTerminal } from '../src/clean.js';
 import { load, lock } from '../src/state.js';
-import { defaultConfigPath } from '../src/lead-policy.js';
+import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/channels.mjs [--config <config.json>] list | register <channel id> <project> [--home] | unregister <channel id>';
 // The bridge of the README runs under launchd with KeepAlive: a killed bridge starts again and takes the lock again (F-T130-14).

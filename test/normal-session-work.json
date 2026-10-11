@@ -1,5 +1,5 @@
 {
-  "about": "The normal work of a lead session (G64 A): the calls that QA and the reviews of T133 used as normal work. Each entry is allowed by the guard hook, or refused with a hint that names a form on this list (names: the text of that form in the hint; leads_to: its entry, which must be allowed). leads_to T158 is the broker tools, which T158 adds. A refused call that is not on this list is a T144 item, not a review finding. Sample paths only.",
+  "about": "The normal work of a bridge session (G64 A): the calls that QA and the reviews of T133 used as normal work. Each entry is allowed by the guard hook, or refused with a hint that names a form on this list (names: the text of that form in the hint; leads_to: its entry, which must be allowed). leads_to T158 is the broker tools, which T158 adds. A refused call that is not on this list is a T144 item, not a review finding. Sample paths only.",
   "entries": [
     {"id":"git-status","tool_name":"Bash","tool_input":{"command":"git status"},"expect":"allow"},
     {"id":"git-status-short","tool_name":"Bash","tool_input":{"command":"git status --short"},"expect":"allow"},
@@ -32,7 +32,7 @@
     {"id":"git-add-folder","tool_name":"Bash","tool_input":{"command":"git add docs"},"expect":"allow"},
     {"id":"git-add-all","tool_name":"Bash","tool_input":{"command":"git add -A"},"expect":"allow"},
     {"id":"git-commit-file","tool_name":"Bash","tool_input":{"command":"git commit -F /sample/scratch/msg.txt"},"expect":"allow"},
-    {"id":"git-commit-m","tool_name":"Bash","tool_input":{"command":"git commit -m \"guard: add the normal lead work corpus\""},"expect":"allow"},
+    {"id":"git-commit-m","tool_name":"Bash","tool_input":{"command":"git commit -m \"guard: add the normal bridge-session work corpus\""},"expect":"allow"},
     {"id":"git-commit-am","tool_name":"Bash","tool_input":{"command":"git commit -am \"docs: fix a typo\""},"expect":"allow"},
     {"id":"git-switch-c","tool_name":"Bash","tool_input":{"command":"git switch -c t200-guard"},"expect":"allow"},
     {"id":"git-switch","tool_name":"Bash","tool_input":{"command":"git switch main"},"expect":"allow"},

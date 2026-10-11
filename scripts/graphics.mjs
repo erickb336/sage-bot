@@ -73,7 +73,7 @@ function node(t, id, kind, x, y, w, sub) {
 
 const ALT = {
   hero: "sage-bot: mention @sage-bot in Discord, and it answers from sage's logbook on the owner's Mac. A sage-apprentice reads and asks; a sage-lead also breaks ties and stops.",
-  how: "How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the lead log.",
+  how: "How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the sage-lead log.",
   threads: 'Sample data: each mention of @sage-bot in a registered channel opens its own thread, and a mention inside that thread continues it.',
   roles: 'The two roles: a sage-apprentice reads and asks; a sage-lead can also break ties, end votes early, unregister a channel and turn off the link to sage.',
   safety: 'The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions.',
@@ -133,7 +133,7 @@ function how(t, id) {
     // 3. A sage-lead's talk.
     heading(t, 40, 826, '3 · SAGE-LEAD TALK'),
     p(0, a3, ['@sage-bot', 'talk'], 'hot'), right(0, 1, m3),
-    p(1, a3, ['lead log,', '#sage-audit']), right(1, 2, m3, t.line, 'muted', { dash: '7 7' }),
+    p(1, a3, ['sage-lead log,', '#sage-audit']), right(1, 2, m3, t.line, 'muted', { dash: '7 7' }),
     p(2, a3, ['bridge session', 'T159, not built'], 'wait'),
     text(W / 2, 1036, ['No Discord text reaches sage', 'as an instruction.'], { size: S, weight: 800, fill: t.loop, anchor: 'middle', lh: 1.2 }),
     label(t, W / 2, 1140, NOTICE),
@@ -191,7 +191,7 @@ function threads(t, id) {
     plaque(t, 590, 150, 440, 'Thread: board', 'hot'),
     msg(66, 290, 'Jon · sage-lead', ['@sage-bot talk: is', 'the release ready?']),
     flow(id, 'M470 316 L 582 316', t.line, 'muted'),
-    plaque(t, 590, 280, 440, 'Lead thread', 'wait'),
+    plaque(t, 590, 280, 440, 'Sage-lead thread', 'wait'),
     label(t, 70, 440, 'Each mention opens its own thread.', { anchor: 'start', fill: t.ink, weight: 700 }),
     // The answer thread.
     rect(40, 500, 1020, 510, { rx: 10, fill: t.tile, stroke: t.edge, sw: 2 }),
@@ -199,10 +199,10 @@ function threads(t, id) {
     msg(66, 630, 'sage-bot', ['Building 2 · framed 5 · merged 9', 'Open questions: G7 (A or B)'], true),
     msg(66, 790, 'Maya · apprentice', '@sage-bot T7'),
     msg(66, 900, 'sage-bot', ['T7 · Share the board · small', 'building · no pull request yet'], true),
-    // The lead thread.
+    // The sage-lead thread.
     rect(40, 1040, 1020, 260, { rx: 10, fill: t.tile, stroke: t.line, sw: 1.5, dash: '7 6' }),
-    text(70, 1098, 'Lead thread', { size: 40, weight: 800, fill: t.ink }),
-    msg(66, 1170, 'sage-bot', ['Recorded in the lead log.', 'Sessions with sage are not on yet.'], true),
+    text(70, 1098, 'Sage-lead thread', { size: 40, weight: 800, fill: t.ink }),
+    msg(66, 1170, 'sage-bot', ['Recorded in the sage-lead log.', 'Sessions with sage are not on yet.'], true),
     label(t, W / 2, 1360, 'Sample data. Mention it again in its thread.'),
     label(t, W / 2, 1420, NOTICE),
   ].join('\n');
@@ -221,7 +221,7 @@ function safety(t, id) {
     bar(at(80, 0), 'Roles and registered channels', 'No role: no reply. The owner registers channels.', true),
     bar(at(80, 1), 'An hourly limit', '10 asks for each person in a rolling hour.', true),
     bar(at(80, 2), 'No AI reads Discord text', 'Code answers. A vote gives sage only the option.', true),
-    bar(at(80, 3), 'The lead log', 'Hash-chained, with a copy in #sage-audit.', true),
+    bar(at(80, 3), 'The sage-lead log', 'Hash-chained, with a copy in #sage-audit.', true),
     bar(at(80, 4), 'The kill switch', '/sage stop. Only the owner turns it on again.', true),
     heading(t, 40, 712, 'BRIDGE SESSIONS · NOT ON YET (T159)'),
     bar(at(732, 0), 'The sandbox: the guarantee · built', 'No GitHub host. Logbooks, sage, secrets denied.', false),

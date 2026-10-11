@@ -98,8 +98,8 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
 /**
  * The start before Discord: refuses an old config, checks the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
- * or a bad registry, stops here, before the Keychain. Then it opens the lead log and reads the kill switch (createAsk, T131).
- * `fetchChannel(id)` gives a Discord channel after the login: the #sage-audit copy of each lead log line goes through it. The returned
+ * or a bad registry, stops here, before the Keychain. Then it opens the sage-lead log and reads the kill switch (createAsk, T131).
+ * `fetchChannel(id)` gives a Discord channel after the login: the #sage-audit copy of each sage-lead log line goes through it. The returned
  * config has the registry's home channel as its channelId: the votes and cards go there.
  */
 export function prepare(file, log, fetchChannel) {
@@ -109,10 +109,10 @@ export function prepare(file, log, fetchChannel) {
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
-  // #sage-audit (T131): a copy of each lead log line. Without auditChannelId, the lead log only, and the start says so.
+  // #sage-audit (T131): a copy of each sage-lead log line. Without auditChannelId, the sage-lead log only, and the start says so.
   let auditChannel = null;
   const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
-  if (!audit) log('no auditChannelId in the config: lead messages go to the lead log only, with no copy in #sage-audit');
+  if (!audit) log('no auditChannelId in the config: sage-lead messages go to the sage-lead log only, with no copy in #sage-audit');
   return { config, channels, projects, own, ask: createAsk({ config, channels, projects, log, audit }) };
 }
 
@@ -135,7 +135,7 @@ export async function enter(client, { config, channels, ask, log }) {
  */
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
-  const { config, channels, projects, own, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any lead log line
+  const { config, channels, projects, own, ask } = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any sage-lead log line
   // Before the token is read: a sage tool that does not take the bridge's `gate answer` form refuses the start with one line (T176).
   for (const sagePath of new Set(projects.map((p) => p.sagePath))) await probeTool(sagePath);
   const token = await readToken();

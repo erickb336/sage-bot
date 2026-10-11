@@ -214,7 +214,7 @@ test('merges never go to a vote: a gate about a merge is not posted', async () =
   assert.equal(b.discord.posts.length, 0);
 });
 
-test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the leads, the tie-break names the lead, and the card follows each change', async () => {
+test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the sage-leads, the tie-break names the sage-lead, and the card follows each change', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T7', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T7', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
@@ -242,7 +242,7 @@ test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the leads, the 
   assert.equal(b.discord.messages.get(id).length, 1 + 5);
 });
 
-test('T39 with B3: after an early end and a lead tie-break, the bridge redraws the card with the lead name and time, and the gate file round trip keeps them', async () => {
+test('T39 with B3: after an early end and a sage-lead tie-break, the bridge redraws the card with the sage-lead name and time, and the gate file round trip keeps them', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T7', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T7', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
@@ -269,7 +269,7 @@ test('T39 with B3: after an early end and a lead tie-break, the bridge redraws t
   assert.equal(text(cardOf(again.gate, again.ask, peopleOf(MEMBERS, CONFIG))), text(card(b, id)));
 });
 
-test('reminders: an open single gate pings the holders every 2 hours from its opening, a tied batch pings the leads 2 hours after its vote ended', async () => {
+test('reminders: an open single gate pings the holders every 2 hours from its opening, a tied batch pings the sage-leads 2 hours after its vote ended', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T2', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');

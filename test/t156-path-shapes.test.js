@@ -1,13 +1,13 @@
-// T156, standing order 16: the path-shape corpus (test/path-shapes.json) applied to every path key of the lead policy. One rule holds
+// T156, standing order 16: the path-shape corpus (test/path-shapes.json) applied to every path key of the session policy. One rule holds
 // every path (G48 A): it must be canonical (canonicalPath in src/sage.js). Each non-canonical shape is refused with one line; a canonical
 // path is accepted, and a probe file written through it lands in the policy's denied (or own) path. The folder and pair rows check the
-// folders that the lead sessions own. SAMPLE DATA ONLY: every path is in a new scratch folder or does not exist, and no session starts.
+// folders that the bridge sessions own. SAMPLE DATA ONLY: every path is in a new scratch folder or does not exist, and no session starts.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { CLAUDE_TMP_MAX, leadPolicy } from '../src/lead-policy.js';
+import { CLAUDE_TMP_MAX, sessionPolicy } from '../src/session-policy.js';
 import { canonicalPath } from '../src/sage.js';
 
 const CORPUS = JSON.parse(readFileSync(new URL('path-shapes.json', import.meta.url), 'utf8'));
@@ -27,7 +27,7 @@ function inputs(root, set = {}) {
   return { config, host };
 }
 
-test('the corpus covers every key that leadPolicy reads: each is a path key with its rows, or named as no path', () => {
+test('the corpus covers every key that sessionPolicy reads: each is a path key with its rows, or named as no path', () => {
   const read = { config: new Set(), env: new Set(), host: new Set() };
   const spy = (where, target) => new Proxy(target, {
     get: (t, k) => { if (typeof k === 'string') read[where].add(k); return t[k]; },
@@ -37,12 +37,12 @@ test('the corpus covers every key that leadPolicy reads: each is a path key with
   try {
     const all = { statePath: join(root, 's', 'gates.json'), auditPath: join(root, 'a'), killPath: join(root, 'k'), sessionsPath: join(root, 'sp'), votesPath: join(root, 'v'), leadSessionsPath: join(root, 'l') };
     const env = spy('env', { CLAUDE_CONFIG_DIR: join(root, 'cc'), SAGE_HOME: join(root, 'sh'), PATH: '/bin' });
-    leadPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), owner: join(root, 'o'), userTemp: join(root, 't'), tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
+    sessionPolicy(spy('config', all), 's1', spy('host', { env, home: join(root, 'h'), owner: join(root, 'o'), userTemp: join(root, 't'), tempRoot: TEMPS, claude: 'claude', uid: process.getuid() }));
   } finally { rmSync(root, { recursive: true, force: true }); }
   for (const where of ['config', 'env', 'host']) {
     const keys = CORPUS.keys.filter((k) => k.in === where).map((k) => k.key);
-    assert.deepEqual([...read[where]].filter((k) => !keys.includes(k) && !(k in (CORPUS.notPaths[where] ?? {}))), [], `${where}: a key that leadPolicy reads has no row in test/path-shapes.json`);
-    assert.deepEqual(keys.filter((k) => !read[where].has(k)), [], `${where}: a row of test/path-shapes.json names a key that leadPolicy does not read`);
+    assert.deepEqual([...read[where]].filter((k) => !keys.includes(k) && !(k in (CORPUS.notPaths[where] ?? {}))), [], `${where}: a key that sessionPolicy reads has no row in test/path-shapes.json`);
+    assert.deepEqual(keys.filter((k) => !read[where].has(k)), [], `${where}: a row of test/path-shapes.json names a key that sessionPolicy does not read`);
   }
 });
 
@@ -142,18 +142,18 @@ for (const { key, in: where, name, kind } of CORPUS.keys) {
         const extra = key === 'SAGE_TOOL' ? { CLAUDE_CONFIG_DIR: join(base, 'cc2') } : {};
         const { config, host } = inputs(root, { ...extra, [key]: path });
         if (expect === 'refused') {
-          assert.throws(() => leadPolicy(config, 's1', host), (e) => {
+          assert.throws(() => sessionPolicy(config, 's1', host), (e) => {
             assert.doesNotMatch(e.message, /\n/);
             assert.ok(e.message.startsWith(`${name} ${CORPUS.says} `), e.message);
             return true;
           });
           return;
         }
-        const policy = leadPolicy(config, 's1', host);
+        const policy = sessionPolicy(config, 's1', host);
         if (expect === 'unset') {
           const without = inputs(root, extra);
           delete (where === 'env' ? without.host.env : without.config)[key];
-          assert.deepEqual(policy, leadPolicy(without.config, 's1', without.host));
+          assert.deepEqual(policy, sessionPolicy(without.config, 's1', without.host));
           return;
         }
         if (key === 'SAGE_TOOL') { // the file that the preflight runs, and the plugin folder
@@ -212,14 +212,14 @@ for (const row of CORPUS.folders) {
       if (row.expect === 'ok') {
         const perUser = join(places.temps, 's1', `claude-${host.uid}`);
         if (Buffer.byteLength(perUser) > CLAUDE_TMP_MAX) { // a scratch temp root is long: every folder rule passed, the length rule refuses last
-          assert.throws(() => leadPolicy(config, 's1', host), { message: new RegExp(`^the lead session's per-user temp folder ${perUser} is longer than ${CLAUDE_TMP_MAX} bytes`) });
+          assert.throws(() => sessionPolicy(config, 's1', host), { message: new RegExp(`^the bridge session's per-user temp folder ${perUser} is longer than ${CLAUDE_TMP_MAX} bytes`) });
           return;
         }
-        const p = leadPolicy(config, 's1', host);
+        const p = sessionPolicy(config, 's1', host);
         assert.deepEqual([p.folder, p.tmp, p.tempRoot], [join(places.sessions, 's1'), join(places.temps, 's1'), places.temps]);
         return;
       }
-      assert.throws(() => leadPolicy(config, 's1', host), { message: new RegExp(`^the lead session's ${what} ${path} is ${row.says}[^\\n]*: a session could reach another folder through it\\. Remove it\\. Nothing was started\\.$`) });
+      assert.throws(() => sessionPolicy(config, 's1', host), { message: new RegExp(`^the bridge session's ${what} ${path} is ${row.says}[^\\n]*: a session could reach another folder through it\\. Remove it\\. Nothing was started\\.$`) });
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
@@ -252,7 +252,7 @@ for (const row of CORPUS.pairs) {
       const { config, host } = inputs(root, { ...(o.leads && { leadSessionsPath: leads }), ...(o.statePath && { statePath: o.statePath }), ...(o.userTemp && { userTemp: o.userTemp }) });
       host.tempRoot = temps;
       const says = row.says.replaceAll('{sessions}', join(leads, 'sessions')).replaceAll('{temps}', temps).replaceAll('{state}', state);
-      assert.throws(() => leadPolicy(config, o.session ?? 's1', host), (e) => {
+      assert.throws(() => sessionPolicy(config, o.session ?? 's1', host), (e) => {
         assert.doesNotMatch(e.message, /\n/);
         assert.ok(e.message.startsWith(`${says}`), `${e.message}\nexpected the start: ${says}`);
         return true;

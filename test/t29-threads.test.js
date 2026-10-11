@@ -221,12 +221,12 @@ test('G15: a session that ends with an open batch keeps its thread open: the lin
   const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
   assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> project/G1\\+G2 is tied after its vote`));
   assert.match(lineOf(b, 'Session 1 · project · Sun 4 Oct'), / · 1 open question$/);
-  // The reminder to the leads 2 hours later goes to the thread too; the thread is still open.
+  // The reminder to the sage-leads 2 hours later goes to the thread too; the thread is still open.
   b.now += 2 * HOUR;
   await b.bridge.loop();
   assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> reminder: part 1 of project/G1\\+G2 still tied`));
   assert.equal(b.discord.threads.get(thread).locked, false);
-  // A lead breaks the tie: the last question settles, and the next loop archives and locks the thread.
+  // A sage-lead breaks the tie: the last question settles, and the next loop archives and locks the thread.
   await b.press(JON, 'tiebreak:project/G1+G2:0:1');
   assert.equal(b.discord.threads.get(thread).locked, false);
   await b.bridge.loop();
@@ -479,7 +479,7 @@ test('F-T29-6 and F-T29-4: a press that posts while the loop waits for a session
   gateAdd(b, S1, 'T1');
   await b.bridge.loop();
   b.now += 30_000;
-  // The next loop posts S1's line; Discord is slow to answer, and a lead breaks the tie meanwhile.
+  // The next loop posts S1's line; Discord is slow to answer, and a sage-lead breaks the tie meanwhile.
   const post = b.discord.post;
   let release;
   let started;
@@ -521,7 +521,7 @@ test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to
   assert.equal(typeof spool(b, S1).endedAt, 'number');
 });
 
-test('T29 with T39: a session thread gets the tie post after a lead ends the vote early; after a restart the tie-break note and the card in the thread name the lead, and the version 2 file keeps the session, endedBy, by and at', async () => {
+test('T29 with T39: a session thread gets the tie post after a sage-lead ends the vote early; after a restart the tie-break note and the card in the thread name the sage-lead, and the version 2 file keeps the session, endedBy, by and at', async () => {
   const b = setup();
   hook(b, S1, 'SessionStart');
   gateAdd(b, S1, 'T1', 'A?');
@@ -539,7 +539,7 @@ test('T29 with T39: a session thread gets the tie post after a lead ends the vot
   await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:project/G1+G2', ephemeral: true }));
   const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
   assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> project/G1\\+G2 is tied after its vote`));
-  // The file on disk is version 4: the entry has its session and the lead who ended the vote.
+  // The file on disk is version 4: the entry has its session and the sage-lead who ended the vote.
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
   assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [4, S1, JON]);
   // A restart: a new bridge loads the file, keeps the thread of S1, and the tie-break goes to the thread.

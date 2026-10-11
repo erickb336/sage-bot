@@ -117,8 +117,8 @@ test('F-T1-24: a batch decides no part when the holder list is empty at the limi
   assert.deepEqual(r.gate.parts[0].outcome, { status: 'open' });
 });
 
-// Since F-T1-32 a lead must also be a holder, so with no holders the reason is not-holder.
-test('F-T1-24: a lead cannot break a tie while the holder list is empty', () => {
+// Since F-T1-32 a sage-lead must also be a holder, so with no holders the reason is not-holder.
+test('F-T1-24: a sage-lead cannot break a tie while the holder list is empty', () => {
   const r = run(batch(), [[tick(30), THREE], [{ type: 'tiebreak', by: LEA, part: 0, option: 'A', at: T0 + 31 * MINUTE, via: 'discord' }, []]]);
   assert.equal(r.gate.phase, 'tied');
   assert.deepEqual(r.effects.at(-1), { type: 'ignored', by: LEA, why: 'not-holder' });
@@ -208,12 +208,12 @@ test('F-T1-27: an option named like an Object property can win a part', () => {
 
 // Round 2 of the review of 4d581c4.
 
-// F-T1-32: a lead action needs the actor in leads and in holders.
+// F-T1-32: a sage-lead action needs the actor in leads and in holders.
 
 const end = (by, min) => ({ type: 'end', by, at: T0 + min * MINUTE, via: 'discord' });
 const tiebreak = (by, option, min) => ({ type: 'tiebreak', by, part: 0, option, at: T0 + min * MINUTE, via: 'discord' });
 
-test('F-T1-32: a lead who is not a holder cannot end the vote or break a tie', () => {
+test('F-T1-32: a sage-lead who is not a holder cannot end the vote or break a tie', () => {
   const r = run(batch(), [[ballot(MAYA, 'A', 0), THREE], [end(LEA, 1), THREE], [tick(30), THREE]]);
   assert.deepEqual(r.effects, [
     { type: 'ignored', by: LEA, why: 'not-holder' },
