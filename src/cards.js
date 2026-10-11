@@ -12,7 +12,7 @@ import { ballotsOf, REASON_MAX } from './vote.js';
 /** The people who may answer and vote: a member with either role (T70). */
 const HOLDERS = 'sage-apprentice or sage-lead';
 export const LEAD = 'sage-lead';
-/** The owner who decides a leads-only question (T73). The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
+/** The owner who decides a sage-leads-only question (T73). The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
 export const OWNER = 'Erick';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
@@ -213,7 +213,7 @@ const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key
 function single(gate, ask, names, shut) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
-  // A leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
+  // A sage-leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
   const owner = ask.leads ? OWNER : who(gate.askedBy, names);
   const build = ({ why, label: cap, question }) => ({
     title: cut(`${ask.leads ? `Recommend for ${owner}: ` : ''}Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
@@ -359,7 +359,7 @@ const NOTES = {
   'not-tied': () => 'This part is not tied, so there is no tie to break.',
   'not-tied-option': () => 'Only one of the tied options can break the tie.',
   full: () => 'This part already has the most voters it can count. Your press did not count.',
-  // On a leads-only card (T73) every press is a recommendation, also the owner's own: the owner decides only at the terminal.
+  // On a sage-leads-only card (T73) every press is a recommendation, also the owner's own: the owner decides only at the terminal.
   closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${lead(g.outcome.by, names)}: ${g.outcome.option}. `
       + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${OWNER} decides at the terminal. Your press did not count.`
     : g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`

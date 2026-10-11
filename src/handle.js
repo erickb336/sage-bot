@@ -84,8 +84,8 @@ function decide(interaction, { gates, people, clock }) {
   const event = action === 'end' || action === 'end!' ? { type: 'end', ...base }
     : action === 'tiebreak' ? { type: 'tiebreak', ...base, part, option }
     : { type: 'press', ...base, option, ...(gate.kind === 'batch' && { part }), ...(reason !== undefined && { reason }) };
-  // A leads-only question (T73) has the sage-leads as its only holders: anyone else gets the leads-only note. The bridge passes on
-  // only the presses of members with a sage role (G20), so not-holder comes only from a leads-only question.
+  // A sage-leads-only question (T73) has the sage-leads as its only holders: anyone else gets the leads-only note. The bridge passes on
+  // only the presses of members with a sage role (G20), so not-holder comes only from a sage-leads-only question.
   const out = step(gate, event, ask.leads ? people.leads : people.holders, people.leads);
   const refused = out.effects.find((e) => e.type === 'ignored');
   // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a sage-lead, ended, closed, withdrawn,

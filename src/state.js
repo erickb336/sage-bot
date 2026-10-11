@@ -36,7 +36,7 @@ function entryOf(e) {
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
     // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
-    // T73: a leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
+    // T73: a sage-leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
     && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'))
     // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).
     && (e.oldButtons === undefined || e.oldButtons === true)
@@ -128,7 +128,7 @@ export const projectOfKey = (key) => {
   const name = /^([^/]*)\//.exec(String(key))?.[1];
   return PROJECT_NAME.test(name ?? '') ? name : undefined;
 };
-/** The key of one sage gate, as the team votes file and the leads-only file hold it. */
+/** The key of one sage gate, as the team votes file and the sage-leads-only file hold it. */
 const GATE_KEY = /^[a-z0-9][a-z0-9-]{0,31}\/G\d{1,9}$/;
 /** A Claude Code session id: a UUID, in lower case as Claude Code writes it. */
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -144,12 +144,12 @@ export function votesPathOf({ votesPath, statePath }) {
 }
 
 /**
- * The leads-only file (T73): the sage gates that sage marked with `--leads`. Each is a single Yes or No question that only the
+ * The sage-leads-only file (T73): the sage gates that sage marked with `--leads`. Each is a single Yes or No question that only the
  * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
-/** The marks in the leads-only file, checked like the team votes file. */
-export const loadLeads = (path) => loadVotes(path, 'leads-only file');
+/** The marks in the sage-leads-only file, checked like the team votes file. */
+export const loadLeads = (path) => loadVotes(path, 'sage-leads-only file');
 
 /**
  * The marks, as a Map of gate key → the folder of its project (null: no listed project had the name at the update); an empty Map
@@ -180,7 +180,7 @@ export function migrateMarks(config, own, folders) {
   const path = votesPathOf(config);
   let changed = false;
   withLock(path, () => {
-    for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'leads-only file']]) {
+    for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'sage-leads-only file']]) {
       const text = readOwn(file, what);
       let ids;
       try { ids = JSON.parse(text ?? 'null'); } catch { ids = null; }
