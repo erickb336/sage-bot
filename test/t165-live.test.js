@@ -478,6 +478,10 @@ test('a refusing fake claude: the key is read once, never written, and the plant
     const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
     for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
     assert.ok(pid > 1 && !alive(pid), `the background sleep ${pid} of L1 is gone`);
+    // F-T165-23: L1 ran the runner's copies by absolute paths, in a folder outside the session folder.
+    const asked = callsOf(readFileSync(join(root, 'run', 'sessions', 'L1.jsonl'), 'utf8')).calls[0].input.command;
+    assert.equal(asked, probeCommand(join(root, 'run', 'runner')));
+    assert.deepEqual(readdirSync(join(root, 'run', 'runner')).toSorted(), ['probe.mjs', 'world.json']);
     assert.equal(report.proof, 'T165 (T134 PR 2b), live');
     assert.deepEqual(fake.calls().filter((c) => c[0] === 'find-generic-password' && c.length === 6).length, 1); // the owner's key: one read, without a path
     assert.deepEqual(fake.calls().filter((c) => c[0] === 'list-keychains')[0], ['list-keychains', '-d', 'user']); // the fixture's save, first
