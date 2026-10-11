@@ -24,6 +24,7 @@ const DENIED = [
   '/h/.claude/plugins/cache/sage', '/h/.claude/plugins/marketplaces/sage', '/h/.claude/sage', // the sage plugin and root (F-T134-6, -12)
   '/u/sage-hooks', '/private/tmp/sage-hooks', '/h/.claude/sage/.hooks', // sage's hook state (F-T134-7, F-T156-40, -12)
   '/h/.local/share/sage-bot/leads/claude', // the lead sessions' Claude Code config folder (F-T134-10)
+  '/h/.claude', // the host's Claude Code config folder, whole (F-T157-20)
 ];
 const fileRules = (tool) => DENIED.flatMap((p) => [`${tool}(/${p})`, `${tool}(/${p}/**)`]);
 // The git control paths of session s21 (F-T156-13): literal paths in its own .git, and every other .git below it, whole.

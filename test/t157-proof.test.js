@@ -9,7 +9,7 @@ import { join, relative } from 'node:path';
 import { launchOf, settingsOf } from '../src/lead-policy.js';
 import { keychainPlan, keychainsOf, printable, withScratchKeychain } from '../scripts/proof/keychain.mjs';
 import { didOf, probes } from '../scripts/proof/probe.mjs';
-import { ROWS, statusOf, verdict } from '../scripts/proof/run.mjs';
+import { ROWS, out, prove, statusOf, verdict } from '../scripts/proof/run.mjs';
 import { buildWorld, policyOf, removeTempRoots } from '../scripts/proof/world.mjs';
 import { spawnSync } from './bridge-setup.js';
 
@@ -62,6 +62,76 @@ test('F-T157-10: the temp roots in /private/tmp go at the end of a run, also whe
     const left = [...sbp()].filter((n) => !before.has(n));
     assert.deepEqual(left, [], `no new temp root stays: ${left.join(', ')}`);
   } finally { chmodSync(join(root, 'ro'), 0o700); rmSync(root, { recursive: true, force: true }); }
+});
+
+const RUN = new URL('../scripts/proof/run.mjs', import.meta.url).pathname;
+const sh = (cmd, cwd) => spawnSync('/bin/sh', ['-c', cmd], { cwd, encoding: 'utf8' });
+const commonDir = (cwd) => spawnSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf8' }).stdout.trim();
+
+test('F-T157-23: the git-commondir probe names a folder inside the world that is never made, and its control puts the repository back', () => {
+  const { w, done } = world();
+  try {
+    const p = probes(w).find((x) => x.id === 'git-commondir');
+    const payload = p.cmd.match(/^echo '([^']*)' > \.git\/commondir$/)?.[1];
+    assert.equal(payload, join(w.sessionTmp, 'no-such-commondir'));
+    assert.ok(!existsSync(payload));
+    assert.equal(sh(p.cmd, w.sessionFolder).status, 0); // the probe itself, unsandboxed: it points git inside the world, never at /tmp
+    assert.equal(readFileSync(join(w.sessionFolder, '.git', 'commondir'), 'utf8'), `${payload}\n`);
+    assert.equal(commonDir(w.sessionFolder), ''); // git refuses a common dir that is not there: it reads nothing outside the world
+    assert.equal(sh(p.control, w.sessionFolder).status, 0); // the control: the write works, and the file goes away again
+    assert.ok(!existsSync(join(w.sessionFolder, '.git', 'commondir')));
+    assert.equal(commonDir(w.sessionFolder), '.git');
+  } finally { done(); }
+});
+
+test('F-T157-23, F-T167-1: a scratch folder that is not empty is refused with one line and exit 2, before any world or temp root is made', async () => {
+  const root = scratch();
+  try {
+    writeFileSync(join(root, 'report.json'), '{}\n');
+    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
+    await assert.rejects(prove(root), { exitCode: 2, message: `the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.` });
+    assert.deepEqual(readdirSync(root), ['report.json']);
+    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
+    const r = spawnSync(process.execPath, [RUN, '--out', root], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: join(root, 'no-home') } });
+    assert.equal(r.status, 2);
+    assert.equal(r.stderr, `proof: the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.\n`);
+    assert.equal(r.stdout, '');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T157-21: a TMPDIR that is no folder gives one line and exit 1, no stack', () => {
+  const r = spawnSync(process.execPath, [RUN], { encoding: 'utf8', env: { PATH: process.env.PATH, TMPDIR: '/nonexistent' } });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^proof: ENOENT: no such file or directory, mkdtemp '\/nonexistent\/sage-bot-proof-\w+'\n$/);
+  assert.equal(r.stdout, '');
+});
+
+test('F-T157-23: a git error of the world reaches the error line, and the temp root goes', () => {
+  const root = scratch();
+  try {
+    const folder = join(root, 'w', 'home', '.local', 'share', 'sage-bot', 'leads', 'sessions', 's1');
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    writeFileSync(join(folder, '.git'), 'not a gitfile\n');
+    const sbp = new Set(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-')));
+    assert.throws(() => buildWorld(join(root, 'w'), TAG), { message: `git init -q in ${folder}: fatal: invalid gitfile format: ${join(folder, '.git')}` });
+    assert.deepEqual(readdirSync('/private/tmp').filter((n) => n.startsWith('sbp-') && !sbp.has(n)), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T157-22: a claude that hangs is killed with its whole process group at the timeout: no child of it stays', () => {
+  const root = scratch();
+  try {
+    const pidFile = join(root, 'child.pid');
+    writeFileSync(join(root, 'claude'), `#!/bin/sh\nsleep 300 &\necho $! > '${pidFile}'\nsleep 300\n`, { mode: 0o755 });
+    const before = Date.now();
+    assert.equal(out(join(root, 'claude'), ['--version'], { timeout: 500 }), null);
+    assert.ok(Date.now() - before < 5000);
+    const child = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.ok(child > 1);
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 40 && alive(child); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); // launchd reaps it within a moment
+    assert.ok(!alive(child), `the grandchild sleep ${child} is gone`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('didOf: worked, refused (EPERM, or any failure for a network call or a test), or cannot tell', () => {

@@ -94,6 +94,9 @@ const M = [
   ['credential files only in $HOME', 'homes.flatMap((h) => CREDENTIAL_FILES.map((f) => join(h, f)))', 'CREDENTIAL_FILES.map((f) => join(home, f))'],
   ['the session HOME is the owner home', '    home, // the session', '    home: owner, // the session'],
   ['owner home not checked', "  canonicalPath('the owner\\'s home folder', owner); // F-T157-7\n", ''],
+  // F-T157-20: the owner's real ~/.claude is a credential file and a denied path with a scratch HOME
+  ['~/.claude only in $HOME', "...homes.map((h) => join(h, '.claude'))", "join(home, '.claude')"],
+  ['~/.claude not denied', '    ...claudeDirs, // F-T157-20\n', ''],
   ['GitHub on the host list', 'export const LEAD_HOSTS = [];', "export const LEAD_HOSTS = ['github.com'];"],
   ['GH_TOKEN not denied', "['GH_TOKEN', 'GITHUB_TOKEN',", "['GITHUB_TOKEN',"],
   ['budget 10', 'export const MAX_USD = 5;', 'export const MAX_USD = 10;'],
@@ -165,7 +168,7 @@ const M = [
   ['~/.gitconfig not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.config/git', '.claude.json']"],
   ['~/.config/git not a credential file', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.claude.json']"],
   ['~/.claude.json not a credential file (F-T157-11)', "'.kube', '.gitconfig', '.config/git', '.claude.json']", "'.kube', '.gitconfig', '.config/git']"],
-  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), claudeConfig]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
+  ['Claude config folder not a credential file', 'CREDENTIAL_FILES.map((f) => join(h, f))), ...claudeDirs]', 'CREDENTIAL_FILES.map((f) => join(h, f)))]'],
   // F-T156-16: the environment is an allow-list
   ['the host environment kept', '...kept, ...model, PATH', '...env, ...model, PATH'],
   ['the host PATH', 'PATH: LEAD_PATH, ', 'PATH: env.PATH, '],

@@ -1,8 +1,9 @@
 // The scratch world of the proof (T157): one lead session's home folder, state files, sage plugin and session folder, all below one
 // scratch folder, and its temp root, a short new folder in /private/tmp (the policy's 44-byte limit, F-T156-35). SAMPLE DATA ONLY: every credential file and variable holds an obviously fake value that ends in the world's tag, so a
-// probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root, and
-// every temp root is recorded, so that the run removes it at its end (removeTempRoots), also when it fails or is stopped (F-T157-10).
-import { execFileSync } from 'node:child_process';
+// probe or the report can say whether one appeared without printing it. Nothing here writes outside `root` and the temp root (`root` is
+// a new folder: the run refuses one that is not empty, F-T157-23), and every temp root is recorded, so that the run removes it at its end
+// (removeTempRoots), also when it fails or is stopped (F-T157-10).
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { leadPolicy } from '../../src/lead-policy.js';
@@ -100,8 +101,11 @@ function fill(root, tag, tempRoot) {
     hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `touch '${w.marker}'` }] }] },
     permissions: { allow: ['Edit(//**)', 'Read(//**)'] },
   }, null, 2)}\n`);
-  const git = (...args) => execFileSync('git', ['-c', 'user.name=proof', '-c', 'user.email=proof@example.invalid', '-c', 'init.defaultBranch=main', ...args],
-    { cwd: sessionFolder, env: { PATH: process.env.PATH, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore' });
+  const git = (...args) => { // F-T157-23: git's own error line reaches the run's error line
+    const r = spawnSync('git', ['-c', 'user.name=proof', '-c', 'user.email=proof@example.invalid', '-c', 'init.defaultBranch=main', ...args],
+      { cwd: sessionFolder, env: { PATH: process.env.PATH, HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')} in ${sessionFolder}: ${(r.stderr || r.error?.message || `exit ${r.status}`).split('\n').find(Boolean)}`);
+  };
   git('init', '-q');
   git('add', '-A');
   git('commit', '-q', '-m', 'sample');

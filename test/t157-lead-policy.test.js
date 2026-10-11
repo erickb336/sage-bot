@@ -51,6 +51,15 @@ test('F-T157-7: with HOME set to a scratch folder, commands still read nothing i
   }
 });
 
+test('F-T157-20: with a scratch HOME, the owner\'s real ~/.claude (plugin cache, sage root, logbooks) is a credential file and a denied path', () => {
+  const settings = settingsOf(leadPolicy(CONFIG, 's1', { ...HOST, owner: '/o' }));
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === '/o/.claude' && f.mode === 'deny'));
+  assert.ok(settings.sandbox.credentials.files.some((f) => f.path === '/h/.claude' && f.mode === 'deny'));
+  for (const list of [settings.sandbox.filesystem.denyRead, settings.sandbox.filesystem.denyWrite]) assert.ok(list.includes('/o/.claude') && list.includes('/h/.claude'), list.join(' '));
+  for (const rule of ['Read(//o/.claude)', 'Read(//o/.claude/**)', 'Edit(//o/.claude)', 'Edit(//o/.claude/**)']) assert.ok(settings.permissions.deny.includes(rule), rule);
+  assert.ok(!settings.sandbox.filesystem.allowRead.some((a) => a.startsWith('/o/')));
+});
+
 test('F-T157-11: the owner\'s ~/.claude.json (MCP configs, account data) is a credential file, in $HOME and in the owner\'s home folder', () => {
   const policy = leadPolicy(CONFIG, 's1', { ...HOST, owner: '/o' });
   const files = settingsOf(policy).sandbox.credentials.files;

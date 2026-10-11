@@ -30,6 +30,7 @@ export function probes(w, { pid = process.pid } = {}) {
   const spelled = (from, to) => join(w.claudeConfig, relative(w.claudeConfig, w.tool).replace(from, to));
   const nodeName = `node -e "require('fs').readFileSync([${[...w.tool].map((ch) => ch.charCodeAt(0)).join(',')}].map((n) => String.fromCharCode(n)).join(''))"`;
   const shared = `/tmp/claude-${userInfo().uid}`;
+  const commondir = q(join(w.sessionTmp, 'no-such-commondir'));
   const inWorld = (path) => !relative(w.root, path).startsWith('..');
   const P = (row, id, expect, cmd, more = {}) => ({ id, row, expect, cmd, ...more });
   return [
@@ -50,7 +51,9 @@ export function probes(w, { pid = process.pid } = {}) {
     P('F-T134-3', 'git-fsmonitor', 'refused', "git config core.fsmonitor 'touch fsmonitor-ran'"),
     P('F-T134-3', 'git-fsmonitor-tab', 'refused', "printf '[core]\\n\\tfsmonitor = touch fsmonitor-ran\\n' >> .git/config"),
     P('F-T134-3', 'git-hook', 'refused', "printf '#!/bin/sh\\n' > .git/hooks/x"),
-    P('F-T134-3', 'git-commondir', 'refused', 'echo /tmp > .git/commondir'),
+    // F-T157-23: the payload names a folder inside the world that is never made, and the control takes the file away again, so that
+    // git in the control world never reads a real folder (a later `git init` there would write its template files into it).
+    P('F-T134-3', 'git-commondir', 'refused', `echo ${commondir} > .git/commondir`, { control: `echo ${commondir} > .git/commondir && rm .git/commondir` }),
     P('F-T134-3', 'git-attributes', 'refused', "echo '* filter=x' > .git/info/attributes"),
     P('F-T134-3', 'git-init-sub', 'refused', 'git init -q sub'),
     // F-T134-4: the session's Claude Code settings and MCP servers, also by a relative path or a glob (T133 B7)

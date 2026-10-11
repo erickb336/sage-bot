@@ -3,11 +3,12 @@
 // runs the rows that need no model against the real `claude` (sandbox status and the preflight; never `claude -p`), and reports the
 // rows that need a session as SKIPPED ("live: T165"). It writes report.json in the scratch folder and prints a one-screen summary.
 // Each world also has a short temp root in /private/tmp (scripts/proof/world.mjs); the run removes both at its end, also when it fails
-// or is stopped with SIGINT, SIGHUP or SIGTERM (F-T157-10).
+// or is stopped with SIGINT, SIGHUP or SIGTERM (F-T157-10). It refuses a --out folder that is not empty, with one line and exit 2, before
+// it makes a world (F-T157-23); any other failure prints one line and exits 1 (F-T157-21).
 // SAMPLE DATA ONLY. It never prints a sample value: it refuses to write a report that holds the world's tag. Exit 1 on FAIL or INVALID.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { constants, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +26,7 @@ const LIVE = 'live: T165';
  */
 export const ROWS = [
   ['F-T157-8', 'now', 'both model variables denied to commands; a launch takes one, from its caller'],
-  ['F-T157-7', 'now', 'with a scratch HOME, commands still read nothing in the owner\'s real home folder'],
+  ['F-T157-7', 'now', 'with a scratch HOME, commands still read nothing in the owner\'s real home folder, and its ~/.claude stays denied'],
   ['F-T157-1', 'now', 'claude sandbox status with the generated settings: supported, enabled, strict, autoAllowBashIfSandboxed; preflight ready'],
   ['F-T157-3', 'now', 'the platform that the proof holds for'],
   ['F-T134-15c', 'now', 'preflight and start refused with the sandbox unavailable'],
@@ -59,8 +60,15 @@ export function verdict(expect, control, live) {
 /** A row's status from its probes' verdicts: FAIL, then INVALID, then SKIPPED, else PASS. */
 export const statusOf = (verdicts) => ['FAIL', 'INVALID', 'SKIPPED'].find((v) => verdicts.includes(v)) ?? 'PASS';
 
-/** The text of a run's output, or of its error. */
-const out = (file, args, o) => { const r = spawnSync(file, args, { encoding: 'utf8', timeout: 60_000, ...o }); return r.status === 0 ? r.stdout.trim() : null; };
+/**
+ * The text of a command's output, or null when it fails. The command runs in a process group of its own (detached), and at the timeout
+ * (30 s) the whole group gets SIGKILL, so that no child of a hung `claude` stays (F-T157-22).
+ */
+export function out(file, args, o) {
+  const r = spawnSync(file, args, { encoding: 'utf8', timeout: 30_000, detached: true, killSignal: 'SIGKILL', ...o });
+  if (r.error) try { process.kill(-r.pid, 'SIGKILL'); } catch { /* the group is gone */ }
+  return r.status === 0 ? r.stdout.trim() : null;
+}
 
 /** The rows that need no model. Each returns [status, why]. */
 async function nowRows(w, policy, env) {
@@ -70,7 +78,9 @@ async function nowRows(w, policy, env) {
   const refusesTwo = (() => { try { launchOf(policy, {}, { CLAUDE_CODE_OAUTH_TOKEN: 'sample', ANTHROPIC_API_KEY: 'sample' }); return false; } catch { return true; } })();
   const one = launchOf(policy, { ANTHROPIC_API_KEY: 'sample-host', CLAUDE_CODE_OAUTH_TOKEN: 'sample-host' }, { ANTHROPIC_API_KEY: 'sample-caller' }).env;
   const t8 = denied.includes('ANTHROPIC_API_KEY') && denied.includes('CLAUDE_CODE_OAUTH_TOKEN') && refusesTwo && one.ANTHROPIC_API_KEY === 'sample-caller' && !('CLAUDE_CODE_OAUTH_TOKEN' in one);
-  const t7 = policy.home === w.home && owner !== w.home && settings.sandbox.filesystem.denyRead.includes(owner);
+  const ownerClaude = join(owner, '.claude'); // F-T157-20
+  const t7 = policy.home === w.home && owner !== w.home && settings.sandbox.filesystem.denyRead.includes(owner)
+    && settings.sandbox.credentials.files.some((f) => f.path === ownerClaude && f.mode === 'deny') && settings.sandbox.filesystem.denyWrite.includes(ownerClaude);
   const launch = launchOf(policy, env);
   const raw = out(policy.claude, ['--settings', JSON.stringify(settings), '--setting-sources', '', 'sandbox', 'status'], { env: launch.env, cwd: w.root });
   const status = (() => { try { return JSON.parse(raw); } catch { return null; } })();
@@ -79,20 +89,26 @@ async function nowRows(w, policy, env) {
   const macos = platform() === 'darwin' ? `macOS ${out('sw_vers', ['-productVersion']) ?? '(version unknown)'}` : platform();
   return {
     'F-T157-8': [t8 ? 'PASS' : 'FAIL', `envVars deny ${denied.filter((n) => n === 'ANTHROPIC_API_KEY' || n === 'CLAUDE_CODE_OAUTH_TOKEN').join(' and ') || 'neither'}; two at once ${refusesTwo ? 'refused' : 'accepted'}; one from the caller: ${Object.keys(one).filter((k) => k.endsWith('_KEY') || k.endsWith('_TOKEN')).join(', ')}`],
-    'F-T157-7': [t7 ? 'PASS' : 'FAIL', `HOME ${policy.home}; denyRead ${settings.sandbox.filesystem.denyRead.includes(owner) ? 'has' : 'lacks'} the owner's home ${owner}`],
+    'F-T157-7': [t7 ? 'PASS' : 'FAIL', `HOME ${policy.home}; denyRead ${settings.sandbox.filesystem.denyRead.includes(owner) ? 'has' : 'lacks'} the owner's home ${owner}; ${ownerClaude} ${t7 ? 'is' : 'is not'} a credential file and a denied path`],
     'F-T157-1': [t1 ? 'PASS' : 'FAIL', status ? `supported ${status.supported}, enabled ${status.enabled}, strict ${status.strictMode}, autoAllowBashIfSandboxed ${status.autoAllowBashIfSandboxed} (${status.autoAllowBashIfSandboxedSource}), unavailable ${status.unavailableReason}; preflight: ${ready.state}` : `claude sandbox status failed; preflight: ${ready.state} (${ready.why})`],
     'F-T157-3': [platform() === 'darwin' ? 'PASS' : 'FAIL', `${macos}: the settings, the probes and their verdicts are claims for macOS only`],
     'F-T134-15c': ['SKIPPED', 'not on macOS: Claude Code 2.1.289 reports the sandbox unavailable only for an unsupported platform, a platform off the managed sandbox.enabledPlatforms (a system file) or a missing dependency; the refusal on an unavailable status is unit-tested with a dummy claude (test/t156-lead-policy.test.js). Start: no start command until T165'],
   };
 }
 
-/** Runs the proof in `root`, and removes the worlds' temp roots after, also on a failure. @param {string} root @returns {Promise<{ report: object, summary: string }>} */
+/**
+ * Runs the proof in `root`, a new or empty folder, and removes the worlds' temp roots after, also on a failure. A folder that is not
+ * empty (a second run into the same --out) is refused before any world is made, with `exitCode` 2 (F-T157-23, F-T167-1): the probes'
+ * controls change the control world's repository, and a world built over an old one is not the world that the report describes.
+ * @param {string} root @returns {Promise<{ report: object, summary: string }>}
+ */
 export async function prove(root) {
   try { return await proveIn(root); } finally { removeTempRoots(); }
 }
 async function proveIn(root) {
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
+  if (readdirSync(root).length) throw Object.assign(new Error(`the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`), { exitCode: 2 });
   const tag = randomBytes(8).toString('hex');
   const control = buildWorld(join(root, 'control'), tag), live = buildWorld(join(root, 'live'), tag);
   const samples = Object.fromEntries(SAMPLE_ENV.map((n) => [n, sample(n, tag)]));
@@ -141,9 +157,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const at = args.indexOf('--out');
   if ((at !== -1 && !args[at + 1]) || args.length !== (at === -1 ? 0 : 2)) { console.error('usage: npm run proof [-- --out <a new scratch folder>]'); process.exit(2); }
-  const root = at === -1 ? mkdtempSync(join(tmpdir(), 'sage-bot-proof-')) : args[at + 1];
   for (const signal of ['SIGINT', 'SIGHUP', 'SIGTERM']) process.once(signal, () => { removeTempRoots(); process.exit(128 + constants.signals[signal]); }); // F-T157-10
-  const { report, summary } = await prove(root);
-  console.log(summary);
-  if (report.counts.FAIL || report.counts.INVALID) process.exitCode = 1;
+  try {
+    const root = at === -1 ? mkdtempSync(join(tmpdir(), 'sage-bot-proof-')) : args[at + 1];
+    const { report, summary } = await prove(root);
+    console.log(summary);
+    if (report.counts.FAIL || report.counts.INVALID) process.exitCode = 1;
+  } catch (e) { // F-T157-21, F-T157-23: one line, never a stack; 2 for a refused folder, else 1
+    console.error(`proof: ${String(e?.message ?? e).split('\n').find(Boolean)}`);
+    process.exit(e?.exitCode ?? 1);
+  }
 }
