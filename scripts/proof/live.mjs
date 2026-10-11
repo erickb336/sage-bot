@@ -17,11 +17,12 @@
 // session and on a signal (G73).
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { constants, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LEAD_PATH } from '../../src/lead-policy.js';
+import { ownerHome } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, stopScratchKeychain, withScratchKeychain } from './keychain.mjs';
 import { resultsOf } from './probe.mjs';
 import { ROWS, OWNER_COMMAND, prove, refuseUsed, statusOf, verdict } from './run.mjs';
@@ -92,6 +93,8 @@ export function keyFromKeychain(env = process.env) {
 export function refuseWhileGhLoggedIn(env = process.env) {
   const r = spawnSync('gh', ['auth', 'token'], { env, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'], timeout: 60_000 });
   if (r.error?.code === 'ENOENT' || (!r.error && r.status === 1)) return;
+  const vars = ['GH_TOKEN', 'GITHUB_TOKEN'].filter((n) => env[n]); // gh gives a set variable's token first; never its value here
+  if (vars.length) throw new Error(`${vars.join(' and ')} ${vars.length > 1 ? 'are' : 'is'} set in this shell, so \`gh auth token\` gives a token: unset ${vars.length > 1 ? 'them' : 'it'} first with \`unset ${vars.join(' ')}\`, and log gh out with \`${GH_LOGOUT}\` if it is logged in (G70 a), then run ${OWNER_COMMAND}. Nothing was started.`);
   const how = r.status === 0 ? 'gh is logged in on this Mac' : `\`gh auth token\` did not say that gh is logged out (${r.error ? r.error.code ?? r.error.message : `exit ${r.status}: ${clean(r.stderr) || 'nothing printed'}`})`;
   throw new Error(`${how}: a session's \`gh auth token\` could reach the real token through the Keychain. Log out first with \`${GH_LOGOUT}\` (G70 a; the merges of sage-bot run through gh, so they wait until you log in again), then run ${OWNER_COMMAND}. Nothing was started.`);
 }
@@ -154,8 +157,16 @@ function readPlain(path) {
   try { return fstatSync(fd).isFile() ? readFileSync(fd, 'utf8') : null; } finally { closeSync(fd); }
 }
 
-/** Removes the run's job from launchd by its label, whatever loaded it and whatever state it is in (G73). */
-const removeJob = (env, label) => spawnSync('launchctl', ['remove', label], { env: { PATH: env.PATH }, stdio: 'ignore', timeout: 30_000 });
+/**
+ * Removes the run's job from launchd by its label, whatever loaded it and whatever state it is in (G73), then checks that `launchctl
+ * list <label>` no longer finds it; throws one line with the owner's command when it still does (F-T165-30). Each launchctl runs in a
+ * process group of its own (detached), so a second Ctrl-C at the terminal does not stop it.
+ */
+function removeJob(env, label) {
+  const launchctl = (...args) => spawnSync('launchctl', args, { env: { PATH: env.PATH }, stdio: 'ignore', timeout: 30_000, detached: true });
+  launchctl('remove', label);
+  if (launchctl('list', label).status === 0) throw new Error(`the launchd job ${label} is still loaded after launchctl remove: remove it with \`launchctl remove ${label}\`.`);
+}
 
 /**
  * The tool calls of a session's stream (`--output-format stream-json --verbose`, one JSON object a line): the tools that the model saw,
@@ -328,9 +339,11 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
     const r = await startSession(policy, env, model, ask[group]);
     removeJob(env, w.launchd.label); // whatever the session did (G73)
     const groupRows = ROWS.filter((x) => x.group === group).map((x) => x.row);
-    if (r.refused) {
+    if (r.refused) { // every row of the session is INVALID, also L1's probes, which would read SKIPPED with no result (F-T165-31)
+      const why = `start refused: ${r.refused.why}`;
       sessions.push({ group, outcome: `start refused: ${r.refused.state}`, turns: 0, costUsd: 0, denials: 0, leakedKey: false });
-      for (const row of groupRows) rows[row] = { status: 'INVALID', why: `start refused: ${r.refused.why}` };
+      for (const row of groupRows) rows[row] = { status: 'INVALID', why };
+      if (group === 'L1') for (const p of controls.values()) results.set(p.id, { did: null, why });
       continue;
     }
     const leakedKey = Boolean(key) && r.stdout.includes(key);
@@ -377,16 +390,22 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
 /** The run that goes on now, for stopLive: its scratch folder and its key (never printed). */
 let current = null;
 /**
- * Stops a live run on a signal, in this order, each step whatever the one before did: kills every session's process group, takes the
- * scratch keychain away and puts the owner's search list back (the handler exits before any finally block, F-T165-22), removes the run's
- * job from launchd (G73), redacts the key from the scratch folder, and removes the temp roots (F-T165-15).
+ * Stops a live run on a signal, in this order, each step whatever the one before did: kills every session's process group and the
+ * process group of every other child (a preflight's command runs in a group of its own, src/lead-policy.js, F-T165-31), removes the
+ * run's job from launchd (G73), takes the scratch keychain away and puts the owner's search list back (the handler exits before any
+ * finally block, F-T165-22), redacts the key from the scratch folder, and removes the temp roots (F-T165-15) and the preflights' temp
+ * folder. A step that fails prints one line.
  */
 export function stopLive() {
   killSessions();
-  if (current) removeJob(current.env, current.label);
-  try { stopScratchKeychain(); } catch (e) { console.error(`proof:live: ${String(e.message).split('\n')[0]}`); }
+  const children = spawnSync('/usr/bin/pgrep', ['-P', String(process.pid)], { encoding: 'utf8', detached: true }).stdout ?? '';
+  for (const pid of children.split('\n').filter(Boolean).map(Number)) for (const p of [-pid, pid]) try { process.kill(p, 'SIGKILL'); } catch { /* gone */ }
+  for (const step of [() => current && removeJob(current.env, current.label), stopScratchKeychain]) {
+    try { step(); } catch (e) { console.error(`proof:live: ${String(e.message).split('\n')[0]}`); }
+  }
   if (current?.key) try { redactLeaks(current.root, current.key); } catch { /* the folder is gone */ }
   removeTempRoots();
+  if (current) rmSync(current.tmp, { recursive: true, force: true });
 }
 
 /** The command's exit for a report: 1 on a FAIL, an INVALID, a leak or an entry that the scan could not read (F-T165-21), else 0. */
@@ -410,24 +429,34 @@ function wouldBe(path) {
  * @returns {Promise<{ report: object, summary: string }>}
  */
 export async function proveLive(root, { env = process.env, dryRun = false, claude, leadPath = LEAD_PATH } = {}) {
-  if (!dryRun) refuseWhileGhLoggedIn(env); // first, before any folder: a refusal makes and leaves nothing
-  const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
-  const uid = userInfo().uid;
-  root = wouldBe(root); // checked before it is made: a refused --out a/b/c leaves no a/b (F-T165-15)
+  // gh, the folder, then the key, each before any folder is made: a refusal makes and leaves nothing (a refused --out a/b/c leaves no
+  // a/b, F-T165-15).
+  if (!dryRun) refuseWhileGhLoggedIn(env);
+  root = wouldBe(root);
+  const uid = userInfo().uid, inside = (top) => !relative(top, root).startsWith('..');
   for (const shared of [`/tmp/claude-${uid}`, `/private/tmp/claude-${uid}`]) {
-    if (!relative(shared, root).startsWith('..')) throw new Error(`the scratch folder ${root} is in the shared ${shared}: use --out with a folder outside it (F-T165-8). Nothing was started.`);
+    if (inside(shared)) throw new Error(`the scratch folder ${root} is in the shared ${shared}: use --out with a folder outside it (F-T165-8). Nothing was started.`);
   }
+  // The sandbox denies the home folder, so a session could not read the runner's copies there: every L1 row would be INVALID (F-T165-32).
+  const home = realpathSync.native(ownerHome());
+  if (inside(home)) throw new Error(`the scratch folder ${root} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
+  const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
   mkdirSync(root, { recursive: true });
-  refuseUsed(root); // F-T157-23: before the keychain and the dummy go in
+  refuseUsed(root); // F-T157-23: before the keychain, the dummy and the temp folder go in
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
-  current = { root, key, env, label: jobLabelOf(tag) };
+  // The preflights' temp folders (sage-bot-preflight-*, src/lead-policy.js makes them in os.tmpdir()) go in the run's own folder, which
+  // the signal handler removes: a signal during a preflight leaves none in the shared TMPDIR (F-T165-31).
+  const tmp = join(root, 'tmp'), tmpWas = process.env.TMPDIR;
+  mkdirSync(tmp);
+  process.env.TMPDIR = tmp;
+  current = { root, key, env, label: jobLabelOf(tag), tmp };
   let saved = [], scan = { leaks: [], unscanned: [] };
   try {
     const { report, summary } = await withScratchKeychain(join(root, 'keychain'), async () => {
       saved = readFileSync(join(root, 'keychain', 'search-list-before.txt'), 'utf8').split('\n').filter(Boolean);
       const live = async (ctx) => ({ ...(await sessionsOf(ctx, { key, env, dryRun, leadPath })), keychain: { run: true, searchList: saved, item: `${ctx.world.keychain.service} in ${ctx.world.keychain.path} (removed at the end of the run)` } });
-      return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], made: ['keychain', 'dummy'], live, proof: dryRun ? 'T165 (T134 PR 2b), dry run: dummy claude, no key' : undefined });
+      return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], made: ['keychain', 'dummy', 'tmp'], live, proof: dryRun ? 'T165 (T134 PR 2b), dry run: dummy claude, no key' : undefined });
     }, { env, id: keychainIdOf(tag) });
     if (key) scan = redactLeaks(root, key);
     const { leaks, unscanned } = scan;
@@ -444,6 +473,8 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
     return { report, summary: lines.join('\n') };
   } finally {
     if (key) try { redactLeaks(root, key); } catch { /* the folder is gone */ } // also after a failure: no file of a run that stopped keeps the key (F-T165-15)
+    if (tmpWas === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmpWas;
+    rmSync(tmp, { recursive: true, force: true });
     current = null;
   }
 }
@@ -457,7 +488,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // A new name in TMPDIR, made by proveLive after its refusals, so that a refused run leaves no folder (the proof's own run.mjs refuses a
   // folder that is not empty, F-T157-23, so a name that exists is refused, not reused).
   const root = at === -1 ? join(tmpdir(), `sage-bot-proof-live-${randomBytes(6).toString('hex')}`) : rest[at + 1];
-  for (const signal of ['SIGINT', 'SIGHUP', 'SIGTERM']) process.once(signal, () => { stopLive(); process.exit(128 + constants.signals[signal]); }); // F-T157-10, F-T165-15
+  // F-T157-10, F-T165-15, F-T165-30: the handler stays for the whole run (process.on: with `once`, a second Ctrl-C during the cleanup
+  // would kill the runner before the scratch keychain goes). The cleanup runs to its end once, then exits with the first signal's code.
+  let stopping = null;
+  for (const signal of ['SIGINT', 'SIGHUP', 'SIGTERM']) {
+    process.on(signal, () => {
+      if (stopping) { console.error('proof:live: cleaning up, please wait'); return; }
+      stopping = signal;
+      stopLive();
+      process.exit(128 + constants.signals[stopping]);
+    });
+  }
   try {
     const { report, summary } = await proveLive(root, { dryRun });
     console.log(summary);

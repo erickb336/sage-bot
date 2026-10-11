@@ -70,7 +70,12 @@ export function stopScratchKeychain() {
  */
 export async function withScratchKeychain(dir, fn, { env = process.env, id } = {}) {
   const plan = keychainPlan(dir, id);
-  const security = (args) => execFileSync('security', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // Each call in a process group of its own (detached), so that a second Ctrl-C at the terminal does not stop it mid-cleanup; a failure
+  // names the verb and the exit only, never the arguments, which hold the sample password and value (F-T165-30).
+  const security = (args) => {
+    try { return execFileSync('security', args, { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], detached: true }); }
+    catch (e) { throw new Error(`security ${args[0]} failed (exit ${e.status ?? e.signal ?? e.code})`); }
+  };
   const saved = keychainsOf(security(plan.save));
   if (!saved.length) throw new Error('the keychain search list is empty or could not be read: nothing was changed.');
   mkdirSync(dir, { recursive: true });

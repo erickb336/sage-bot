@@ -10,7 +10,8 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { spawnSync } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
-import { ADD_KEY, FINDINGS, GH_LOGOUT, SERVICE, askedRun, callsOf, checksOf, clean, exitCode, keyFromKeychain, probeCommand, prompts, proveLive, redactLeaks, refuseWhileGhLoggedIn } from '../scripts/proof/live.mjs';
+import { ADD_KEY, FINDINGS, GH_LOGOUT, SERVICE, askedRun, callsOf, checksOf, clean, exitCode, keyFromKeychain, probeCommand, prompts, proveLive, refuseWhileGhLoggedIn } from '../scripts/proof/live.mjs';
+import { ownerHome } from '../src/sage.js';
 import { ACCOUNT } from '../scripts/proof/keychain.mjs';
 import { HOST_OFF, SENTINEL, probes, resultsOf } from '../scripts/proof/probe.mjs';
 import { OWNER_COMMAND, ROWS, prove } from '../scripts/proof/run.mjs';
@@ -35,19 +36,24 @@ const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 
  * A fake `security`, `gh`, `rg`, `launchctl` and `crontab` in `<root>/bin`. security: the search list, the keychains and their items in a
  * JSON file, with the key item in the login keychain, and a log of each call; `find-generic-password -w` prints an item's value; a path
  * limits the search to that keychain; with `breakRestore`, the restore of the search list leaves it wrong, so the fixture throws after the
- * sessions. gh: `auth status` always exits 1 (an offline Mac); `auth token` prints a stored token when `ghLoggedIn`, else the token of the
+ * sessions; `failVerb` makes that verb exit 1 with an error that echoes its arguments, as `security` can; `slowDelete` makes
+ * `delete-keychain` take that many ms. gh: `auth status` always exits 1 (an offline Mac); `auth token` prints GH_TOKEN or GITHUB_TOKEN
+ * when one is set, then a stored token when `ghLoggedIn`, else the token of the
  * hosts file in GH_CONFIG_DIR or HOME, else exits 1; `ghBroken` makes `auth token` exit 2 with an error, and `ghHangs` makes it sleep
  * past the runner's timeout. rg: grep, so that `rg` on a file prints its lines when nothing refuses it. launchctl: the loaded labels in a
- * JSON file (load and unload take a plist, list and remove a label), and a log of each call; crontab: "no crontab", exit 1, and a log.
+ * JSON file (load and unload take a plist, list and remove a label), and a log of each call; with `removeFails`, remove exits 0 and leaves
+ * the job loaded; crontab: "no crontab", exit 1, and a log.
  * No test reaches the real launchd or crontab (G73).
  */
-function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false } = {}) {
+function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false } = {}) {
   const bin = join(root, 'bin'), state = join(root, 'security-state.json'), log = join(root, 'security-calls.log');
   mkdirSync(bin, { recursive: true });
   writeFileSync(state, sb({ list: [LOGIN], keychains: [LOGIN], items: key ? [{ account: ACCOUNT, service: SERVICE, value: key, keychain: LOGIN }] : [] }));
   writeFileSync(join(root, 'fake-security.mjs'), `import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const [verb, ...args] = process.argv.slice(2), s = JSON.parse(readFileSync(${sb(state)}, 'utf8'));
 appendFileSync(${sb(log)}, JSON.stringify([verb, ...args]) + '\\n');
+if (verb === ${sb(failVerb)}) { console.error('security: ' + verb + ' ' + args.join(' ') + ': sample error'); process.exit(1); }
+if (verb === 'delete-keychain') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${slowDelete});
 const opt = (f) => { const i = args.indexOf(f); return i === -1 ? undefined : args[i + 1]; };
 if (verb === 'list-keychains') { if (args.includes('-s')) s.list = ${breakRestore} ? ['/x/wrong.keychain-db'] : args.slice(args.indexOf('-s') + 1); else console.log(s.list.map((p) => '    "' + p + '"').join('\\n')); }
 if (verb === 'create-keychain') { s.keychains.push(args.at(-1)); s.list.push(args.at(-1)); }
@@ -66,6 +72,7 @@ writeFileSync(${sb(state)}, JSON.stringify(s));
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
 if [ "$1 $2" = "auth status" ]; then echo 'github.com: api.github.com: dial tcp: no route to host' >&2; exit 1; fi
 if [ "$1 $2" != "auth token" ]; then echo "fake gh: $*" >&2; exit 2; fi
+if [ -n "$GH_TOKEN$GITHUB_TOKEN" ]; then echo "\${GH_TOKEN:-$GITHUB_TOKEN}"; exit 0; fi
 if [ ${ghLoggedIn ? 1 : 0} = 1 ]; then echo sample-fake-stored-gh-token; exit 0; fi
 if [ ${ghBroken ? 1 : 0} = 1 ]; then echo 'gh: sample config error' >&2; exit 2; fi
 if [ ${ghHangs ? 1 : 0} = 1 ]; then sleep 120; exit 1; fi
@@ -87,7 +94,7 @@ const save = (l) => writeFileSync(${sb(jobs)}, JSON.stringify(l));
 if (verb === 'load') save([...loaded, labelOf(arg)]);
 if (verb === 'unload') save(loaded.filter((l) => l !== labelOf(arg)));
 if (verb === 'list' && !loaded.includes(arg)) { console.error('Could not find service "' + arg + '" in domain for port'); process.exit(113); }
-if (verb === 'remove') { if (!loaded.includes(arg)) process.exit(3); save(loaded.filter((l) => l !== arg)); }
+if (verb === 'remove') { if (!loaded.includes(arg)) process.exit(3); if (!${removeFails}) save(loaded.filter((l) => l !== arg)); }
 `);
   writeFileSync(join(bin, 'launchctl'), `#!/bin/sh\nexec ${sb(process.execPath)} ${sb(join(root, 'fake-launchctl.mjs'))} "$@"\n`);
   chmodSync(join(bin, 'launchctl'), 0o755);
@@ -121,9 +128,11 @@ if (verb === 'remove') { if (!loaded.includes(arg)) process.exit(3); save(loaded
  * unreadable, in a file after it, and a pair of hard links without the key), hardLinks (only the pair of hard links), stream ('empty':
  * no line at all), loadsJob (each session loads the run's plist into the fake launchd and leaves it), background (L1 leaves a `sleep` in
  * the background of its process group and ends normally), plants (L2 puts links to the owner's files `outside` in place of probe.mjs and
- * world.json in its folder, and a pipe in place of .claude/settings.json), garble (L3 overwrites world.json in its folder).
+ * world.json in its folder, and a pipe in place of .claude/settings.json), garble (L3 overwrites world.json in its folder), preflight
+ * (`{ runner, mode, pid }`: once the runner's folder `runner` is there, the next `sandbox status` of a preflight says disabled
+ * ('unavailable', once) or holds a grandchild `sleep`, whose pid goes to the file `pid`, and never ends ('hang')).
  */
-function fakeClaude(root, bin, { mode = 'refuse', leak = false, grepTool = false, readWorks = false, forge = '', breaksKeychain = false, sleep = false, hides = false, hardLinks = false, stream = '', loadsJob = false, background = false, plants = null, garble = false } = {}) {
+function fakeClaude(root, bin, { mode = 'refuse', leak = false, grepTool = false, readWorks = false, forge = '', breaksKeychain = false, sleep = false, hides = false, hardLinks = false, stream = '', loadsJob = false, background = false, plants = null, garble = false, preflight = null } = {}) {
   const script = join(root, 'fake-claude.mjs');
   const profile = `(version 1)(allow default)(deny file-write* (subpath "/private/tmp/claude-${UID}"))(deny file-write* (subpath "/tmp/claude-${UID}"))(deny file-write* (literal "/private/tmp/sage-hooks"))(deny file-write* (subpath "/private/tmp/sage-hooks"))`;
   writeFileSync(script, `import { spawn, spawnSync } from 'node:child_process';
@@ -132,6 +141,13 @@ import { join } from 'node:path';
 import { SENTINEL, probes } from ${sb(PROBE)};
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('9.9.9 (fake claude)'); process.exit(0); }
+const pf = ${sb(preflight)};
+if (args.includes('sandbox') && pf && existsSync(pf.runner) && !existsSync(pf.runner + '.refused')) {
+  if (pf.mode === 'hang') { const child = spawn('sleep', ['300'], { stdio: 'ignore' }); writeFileSync(pf.pid, String(child.pid)); await new Promise(() => {}); }
+  writeFileSync(pf.runner + '.refused', '');
+  console.log(JSON.stringify({ supported: true, enabled: false, strictMode: true, unavailableReason: null }));
+  process.exit(0);
+}
 if (args.includes('sandbox')) { console.log(JSON.stringify({ supported: true, enabled: true, strictMode: true, autoAllowBashIfSandboxed: true, autoAllowBashIfSandboxedSource: 'default', unavailableReason: null })); process.exit(0); }
 if (${sb(stream)} === 'empty') process.exit(0);
 const prompt = args.at(-1), cwd = process.cwd();
@@ -205,6 +221,27 @@ const files = (dir) => readdirSync(dir, { recursive: true }).map((n) => join(dir
 const live = (s) => s.rows.filter((r) => r.group !== 'now');
 /** The temp roots that a run below `dir` recorded (each world.json names its own): the only ones a test may look at (T174). */
 const tempRootsOf = (dir) => [...new Set(files(dir).filter((p) => p.endsWith('/world.json')).map((p) => JSON.parse(readFileSync(p, 'utf8')).tempRoot))];
+/**
+ * The JSON value of `expr` in a child node process, with `m` the runner's module and `a` the JSON `args`, and a timeout: a case with a
+ * pipe that the runner waits on fails here instead of hanging the test file (F-T165-33). `swap` [name, from]: just before the runner
+ * opens `name` to write, the file `from` is renamed to `name` (through node:fs, which the runner imports: syncBuiltinESMExports).
+ */
+function inChild(expr, args, swap = null) {
+  const code = `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const [a, swap] = JSON.parse(process.argv[1]);
+if (swap) {
+  const open = fs.openSync;
+  fs.openSync = (path, flags, ...rest) => { if (path === swap[0] && flags & fs.constants.O_WRONLY && fs.existsSync(swap[1])) fs.renameSync(swap[1], swap[0]); return open(path, flags, ...rest); };
+  syncBuiltinESMExports();
+}
+const m = await import(${sb(LIVE)});
+console.log(JSON.stringify(${expr}));`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify([args, swap])], { encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL' });
+  assert.equal(r.error?.code, undefined, `the child did not end: ${r.error?.code}`);
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
 
 test('the key comes from the Keychain item only, through security -w, and a missing item names the owner\'s command and no value', () => {
   const root = scratch();
@@ -261,7 +298,7 @@ test('F-T165-15, F-T165-21, F-T165-24: the leak scan redacts a planted key in a 
     const fd = openSync(join(dir, 'a', 'huge.bin'), 'w'); // a sparse file past the scan's limit
     ftruncateSync(fd, (1 << 28) + 1);
     closeSync(fd);
-    const { leaks, unscanned } = redactLeaks(dir, KEY);
+    const { leaks, unscanned } = inChild('m.redactLeaks(...a)', [dir, KEY]); // the pipe: in a child, so a wait fails the test (F-T165-33)
     assert.deepEqual(leaks.toSorted(), [join(dir, 'a', 'b', 'transcript.jsonl'), join(dir, 'a', 'shut', 'in.txt'), join(dir, 'z-later.txt')]);
     assert.deepEqual(unscanned.toSorted((x, y) => x.path.localeCompare(y.path)), [
       { path: join(dir, 'a', 'hard-link'), why: 'a file with 2 names (hard links): the scan rewrites it nowhere' },
@@ -272,8 +309,9 @@ test('F-T165-15, F-T165-21, F-T165-24: the leak scan redacts a planted key in a 
     assert.equal(readFileSync(join(dir, 'z-later.txt'), 'utf8'), '<key>\n');
     assert.equal(readFileSync(join(dir, 'a', 'clean.txt'), 'utf8'), 'nothing here\n');
     assert.equal(readFileSync(outside, 'utf8'), `the owner's file with ${KEY}\n`); // unchanged, through the link and through the hard link
-    assert.deepEqual(redactLeaks(dir, KEY).leaks, []);
-    assert.equal(redactLeaks(dir, KEY).unscanned.length, 2); // still unscanned: the run fails on them each time
+    const again = inChild('m.redactLeaks(...a)', [dir, KEY]);
+    assert.deepEqual(again.leaks, []);
+    assert.equal(again.unscanned.length, 2); // still unscanned: the run fails on them each time
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -342,7 +380,7 @@ test('the checks of L2 and L3 (standing order 19): worked only with the tag, the
     // F-T165-23: a settings file that is a pipe or a link after the session is no evidence, and the check never waits on the pipe.
     rmSync(join(w.sessionFolder, '.claude', 'settings.json'));
     assert.equal(spawnSync('mkfifo', [join(w.sessionFolder, '.claude', 'settings.json')]).status, 0);
-    assert.deepEqual(checksOf(w, s, { settingsBefore, hide })['F-T134-4b'][0], { id: 'write-settings', did: null, why: '.claude/settings.json is no plain file after the session (a link, a pipe or nothing): no evidence' });
+    assert.deepEqual(inChild("m.checksOf(a[0], a[1], { settingsBefore: a[2], hide: (t) => String(t).replaceAll(a[3], '<tag>') })['F-T134-4b'][0]", [w, s, settingsBefore, TAG]), { id: 'write-settings', did: null, why: '.claude/settings.json is no plain file after the session (a link, a pipe or nothing): no evidence' }); // in a child: a wait fails (F-T165-33)
     rmSync(join(w.sessionFolder, '.claude', 'settings.json'));
     symlinkSync(join(w.home, 'proof-write.txt'), join(w.sessionFolder, '.claude', 'settings.json'));
     assert.equal(checksOf(w, s, { settingsBefore, hide })['F-T134-4b'][0].did, null);
@@ -618,7 +656,13 @@ test('F-T165-23: links that a session puts in place of probe.mjs and world.json 
     const owner = { probe: join(root, 'owner-file.txt'), world: join(root, 'owner-file.json') };
     writeFileSync(owner.probe, 'the owner\'s file\n');
     writeFileSync(owner.world, '{"owner":true}\n');
-    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin, { plants: owner }), leadPath: fake.bin });
+    const claude = fakeClaude(root, fake.bin, { plants: owner }), out = join(root, 'run'), bin = join(root, 'cbin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
+    // The whole run in a child with a timeout: a run that waits on the pipe fails here instead of hanging the test file (F-T165-33).
+    const r = spawnSync(process.execPath, [LIVE, '--out', out], { encoding: 'utf8', timeout: 100_000, killSignal: 'SIGKILL', env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'home'), TMPDIR: root } });
+    assert.equal(r.error?.code, undefined, `the run did not end: ${r.error?.code}`);
+    const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'));
     assert.equal(readFileSync(owner.probe, 'utf8'), 'the owner\'s file\n');
     assert.equal(readFileSync(owner.world, 'utf8'), '{"owner":true}\n');
     const settings = report.rows.find((r) => r.row === 'F-T134-4b').checks.find((c) => c.id === 'write-settings');
@@ -732,7 +776,7 @@ test('F-T165-15: the leak scan runs also when the run fails after the sessions, 
 });
 
 test('the command with no key item refuses with one line that names the item, exit 1, and makes no folder and no temp root', () => {
-  const root = scratch();
+  const root = liveScratch(); // outside the shared /tmp/claude-<uid>: the folder is checked before the key
   try {
     const none = fakeSecurity(root, { key: '' });
     const out = join(root, 'out');
@@ -796,4 +840,117 @@ test('npm run proof (no key): the live rows are SKIPPED with the owner\'s comman
     assert.equal(report.keychain.run, false);
     assert.equal(report.keychain.commands.length, 8);
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-30: two SIGINTs to the runner\'s process group 700 ms apart, during a preflight: the cleanup runs to its end, the search list comes back, the scratch keychain, the temp roots, the preflight\'s folder and its child go, exit 130', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(join(root, 'sig'), { slowDelete: 1500 }); // the cleanup takes past the second signal
+    const out = join(root, 'run'), pidFile = join(root, 'sig', 'preflight.pid'), tmp = join(root, 'sig', 'tmp');
+    const claude = fakeClaude(join(root, 'sig'), fake.bin, { preflight: { runner: join(out, 'runner'), mode: 'hang', pid: pidFile } });
+    const bin = join(root, 'sig', 'cbin');
+    mkdirSync(bin);
+    mkdirSync(tmp);
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\nexec '${claude}' "$@"\n`, { mode: 0o755 });
+    const { spawn } = await import('node:child_process');
+    // A process group of its own, as at a terminal: each SIGINT goes to the whole group, as a Ctrl-C does.
+    const child = spawn(process.execPath, [LIVE, '--out', out], { env: { PATH: `${bin}:${fake.env.PATH}`, HOME: join(root, 'sig', 'home'), TMPDIR: tmp }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d; });
+    const closed = new Promise((r) => child.on('close', (code, signal) => r({ code, signal })));
+    for (let i = 0; i < 600 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 100));
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    assert.ok(pid > 1);
+    assert.equal(readdirSync(join(out, 'tmp')).filter((n) => n.startsWith('sage-bot-preflight-')).length, 1); // the L1 preflight's folder, in the run's folder
+    process.kill(-child.pid, 'SIGINT');
+    await new Promise((r) => setTimeout(r, 700));
+    try { process.kill(-child.pid, 'SIGINT'); } catch { /* the runner is gone already */ }
+    assert.deepEqual(await closed, { code: 130, signal: null }, stderr);
+    const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
+    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(!alive(pid), `the preflight's grandchild sleep ${pid} is gone`);
+    assert.deepEqual(fake.state().list, [LOGIN]); // the search list is as it was
+    assert.deepEqual(fake.state().keychains, [LOGIN]); // the scratch keychain is gone
+    assert.equal(tempRootsOf(out).length, 2);
+    assert.ok(tempRootsOf(out).every((d) => !existsSync(d)));
+    assert.ok(!existsSync(join(out, 'tmp')));
+    assert.deepEqual(readdirSync(tmp), []); // and nothing of the preflight in the shared TMPDIR
+    assert.ok(!stderr.includes('sample-fake-keychain'), stderr);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-30: a security command that fails names its verb and exit only, never the sample password or value, and the search list comes back', async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root, { failVerb: 'create-keychain' });
+    await assert.rejects(proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin) }), (e) => e.message === 'security create-keychain failed (exit 1)');
+    const bad = fakeSecurity(join(root, 'add'), { failVerb: 'add-generic-password' });
+    await assert.rejects(proveLive(join(root, 'run-add'), { env: bad.env, claude: fakeClaude(join(root, 'add'), bad.bin) }), (e) => e.message === 'security add-generic-password failed (exit 1)');
+    assert.deepEqual([fake.state().list, bad.state().list, bad.state().keychains], [[LOGIN], [LOGIN], [LOGIN]]);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-30: a launchd job that is still loaded after launchctl remove stops the run with one line that names it and the command', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root, { removeFails: true });
+    await assert.rejects(proveLive(join(root, 'run'), { env: fake.env, claude: fakeClaude(root, fake.bin, { loadsJob: true }), leadPath: fake.bin }),
+      (e) => /^the launchd job (sage-bot-proof-[0-9a-f]{16}) is still loaded after launchctl remove: remove it with `launchctl remove \1`\.$/.test(e.message));
+    assert.equal(fake.jobs().length, 1);
+    assert.deepEqual(fake.state().list, [LOGIN]);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-31, F-T165-33: a refused L1 start makes every L1 row INVALID (exit 1); with an empty lead PATH and rg on the host PATH, both F-T157-5 checks are INVALID', { timeout: 300_000 }, async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root);
+    assert.equal(spawnSync('/bin/sh', ['-c', 'command -v rg'], { env: fake.env, encoding: 'utf8' }).stdout.trim(), join(fake.bin, 'rg')); // rg is on env.PATH
+    const claude = fakeClaude(root, fake.bin, { preflight: { runner: join(root, 'run', 'runner'), mode: 'unavailable' } });
+    const { report } = await proveLive(join(root, 'run'), { env: fake.env, claude, leadPath: '' });
+    const l1 = report.rows.filter((r) => r.group === 'L1');
+    assert.deepEqual([...new Set(l1.map((r) => r.status))], ['INVALID']);
+    assert.deepEqual([...new Set(l1.flatMap((r) => r.probes.map((p) => `${p.live.did} ${p.live.why}`)))], ['null start refused: claude sandbox status: supported true, enabled false, strict true']);
+    assert.equal(report.sessions[0].outcome, 'start refused: no sandbox');
+    assert.equal(exitCode(report), 1);
+    assert.equal(report.rows.find((r) => r.row === 'F-T134-15').status, 'PASS'); // L2 started: only L1 was refused
+    assert.deepEqual(report.rows.find((r) => r.row === 'F-T157-5').checks.map((c) => [c.id, c.verdict, c.why]), ['rg-where', 'rg-credential'].map((id) => [id, 'INVALID', 'no rg on the lead PATH of this Mac: the row proves nothing until rg is installed there']));
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-32: an --out in the owner\'s home folder is refused before the key is read, with one line, and makes nothing', async () => {
+  const root = liveScratch();
+  try {
+    const fake = fakeSecurity(root);
+    // The home folder itself: it exists and is not empty, so a runner without the refusal stops at refuseUsed and makes nothing there.
+    const home = realpathSync.native(ownerHome()), before = readdirSync(home).toSorted();
+    await assert.rejects(proveLive(home, { env: fake.env, claude: fakeClaude(root, fake.bin) }), (e) => e.message === `the scratch folder ${home} is in your home folder ${home}, which the sessions cannot read: use --out with a folder outside it, or none for a new one in TMPDIR (F-T165-32). Nothing was started.`);
+    assert.deepEqual(readdirSync(home).toSorted(), before);
+    assert.deepEqual(fake.calls(), []); // no key read, no fixture
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-32: with GH_TOKEN or GITHUB_TOKEN set, the gh refusal names the variable and says to unset it, never its value', () => {
+  const root = scratch();
+  try {
+    const fake = fakeSecurity(root);
+    const value = 'sample-fake-env-gh-token';
+    assert.throws(() => refuseWhileGhLoggedIn({ ...fake.env, GH_TOKEN: value }), (e) => e.message === `GH_TOKEN is set in this shell, so \`gh auth token\` gives a token: unset it first with \`unset GH_TOKEN\`, and log gh out with \`${GH_LOGOUT}\` if it is logged in (G70 a), then run npm run proof:live. Nothing was started.`);
+    assert.throws(() => refuseWhileGhLoggedIn({ ...fake.env, GH_TOKEN: value, GITHUB_TOKEN: value }), (e) => e.message.startsWith('GH_TOKEN and GITHUB_TOKEN are set in this shell') && e.message.includes('`unset GH_TOKEN GITHUB_TOKEN`') && !e.message.includes(value));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T165-33: a name swapped for a hard link to an owner\'s file between the scan\'s read and its write: the owner\'s file stays as it was, and the name is unscanned', () => {
+  const root = scratch();
+  try {
+    const dir = join(root, 'scan'), owner = join(root, 'owner.txt'), swap = join(root, 'swap');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'a.txt'), `${KEY}\n`);
+    writeFileSync(owner, `the owner's file with ${KEY}\n`);
+    linkSync(owner, swap); // a second name of the owner's file, which the swap moves into the scanned name
+    const r = inChild('m.redactLeaks(...a)', [dir, KEY], [join(dir, 'a.txt'), swap]);
+    assert.ok(!existsSync(swap)); // the swap happened
+    assert.equal(readFileSync(owner, 'utf8'), `the owner's file with ${KEY}\n`);
+    assert.deepEqual(r, { leaks: [], unscanned: [{ path: join(dir, 'a.txt'), why: 'a file with 2 names (hard links): the scan rewrites it nowhere' }] });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

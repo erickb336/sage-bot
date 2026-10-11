@@ -302,7 +302,7 @@ test('keychain fixture: it saves the search list, makes the scratch keychain, an
 });
 
 test('keychain fixture: the list goes back also when the probes throw, or a command of the fixture fails', async () => {
-  for (const [fail, message] of [[undefined, 'probe failed'], ['add-generic-password', /fake failure/], ['create-keychain', /fake failure/]]) {
+  for (const [fail, message] of [[undefined, 'probe failed'], ['add-generic-password', /^security add-generic-password failed \(exit \d+\)$/], ['create-keychain', /^security create-keychain failed \(exit \d+\)$/]]) { // the verb and exit only (F-T165-30)
     const root = scratch();
     try {
       const fake = fakeSecurity(root, { fail });
