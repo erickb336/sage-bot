@@ -26,7 +26,7 @@ const LIVE = `live: ${OWNER_COMMAND}`;
 
 /**
  * The rows of the proof. `group`: now (no model: it runs here), L1 (probe.mjs in a session), L2 (file-tool calls in a session), L3
- * (escapes and a subagent in a session). T165 adds the launcher and, for L2 and L3, a prompt from `ask`.
+ * (escapes and a subagent in a session). The live runner (scripts/proof/live.mjs) starts the sessions and, for L2 and L3, asks `ask`.
  */
 export const ROWS = [
   ['F-T157-8', 'now', 'both model variables denied to commands; a launch takes one, from its caller'],
