@@ -25,4 +25,4 @@ jobs:
       # Claude Code makes its shared temp folder /tmp/claude-<uid> at its start, as on the owner's Mac; the sandbox proof's
       # shared-tmp probe (F-T134-13) checks that a session cannot write there, and its control needs the folder. The runner has no Claude Code.
       - run: mkdir -p "/tmp/claude-$(id -u)"
-      - run: npm run check
+      - run: node scripts/diag-check.mjs
