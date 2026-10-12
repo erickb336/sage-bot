@@ -55,7 +55,7 @@ test('F-T27-40: a joiner stays only between letters of a joining script, one at 
   // On the card: a name of marks and joiners falls back; a reason of them gives no field; a mark stack in a reason is cut to 3.
   const { embed } = build(['\u0301\u200d\u0301', 'Jon', 'Ana'], ['ok', '\u0301\u200d\u0301', `a${'\u0301\u200d'.repeat(99)}`]);
   assert.deepEqual(embed.fields.slice(1), [{ name: 'member …0000, part 1', value: 'ok' }, { name: 'Ana, part 1', value: 'a\u0301\u0301\u0301' }]);
-  assert.match(embed.fields[0].value, /\nVoted: member …0000, Jon, Ana · Not voted: nobody\n/);
+  assert.match(embed.fields[0].value, /\nVoted: \*\*member …0000\*\*, \*\*Jon\*\*, \*\*Ana\*\* · Not voted: nobody\n/);
 });
 
 test('F-T27-41: an ideographic variation selector goes, also after a Han ideograph, so no selector carries a byte', () => {
@@ -151,12 +151,12 @@ test('F-T27-36: a tag sequence that is not one of the three flags leaves the bla
   assert.equal(safe(`${flag('gbsct')}${flag('gbxyz')}${flag('gbwls')}`), `${flag('gbsct')}🏴${flag('gbwls')}`);
   // A team of 5: every name whole. A team of 300 with 32-character names: each list ends in "and N more", and the confirm fits.
   const five = build(['Erick', 'Maya', 'Jon', 'Ana', 'Lea'], [], { parts: 4 });
-  assert.match(confirmEnd(five.gate, five.people).content, /^\*\*End B now\?\*\*\n(Part [1-4] goes to A: 5 of 5 votes \(Erick, Maya, Jon, Ana, Lea\)\.\n){4}Nobody can vote after this\.$/);
+  assert.match(confirmEnd(five.gate, five.people).content, /^\*\*End B now\?\*\*\n(Part [1-4] goes to A: 5 of 5 votes \(\*\*Erick\*\*, \*\*Maya\*\*, \*\*Jon\*\*, \*\*Ana\*\*, \*\*Lea\*\*\)\.\n){4}Nobody can vote after this\.$/);
   const big = build(Array.from({ length: 300 }, (_, i) => `Member number ${i}`.padEnd(32, '!')), [], { parts: 4 });
   const { content } = confirmEnd(big.gate, big.people);
   assert.ok(content.length <= 2000 && content.length > 1800, `${content.length}`); // 60,000 characters on 5d39b82
   assert.equal((content.match(/ and \d+ more\)\./g) ?? []).length, 4);
-  assert.match(content, /Part 1 goes to A: 300 of 300 votes \(Member number 0!{17}, Member number 1!{17}, /);
+  assert.match(content, /Part 1 goes to A: 300 of 300 votes \(\*\*Member number 0!{17}\*\*, \*\*Member number 1!{17}\*\*, /);
 });
 
 test('F-T27-37: handle returns stored: true only when the event changed the gate, also beside replyError', async () => {

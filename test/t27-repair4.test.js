@@ -144,7 +144,7 @@ test('F-T27-30: the QA repro (a team of 5, 4 parts, 5 options, long questions, e
     // Each part field first went within 1024 on its own: the voter lists end in "and 4 more" and the why is cut at a word; the labels are whole.
     e.fields.slice(0, 4).forEach((f, idx) => {
       for (const k of ['A', 'B', 'C', 'D', 'E']) assert.ok(f.value.includes(`**${k}.** ${`${k.toLowerCase()} `.repeat(50).trim()} ·`), `${question}: ${k}`);
-      assert.match(f.value, /\nsage recommends A: why( why)+…\nVoted: Member number 0!{17} and 4 more · Not voted: nobody\n/);
+      assert.match(f.value, /\nsage recommends A: why( why)+…\nVoted: \*\*Member number 0!{17}\*\* and 4 more · Not voted: nobody\n/);
       assert.ok(f.name.length <= 256 && f.name.startsWith(`Part ${idx + 1} · q q q`), f.name);
       if (question + 9 <= 256) assert.equal(f.name, `Part ${idx + 1} · ${'q '.repeat(question / 2).trim()}`); // the name is cut only for the 256 limit
     });
@@ -158,7 +158,7 @@ test('F-T27-30: with no reason to drop, the budget cuts in order: the voter list
   assert.equal(e.fields.length, 4);
   for (const f of e.fields) {
     assert.ok(f.value.length <= 1024 && f.value.length > 900, `${f.value.length}`);
-    assert.match(f.value, /Voted: Member number 0!{17} and 4 more · Not voted: nobody/);
+    assert.match(f.value, /Voted: \*\*Member number 0!{17}\*\* and 4 more · Not voted: nobody/);
     assert.match(f.value, /sage recommends A: why( why)+…\n/);
     for (const k of ['A', 'B', 'C', 'D', 'E']) assert.match(f.value, new RegExp(`\\*\\*${k}\\.\\*\\* ${k.toLowerCase()}( ${k.toLowerCase()}){24} ·`));
     assert.equal(f.name, `Part ${e.fields.indexOf(f) + 1} · ${'q '.repeat(50).trim()}`);
@@ -248,17 +248,17 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
     { type: 'press', by: digits, part: 0, option: 'A', at: T0 + 1, via: 'discord', reason: 'yes' },
     { type: 'press', by: odd, part: 0, option: 'A', at: T0 + 2, via: 'discord', reason: 'also yes' });
   const [e] = card(gate, { kind: 'batch', task: 'T1', title: 't', parts: [{ question: 'q', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] }, people).embeds;
-  assert.match(e.fields[0].value, /\*\*A\.\*\* a · Recommended · 2 votes \(member …6789, member\)\n/);
-  assert.match(e.fields[0].value, /\nVoted: member …6789, member · Not voted: Ana\n/);
+  assert.match(e.fields[0].value, /\*\*A\.\*\* a · Recommended · 2 votes \(\*\*member …6789\*\*, \*\*member\*\*\)\n/);
+  assert.match(e.fields[0].value, /\nVoted: \*\*member …6789\*\*, \*\*member\*\* · Not voted: \*\*Ana\*\*\n/);
   assert.deepEqual(e.fields.slice(1), [{ name: 'member …6789, part 1', value: 'yes' }, { name: 'member, part 1', value: 'also yes' }]);
   assert.equal(note('not-asker', gate, people.names).content, 'Only member, who asked B, can withdraw it.');
-  assert.match(confirmEnd(gate, people).content, /Part 1 goes to A: 2 of 3 votes \(member …6789, member\)\./);
+  assert.match(confirmEnd(gate, people).content, /Part 1 goes to A: 2 of 3 votes \(\*\*member …6789\*\*, \*\*member\*\*\)\./);
   const text = JSON.stringify([e, confirmEnd(gate, people), note('not-asker', gate, people.names)]);
   assert.doesNotMatch(text, /maya|123456789012346789/);
   // On 56e5910 the fallback showed the last 4 characters of any id ("member …maya").
   const maya = peopleOf([{ id: MAYA, name: '', roles: ['drv'] }], ROLES);
   const b9 = apply(openAsk('B9', T0), maya, { type: 'press', by: MAYA, part: 0, option: 'A', at: T0 + 1, via: 'discord' });
-  assert.match(card(b9, ASKS.B9, maya).embeds[0].fields[0].value, /1 vote \(member\)\n/);
+  assert.match(card(b9, ASKS.B9, maya).embeds[0].fields[0].value, /1 vote \(\*\*member\*\*\)\n/);
 });
 
 test('F-T27-30 to F-T27-33: the README states the premise of safe, the budget order and the fallback name', () => {

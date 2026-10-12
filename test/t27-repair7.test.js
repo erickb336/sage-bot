@@ -30,7 +30,7 @@ test('F-T27-50: at most 4 spacing or enclosing marks on one letter, beside the 3
   for (const whole of ['ကျော်', 'ကျော်ဇင်', 'مُحَمَّد', 'שָׁלוֹם', 'র‍্য', 'ണ്‍']) assert.equal(safe(whole), whole, whole);
   // On the card: the voter list and the reason field show 4 stems; a reason that is one long grapheme of stems is capped, not cut at 200.
   const embed = build(['Maya', `Mal${STEM.repeat(14)}`], [undefined, `a${STEM.repeat(300)}`]);
-  assert.match(embed.fields[0].value, new RegExp(`\\nVoted: Maya, Mal${STEM}{4} · Not voted: nobody\\n`, 'v'));
+  assert.match(embed.fields[0].value, new RegExp(`\\nVoted: \\*\\*Maya\\*\\*, \\*\\*Mal${STEM}{4}\\*\\* · Not voted: nobody\\n`, 'v'));
   assert.deepEqual(embed.fields[1], { name: `Mal${STEM.repeat(4)}, part 1`, value: `a${STEM.repeat(4)}` });
 });
 
@@ -38,7 +38,7 @@ test('F-T27-49: the null notehead U+1D159 looks blank, so it goes; a name of onl
   assert.equal(safe('\u{1D159}'), '');
   assert.equal(safe('a\u{1D159}b \u{1D158}'), 'ab \u{1D158}'); // the visible notehead next to it stays
   const embed = build(['Maya', '\u{1D159}\u{1D159}\u{1D159}'], [undefined, '\u{1D159}']);
-  assert.match(embed.fields[0].value, /\nVoted: Maya, member …0001 · Not voted: nobody\n/);
+  assert.match(embed.fields[0].value, /\nVoted: \*\*Maya\*\*, \*\*member …0001\*\* · Not voted: nobody\n/);
   assert.equal(embed.fields.length, 1); // a reason of only the blank symbol gets no field
 });
 

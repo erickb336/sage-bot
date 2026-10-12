@@ -11,7 +11,7 @@
 // A sage-leads-only gate is the automatic-merge question (LEADS_QUESTION in src/bridge.js) with the options Yes|No. Only the sage-leads answer it,
 // as a recommendation; the owner decides at the terminal. --leads reads the gate from the logbook of the project and refuses any other.
 // Its list is `<votes list>.leads`. A gate is in one list at most: a mark moves it.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { notLeadsOnly } from '../src/bridge.js';
 import { forTerminal } from '../src/clean.js';
 import { loadProjects, pickProject, projectHere } from '../src/projects.js';
@@ -43,9 +43,12 @@ try {
   // The lists before G45 A get the folder of each project, once; their bare gate ids (before T132) become keys of the own project.
   migrateMarks(config, pickProject(projects).name, new Map(projects.map((p) => [p.name, p.project])));
   if (mode === '--leads') {
-    // A missing or wrong sagePath gives one line, never the child's stack (F-T73-7).
-    const rows = await sageTool(project).gates().catch(() => {
-      throw new Error(`could not read the gates of ${project.name} with the sage state tool ${project.sagePath}. Nothing changed.`);
+    // One line that names the cause, never the child's stack (F-T73-7): a missing tool, else the tool's own refusal (a "sage: " line,
+    // such as a project with no logbook), else the first line of the error (F-T94-2).
+    const rows = await sageTool(project).gates().catch((e) => {
+      const cause = !existsSync(project.sagePath) ? `the sage state tool ${project.sagePath} does not exist`
+        : /^sage: (.*)$/m.exec(e?.message)?.[1] ?? `the sage state tool ${project.sagePath} failed: ${String(e?.message ?? e).split('\n')[0]}`;
+      throw new Error(`could not read the gates of ${project.name}: ${cause}. Nothing changed.`);
     });
     const row = rows.find((r) => r.id === args[0]);
     const why = row ? notLeadsOnly(row) : `${args[0]} is not a gate of the sage project ${project.name}`;

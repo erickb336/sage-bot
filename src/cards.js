@@ -48,7 +48,7 @@ const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}
 /**
  * Untrusted text as one inert line: the allow-list above, then Discord markdown escaped (discord.js `escapeMarkdown`), every `[`, `]`, `<`
  * and `>` escaped (no masked link, mention, timestamp, emoji code or quote; "A > B" and "x <= y" keep their meaning), a leading `-#`
- * escaped (no subtext), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
+ * escaped (no subtext), every `*`, `_`, `~` and `|` escaped (escapeMarkdown pairs a run of them unevenly: F-T50-1), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
  * gets no field, because Discord refuses an empty field value, and a name of '' falls back (see `who`).
  */
 export function safe(text) {
@@ -74,7 +74,10 @@ export function safe(text) {
     out += keep;
   }
   // One line first, so that the heading and list escapes see the start of the text.
-  return escapeMarkdown(out.replace(/ +/g, ' ').trim(), ESCAPE_ALL).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// ');
+  // escapeMarkdown pairs a run of `*`, `_`, `~` or `|` unevenly (F-T50-1): each one waits as a private-use character (never kept above)
+  // while it runs, then comes back escaped.
+  const held = out.replace(/ +/g, ' ').trim().replace(/[*_~|]/g, (c) => String.fromCharCode(0xe000 + '*_~|'.indexOf(c)));
+  return escapeMarkdown(held, ESCAPE_ALL).replace(/[\uE000-\uE003]/g, (c) => `\\${'*_~|'[c.charCodeAt(0) - 0xe000]}`).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// ');
 }
 const GRAPHEMES = new Intl.Segmenter();
 /**
@@ -102,6 +105,8 @@ const cutAtWord = (text, max) => {
 export const stamp = (ms, style = 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 /** A person's name made safe; when it is missing or visibly empty, "member …6789" (the last 4 digits of a Discord id) or "member" for any other id, never the raw id (F-T27-29, F-T27-33). */
 const who = (id, names) => safe(names.get(id) ?? '') || (/^\d{4,}$/.test(id) ? `member …${id.slice(-4)}` : 'member');
+/** A name in a list of people, in bold: `safe` escapes every `*`, so a name such as "Maya, Erick, Jon" stays one bold name (F-T37-1). */
+const bold = (id, names) => `**${who(id, names)}**`;
 const label = (p, key) => p.options[key] ?? key;
 /** The sage-lead who acted, "Jon (sage-lead)", or "a sage-lead" when the gate does not know (a gate saved before T39). */
 const lead = (id, names) => id ? `${who(id, names)} (${LEAD})` : `a ${LEAD}`;
@@ -261,7 +266,7 @@ function batch(gate, ask, holders, names, shut) {
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
       : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${top ? `${part.tied.join(', ')} at ${plural(top, 'vote')} each` : 'no votes'}.**${shut ? '' : ` A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`}`
+      : !voting ? `**Tied: ${part.tied.join(', ')}.**${shut ? '' : ` A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`}`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
@@ -270,7 +275,7 @@ function batch(gate, ask, holders, names, shut) {
         { chosen: p.final ? p.final.option === k : o.status === 'decided' && o.option === k, disabled: !voting || Boolean(p.final) })).filter(Boolean)));
     /** The field of the part under the caps of a plan: the voter lists, the why, the labels and the question shrink; the keys and the counts never. */
     return ({ voters, why, label: cap, question }) => {
-      const named = (ids) => list(ids.map((id) => who(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')), voters);
+      const named = (ids) => list(ids.map((id) => bold(id, names) + (ballots.get(id)?.via === 'terminal' ? ' (terminal)' : '')), voters);
       return {
         name: cutAtWord(`Part ${n} · ${cutAtWord(p.question, question)}`, LIMIT.name),
         value: [
@@ -303,7 +308,7 @@ function batch(gate, ask, holders, names, shut) {
     ...(!shut && { footer }),
   });
   // The voter cap starts at the longest list that the holders can make, so that the first step cuts a list.
-  const plan = { reasons: reasons.length, voters: [...holders].reduce((sum, id) => sum + who(id, names).length + 13, 0), ...caps(ask) };
+  const plan = { reasons: reasons.length, voters: [...holders].reduce((sum, id) => sum + who(id, names).length + 17, 0), ...caps(ask) };
   const options = gate.parts.reduce((sum, part) => sum + part.options.length, 0);
   return { embed: budget(build, plan, { reasons: Infinity, voters: options + 2 * gate.parts.length, why: gate.parts.length, label: options, question: gate.parts.length }), rows };
 }
@@ -320,13 +325,18 @@ export function reasonModal(gate, ask, part, index) {
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
 
-/** The private confirm before a sage-lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters. */
-export function confirmEnd(gate, { holders, names }) {
+/**
+ * The private confirm before a sage-lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters.
+ * A part with the owner's final answer from the terminal (`ask.parts[i].final`) shows that answer: the end does not change it (F-T56-1).
+ */
+export function confirmEnd(gate, { holders, names }, ask) {
   const tallies = gate.parts.map((part) => tally(part, holders));
   const text = (cap) => [`**End ${gate.id} now?**`, ...tallies.map((counts, i) => {
     const { top, tied } = leaders(counts);
-    return top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
-      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${list(counts.get(tied[0]).map((id) => who(id, names)), cap)}).`
+    const final = ask?.parts[i].final;
+    return final ? `Part ${i + 1} has the final answer from the terminal: ${final.text}.`
+      : top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
+      : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${list(counts.get(tied[0]).map((id) => bold(id, names)), cap)}).`
       : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until a ${LEAD} breaks the tie.`;
   }), 'Nobody can vote after this.'].join('\n');
   // A team of 2 to 5 always fits whole; for a far larger team the voter lists shrink to "and N more", the overshoot spread over the parts (F-T27-36).
@@ -358,11 +368,13 @@ const NOTES = {
   'wrong-kind': () => 'This is a single question, not a vote: there is nothing to end and no tie to break.',
   'not-tied': () => 'This part is not tied, so there is no tie to break.',
   'not-tied-option': () => 'Only one of the tied options can break the tie.',
+  // A reason form sent after the vote ended: the press before it counts, only the reason is too late (F-T42-1).
+  'late-reason': (g) => `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your vote counts; your reason came after the end, so it is not on the card.`,
   full: () => 'This part already has the most voters it can count. Your press did not count.',
   // On a sage-leads-only card (T73) every press is a recommendation, also the owner's own: the owner decides only at the terminal.
   closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${lead(g.outcome.by, names)}: ${g.outcome.option}. `
       + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${OWNER} decides at the terminal. Your press did not count.`
     : g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
-    : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${who(g.askedBy, names)}. Nothing to answer.`
+    : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${ask?.leads ? OWNER : who(g.askedBy, names)}. Nothing to answer.`
     : `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your press did not count.`,
 };
