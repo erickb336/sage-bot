@@ -5,7 +5,7 @@
 // every probe and tool call with no sandbox) makes every boundary row FAIL, and a fake that refuses everything makes every row PASS.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from './bridge-setup.js';
@@ -48,14 +48,14 @@ const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 
  * `killsHostControl` (a signal), a load sends it to the host control that runs it, which then prints nothing (F-T181-1); crontab: "no crontab", exit 1, and a log.
  * No test reaches the real launchd or crontab (G73).
  */
-function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false, listExit = 113, killsHostControl = '' } = {}) {
+function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, intruder = '', removeFails = false, listExit = 113, killsHostControl = '' } = {}) {
   const bin = join(root, 'bin'), state = join(root, 'security-state.json'), log = join(root, 'security-calls.log');
   mkdirSync(bin, { recursive: true });
   writeFileSync(state, sb({ list: [LOGIN], keychains: [LOGIN], items: key ? [{ account: ACCOUNT, service: SERVICE, value: key, keychain: LOGIN }] : [] }));
-  writeFileSync(join(root, 'fake-security.mjs'), `import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+  writeFileSync(join(root, 'fake-security.mjs'), `import { appendFileSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 const [verb, ...args] = process.argv.slice(2), s = JSON.parse(readFileSync(${sb(state)}, 'utf8'));
 appendFileSync(${sb(log)}, JSON.stringify([verb, ...args]) + '\\n');
-if (verb === ${sb(failVerb)}) { console.error('security: ' + verb + ' ' + args.join(' ') + ': sample error'); process.exit(1); }
+if (verb === ${sb(failVerb)}) { if (${sb(intruder)}) { writeFileSync(${sb(intruder)} + '/other-process.txt', 'not yours'); symlinkSync('/nonexistent-target', ${sb(intruder)} + '/other-link'); } console.error('security: ' + verb + ' ' + args.join(' ') + ': sample error'); process.exit(1); }
 if (verb === 'delete-keychain') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${slowDelete});
 const opt = (f) => { const i = args.indexOf(f); return i === -1 ? undefined : args[i + 1]; };
 if (verb === 'list-keychains') { if (args.includes('-s')) s.list = ${breakRestore} ? ['/x/wrong.keychain-db'] : args.slice(args.indexOf('-s') + 1); else console.log(s.list.map((p) => '    "' + p + '"').join('\\n')); }
@@ -681,6 +681,22 @@ test('F-T180-1: a dry run that fails in a fixture leaves nothing in --out, so th
     const good = fakeSecurity(join(root, 'good'));
     const { report } = await proveLive(empty, { env: good.env, dryRun: true });
     assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key'); // the same --out, again
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T167-2: a dry run that fails removes only what it made and recorded: a file and a link that another process put in --out during the run stay, and --out stays with them', async () => {
+  const root = liveScratch();
+  try {
+    const shared = join(root, 'shared'), fresh = join(root, 'fresh');
+    mkdirSync(shared);
+    // case A: --out was there (empty), another writer adds a file and a link during the run
+    await assert.rejects(proveLive(shared, { env: fakeSecurity(join(root, 'a'), { failVerb: 'create-keychain', intruder: shared }).env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(shared).sort(), ['other-link', 'other-process.txt'], 'only the other writer\'s entries are left');
+    assert.equal(readFileSync(join(shared, 'other-process.txt'), 'utf8'), 'not yours');
+    assert.ok(lstatSync(join(shared, 'other-link')).isSymbolicLink(), 'the link is still a link');
+    // case B: the run made --out; the other writer adds entries; --out stays because it is not empty
+    await assert.rejects(proveLive(fresh, { env: fakeSecurity(join(root, 'b'), { failVerb: 'create-keychain', intruder: fresh }).env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(fresh).sort(), ['other-link', 'other-process.txt'], '--out stays and holds only the other writer\'s entries');
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 

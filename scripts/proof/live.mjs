@@ -17,7 +17,7 @@
 // session and on a signal (G73).
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, writeFileSync, writeSync } from 'node:fs';
 import { constants, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -433,6 +433,9 @@ function rgOn(leadPath) {
   return where.status === 0 && where.stdout.trim().startsWith('/') ? where.stdout.trim() : null;
 }
 
+/** The entries that a run makes in --out: its keychain, dummy and temp folders, and what prove() writes (the two worlds and the report). */
+const RUN_ENTRIES = ['keychain', 'dummy', 'tmp', 'control', 'live', 'report.json'];
+
 /**
  * Runs the live proof in `root`. @param {string} root
  * @param {{ env?: NodeJS.ProcessEnv, dryRun?: boolean, claude?: string, leadPath?: string, home?: string }} [o]  env: the host's (its PATH finds
@@ -458,7 +461,7 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   const rg = rgOn(leadPath);
   if (!rg && !dryRun) throw new Error(`ripgrep (rg) is not on the sessions' PATH ${leadPath}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
-  const existed = existsSync(root); // F-T180-1: what a failed dry run removes is only what this run made
+  const existed = existsSync(root); // F-T180-1, F-T167-2: a failed dry run removes only the entries of RUN_ENTRIES, which this run made
   mkdirSync(root, { recursive: true });
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
@@ -489,9 +492,13 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
     if (key && lines.some((l) => l.includes(key))) throw new Error('the summary holds the key: nothing was printed.');
     return { report, summary: lines.join('\n') };
   } catch (e) {
-    // F-T180-1: a dry run that fails after the folder is made leaves nothing, so the same --out can be used again. The folder was empty
-    // (refuseUsed), so every entry in it is this run's. A real run keeps its folder: it may hold the evidence of the failure.
-    if (dryRun) { if (existed) for (const n of readdirSync(root)) rmSync(join(root, n), { recursive: true, force: true }); else rmSync(root, { recursive: true, force: true }); }
+    // F-T180-1, F-T167-2: a dry run that fails leaves nothing of its own, so the same --out can be used again. It removes only the entries this
+    // run made in --out (RUN_ENTRIES, each a path in --out; a link among them goes as a link), never a file that another process added, and --out
+    // itself only when this run made it and it is empty (rmdir). A real run keeps its folder: it may hold the evidence of the failure.
+    if (dryRun) {
+      for (const n of RUN_ENTRIES) rmSync(join(root, n), { recursive: true, force: true });
+      if (!existed) try { rmdirSync(root); } catch { /* another process put an entry there: it stays */ }
+    }
     throw e;
   } finally {
     if (key) try { redactLeaks(root, key); } catch { /* the folder is gone */ } // also after a failure: no file of a run that stopped keeps the key (F-T165-15)
