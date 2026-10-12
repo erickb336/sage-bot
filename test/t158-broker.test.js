@@ -32,7 +32,7 @@ function noPath(text, folders) {
  * `session` is the session's name; `around(args, run, options)` wraps each git call of the broker, and `fetch(url, init, fake)` each
  * REST request. Every refusal goes through noPath.
  */
-function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run(), fetch } = {}) {
+function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run(), fetch, repo = REPO } = {}) {
   const root = realpathSync(tempFolder('t158-')); // the broker compares the temp folder with its real path
   const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', session), tmp = join(root, 'tmp', session);
   const workDir = join(root, 'broker');
@@ -46,9 +46,9 @@ function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1
   sh(root, 'clone', '--quiet', origin, folder);
   const calls = [];
   const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return around(args, () => runGit(args, timeout ? { ...o, timeout } : o), o); };
-  const gh = fakeGitHub({ owner: OWNER, repo: REPO, token: TOKEN, pulls });
+  const gh = fakeGitHub({ owner: OWNER, repo, token: TOKEN, pulls });
   const logs = [];
-  const made = createBroker({ policy: { session, folder, tmp }, github: { owner: OWNER, repo: REPO, remote: remote ?? origin },
+  const made = createBroker({ policy: { session, folder, tmp }, github: { owner: OWNER, repo, remote: remote ?? origin },
     token, workDir, fetch: fetch ? (url, init) => fetch(url, init, gh.fetch) : gh.fetch, git, log: (line) => logs.push(line) });
   const broker = { ...made, call: async (verb, input) => {
     const r = await made.call(verb, input);
@@ -133,6 +133,50 @@ test('upload: refuses a merge, a change under .github and a message with a hidde
   sh(w.folder, 'merge', '--quiet', '--no-edit', side);
   await refused(sh(w.folder, 'rev-parse', 'HEAD'), /is a merge or has no parent/);
   assert.deepEqual(w.refs(), before);
+});
+
+test('F-T158-21, G82 A: an upload carries main\'s .github as it is now, in any letter case', async () => {
+  const w = world();
+  sh(w.folder, 'config', 'core.ignorecase', 'false'); // the Mac's disk ignores case; git must keep the name as written
+  const refused = async (commit) => {
+    const r = await w.broker.call('upload', { commit });
+    assert.deepEqual(r, { ok: false, refused: 'the session\'s branch must carry main\'s .github as it is now; a new session can start from the current main. The broker did nothing more.' });
+  };
+  // On main: A adds .github/workflows/keep.yml and .GitHub/workflows/up.yml; A2 adds .github/workflows/old.yml; B removes up.yml
+  // and old.yml. Distinct file names, because the Mac's disk shows .github and .GitHub as one folder.
+  w.commit('.github/workflows/keep.yml', 'on: pull_request\n');
+  const a = w.commit('.GitHub/workflows/up.yml', 'on: push\n');
+  const a2 = w.commit('.github/workflows/old.yml', 'on: push\n');
+  sh(w.folder, 'rm', '--quiet', '.github/workflows/old.yml', '.GitHub/workflows/up.yml');
+  sh(w.folder, 'commit', '--quiet', '-m', 'B');
+  const b = sh(w.folder, 'rev-parse', 'HEAD');
+  sh(w.folder, 'push', '--quiet', 'origin', 'HEAD:main');
+  // (1) R761's case: a session on the old main commit A2 commits a harmless file; its .github is not main's now.
+  sh(w.folder, 'reset', '--quiet', '--hard', a2);
+  await refused(w.commit('c.txt', 'harmless\n'));
+  // (4) On A, .github is main's now, and only .GitHub is old: a check that reads only ".github" lets this one go.
+  sh(w.folder, 'reset', '--quiet', '--hard', a);
+  await refused(w.commit('c.txt', 'harmless\n'));
+  assert.equal(w.refs()['refs/heads/sage-lead/s1'], undefined);
+  // (2) A session on the current main B uploads.
+  sh(w.folder, 'reset', '--quiet', '--hard', b);
+  const r1 = await w.broker.call('upload', { commit: w.commit('c.txt', 'harmless\n') });
+  assert.equal(r1.ok, true, r1.refused);
+  // (3) Main changes .github after that upload: the same session's next fast-forward still goes up (the accepted cost of G82 A).
+  const seed = join(w.root, 'seed');
+  sh(seed, 'pull', '--quiet', w.origin, 'main');
+  mkdirSync(join(seed, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(seed, '.github', 'workflows', 'new.yml'), 'on: push\n');
+  sh(seed, 'add', '.github'); sh(seed, 'commit', '--quiet', '-m', 'C'); sh(seed, 'push', '--quiet', w.origin, 'main');
+  const r2 = await w.broker.call('upload', { commit: w.commit('d.txt', 'two\n') });
+  assert.deepEqual([r2.ok, r2.refused, r2.pushed], [true, undefined, true]);
+});
+
+test('F-T158-21: an error that reads a tree refuses (fail closed)', async () => {
+  const w = world({ around: (args, run) => (args.includes('ls-tree') ? Promise.reject(new Error('sample failure')) : run()) });
+  const r = await w.broker.call('upload', { commit: w.commit('a.txt', 'one\n') });
+  assert.deepEqual(r, { ok: false, refused: 'git ls-tree failed. The broker did nothing more.' });
+  assert.equal(w.refs()['refs/heads/sage-lead/s1'], undefined);
 });
 
 test('host git never runs in the session folder: no call there, and the session\'s hooks and config never run', async () => {
@@ -409,6 +453,17 @@ test('F-T158-16: the verbs of one session run one at a time; two sessions run at
   assert.deepEqual(all.map((r) => r.ok), [true, true, true], all.map((r) => r.refused).join(' '));
   assert.deepEqual(events.slice(0, 2).sort(), ['s1 start', 's2 start'], events.join(', ')); // two sessions at once
   assert.deepEqual(events.filter((e) => e.startsWith('s1')), ['s1 start', 's1 end', 's1 start', 's1 end'], events.join(', ')); // one session: one at a time
+});
+
+test('F-T158-22: session s1 of two repositories runs at once; the verbs of one s1 still run one at a time', async () => {
+  // Each REST request takes 300 ms more, and says when it starts and ends.
+  const events = [];
+  const slow = (name) => async (url, init, fake) => { events.push(`${name} start`); await sleep(300); events.push(`${name} end`); return fake(url, init); };
+  const a = world({ repo: 'repo-a', fetch: slow('a') }), b = world({ repo: 'repo-b', fetch: slow('b') });
+  const all = await Promise.all([a.broker.call('pr_view'), b.broker.call('pr_view'), a.broker.call('pr_view')]);
+  assert.deepEqual(new Set(all.map((r) => r.refused)), new Set(['this session has no pull request yet. The broker did nothing more.'])); // each read GitHub
+  assert.deepEqual(events.slice(0, 2), ['a start', 'b start'], events.join(', ')); // b does not wait for a's slow request
+  assert.deepEqual(events.filter((e) => e.startsWith('a')), ['a start', 'a end', 'a start', 'a end'], events.join(', ')); // one s1: one at a time
 });
 
 /** `run` with LIMITS[key] set to `ms`, and the limit back after. */

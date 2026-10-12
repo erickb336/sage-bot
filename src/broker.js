@@ -72,6 +72,9 @@ export function scopeOf(policy, { owner, repo, remote }) {
   return {
     session: policy.session, branch: `sage-lead/${policy.session}`, folder: policy.folder, tmp: policy.tmp,
     owner, repo, full: `${owner}/${repo}`, remote: remote ?? `https://github.com/${owner}/${repo}.git`,
+    // The key of the session's queue (F-T158-22): one bridge serves several projects, and each can have a session s1.
+    // GitHub names ignore letter case, so one repository gives one key.
+    queue: `${owner}/${repo}/${policy.session}`.toLowerCase(),
   };
 }
 
@@ -205,8 +208,12 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
         if (ci) refuse(`commit ${c} changes ${JSON.stringify(keep(ci))}; a session does not change .github (workflows run with the repository's rights)`);
         made.set(c, await remake(m, c, made.get(parents[0]) ?? parents[0]));
       }
-      const head = made.get(commit);
-      const old = m.heads[BRANCH];
+      // G82 A (F-T158-21): the new head carries main's .github as it is now, or the one the session's branch already carries.
+      const github = async (rev) => (await m.text(['ls-tree', '-z', rev])).split('\0').filter((e) => e.slice(e.indexOf('\t') + 1).toLowerCase() === '.github').join('\0');
+      const head = made.get(commit), old = m.heads[BRANCH], ci = await github(commit);
+      if (ci !== await github(MAIN) && !(old && ci === await github(BRANCH))) {
+        refuse('the session\'s branch must carry main\'s .github as it is now; a new session can start from the current main');
+      }
       if (old === head) return { branch: s.branch, head, commits: lines.length, pushed: false };
       if (old) { try { await m.g(['merge-base', '--is-ancestor', BRANCH, head]); } catch { refuse(`the upload is not a fast-forward of ${s.branch}: the broker never rewrites the session's branch`); } }
       await m.g(['push', '--quiet', '--no-verify', s.remote, `${head}:${BRANCH}`]); // no +, no delete, one fixed ref
@@ -301,9 +308,9 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
    * one session run one at a time, in the order of the calls (F-T158-16); the verbs of other sessions run meanwhile.
    */
   function call(verb, input) {
-    const run = (queues.get(s.session) ?? Promise.resolve()).then(() => callNow(verb, input));
-    queues.set(s.session, run);
-    run.then(() => { if (queues.get(s.session) === run) queues.delete(s.session); });
+    const run = (queues.get(s.queue) ?? Promise.resolve()).then(() => callNow(verb, input));
+    queues.set(s.queue, run);
+    run.then(() => { if (queues.get(s.queue) === run) queues.delete(s.queue); });
     return run;
   }
   async function callNow(verb, input = {}) {
@@ -323,7 +330,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
   }
   return { call, verbs: Object.keys(VERBS), scope: s };
 }
-/** The last call of each session that runs or waits, by session (F-T158-16). */
+/** The last call of each session that runs or waits, by repository and session (F-T158-16, F-T158-22). */
 const queues = new Map();
 
 /**
