@@ -74,12 +74,14 @@ function scopeOf(policy, { owner, repo, remote }, logbook) {
   if (!SESSION.test(policy?.session ?? '')) throw new TypeError('the broker needs the session policy of one bridge session');
   if (!NAME.test(owner ?? '') || !NAME.test(repo ?? '')) throw new TypeError('the broker needs a GitHub owner and repository name');
   // The session's fixed logbook scope (G81), from the bridge when it starts the session: its project's state tool (sageTool in
-  // src/sage.js, which fixes the project), its one task and its run. The session never gives any of them.
-  if (logbook !== undefined && !(typeof logbook?.tool?.command === 'function' && /^T\d{1,6}$/.test(logbook.task ?? '') && /^R\d{1,6}$/.test(logbook.run ?? ''))) {
+  // src/sage.js, which fixes the project), its one task and its run. The session never gives any of them. The broker reads each
+  // value once and keeps a frozen copy, so a later change to the bridge's object reaches no argv (F-T195-1).
+  const l = logbook === undefined ? undefined : Object.freeze({ command: logbook?.tool?.command, task: logbook?.task, run: logbook?.run });
+  if (l && !(typeof l.command === 'function' && /^T\d{1,6}$/.test(l.task ?? '') && /^R\d{1,6}$/.test(l.run ?? ''))) {
     throw new TypeError('the broker\'s logbook scope needs the project\'s state tool, one task id (T<n>) and one run id (R<n>)');
   }
   return {
-    logbook,
+    logbook: l,
     session: policy.session, branch: `sage-lead/${policy.session}`, folder: policy.folder, tmp: policy.tmp,
     owner, repo, full: `${owner}/${repo}`, remote: remote ?? `https://github.com/${owner}/${repo}.git`,
     // The key of the session's queue (F-T158-22): one bridge serves several projects, and each can have a session s1.
@@ -315,6 +317,8 @@ export function createBroker({ policy, github, logbook, token, workDir, fetch, g
 
   /** The session's logbook scope, or a refusal: a session that the bridge started with no task has no logbook verb. */
   const scope = () => s.logbook ?? refuse('this session has no task in the logbook');
+  /** The status of the session's run_done that the state tool took, or undefined: the broker's per-session lock (F-T196-1). */
+  let recorded;
   const oneOf = (what, value, list) => (list.includes(value) ? value : refuse(`${what} is one of ${list.join(', ')}`));
   /**
    * One command of the state tool (G30 A, G81): the argv that the verb fixes, the project that sageTool fixes, no shell, and no longer
@@ -323,7 +327,7 @@ export function createBroker({ policy, github, logbook, token, workDir, fetch, g
    */
   async function state(verb, args, writes = true) {
     let out;
-    try { out = await within(LIMITS.sageMs, 'the state tool took too long', (signal) => s.logbook.tool.command(args, { signal })); }
+    try { out = await within(LIMITS.sageMs, 'the state tool took too long', (signal) => s.logbook.command(args, { signal })); }
     catch (e) {
       if (!(e instanceof Refusal)) refuse(`the state tool refused ${verb}${Number.isSafeInteger(e?.code) ? ` (exit code ${e.code})` : ''}`);
       throw writes ? new Unsure(`${e.message}; the logbook may have changed`) : e;
@@ -333,9 +337,13 @@ export function createBroker({ policy, github, logbook, token, workDir, fetch, g
 
   const VERBS = {
     // The logbook verbs (T189): the session's own run, task and pull request only. No other command of the state tool is reachable.
-    run_done: { keys: ['status'], run: ({ status }) => {
+    // The session's run is recorded once (F-T196-1): after the first run_done that the tool takes, each later one refuses.
+    run_done: { keys: ['status'], run: async ({ status }) => {
       const l = scope();
-      return state('run_done', ['run', 'done', l.run, `--status=${oneOf('status', status, RUN_STATUS)}`]);
+      if (recorded) refuse(`this session's run is already recorded as ${recorded}`);
+      const r = await state('run_done', ['run', 'done', l.run, `--status=${oneOf('status', status, RUN_STATUS)}`]);
+      recorded = status;
+      return r;
     } },
     verdict: { keys: ['kind', 'cycle'], run: async ({ kind, cycle }) => {
       const l = scope();

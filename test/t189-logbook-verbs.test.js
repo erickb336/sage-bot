@@ -16,31 +16,70 @@ const TOKEN = 'sample-token-not-real';
 const OWNER = 'sample-owner', REPO = 'sample-repo';
 const HEAD = 'ab'.repeat(20);
 
-// The dummy state tool: it appends { pid, args } to DUMMY_LOG, then hangs (DUMMY_HANG names the command), fails with a path in its
-// error (DUMMY_FAIL), or prints one line with a hidden character (U+202E) that the broker must not pass to the session.
-const DUMMY = `import { appendFileSync } from 'node:fs';
+// The dummy state tool: it appends { pid, args, env } to the log that dummy.json (beside it) names, then hangs (`hang` names the
+// command), fails with a path in its error (`fail`), or prints one line with a hidden character (U+202E) that the broker must not pass
+// to the session. Its settings are in a file, not in its environment: the broker passes only an allow-listed environment (F-T195-2).
+const DUMMY = `import { appendFileSync, readFileSync } from 'node:fs';
+const c = JSON.parse(readFileSync(new URL('./dummy.json', import.meta.url), 'utf8'));
 const args = process.argv.slice(2);
-appendFileSync(process.env.DUMMY_LOG, JSON.stringify({ pid: process.pid, args }) + '\\n');
-if (args[0] === process.env.DUMMY_HANG) { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
-else if (args[0] === process.env.DUMMY_FAIL) { process.stderr.write('refused: /Users/someone/.claude/sage/x/tasks.tsv is locked\\n'); process.exit(3); }
+appendFileSync(c.log, JSON.stringify({ pid: process.pid, args, env: process.env }) + '\\n');
+if (args[0] === c.hang) { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
+else if (args[0] === c.fail) { process.stderr.write('refused: /Users/someone/.claude/sage/x/tasks.tsv is locked\\n'); process.exit(3); }
 else process.stdout.write('dummy ' + args[0] + ' ok\\u202E\\n');
 `;
 
-function world({ pulls = [samplePull({ owner: OWNER, repo: REPO, number: 7, branch: 'sage-lead/s1' })], hang = '', fail = '', logbook = true } = {}) {
+function world({ pulls = [samplePull({ owner: OWNER, repo: REPO, number: 7, branch: 'sage-lead/s1' })], hang = '', fail = '', logbook = true, env = { PATH: process.env.PATH } } = {}) {
   const root = realpathSync(tempFolder('t189-'));
   const project = join(root, 'project'), log = join(root, 'argv.log'), dummy = join(root, 'dummy.mjs');
   for (const d of [project, join(root, 'session'), join(root, 'tmp'), join(root, 'broker')]) mkdirSync(d);
   writeFileSync(dummy, DUMMY);
+  writeFileSync(join(root, 'dummy.json'), JSON.stringify({ log, hang, fail }));
   writeFileSync(log, '');
-  const tool = sageTool({ sagePath: dummy, project, env: { PATH: process.env.PATH, DUMMY_LOG: log, DUMMY_HANG: hang, DUMMY_FAIL: fail } });
+  const tool = sageTool({ sagePath: dummy, project, env });
+  const scope = { tool, task: 'T5', run: 'R12' };
   const gh = fakeGitHub({ owner: OWNER, repo: REPO, token: TOKEN, pulls: pulls.map((p) => ({ ...p, head: { ...p.head, sha: HEAD } })) });
   const broker = createBroker({ policy: { session: 's1', folder: join(root, 'session'), tmp: join(root, 'tmp') },
-    github: { owner: OWNER, repo: REPO, remote: join(root, 'none.git') }, ...(logbook && { logbook: { tool, task: 'T5', run: 'R12' } }),
+    github: { owner: OWNER, repo: REPO, remote: join(root, 'none.git') }, ...(logbook && { logbook: scope }),
     token: () => TOKEN, workDir: join(root, 'broker'), fetch: gh.fetch });
   const runs = () => readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const argv = () => runs().map((r) => r.args);
-  return { root, project, broker, gh, runs, argv };
+  return { root, project, broker, gh, runs, argv, scope, tool };
 }
+
+test('F-T195-1: a change to the bridge\'s logbook object after createBroker reaches no argv', async () => {
+  const w = world();
+  w.scope.task = 'T9';
+  w.scope.run = 'R9';
+  w.scope.tool = { command: async () => 'swapped tool' };
+  w.tool.command = async () => 'swapped command';
+  assert.deepEqual(await w.broker.call('task_status', {}), { ok: true, line: 'dummy task ok ' });
+  assert.deepEqual(await w.broker.call('run_done', { status: 'done' }), { ok: true, line: 'dummy run ok ' });
+  assert.deepEqual(w.argv(), [['task', 'T5', '--project', w.project], ['run', 'done', 'R12', '--status=done', '--project', w.project]]);
+});
+
+test('F-T195-2: a logbook verb gives the state tool only the allow-listed environment, never a token of the bridge', async () => {
+  const env = { PATH: process.env.PATH, HOME: '/sample/home', SAGE_HOME: '/sample/sage', SAGE_WORKTREES: '/sample/wt', SAGE_BOARD_ROOTS: '/sample/b',
+    CLAUDE_CONFIG_DIR: '/sample/claude', LANG: 'C', LC_ALL: 'C', SAMPLE_GH_TOKEN: 'sample-token-not-real', NODE_OPTIONS: '--require=/sample/x.js', GIT_DIR: '/sample/g' };
+  const w = world({ env });
+  assert.equal((await w.broker.call('task_status', {})).ok, true);
+  const { SAMPLE_GH_TOKEN, NODE_OPTIONS, GIT_DIR, ...kept } = env;
+  const { __CF_USER_TEXT_ENCODING, ...seen } = w.runs()[0].env; // macOS adds this one to each process; the bridge does not give it
+  assert.deepEqual(seen, kept);
+});
+
+test('F-T196-1: the session\'s run is recorded once; a later run_done refuses and the tool does not run', async () => {
+  const w = world();
+  assert.equal((await w.broker.call('run_done', { status: 'done' })).ok, true);
+  for (const status of ['blocked', 'done']) {
+    assert.deepEqual(await w.broker.call('run_done', { status }), { ok: false, refused: 'this session\'s run is already recorded as done. The broker did nothing more.' });
+  }
+  assert.equal(w.argv().length, 1);
+  // A run_done that the tool refused records nothing: the next one runs.
+  const f = world({ fail: 'run' });
+  assert.equal((await f.broker.call('run_done', { status: 'done' })).ok, false);
+  assert.match((await f.broker.call('run_done', { status: 'blocked' })).refused, /the state tool refused run_done/);
+  assert.equal(f.argv().length, 2);
+});
 
 test('each logbook verb runs exactly its fixed argv, with the session\'s task, run, pull request and project', async () => {
   const w = world();
