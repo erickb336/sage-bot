@@ -9,24 +9,22 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { githubRest } from './github.js';
+import { githubRest, Refusal } from './github.js';
 import { BRIDGE_PATH, SESSION } from './session-policy.js';
 
 /** The fixed identity of every commit that the broker uploads (G62 a). T161 may give it the GitHub App's own address. */
 export const IDENTITY = { name: 'sage-lead (via sage-bot)', email: 'sage-lead@sage-bot.invalid' };
 /** The base of every session's pull request, and the branch that an upload starts from. */
-export const BASE = 'main';
+const BASE = 'main';
 /** `bytes` and `files`: the object files that an upload copies. `object` and `inflated`: the size of each copied object and of all of
  * them, unpacked, before git reads them (F-T158-10). `gitMs`: the most time of one git call. `restMs` and `tokenMs`: the most time of
- * one REST request, with its answer, and of one call of the token function (F-T158-18). */
+ * one REST request, with its answer, and of one call of the token function (F-T158-18). `output`: the most output of one git call (F-T191-3). */
 export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500, files: 100_000, bytes: 512 * 2 ** 20,
-  object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000, restMs: 60_000, tokenMs: 30_000 };
+  object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000, restMs: 60_000, tokenMs: 30_000,
+  output: 256 * 2 ** 20 };
 
-class Refusal extends Error {}
 /** A push that failed or took too long: GitHub can still have taken it (F-T158-14). */
 class Unsure extends Refusal {}
-/** A REST request or a token lookup that took too long (F-T158-18). */
-class Late extends Refusal {}
 const refuse = (why) => { throw new Refusal(why); };
 
 /** `run(signal)`, but no longer than `ms`: then the signal stops `run`, and the call refuses with `why`, also when `run` does not
@@ -34,11 +32,9 @@ const refuse = (why) => { throw new Refusal(why); };
 async function within(ms, why, run) {
   const stop = new AbortController();
   let timer;
-  const late = new Promise((_, reject) => { timer = setTimeout(() => { stop.abort(); reject(new Late(why)); }, ms); });
+  const late = new Promise((_, reject) => { timer = setTimeout(() => { stop.abort(); reject(new Refusal(why)); }, ms); });
   try { return await Promise.race([run(stop.signal), late]); } finally { clearTimeout(timer); }
 }
-/** After a write to GitHub started, a request that took too long can still have changed the pull request. */
-const mayHave = (e) => { throw e instanceof Late ? new Unsure(`${e.message}; the change may have happened: call pr_view to check`) : e; };
 
 /**
  * The text that the broker lets into GitHub: a pull request's title and body, and each commit message. People read it on GitHub.
@@ -66,7 +62,7 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
  * The one resolver of the broker (standing order 15): the session, its branch, its folders and the repository, from the session
  * policy (`sessionPolicy` in src/session-policy.js) and the bridge's GitHub settings. Nothing else in the broker names them.
  */
-export function scopeOf(policy, { owner, repo, remote }) {
+function scopeOf(policy, { owner, repo, remote }) {
   if (!SESSION.test(policy?.session ?? '')) throw new TypeError('the broker needs the session policy of one bridge session');
   if (!NAME.test(owner ?? '') || !NAME.test(repo ?? '')) throw new TypeError('the broker needs a GitHub owner and repository name');
   return {
@@ -80,21 +76,22 @@ export function scopeOf(policy, { owner, repo, remote }) {
 
 /** Run git, as the broker's own process, never in a session folder, and never longer than `timeout` (F-T158-10): it does not block
  * the sage-bot process. git leads its own process group, so a timeout kills git and every helper that it started (git-remote-http
- * with its connection, F-T158-17). It gives the output as bytes; an error has `killed` when the timeout or the output limit stopped it.
+ * with its connection, F-T158-17). It gives the output as bytes; an error has `killed` when the timeout stopped it, and `tooMuch` when
+ * the output passed `LIMITS.output` (F-T191-3).
  * Tests wrap it to record each call. */
 export function runGit(args, { cwd, env, input, timeout = LIMITS.gitMs }) {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
     const out = [];
-    let size = 0, killed = false;
+    let size = 0, killed = false, tooMuch = false;
     const stop = () => { killed = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group has gone */ } };
     const timer = setTimeout(stop, timeout);
-    child.stdout.on('data', (d) => { out.push(d); size += d.length; if (size > 256 * 2 ** 20) stop(); });
+    child.stdout.on('data', (d) => { out.push(d); size += d.length; if (size > LIMITS.output && !tooMuch) { tooMuch = true; stop(); } });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code, signal) => {
       clearTimeout(timer);
       if (code === 0 && !killed) resolve(Buffer.concat(out));
-      else reject(Object.assign(new Error(`git exited with ${code ?? signal}`), { killed }));
+      else reject(Object.assign(new Error(`git exited with ${code ?? signal}`), tooMuch ? { tooMuch } : { killed }));
     });
     child.stdin.on('error', () => {}); // git can exit before it reads its input; the exit code tells
     child.stdin.end(input);
@@ -122,7 +119,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
   const s = scopeOf(policy, github);
   const tokenNow = () => within(LIMITS.tokenMs, 'the token lookup took too long', () => token());
   const request = githubRest({ api: github.api, token: tokenNow, fetch });
-  const rest = (method, path, body) => within(LIMITS.restMs, 'GitHub took too long', (signal) => request(method, path, body, signal));
+  const rest = (method, path, body, onSend) => within(LIMITS.restMs, 'GitHub took too long', (signal) => request(method, path, body, { signal, onSend }));
   const MAIN = `refs/heads/${BASE}`, BRANCH = `refs/heads/${s.branch}`;
 
   /**
@@ -137,7 +134,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       const g = async (args, input) => {
         try { return await git(['--git-dir', repo, ...NEUTRAL, ...args], { cwd: repo, env, input }); }
         catch (e) {
-          const why = `git ${args[0]} ${e?.killed ? 'took too long' : 'failed'}`;
+          const why = `git ${args[0]} ${e?.tooMuch ? 'printed too much' : e?.killed ? 'took too long' : 'failed'}`;
           throw args[0] === 'push' ? new Unsure(`${why}; the upload may have landed: call upload again to check`) : new Refusal(why);
         }
       };
@@ -158,7 +155,9 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
     await pull(m);
     await m.g(['bundle', 'create', '--quiet', join(m.repo, 'out.bundle'), MAIN, ...(m.heads[BRANCH] ? [BRANCH] : [])]);
     const bundle = writeInTemp(`fetch-${randomBytes(6).toString('hex')}.bundle`, readFileSync(join(m.repo, 'out.bundle')));
-    return { main: m.heads[MAIN], branch: m.heads[BRANCH] ?? null, bundle };
+    // The ids that the bundle holds: GitHub can move a branch between ls-remote and the fetch (F-T191-7).
+    const id = async (ref) => (m.heads[ref] ? (await m.text(['rev-parse', '--verify', ref])).trim() : null);
+    return { main: await id(MAIN), branch: await id(BRANCH), bundle };
   });
 
   /**
@@ -268,8 +267,25 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
     if (number !== undefined && number !== pr?.number) refuse(`#${number} is not this session's pull request${pr ? ` (#${pr.number})` : ''}`);
     return pr;
   }
-  const view = (pr) => ({ number: pr.number, url: pr.html_url, state: pr.merged_at ? 'merged' : pr.state, draft: Boolean(pr.draft),
-    title: keep(pr.title), body: keep(pr.body), head: pr.head.sha, base: pr.base.ref });
+  const view = (pr) => ({ number: pr.number, url: keep(pr.html_url), state: pr.merged_at ? 'merged' : pr.state, draft: Boolean(pr.draft),
+    title: keep(pr.title), body: keep(pr.body), head: pr.head.sha, base: keep(pr.base.ref) });
+  /**
+   * A write to the session's pull request, then its view from GitHub's list. Once the request was sent, any error (a timeout, a 5xx,
+   * a network error, a list that does not show the change yet) can hide a change that landed, so it says so (F-T191-1). An error
+   * before that, for example a token lookup that took too long, sent nothing (F-T194-1).
+   */
+  async function change(verb, method, path, body, number) {
+    let sent = false;
+    try {
+      await rest(method, path, body, () => { sent = true; });
+      const pr = await own(number);
+      if (!pr) refuse('GitHub does not list the session\'s pull request yet');
+      return view(pr);
+    } catch (e) {
+      if (!sent) throw e;
+      throw new Unsure(`${reason(verb, e)}; the change may have happened: call pr_view to check`);
+    }
+  }
   const fields = ({ title, body }) => ({
     ...(title === undefined ? {} : { title: textOf('title', title, LIMITS.title, false) }),
     ...(body === undefined ? {} : { body: textOf('body', body, LIMITS.body, true) }),
@@ -282,10 +298,11 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       if (i.title === undefined || i.body === undefined) refuse('pr_create needs a title and a body');
       if (i.draft !== undefined && typeof i.draft !== 'boolean') refuse('draft must be true or false');
       const f = fields(i);
+      // GitHub's own refusal of a head that does not exist does not say what to do (F-T191-5).
+      if (!await withMirror(async (m) => Boolean(m.heads[BRANCH]))) refuse(`${s.branch} is not on GitHub yet: upload the session's branch first`);
       const pr = await own();
       if (pr) refuse(`this session already has its pull request #${pr.number}; change it with pr_edit`);
-      await rest('POST', `/repos/${s.full}/pulls`, { ...f, head: s.branch, base: BASE, draft: i.draft ?? false, maintainer_can_modify: false }).catch(mayHave);
-      return view(await own().catch(mayHave));
+      return change('pr_create', 'POST', `/repos/${s.full}/pulls`, { ...f, head: s.branch, base: BASE, draft: i.draft ?? false, maintainer_can_modify: false });
     } },
     pr_edit: { keys: ['number', 'title', 'body', 'base'], run: async (i) => {
       if (i.base !== undefined && i.base !== BASE) refuse(`the base of the session's pull request stays ${BASE}`);
@@ -293,8 +310,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       const f = fields(i);
       const pr = await own(i.number);
       if (!pr) refuse('this session has no pull request yet; open it with pr_create');
-      await rest('PATCH', `/repos/${s.full}/pulls/${pr.number}`, f).catch(mayHave);
-      return view(await own(pr.number).catch(mayHave));
+      return change('pr_edit', 'PATCH', `/repos/${s.full}/pulls/${pr.number}`, f, pr.number);
     } },
     pr_view: { keys: ['number'], run: async (i) => {
       const pr = await own(i.number);
@@ -323,13 +339,14 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       return { ok: true, ...(await VERBS[verb].run(input)) };
     } catch (e) {
       if (e instanceof Unsure) return { ok: false, refused: `${e.message}.` };
-      // An error that the broker did not write gives only its code: its text can name a path (F-T158-15).
-      const why = e instanceof Refusal ? e.message : `the broker could not finish ${verb} (${/^E[A-Z0-9]{1,30}$/.test(e?.code) ? e.code : 'an unexpected error'})`;
-      return { ok: false, refused: `${why}. The broker did nothing more.` };
+      return { ok: false, refused: `${reason(verb, e)}. The broker did nothing more.` };
     }
   }
-  return { call, verbs: Object.keys(VERBS), scope: s };
+  return { call, verbs: Object.keys(VERBS) };
 }
+/** The one line of an error. An error that the broker did not write gives only its code: its text can name a path (F-T158-15). */
+const reason = (verb, e) => (e instanceof Refusal ? e.message
+  : `the broker could not finish ${verb} (${/^E[A-Z0-9]{1,30}$/.test(e?.code) ? e.code : 'an unexpected error'})`);
 /** The last call of each session that runs or waits, by repository and session (F-T158-16, F-T158-22). */
 const queues = new Map();
 

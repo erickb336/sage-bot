@@ -32,7 +32,7 @@ function noPath(text, folders) {
  * `session` is the session's name; `around(args, run, options)` wraps each git call of the broker, and `fetch(url, init, fake)` each
  * REST request. Every refusal goes through noPath.
  */
-function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run(), fetch, repo = REPO } = {}) {
+function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run(), fetch, repo = REPO, branch = false } = {}) {
   const root = realpathSync(tempFolder('t158-')); // the broker compares the temp folder with its real path
   const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', session), tmp = join(root, 'tmp', session);
   const workDir = join(root, 'broker');
@@ -43,6 +43,7 @@ function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1
   sh(seed, 'add', 'README.md'); sh(seed, 'commit', '--quiet', '-m', 'first');
   sh(seed, 'push', '--quiet', origin, 'main', 'main:refs/heads/sage-lead/s2');
   sh(seed, 'tag', 'v1'); sh(seed, 'push', '--quiet', origin, 'v1');
+  if (branch) sh(seed, 'push', '--quiet', origin, `main:refs/heads/sage-lead/${session}`); // as after an upload: pr_create needs it (F-T191-5)
   sh(root, 'clone', '--quiet', origin, folder);
   const calls = [];
   const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return around(args, () => runGit(args, timeout ? { ...o, timeout } : o), o); };
@@ -231,7 +232,7 @@ test('fetch is read-only: GitHub\'s refs stay, no REST call, and a bundle in the
 });
 
 test('pull request: create, edit and view only the session\'s own; no merge, approve, other PR or other base', async () => {
-  const w = world({ pulls: [samplePull({ owner: OWNER, repo: REPO, number: 1, branch: 'sage-lead/s2' })] });
+  const w = world({ branch: true, pulls: [samplePull({ owner: OWNER, repo: REPO, number: 1, branch: 'sage-lead/s2' })] });
   const made = await w.broker.call('pr_create', { title: 'Add a.txt', body: 'What and why.\n\n- one' });
   assert.equal(made.ok, true, made.refused);
   assert.deepEqual([made.number, made.state, made.title, made.base], [2, 'open', 'Add a.txt', 'main']);
@@ -480,7 +481,7 @@ test('F-T158-18: a REST request that never answers refuses at the time limit; th
   await withLimit('restMs', 500, async () => {
     const signals = [];
     let hang = 1; // the first POST never answers, as a GitHub that took the request and hangs
-    const w = world({ fetch: (url, init, fake) => {
+    const w = world({ branch: true, fetch: (url, init, fake) => {
       if (init.method === 'POST' && hang-- > 0) { signals.push(init.signal); return never(); }
       return fake(url, init);
     } });
@@ -598,4 +599,104 @@ test('F-T158-1, -2, -4: a fake bare repository, a rebase exec line and an altern
   rmSync(sentinel);
   sh(fake, 'update-ref', 'refs/tags/x', sh(fake, 'hash-object', '-w', '--stdin'));
   assert.equal(existsSync(sentinel), true, 'the fake repository\'s hook');
+});
+
+// T191 (round 5): truthful refusals. A GitHub answer as the fake's fetch would give it, with a body that names a path (never shown).
+const answer = (status) => new Response(JSON.stringify({ message: 'sample text of /sample/path' }), { status });
+const mayHappen = 'the change may have happened: call pr_view to check.';
+
+test('F-T191-1: once a write was sent, a 5xx, a refusal, a list that does not show it yet and a network error each say it may have happened', async () => {
+  // A POST that GitHub answers with 502 or 422.
+  for (const [status, meaning] of [[502, 'an error of GitHub'], [422, 'GitHub refused the request']]) {
+    const w = world({ branch: true, fetch: (url, init, fake) => (init.method === 'POST' ? answer(status) : fake(url, init)) });
+    assert.deepEqual(await w.broker.call('pr_create', { title: 't', body: 'b' }), { ok: false, refused: `GitHub answered ${status} to POST: ${meaning}; ${mayHappen}` });
+  }
+  // A POST that lands, while GitHub's list does not show the new pull request yet.
+  let posted = false;
+  const w = world({ branch: true, fetch: async (url, init, fake) => {
+    if (init.method === 'POST') { posted = true; return fake(url, init); }
+    return posted ? new Response('[]', { status: 200 }) : fake(url, init);
+  } });
+  assert.deepEqual(await w.broker.call('pr_create', { title: 't', body: 'b' }), { ok: false, refused: `GitHub does not list the session's pull request yet; ${mayHappen}` });
+  assert.equal(w.gh.state.pulls.length, 1, 'the control: the pull request landed');
+  // A PATCH whose connection fails: undici throws a TypeError with no code.
+  const e = world({ pulls: [samplePull({ owner: OWNER, repo: REPO, number: 3, branch: 'sage-lead/s1' })],
+    fetch: (url, init, fake) => (init.method === 'PATCH' ? Promise.reject(new TypeError('fetch failed')) : fake(url, init)) });
+  assert.deepEqual(await e.broker.call('pr_edit', { title: 'x' }), { ok: false, refused: `the broker could not finish pr_edit (an unexpected error); ${mayHappen}` });
+  // The control: a read that fails sent no change, and says so.
+  const r = world({ fetch: () => Promise.reject(new TypeError('fetch failed')) });
+  assert.deepEqual(await r.broker.call('pr_view'), { ok: false, refused: 'the broker could not finish pr_view (an unexpected error). The broker did nothing more.' });
+});
+
+test('F-T194-1: a token lookup that takes too long before the POST sends nothing, and says so', async () => {
+  await withLimit('tokenMs', 300, async () => {
+    let n = 0; // the token of ls-remote (git) and of the list (GET) come; the one of the POST never does
+    const w = world({ branch: true, token: () => (++n === 3 ? never() : TOKEN) });
+    assert.deepEqual(await w.broker.call('pr_create', { title: 't', body: 'b' }), { ok: false, refused: 'the token lookup took too long. The broker did nothing more.' });
+    assert.deepEqual([n, w.gh.calls.map((c) => c.method)], [3, ['GET']]);
+  });
+});
+
+test('F-T191-2: a GitHub error status reaches the session as its method, status and meaning, with no path and no text of GitHub', async () => {
+  for (const [status, meaning] of [[403, 'the broker\'s GitHub access was refused'], [401, 'the broker\'s GitHub access was refused'], [404, 'not found'], [500, 'an error of GitHub'], [409, 'an answer that the broker does not expect']]) {
+    const w = world({ fetch: () => answer(status) });
+    assert.deepEqual(await w.broker.call('pr_view'), { ok: false, refused: `GitHub answered ${status} to GET: ${meaning}. The broker did nothing more.` });
+  }
+});
+
+test('F-T191-5: pr_create before any upload refuses with one clear line, before it calls GitHub', async () => {
+  const w = world();
+  assert.deepEqual(await w.broker.call('pr_create', { title: 't', body: 'b' }), { ok: false, refused: 'sage-lead/s1 is not on GitHub yet: upload the session\'s branch first. The broker did nothing more.' });
+  assert.deepEqual(w.gh.calls, []);
+  assert.equal((await w.broker.call('upload', { commit: w.commit('a.txt', 'one\n') })).ok, true);
+  const made = await w.broker.call('pr_create', { title: 't', body: 'b' });
+  assert.deepEqual([made.ok, made.number], [true, 1], 'the control: after the upload, pr_create works');
+});
+
+test('F-T191-4: pr_view gives the url and the base through the text allow-list', async () => {
+  const pr = samplePull({ owner: OWNER, repo: REPO, number: 4, branch: 'sage-lead/s1' });
+  pr.html_url = `https://github.com/${OWNER}/${REPO}/pull/4\u202E\u0007`;
+  pr.base.ref = 'main\u200B\n';
+  const w = world({ pulls: [pr] });
+  const r = await w.broker.call('pr_view');
+  assert.deepEqual([r.url, r.base], [`https://github.com/${OWNER}/${REPO}/pull/4  `, 'main \n']);
+});
+
+test('F-T191-7: fetch answers the commit ids that its bundle holds, also when main moves during the fetch', async () => {
+  let w;
+  w = world({ branch: true, around: async (args, run) => {
+    const out = await run();
+    if (args.includes('ls-remote')) { // GitHub's main moves after ls-remote and before the fetch
+      const seed = join(w.root, 'seed');
+      writeFileSync(join(seed, 'moved.txt'), 'moved\n');
+      sh(seed, 'add', 'moved.txt'); sh(seed, 'commit', '--quiet', '-m', 'moved');
+      sh(seed, 'push', '--quiet', w.origin, 'main', 'main:refs/heads/sage-lead/s1');
+    }
+    return out;
+  } });
+  const r = await w.broker.call('fetch');
+  assert.equal(r.ok, true, r.refused);
+  const heads = sh(w.root, 'bundle', 'list-heads', r.bundle);
+  assert.equal(heads, `${r.main} refs/heads/main\n${r.branch} refs/heads/sage-lead/s1`);
+  assert.deepEqual([r.main, r.branch], [w.refs()['refs/heads/main'], w.refs()['refs/heads/sage-lead/s1']]);
+});
+
+test('F-T191-3: a git call that prints more than LIMITS.output refuses with its own line', async () => {
+  assert.equal(LIMITS.output, 256 * 2 ** 20);
+  await withLimit('output', 10, async () => {
+    const w = world();
+    assert.deepEqual(await w.broker.call('fetch'), { ok: false, refused: 'git ls-remote printed too much. The broker did nothing more.' });
+    assert.deepEqual(readdirSync(w.workDir), []);
+  });
+});
+
+test('F-T191-6, G82 A: an old main whose .github has the same names as main\'s now, with another file inside, is refused', async () => {
+  const w = world();
+  const a = w.commit('.github/workflows/ci.yml', 'on: push\n');
+  w.commit('.github/workflows/ci.yml', 'on: pull_request\n');
+  sh(w.folder, 'push', '--quiet', 'origin', 'HEAD:main');
+  sh(w.folder, 'reset', '--quiet', '--hard', a);
+  const r = await w.broker.call('upload', { commit: w.commit('c.txt', 'harmless\n') });
+  assert.deepEqual(r, { ok: false, refused: 'the session\'s branch must carry main\'s .github as it is now; a new session can start from the current main. The broker did nothing more.' });
+  assert.equal(w.refs()['refs/heads/sage-lead/s1'], undefined);
 });
