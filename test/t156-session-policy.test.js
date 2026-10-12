@@ -530,7 +530,10 @@ test('F-T156-36: a claude that exits but leaves a process holding its output pas
     writeFileSync(h.policy.claude, `#!/bin/sh\n/bin/sleep 30 &\necho $! > "${h.root}/pid"\necho '${JSON.stringify({ supported: true, enabled: true, strictMode: true, unavailableReason: null })}'\n`);
     assert.deepEqual(await preflight(h.policy, h.env, { claude: 500 }), { state: 'no sandbox', why: `claude sandbox status failed: Command failed: ${h.policy.claude} --settings ${JSON.stringify(settingsOf(h.policy))} --setting-sources  sandbox status` });
     pid = Number(readFileSync(join(h.root, 'pid'), 'utf8'));
-    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+    // The kill is a signal; the process may take a moment to end, so poll (as the test above does).
+    const alive = () => { try { process.kill(pid, 0); return true; } catch (e) { assert.equal(e.code, 'ESRCH'); return false; } };
+    for (let i = 0; i < 100 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(), false, `the process ${pid} is still running`);
   } finally { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } h.done(); }
 });
 
