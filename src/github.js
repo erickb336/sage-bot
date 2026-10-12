@@ -2,10 +2,11 @@
 // identity (G58 a: a dedicated GitHub App or machine account, never the owner's gh login). The token comes from a function, so that
 // nothing stores it here; it goes only into the Authorization header, never into a URL, an argument list or an error text.
 
-/** A request to the GitHub REST API. `fetch` is injected: production passes globalThis.fetch, the tests the fake GitHub. */
+/** A request to the GitHub REST API. `fetch` is injected: production passes globalThis.fetch, the tests the fake GitHub. `signal`
+ * stops the request and the reading of its answer (the broker's time limit, F-T158-18). */
 export function githubRest({ api = 'https://api.github.com', token, fetch = globalThis.fetch }) {
   if (typeof token !== 'function') throw new TypeError('the broker needs a token function (G58 a)');
-  return async (method, path, body) => {
+  return async (method, path, body, signal) => {
     const res = await fetch(`${api}${path}`, {
       method,
       headers: {
@@ -16,6 +17,7 @@ export function githubRest({ api = 'https://api.github.com', token, fetch = glob
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       redirect: 'error',
+      signal,
     });
     const text = await res.text();
     // The status only: a response body can hold text of other people, and it is not the session's business.

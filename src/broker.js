@@ -17,14 +17,28 @@ export const IDENTITY = { name: 'sage-lead (via sage-bot)', email: 'sage-lead@sa
 /** The base of every session's pull request, and the branch that an upload starts from. */
 export const BASE = 'main';
 /** `bytes` and `files`: the object files that an upload copies. `object` and `inflated`: the size of each copied object and of all of
- * them, unpacked, before git reads them (F-T158-10). `gitMs`: the most time of one git call. */
+ * them, unpacked, before git reads them (F-T158-10). `gitMs`: the most time of one git call. `restMs` and `tokenMs`: the most time of
+ * one REST request, with its answer, and of one call of the token function (F-T158-18). */
 export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500, files: 100_000, bytes: 512 * 2 ** 20,
-  object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000 };
+  object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000, restMs: 60_000, tokenMs: 30_000 };
 
 class Refusal extends Error {}
 /** A push that failed or took too long: GitHub can still have taken it (F-T158-14). */
 class Unsure extends Refusal {}
+/** A REST request or a token lookup that took too long (F-T158-18). */
+class Late extends Refusal {}
 const refuse = (why) => { throw new Refusal(why); };
+
+/** `run(signal)`, but no longer than `ms`: then the signal stops `run`, and the call refuses with `why`, also when `run` does not
+ * stop. So a GitHub or a token function that never answers cannot hold the session's later verbs (F-T158-18). */
+async function within(ms, why, run) {
+  const stop = new AbortController();
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => { stop.abort(); reject(new Late(why)); }, ms); });
+  try { return await Promise.race([run(stop.signal), late]); } finally { clearTimeout(timer); }
+}
+/** After a write to GitHub started, a request that took too long can still have changed the pull request. */
+const mayHave = (e) => { throw e instanceof Late ? new Unsure(`${e.message}; the change may have happened: call pr_view to check`) : e; };
 
 /**
  * The text that the broker lets into GitHub: a pull request's title and body, and each commit message. People read it on GitHub.
@@ -103,7 +117,9 @@ const envOf = (home, token) => ({
  */
 export function createBroker({ policy, github, token, workDir, fetch, git = runGit, log = console.error }) {
   const s = scopeOf(policy, github);
-  const rest = githubRest({ api: github.api, token, fetch });
+  const tokenNow = () => within(LIMITS.tokenMs, 'the token lookup took too long', () => token());
+  const request = githubRest({ api: github.api, token: tokenNow, fetch });
+  const rest = (method, path, body) => within(LIMITS.restMs, 'GitHub took too long', (signal) => request(method, path, body, signal));
   const MAIN = `refs/heads/${BASE}`, BRANCH = `refs/heads/${s.branch}`;
 
   /**
@@ -114,7 +130,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
     let repo;
     try { repo = mkdtempSync(join(workDir, `${s.session}-`)); } catch { refuse('the broker\'s work folder is missing or the broker cannot write in it'); }
     try {
-      const env = envOf(repo, await token());
+      const env = envOf(repo, await tokenNow());
       const g = async (args, input) => {
         try { return await git(['--git-dir', repo, ...NEUTRAL, ...args], { cwd: repo, env, input }); }
         catch (e) {
@@ -261,8 +277,8 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       const f = fields(i);
       const pr = await own();
       if (pr) refuse(`this session already has its pull request #${pr.number}; change it with pr_edit`);
-      await rest('POST', `/repos/${s.full}/pulls`, { ...f, head: s.branch, base: BASE, draft: i.draft ?? false, maintainer_can_modify: false });
-      return view(await own());
+      await rest('POST', `/repos/${s.full}/pulls`, { ...f, head: s.branch, base: BASE, draft: i.draft ?? false, maintainer_can_modify: false }).catch(mayHave);
+      return view(await own().catch(mayHave));
     } },
     pr_edit: { keys: ['number', 'title', 'body', 'base'], run: async (i) => {
       if (i.base !== undefined && i.base !== BASE) refuse(`the base of the session's pull request stays ${BASE}`);
@@ -270,8 +286,8 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       const f = fields(i);
       const pr = await own(i.number);
       if (!pr) refuse('this session has no pull request yet; open it with pr_create');
-      await rest('PATCH', `/repos/${s.full}/pulls/${pr.number}`, f);
-      return view(await own(pr.number));
+      await rest('PATCH', `/repos/${s.full}/pulls/${pr.number}`, f).catch(mayHave);
+      return view(await own(pr.number).catch(mayHave));
     } },
     pr_view: { keys: ['number'], run: async (i) => {
       const pr = await own(i.number);

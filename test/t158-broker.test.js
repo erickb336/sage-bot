@@ -29,9 +29,10 @@ function noPath(text, folders) {
 
 /**
  * `remote`, `token` and `timeout` change the broker's GitHub, its token function and the most time of each of its git calls.
- * `session` is the session's name; `around(args, run, options)` wraps each git call of the broker. Every refusal goes through noPath.
+ * `session` is the session's name; `around(args, run, options)` wraps each git call of the broker, and `fetch(url, init, fake)` each
+ * REST request. Every refusal goes through noPath.
  */
-function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run() } = {}) {
+function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run(), fetch } = {}) {
   const root = realpathSync(tempFolder('t158-')); // the broker compares the temp folder with its real path
   const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', session), tmp = join(root, 'tmp', session);
   const workDir = join(root, 'broker');
@@ -48,7 +49,7 @@ function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1
   const gh = fakeGitHub({ owner: OWNER, repo: REPO, token: TOKEN, pulls });
   const logs = [];
   const made = createBroker({ policy: { session, folder, tmp }, github: { owner: OWNER, repo: REPO, remote: remote ?? origin },
-    token, workDir, fetch: gh.fetch, git, log: (line) => logs.push(line) });
+    token, workDir, fetch: fetch ? (url, init) => fetch(url, init, gh.fetch) : gh.fetch, git, log: (line) => logs.push(line) });
   const broker = { ...made, call: async (verb, input) => {
     const r = await made.call(verb, input);
     if (!r.ok) noPath(r.refused, [root, workDir, folder, tmp]);
@@ -408,6 +409,74 @@ test('F-T158-16: the verbs of one session run one at a time; two sessions run at
   assert.deepEqual(all.map((r) => r.ok), [true, true, true], all.map((r) => r.refused).join(' '));
   assert.deepEqual(events.slice(0, 2).sort(), ['s1 start', 's2 start'], events.join(', ')); // two sessions at once
   assert.deepEqual(events.filter((e) => e.startsWith('s1')), ['s1 start', 's1 end', 's1 start', 's1 end'], events.join(', ')); // one session: one at a time
+});
+
+/** `run` with LIMITS[key] set to `ms`, and the limit back after. */
+async function withLimit(key, ms, run) {
+  const before = LIMITS[key];
+  LIMITS[key] = ms;
+  try { return await run(); } finally { LIMITS[key] = before; }
+}
+const never = () => new Promise(() => {});
+const took = async (call) => { const t0 = Date.now(); const r = await call; return [r, Date.now() - t0]; };
+
+test('F-T158-18: a REST request that never answers refuses at the time limit; the session\'s next verb then runs; s2 never waits', async () => {
+  assert.deepEqual([LIMITS.restMs, LIMITS.tokenMs], [60_000, 30_000]);
+  await withLimit('restMs', 500, async () => {
+    const signals = [];
+    let hang = 1; // the first POST never answers, as a GitHub that took the request and hangs
+    const w = world({ fetch: (url, init, fake) => {
+      if (init.method === 'POST' && hang-- > 0) { signals.push(init.signal); return never(); }
+      return fake(url, init);
+    } });
+    const s2 = world({ session: 's2' });
+    const first = took(w.broker.call('pr_create', { title: 'one', body: 'first' }));
+    const next = took(w.broker.call('pr_create', { title: 'two', body: 'second' })); // waits for the first: one at a time
+    const [other, otherMs] = await took(s2.broker.call('pr_view'));
+    assert.deepEqual([other.refused, otherMs < 250], ['this session has no pull request yet. The broker did nothing more.', true], `${otherMs} ms`);
+    const [a, aMs] = await first;
+    assert.deepEqual([a.ok, a.refused], [false, 'GitHub took too long; the change may have happened: call pr_view to check.']);
+    assert.ok(aMs >= 450 && aMs < 2000, `${aMs} ms`);
+    assert.equal(signals[0].aborted, true); // the request itself is stopped too
+    const [b, bMs] = await next;
+    assert.deepEqual([b.ok, b.title, b.body], [true, 'two', 'second'], b.refused);
+    assert.ok(bMs < aMs + 1000, `${bMs} ms`);
+    // A read that took too long changed nothing: it says so.
+    const r = world({ fetch: () => never() });
+    assert.deepEqual(await r.broker.call('pr_view'), { ok: false, refused: 'GitHub took too long. The broker did nothing more.' });
+  });
+});
+
+test('F-T158-18: an answer whose body drips forever refuses at the time limit', async () => {
+  await withLimit('restMs', 500, async () => {
+    let drops = 0, signal;
+    const w = world({ fetch: (url, init) => {
+      signal = init.signal;
+      // The headers come at once; then one byte every 20 ms, never the end.
+      const body = new ReadableStream({ async pull(c) { await sleep(20); if (!signal.aborted) { drops += 1; c.enqueue(new Uint8Array([32])); } } });
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+    } });
+    const [r, ms] = await took(w.broker.call('pr_view'));
+    assert.deepEqual(r, { ok: false, refused: 'GitHub took too long. The broker did nothing more.' });
+    assert.ok(ms >= 450 && ms < 2000 && drops > 5, `${ms} ms, ${drops} bytes`);
+    assert.equal(signal.aborted, true);
+  });
+});
+
+test('F-T158-18: a token function that never answers refuses at the time limit and lets the session\'s next verb run', async () => {
+  await withLimit('tokenMs', 300, async () => {
+    let hang = 2; // the token of the fetch verb (git) and of pr_view (REST) never come
+    const w = world({ token: () => (hang-- > 0 ? never() : TOKEN) });
+    const s2 = world({ session: 's2' });
+    const calls = [took(w.broker.call('fetch')), took(w.broker.call('pr_view')), took(w.broker.call('pr_view'))];
+    const [other, otherMs] = await took(s2.broker.call('pr_view'));
+    assert.deepEqual([other.refused, otherMs < 150], ['this session has no pull request yet. The broker did nothing more.', true], `${otherMs} ms`);
+    const [[f, fMs], [v, vMs], [last, lastMs]] = await Promise.all(calls);
+    const late = 'the token lookup took too long. The broker did nothing more.';
+    assert.deepEqual([f.refused, v.refused, last.refused], [late, late, 'this session has no pull request yet. The broker did nothing more.']);
+    assert.ok(fMs >= 250 && vMs >= 550 && lastMs < 3000, `${fMs}, ${vMs}, ${lastMs} ms`);
+    assert.deepEqual(readdirSync(w.workDir), []); // the fetch verb's folder went too
+  });
 });
 
 test('a work folder that cannot be removed after a push does not turn the push into a refusal; the broker logs it', async () => {
