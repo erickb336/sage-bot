@@ -342,7 +342,9 @@ test('T131 dry run: no code in src/ can start a claude session; only the known t
   // the broker's git in its own repositories (T158), the Keychain tool, the session policy's preflight (T156), git (a folder in git, as
   // the state tool asks), the sage state tool (node), /bin/ps
   assert.deepEqual(users, ['broker.js', 'discord.js', 'projects.js', 'sage.js', 'session-policy.js', 'state.js']);
-  for (const f of readdirSync(src).filter((x) => x !== 'session-policy.js')) assert.ok(!/['"`]claude['"`]|\/claude\b|spawn\(/.test(readFileSync(join(src, f), 'utf8')), `${f} names a claude process or a spawn`);
+  // The broker spawns git only, so that git leads its own process group (F-T158-17: execFile does not pass `detached`).
+  const spawnOf = (f) => (f === 'broker.js' ? readFileSync(join(src, f), 'utf8').replaceAll("spawn('git', ", 'git(') : readFileSync(join(src, f), 'utf8'));
+  for (const f of readdirSync(src).filter((x) => x !== 'session-policy.js')) assert.ok(!/['"`]claude['"`]|\/claude\b|spawn\(/.test(spawnOf(f)), `${f} names a claude process or a spawn`);
   // The session policy runs claude only for `sandbox status` (its preflight), never a session: launchOf only returns the command.
   const policy = readFileSync(join(src, 'session-policy.js'), 'utf8');
   assert.ok(!/spawn\(/.test(policy));

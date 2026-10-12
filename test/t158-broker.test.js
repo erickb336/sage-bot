@@ -3,10 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createDeflate } from 'node:zlib';
 import { createBroker, IDENTITY, LIMITS, runGit, textOf } from '../src/broker.js';
 import { fakeGitHub, samplePull } from '../src/fake-github.js';
@@ -20,10 +21,19 @@ const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_GLOBAL: '
 /** git as the test's session or the test's GitHub, never as the broker. */
 const sh = (cwd, ...args) => execFileSync('git', args, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-/** `remote`, `token` and `timeout` change the broker's GitHub, its token function and the most time of each of its git calls. */
-function world({ pulls = [], remote, token = () => TOKEN, timeout } = {}) {
+/** A refusal must name no path (F-T158-15): no "/" that starts a word, and none of the test's folders by value. */
+function noPath(text, folders) {
+  assert.doesNotMatch(text, /(^|[\s"'(=:])\/[^\s/]+/, text);
+  for (const f of folders) assert.ok(!text.includes(f) && !text.includes(f.replace(/^\/private/, '')), text);
+}
+
+/**
+ * `remote`, `token` and `timeout` change the broker's GitHub, its token function and the most time of each of its git calls.
+ * `session` is the session's name; `around(args, run, options)` wraps each git call of the broker. Every refusal goes through noPath.
+ */
+function world({ pulls = [], remote, token = () => TOKEN, timeout, session = 's1', around = (args, run) => run() } = {}) {
   const root = realpathSync(tempFolder('t158-')); // the broker compares the temp folder with its real path
-  const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', 's1'), tmp = join(root, 'tmp', 's1');
+  const origin = join(root, 'origin.git'), seed = join(root, 'seed'), folder = join(root, 'sessions', session), tmp = join(root, 'tmp', session);
   const workDir = join(root, 'broker');
   for (const d of [seed, tmp, workDir]) mkdirSync(d, { recursive: true });
   sh(root, 'init', '--bare', '--quiet', '-b', 'main', origin);
@@ -34,10 +44,16 @@ function world({ pulls = [], remote, token = () => TOKEN, timeout } = {}) {
   sh(seed, 'tag', 'v1'); sh(seed, 'push', '--quiet', origin, 'v1');
   sh(root, 'clone', '--quiet', origin, folder);
   const calls = [];
-  const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return runGit(args, timeout ? { ...o, timeout } : o); };
+  const git = (args, o) => { calls.push({ args, cwd: o.cwd, env: o.env }); return around(args, () => runGit(args, timeout ? { ...o, timeout } : o), o); };
   const gh = fakeGitHub({ owner: OWNER, repo: REPO, token: TOKEN, pulls });
-  const broker = createBroker({ policy: { session: 's1', folder, tmp }, github: { owner: OWNER, repo: REPO, remote: remote ?? origin },
-    token, workDir, fetch: gh.fetch, git });
+  const logs = [];
+  const made = createBroker({ policy: { session, folder, tmp }, github: { owner: OWNER, repo: REPO, remote: remote ?? origin },
+    token, workDir, fetch: gh.fetch, git, log: (line) => logs.push(line) });
+  const broker = { ...made, call: async (verb, input) => {
+    const r = await made.call(verb, input);
+    if (!r.ok) noPath(r.refused, [root, workDir, folder, tmp]);
+    return r;
+  } };
   const refs = () => Object.fromEntries(sh(origin, 'for-each-ref', '--format=%(refname) %(objectname)').split('\n').map((l) => l.split(' ')));
   const commit = (file, text, message = `change ${file}`) => {
     mkdirSync(join(folder, file, '..'), { recursive: true });
@@ -45,7 +61,7 @@ function world({ pulls = [], remote, token = () => TOKEN, timeout } = {}) {
     sh(folder, 'add', file); sh(folder, 'commit', '--quiet', '-m', message);
     return sh(folder, 'rev-parse', 'HEAD');
   };
-  return { root, origin, folder, tmp, workDir, broker, gh, calls, refs, commit };
+  return { root, origin, folder, tmp, workDir, broker, gh, calls, refs, commit, logs };
 }
 
 test('upload: the session\'s commits land on sage-lead/s1 only, with the fixed identity, by fast-forward', async () => {
@@ -260,7 +276,7 @@ test('F-T158-5: an error before the work starts leaves no folder of the broker b
   const cases = [
     [{ remote: join(empty, '..', 'nowhere.git') }, /git ls-remote failed/],
     [{ remote: empty }, /GitHub has no main branch/],
-    [{ token: () => { throw new Error('no token'); } }, /could not finish fetch \(no token\)/],
+    [{ token: () => { throw new Error('no token in /sample/path'); } }, /could not finish fetch \(an unexpected error\)/], // no text of an unknown error (F-T158-15)
   ];
   for (const [o, text] of cases) {
     const w = world(o);
@@ -321,9 +337,12 @@ test('F-T158-10: a 1 GB object of zeros is refused before git unpacks it, and th
   assert.deepEqual(readdirSync(w.workDir), []);
 });
 
-test('F-T158-10: a GitHub that never answers times out and refuses; the event loop keeps running meanwhile', async () => {
+test('F-T158-10, F-T158-17: a GitHub that never answers times out and refuses; git\'s HTTP helper goes with git', async () => {
   const open = new Set();
-  const silent = createServer((socket) => { open.add(socket); socket.on('close', () => open.delete(socket)); }); // it says nothing
+  let accepted = 0;
+  const silent = createServer((socket) => { // it reads (so that it sees the close) and says nothing
+    accepted += 1; open.add(socket); socket.on('close', () => open.delete(socket)); socket.resume();
+  });
   await new Promise((done) => silent.listen(0, '127.0.0.1', done));
   try {
     const w = world({ remote: `http://127.0.0.1:${silent.address().port}/sample.git`, timeout: 1500 });
@@ -334,7 +353,76 @@ test('F-T158-10: a GitHub that never answers times out and refuses; the event lo
     assert.match(result.refused, /git ls-remote took too long/);
     assert.ok(Date.now() - start < 5000, `${Date.now() - start} ms`);
     assert.deepEqual(readdirSync(w.workDir), []);
-  } finally { for (const socket of open) socket.destroy(); silent.close(); } // git's HTTP helper can still hold it (http.lowSpeedTime)
+    // The listener counts the connections that are still open: the timeout kills git's process group, helper and all.
+    const until = Date.now() + 3000;
+    while (open.size && Date.now() < until) await sleep(50);
+    assert.ok(accepted > 0, 'git never connected');
+    assert.equal(open.size, 0, `${open.size} of ${accepted} connections still open ${Date.now() - start} ms after the call began`);
+  } finally { for (const socket of open) socket.destroy(); silent.close(); }
+});
+
+test('F-T158-14: a push that took too long can still have landed; the refusal says so, and a second upload tells', async () => {
+  // The push lands on the local GitHub, then the broker sees a timeout: what a slow GitHub can do.
+  const w = world({ around: async (args, run) => {
+    const out = await run();
+    if (args.includes('push')) throw Object.assign(new Error('sample timeout'), { killed: true });
+    return out;
+  } });
+  const c1 = w.commit('a.txt', 'one\n');
+  const r = await w.broker.call('upload', { commit: c1 });
+  assert.deepEqual(r, { ok: false, refused: 'git push took too long; the upload may have landed: call upload again to check.' });
+  const head = w.refs()['refs/heads/sage-lead/s1'];
+  assert.ok(head, 'the control: the ref landed');
+  assert.deepEqual(await w.broker.call('upload', { commit: c1 }), { ok: true, branch: 'sage-lead/s1', head, commits: 1, pushed: false });
+});
+
+test('F-T158-15: a refusal names a folder by its role, never by its path', async () => {
+  const w = world();
+  const c1 = w.commit('a.txt', 'one\n');
+  rmSync(w.workDir, { recursive: true });
+  await refusedWith(w, 'upload', { commit: c1 }, /^the broker's work folder is missing or the broker cannot write in it\./);
+  mkdirSync(w.workDir);
+  const git = join(w.folder, '.git'), objects = join(git, 'objects'), away = join(w.root, 'away');
+  renameSync(objects, away); symlinkSync(away, objects);
+  await refusedWith(w, 'upload', { commit: c1 }, /^the session's \.git\/objects folder is missing or is not a folder \(a link is not one\)/);
+  rmSync(objects); renameSync(away, objects);
+  renameSync(git, away);
+  await refusedWith(w, 'upload', { commit: c1 }, /^the session's \.git folder is missing or is not a folder/);
+  renameSync(away, git);
+  assert.equal((await w.broker.call('upload', { commit: c1 })).ok, true, 'the control: with every folder back, the upload works');
+});
+
+test('F-T158-16: the verbs of one session run one at a time; two sessions run at once', async () => {
+  const w = world();
+  const c1 = w.commit('a.txt', 'one\n');
+  const [a, b] = await Promise.all([w.broker.call('upload', { commit: c1 }), w.broker.call('upload', { commit: c1 })]);
+  assert.deepEqual([a.ok, a.pushed, b.ok, b.pushed, b.head], [true, true, true, false, a.head], `${a.refused} ${b.refused}`);
+  // Each ls-remote takes 300 ms more, and says when it starts and ends.
+  const events = [];
+  const slow = (session) => async (args, run) => {
+    if (args.includes('ls-remote')) { events.push(`${session} start`); await sleep(300); events.push(`${session} end`); }
+    return run();
+  };
+  const s1 = world({ around: slow('s1') }), s2 = world({ session: 's2', around: slow('s2') });
+  const all = await Promise.all([s1.broker.call('fetch'), s2.broker.call('fetch'), s1.broker.call('fetch')]);
+  assert.deepEqual(all.map((r) => r.ok), [true, true, true], all.map((r) => r.refused).join(' '));
+  assert.deepEqual(events.slice(0, 2).sort(), ['s1 start', 's2 start'], events.join(', ')); // two sessions at once
+  assert.deepEqual(events.filter((e) => e.startsWith('s1')), ['s1 start', 's1 end', 's1 start', 's1 end'], events.join(', ')); // one session: one at a time
+});
+
+test('a work folder that cannot be removed after a push does not turn the push into a refusal; the broker logs it', async () => {
+  let workDir;
+  const w = world({ around: async (args, run, o) => {
+    const out = await run();
+    if (args.includes('push')) { workDir = dirname(o.cwd); chmodSync(workDir, 0o555); } // the broker can no longer remove its folder
+    return out;
+  } });
+  const c1 = w.commit('a.txt', 'one\n');
+  try {
+    const r = await w.broker.call('upload', { commit: c1 });
+    assert.deepEqual([r.ok, r.pushed, r.head], [true, true, w.refs()['refs/heads/sage-lead/s1']], r.refused);
+    assert.deepEqual(w.logs, ['broker s1: could not remove a work folder (EACCES)']);
+  } finally { if (workDir) chmodSync(workDir, 0o755); }
 });
 
 test('F-T158-6: a commit id that the session does not have gets the clear refusal', async () => {

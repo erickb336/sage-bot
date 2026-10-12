@@ -5,11 +5,10 @@
 //
 // Host-side git never runs in a session folder (docs/reference.md, "Git in a session folder"): an upload reads the object files of
 // the session's .git as plain files, into a new bare repository of the broker, and runs git only there, with hooks and config off.
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { githubRest } from './github.js';
 import { BRIDGE_PATH, SESSION } from './session-policy.js';
 
@@ -23,6 +22,8 @@ export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500,
   object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000 };
 
 class Refusal extends Error {}
+/** A push that failed or took too long: GitHub can still have taken it (F-T158-14). */
+class Unsure extends Refusal {}
 const refuse = (why) => { throw new Refusal(why); };
 
 /**
@@ -61,14 +62,26 @@ export function scopeOf(policy, { owner, repo, remote }) {
 }
 
 /** Run git, as the broker's own process, never in a session folder, and never longer than `timeout` (F-T158-10): it does not block
- * the sage-bot process. A git HTTP helper that outlives a killed git stops at http.lowSpeedTime. It gives the output as bytes.
+ * the sage-bot process. git leads its own process group, so a timeout kills git and every helper that it started (git-remote-http
+ * with its connection, F-T158-17). It gives the output as bytes; an error has `killed` when the timeout or the output limit stopped it.
  * Tests wrap it to record each call. */
-const execGit = promisify(execFile);
 export function runGit(args, { cwd, env, input, timeout = LIMITS.gitMs }) {
-  const run = execGit('git', args, { cwd, env, encoding: 'buffer', maxBuffer: 256 * 2 ** 20, timeout, killSignal: 'SIGKILL' });
-  run.child.stdin.on('error', () => {}); // git can exit before it reads its input; the exit code tells
-  run.child.stdin.end(input);
-  return run.then(({ stdout }) => stdout);
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    const out = [];
+    let size = 0, killed = false;
+    const stop = () => { killed = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group has gone */ } };
+    const timer = setTimeout(stop, timeout);
+    child.stdout.on('data', (d) => { out.push(d); size += d.length; if (size > 256 * 2 ** 20) stop(); });
+    child.on('error', (e) => { clearTimeout(timer); reject(e); });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0 && !killed) resolve(Buffer.concat(out));
+      else reject(Object.assign(new Error(`git exited with ${code ?? signal}`), { killed }));
+    });
+    child.stdin.on('error', () => {}); // git can exit before it reads its input; the exit code tells
+    child.stdin.end(input);
+  });
 }
 
 /** The settings of every git call: no global or system config, no hooks, no fsmonitor, no prompt, and a stalled HTTP transfer
@@ -88,7 +101,7 @@ const envOf = (home, token) => ({
  *   token: () => string | Promise<string>, workDir: string, fetch?: typeof globalThis.fetch, git?: typeof runGit }} o
  *   `workDir` is a folder of the broker, outside every session folder; each verb makes a new folder in it and removes it after.
  */
-export function createBroker({ policy, github, token, workDir, fetch, git = runGit }) {
+export function createBroker({ policy, github, token, workDir, fetch, git = runGit, log = console.error }) {
   const s = scopeOf(policy, github);
   const rest = githubRest({ api: github.api, token, fetch });
   const MAIN = `refs/heads/${BASE}`, BRANCH = `refs/heads/${s.branch}`;
@@ -98,19 +111,26 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
    * repository goes when `work` ends, and also when anything before it fails (F-T158-5).
    */
   async function withMirror(work) {
-    const repo = mkdtempSync(join(workDir, `${s.session}-`));
+    let repo;
+    try { repo = mkdtempSync(join(workDir, `${s.session}-`)); } catch { refuse('the broker\'s work folder is missing or the broker cannot write in it'); }
     try {
       const env = envOf(repo, await token());
       const g = async (args, input) => {
         try { return await git(['--git-dir', repo, ...NEUTRAL, ...args], { cwd: repo, env, input }); }
-        catch (e) { throw new Error(`git ${args[0]} ${e?.killed ? 'took too long' : 'failed'}`); }
+        catch (e) {
+          const why = `git ${args[0]} ${e?.killed ? 'took too long' : 'failed'}`;
+          throw args[0] === 'push' ? new Unsure(`${why}; the upload may have landed: call upload again to check`) : new Refusal(why);
+        }
       };
       const text = async (args) => String(await g(args));
       await g(['init', '--bare', '--quiet']);
       const heads = Object.fromEntries((await text(['ls-remote', '--heads', s.remote, MAIN, BRANCH])).split('\n').filter(Boolean).map((l) => l.split('\t').reverse()));
       if (!SHA.test(heads[MAIN] ?? '')) refuse(`GitHub has no ${BASE} branch in ${s.full}`);
       return await work({ repo, g, text, heads });
-    } finally { rmSync(repo, { recursive: true, force: true }); }
+    } finally {
+      // A folder that stays does not undo a push that is done: log it, and keep the verb's answer.
+      try { rmSync(repo, { recursive: true, force: true }); } catch (e) { log(`broker ${s.session}: could not remove a work folder (${e?.code})`); }
+    }
   }
   const pull = (m) => m.g(['fetch', '--quiet', '--no-tags', s.remote, ...[MAIN, ...(m.heads[BRANCH] ? [BRANCH] : [])].map((r) => `+${r}:${r}`)]);
 
@@ -209,7 +229,7 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       GIT_COMMITTER_NAME: IDENTITY.name, GIT_COMMITTER_EMAIL: IDENTITY.email, GIT_COMMITTER_DATE: when('committer') };
     try {
       return String(await git(['--git-dir', m.repo, ...NEUTRAL, 'commit-tree', tree, '-p', parent, '-F', '-'], { cwd: m.repo, env: { ...envOf(m.repo, ''), ...env }, input: message })).trim();
-    } catch { throw new Error('git commit-tree failed'); }
+    } catch { refuse('git commit-tree failed'); }
   }
 
   /** The session's own pull request, or null. GitHub lists by head; each answer must be of this repository and branch, else refuse. */
@@ -260,8 +280,17 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
     } },
   };
 
-  /** One verb. Every answer is { ok: true, ... } or { ok: false, refused: one line }; any error refuses (fail closed). */
-  async function call(verb, input = {}) {
+  /**
+   * One verb. Every answer is { ok: true, ... } or { ok: false, refused: one line }; any error refuses (fail closed). The verbs of
+   * one session run one at a time, in the order of the calls (F-T158-16); the verbs of other sessions run meanwhile.
+   */
+  function call(verb, input) {
+    const run = (queues.get(s.session) ?? Promise.resolve()).then(() => callNow(verb, input));
+    queues.set(s.session, run);
+    run.then(() => { if (queues.get(s.session) === run) queues.delete(s.session); });
+    return run;
+  }
+  async function callNow(verb, input = {}) {
     try {
       if (typeof verb !== 'string' || !Object.hasOwn(VERBS, verb)) refuse(`that is not a broker verb; the verbs are ${Object.keys(VERBS).join(', ')}, and none of them merges, approves or changes a branch`);
       const proto = input !== null && typeof input === 'object' && Object.getPrototypeOf(input);
@@ -270,12 +299,16 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
       if (extra.length) refuse(`${verb} takes ${VERBS[verb].keys.join(', ') || 'no input'}, not ${extra.map((k) => JSON.stringify(keep(k))).join(', ')}`);
       return { ok: true, ...(await VERBS[verb].run(input)) };
     } catch (e) {
-      const why = e instanceof Refusal ? e.message : `the broker could not finish ${verb} (${String(e?.message).split('\n')[0].replace(/[^ -~]/g, ' ').slice(0, 120)})`;
+      if (e instanceof Unsure) return { ok: false, refused: `${e.message}.` };
+      // An error that the broker did not write gives only its code: its text can name a path (F-T158-15).
+      const why = e instanceof Refusal ? e.message : `the broker could not finish ${verb} (${/^E[A-Z0-9]{1,30}$/.test(e?.code) ? e.code : 'an unexpected error'})`;
       return { ok: false, refused: `${why}. The broker did nothing more.` };
     }
   }
   return { call, verbs: Object.keys(VERBS), scope: s };
 }
+/** The last call of each session that runs or waits, by session (F-T158-16). */
+const queues = new Map();
 
 /**
  * The object files of the session's .git, copied as plain files into the broker's repository. Only the names of git objects and packs
@@ -284,22 +317,23 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
  * object (fsck --strict). No git command runs in the session folder.
  */
 function copyObjects(folder, repo) {
+  // A refusal names a folder or a file by its role, never by its path (F-T158-15): the session's model reads it.
   const from = join(folder, '.git', 'objects');
-  for (const dir of [folder, join(folder, '.git'), from]) {
-    if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) refuse(`${dir} is not a folder (a link is not one): the broker reads only the session's own .git folder`);
+  for (const [dir, role] of [[folder, 'the session folder'], [join(folder, '.git'), 'the session\'s .git folder'], [from, 'the session\'s .git/objects folder']]) {
+    if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) refuse(`${role} is missing or is not a folder (a link is not one): the broker reads only the session's own .git folder`);
   }
   let files = 0, bytes = 0;
   const copy = (src, dst) => {
     const fd = openNoFollow(src);
     try {
       const st = fstatSync(fd);
-      if (!st.isFile()) refuse(`${src} is not a plain file`);
+      if (!st.isFile()) refuse('an object file of the session\'s .git is not a plain file');
       files += 1; bytes += st.size;
       if (files > LIMITS.files || bytes > LIMITS.bytes) refuse(`the session's .git has more than ${LIMITS.files} object files or ${LIMITS.bytes} bytes`);
       writeFileSync(dst, readFileSync(fd), { flag: 'wx', mode: 0o444 });
     } finally { closeSync(fd); }
   };
-  const dir = (path) => { if (!lstatSync(path).isDirectory()) refuse(`${path} is not a folder`); return readdirSync(path); };
+  const dir = (path) => { if (!lstatSync(path).isDirectory()) refuse('a folder in the session\'s .git/objects is not a folder (a link is not one)'); return readdirSync(path); };
   for (const name of dir(from)) {
     if (/^[0-9a-f]{2}$/.test(name)) {
       mkdirSync(join(repo, 'objects', name), { recursive: true });
@@ -311,5 +345,5 @@ function copyObjects(folder, repo) {
 }
 const openNoFollow = (path) => {
   try { return openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
-  catch { return refuse(`${path} is not a plain file that the broker can read`); }
+  catch { return refuse('an object file of the session\'s .git is not a plain file that the broker can read'); }
 };
