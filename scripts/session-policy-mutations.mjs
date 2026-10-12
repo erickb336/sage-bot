@@ -28,8 +28,11 @@ export function verdictOf({ status, stdout }, files, parses) {
   return { verdict: failed ? 'KILLED' : 'SURVIVED', failed };
 }
 
-/** Whether a source file parses (`node --check`). @param {string} file */
-export const parses = (file) => spawnSync(process.execPath, ['--check', file]).status === 0;
+/**
+ * Whether a source file parses as an ES module (F-T185-1). The source goes in on stdin with `--input-type=module`: `node --check <file>`
+ * reads a .js file as CommonJS when no package.json with "type": "module" is above it, and then fails on `import`. @param {string} file
+ */
+export const parses = (file) => spawnSync(process.execPath, ['--input-type=module', '--check'], { input: readFileSync(file) }).status === 0;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
 

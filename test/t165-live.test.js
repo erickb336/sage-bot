@@ -5,7 +5,7 @@
 // every probe and tool call with no sandbox) makes every boundary row FAIL, and a fake that refuses everything makes every row PASS.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from './bridge-setup.js';
@@ -48,14 +48,14 @@ const seatbelt = spawnSync('sandbox-exec', ['-p', '(version 1)(allow default)', 
  * `killsHostControl` (a signal), a load sends it to the host control that runs it, which then prints nothing (F-T181-1); crontab: "no crontab", exit 1, and a log.
  * No test reaches the real launchd or crontab (G73).
  */
-function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, removeFails = false, listExit = 113, killsHostControl = '' } = {}) {
+function fakeSecurity(root, { key = KEY, ghLoggedIn = false, ghBroken = false, ghHangs = false, breakRestore = false, failVerb = '', slowDelete = 0, intruder = '', removeFails = false, listExit = 113, killsHostControl = '' } = {}) {
   const bin = join(root, 'bin'), state = join(root, 'security-state.json'), log = join(root, 'security-calls.log');
   mkdirSync(bin, { recursive: true });
   writeFileSync(state, sb({ list: [LOGIN], keychains: [LOGIN], items: key ? [{ account: ACCOUNT, service: SERVICE, value: key, keychain: LOGIN }] : [] }));
-  writeFileSync(join(root, 'fake-security.mjs'), `import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+  writeFileSync(join(root, 'fake-security.mjs'), `import { appendFileSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 const [verb, ...args] = process.argv.slice(2), s = JSON.parse(readFileSync(${sb(state)}, 'utf8'));
 appendFileSync(${sb(log)}, JSON.stringify([verb, ...args]) + '\\n');
-if (verb === ${sb(failVerb)}) { console.error('security: ' + verb + ' ' + args.join(' ') + ': sample error'); process.exit(1); }
+if (verb === ${sb(failVerb)}) { if (${sb(intruder)}) { writeFileSync(${sb(intruder)} + '/other-process.txt', 'not yours'); symlinkSync('/nonexistent-target', ${sb(intruder)} + '/other-link'); } console.error('security: ' + verb + ' ' + args.join(' ') + ': sample error'); process.exit(1); }
 if (verb === 'delete-keychain') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${slowDelete});
 const opt = (f) => { const i = args.indexOf(f); return i === -1 ? undefined : args[i + 1]; };
 if (verb === 'list-keychains') { if (args.includes('-s')) s.list = ${breakRestore} ? ['/x/wrong.keychain-db'] : args.slice(args.indexOf('-s') + 1); else console.log(s.list.map((p) => '    "' + p + '"').join('\\n')); }
@@ -630,7 +630,10 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    const { report, summary } = await proveLive(join(root, 'run'), { env: fake.env, dryRun: true });
+    // F-T178-1: an empty bridge-session PATH has no rg on any Mac, so this proves that a dry run does not refuse on a missing rg.
+    const noRg = join(root, 'no-rg');
+    mkdirSync(noRg);
+    const { report, summary } = await proveLive(join(root, 'run'), { env: fake.env, dryRun: true, leadPath: noRg });
     assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key');
     assert.match(summary.split('\n')[0], /^sage-bot proof \(T165 \(T134 PR 2b\), dry run: dummy claude, no key\): macOS [\d.]+, Claude Code 0\.0\.0$/); // F-T165-15: no stray text
     assert.equal(report.key, 'none (dry run)');
@@ -648,6 +651,68 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
     assert.ok(!summary.includes('Host hook folder'));
     assert.deepEqual(report.sessions.map((s) => [s.group, s.outcome, s.costUsd]), [['L1', 'success', 0], ['L2', 'success', 0], ['L3', 'success', 0]]);
     for (const path of files(join(root, 'run'))) assert.ok(!readFileSync(path, 'latin1').includes('ANTHROPIC_API_KEY='), `${path} holds a key variable`);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T179-1: an --out that is a file is refused with one line that says --out must be a new folder, in the proof and in the live proof', async () => {
+  const root = liveScratch();
+  try {
+    const file = join(root, 'a-file');
+    writeFileSync(file, 'sample\n');
+    const line = `--out ${file} is a file: --out must be a new folder (F-T179-1). Nothing was made.`;
+    const fake = fakeSecurity(root);
+    await assert.rejects(prove(file), (e) => e.exitCode === 2 && e.message === line);
+    await assert.rejects(proveLive(file, { env: fake.env, dryRun: true }), (e) => e.exitCode === 2 && e.message === line);
+    assert.equal(readFileSync(file, 'utf8'), 'sample\n');
+    assert.deepEqual(fake.calls(), []);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T180-1: a dry run that fails in a fixture leaves nothing in --out, so the same --out works again; a folder that was there stays, and a folder that is not empty is still refused', async () => {
+  const root = liveScratch();
+  try {
+    const bad = fakeSecurity(join(root, 'bad'), { failVerb: 'create-keychain' });
+    const fresh = join(root, 'fresh'), empty = join(root, 'empty');
+    mkdirSync(empty);
+    await assert.rejects(proveLive(fresh, { env: bad.env, dryRun: true }), /create-keychain/);
+    assert.ok(!existsSync(fresh), 'a folder that the run made is removed');
+    await assert.rejects(proveLive(empty, { env: bad.env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(empty), [], 'the empty folder stays, with nothing in it');
+    const good = fakeSecurity(join(root, 'good'));
+    const { report } = await proveLive(empty, { env: good.env, dryRun: true });
+    assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key'); // the same --out, again
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T167-2: a dry run that fails removes only what it made and recorded: a file and a link that another process put in --out during the run stay, and --out stays with them', async () => {
+  const root = liveScratch();
+  try {
+    const shared = join(root, 'shared'), fresh = join(root, 'fresh');
+    mkdirSync(shared);
+    // case A: --out was there (empty), another writer adds a file and a link during the run
+    await assert.rejects(proveLive(shared, { env: fakeSecurity(join(root, 'a'), { failVerb: 'create-keychain', intruder: shared }).env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(shared).sort(), ['other-link', 'other-process.txt'], 'only the other writer\'s entries are left');
+    assert.equal(readFileSync(join(shared, 'other-process.txt'), 'utf8'), 'not yours');
+    assert.ok(lstatSync(join(shared, 'other-link')).isSymbolicLink(), 'the link is still a link');
+    // case B: the run made --out; the other writer adds entries; --out stays because it is not empty
+    await assert.rejects(proveLive(fresh, { env: fakeSecurity(join(root, 'b'), { failVerb: 'create-keychain', intruder: fresh }).env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(fresh).sort(), ['other-link', 'other-process.txt'], '--out stays and holds only the other writer\'s entries');
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T167-3: a dry run that fails late, after prove() made the worlds, the runner copies and the sessions, leaves only the other writer\'s entries, so the same --out works again', async () => {
+  const root = liveScratch();
+  try {
+    // delete-keychain fails in the fixture's cleanup, after the sessions; breakRestore makes the restore of the search list throw there too
+    for (const [name, o, left] of [['delete', { failVerb: 'delete-keychain' }, ['other-link', 'other-process.txt']], ['restore', { breakRestore: true }, []]]) {
+      const out = join(root, `out-${name}`);
+      mkdirSync(out);
+      await assert.rejects(proveLive(out, { env: fakeSecurity(join(root, name), { ...o, intruder: out }).env, dryRun: true }), /delete-keychain|search list/);
+      assert.deepEqual(readdirSync(out).sort(), left, `${name}: only the other writer's entries are left`);
+      if (left.length) for (const n of left) rmSync(join(out, n));
+      const { report } = await proveLive(out, { env: fakeSecurity(join(root, `${name}-good`)).env, dryRun: true });
+      assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key'); // the same --out, again
+    }
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 

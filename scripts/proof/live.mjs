@@ -17,7 +17,7 @@
 // session and on a signal (G73).
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants as fsc, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, writeFileSync, writeSync } from 'node:fs';
 import { constants, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ import { BRIDGE_PATH } from '../../src/session-policy.js';
 import { ownerHome } from '../../src/sage.js';
 import { ACCOUNT, keychainIdOf, stopScratchKeychain, withScratchKeychain } from './keychain.mjs';
 import { HOST_OFF, isWithin, resultsOf } from './probe.mjs';
-import { ROWS, OWNER_COMMAND, prove, refuseUsed, statusOf, verdict } from './run.mjs';
+import { ROWS, OWNER_COMMAND, prove, refuseUsed, runEntries, statusOf, verdict } from './run.mjs';
 import { dummyClaude, killSessions, startSession } from './session.mjs';
 import { jobLabelOf, removeTempRoots } from './world.mjs';
 
@@ -303,7 +303,7 @@ export function checksOf(w, { tools, calls }, { settingsBefore, hide, rg = null 
  * results by probe id, the L2 and L3 rows.
  * @param {object} ctx @param {{ key: string | null, env: NodeJS.ProcessEnv, dryRun: boolean, rg: string | null }} o  rg: rgOn's
  */
-async function sessionsOf({ root, world: w, control, policy, tag, controls }, { key, env, dryRun, rg }) {
+async function sessionsOf({ entries, world: w, control, policy, tag, controls }, { key, env, dryRun, rg }) {
   const hide = (t) => { let s = String(t).replaceAll(tag, '<tag>'); if (key) s = s.replaceAll(key, '<key>'); return s; };
   const model = key ? { ANTHROPIC_API_KEY: key } : {};
   const skipped = dryRun ? 'dry run: the dummy claude ran no model' : 'the session gave no result';
@@ -319,14 +319,14 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
   // The runner's own copies of probe.mjs and world.json, outside the session folder, where a session can read and not write: the asked
   // command names them by absolute paths, so no file of the session folder takes their place (F-T165-23). The runner writes no file into
   // a session folder; after each session the copies must still be the runner's, else that session's results count for nothing.
-  const dir = join(root, 'runner');
+  const dir = entries.at('runner'), sessionsDir = entries.at('sessions');
   const copies = { 'probe.mjs': readFileSync(PROBE, 'utf8'), 'world.json': `${JSON.stringify(w, null, 2)}\n` };
   mkdirSync(dir);
   for (const [name, text] of Object.entries(copies)) writeFileSync(join(dir, name), text, { flag: 'wx' });
   const changed = () => Object.entries(copies).find(([name, text]) => readPlain(join(dir, name)) !== text)?.[0];
   const command = probeCommand(dir), ask = prompts(w, dir);
   const settingsBefore = readPlain(join(w.sessionFolder, '.claude', 'settings.json'));
-  mkdirSync(join(root, 'sessions'), { recursive: true });
+  mkdirSync(sessionsDir, { recursive: true });
   const results = new Map(), rows = {}, sessions = [];
   // The probes that a session (or its subagent) ran, each with its verdict from its control and its result: from askedRun's result text,
   // else none, with the reason. In a dry run there is no result (SKIPPED); a malformed line is no result (F-T165-18).
@@ -352,8 +352,8 @@ async function sessionsOf({ root, world: w, control, policy, tag, controls }, { 
       continue;
     }
     const leakedKey = Boolean(key) && r.stdout.includes(key);
-    writeFileSync(join(root, 'sessions', `${group}.jsonl`), hide(r.stdout));
-    writeFileSync(join(root, 'sessions', `${group}.stderr`), hide(r.stderr));
+    writeFileSync(join(sessionsDir, `${group}.jsonl`), hide(r.stdout));
+    writeFileSync(join(sessionsDir, `${group}.stderr`), hide(r.stderr));
     const s = callsOf(r.stdout); // raw: the checks compare against the tag itself (F-T165-14)
     sessions.push({ group, outcome: r.timedOut ? 'timed out' : s.result ? `${s.result.subtype}${s.result.is_error ? ' (error)' : ''}` : `exit ${r.status}, no result`, turns: s.result?.num_turns ?? 0, costUsd: s.result?.total_cost_usd ?? 0, denials: s.result?.permission_denials?.length ?? 0, leakedKey, tools: s.tools, calls: s.calls.map((x) => ({ name: x.name, error: x.error, denied: x.denied })) });
     const broken = s.fault && `the session's stream is empty or broken (${s.fault})`; // every row of the session is INVALID
@@ -458,27 +458,29 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   const rg = rgOn(leadPath);
   if (!rg && !dryRun) throw new Error(`ripgrep (rg) is not on the sessions' PATH ${leadPath}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
+  const existed = existsSync(root); // F-T180-1, F-T167-2, F-T167-3: a failed dry run removes only the entries that `entries` recorded
   mkdirSync(root, { recursive: true });
-  const tag = randomBytes(8).toString('hex');
-  const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
+  const tag = randomBytes(8).toString('hex'), entries = runEntries(root);
+  const runClaude = dryRun ? dummyClaude(entries.at('dummy'), 'ok') : claude;
   // The preflights' temp folders (sage-bot-preflight-*, src/session-policy.js makes them in os.tmpdir()) go in the run's own folder, which
   // the signal handler removes: a signal during a preflight leaves none in the shared TMPDIR (F-T165-31).
-  const tmp = join(root, 'tmp'), tmpWas = process.env.TMPDIR;
+  const tmp = entries.at('tmp'), tmpWas = process.env.TMPDIR;
   mkdirSync(tmp);
   process.env.TMPDIR = tmp;
   current = { root, key, env, label: jobLabelOf(tag), tmp };
   let saved = [], scan = { leaks: [], unscanned: [] };
   try {
-    const { report, summary } = await withScratchKeychain(join(root, 'keychain'), async () => {
-      saved = readFileSync(join(root, 'keychain', 'search-list-before.txt'), 'utf8').split('\n').filter(Boolean);
+    const keychainDir = entries.at('keychain');
+    const { report, summary } = await withScratchKeychain(keychainDir, async () => {
+      saved = readFileSync(join(keychainDir, 'search-list-before.txt'), 'utf8').split('\n').filter(Boolean);
       const live = async (ctx) => ({ ...(await sessionsOf(ctx, { key, env, dryRun, rg })), keychain: { run: true, searchList: saved, item: `${ctx.world.keychain.service} in ${ctx.world.keychain.path} (removed at the end of the run)` } });
-      return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], made: ['keychain', 'dummy', 'tmp'], live, proof: dryRun ? 'T165 (T134 PR 2b), dry run: dummy claude, no key' : undefined });
+      return prove(root, { tag, env, claude: runClaude, secrets: key ? [key] : [], entries, live, proof: dryRun ? 'T165 (T134 PR 2b), dry run: dummy claude, no key' : undefined });
     }, { env, id: keychainIdOf(tag) });
     if (key) scan = redactLeaks(root, key);
     const { leaks, unscanned } = scan;
     const findings = Object.fromEntries(Object.entries(FINDINGS).map(([k, rs]) => [k, { rows: rs, status: statusOf(rs.map((r) => report.rows.find((x) => x.row === r).status)) }]));
     Object.assign(report, { key: key ? `from the Keychain item ${SERVICE} (account ${ACCOUNT}); never written` : 'none (dry run)', leaks, unscanned, findings });
-    writeFileSync(join(root, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
+    writeFileSync(entries.at('report.json'), `${JSON.stringify(report, null, 2)}\n`);
     const lines = [
       summary,
       ...Object.entries(findings).map(([k, f]) => `${f.status.padEnd(8)} ${k.padEnd(11)} by ${f.rows.join(', ')}`),
@@ -487,6 +489,15 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
     ];
     if (key && lines.some((l) => l.includes(key))) throw new Error('the summary holds the key: nothing was printed.');
     return { report, summary: lines.join('\n') };
+  } catch (e) {
+    // F-T180-1, F-T167-2: a dry run that fails leaves nothing of its own, so the same --out can be used again. It removes only the entries this
+    // run made in --out (entries.remove: runEntries names each one, F-T167-3), never a file that another process added, and --out itself
+    // only when this run made it and it is empty (rmdir). A real run keeps its folder: it may hold the evidence of the failure.
+    if (dryRun) {
+      entries.remove();
+      if (!existed) try { rmdirSync(root); } catch { /* another process put an entry there: it stays */ }
+    }
+    throw e;
   } finally {
     if (key) try { redactLeaks(root, key); } catch { /* the folder is gone */ } // also after a failure: no file of a run that stopped keeps the key (F-T165-15)
     if (tmpWas === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmpWas;
