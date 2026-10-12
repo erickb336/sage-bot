@@ -117,13 +117,14 @@ export function prepare(file, log, fetchChannel) {
 }
 
 /**
- * The start after the login: fetches the guild and its members, sets /sage for this guild only, and logs each permission that sage-bot
- * lacks in a registered channel. Returns the guild.
+ * The start after the login: fetches the guild and its members, sets /sage for this guild only (a refusal is logged, and the start
+ * goes on), and logs each permission that sage-bot lacks in a registered channel. Returns the guild.
  */
 export async function enter(client, { config, channels, ask, log }) {
   const guild = await client.guilds.fetch(config.guildId);
   await guild.members.fetch();
-  await guild.commands.set([askCommand(ask.projects)]);
+  // A refused /sage stops only /sage: the votes and cards start all the same (F-T93-4).
+  await guild.commands.set([askCommand(ask.projects)]).catch((e) => log(`Discord refused to set /sage, so /sage does not work until the next start; the votes and cards work: ${apiError(e)}`));
   for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
   return guild;
 }
