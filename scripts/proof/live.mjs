@@ -458,6 +458,7 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
   const rg = rgOn(leadPath);
   if (!rg && !dryRun) throw new Error(`ripgrep (rg) is not on the sessions' PATH ${leadPath}, so row F-T157-5 cannot pass: install it with \`brew install ripgrep\`, then run npm run proof:live. Nothing was started.`);
   const key = dryRun ? null : keyFromKeychain(env); // then the key: no fixture and no world before it is there
+  const existed = existsSync(root); // F-T180-1: what a failed dry run removes is only what this run made
   mkdirSync(root, { recursive: true });
   const tag = randomBytes(8).toString('hex');
   const runClaude = dryRun ? dummyClaude(join(root, 'dummy'), 'ok') : claude;
@@ -487,6 +488,11 @@ export async function proveLive(root, { env = process.env, dryRun = false, claud
     ];
     if (key && lines.some((l) => l.includes(key))) throw new Error('the summary holds the key: nothing was printed.');
     return { report, summary: lines.join('\n') };
+  } catch (e) {
+    // F-T180-1: a dry run that fails after the folder is made leaves nothing, so the same --out can be used again. The folder was empty
+    // (refuseUsed), so every entry in it is this run's. A real run keeps its folder: it may hold the evidence of the failure.
+    if (dryRun) { if (existed) for (const n of readdirSync(root)) rmSync(join(root, n), { recursive: true, force: true }); else rmSync(root, { recursive: true, force: true }); }
+    throw e;
   } finally {
     if (key) try { redactLeaks(root, key); } catch { /* the folder is gone */ } // also after a failure: no file of a run that stopped keeps the key (F-T165-15)
     if (tmpWas === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = tmpWas;

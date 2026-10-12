@@ -37,8 +37,7 @@ test('F-T156-23: a test file that does not load is no failing test: INVALID alon
 test('F-T156-23: a mutated file that does not parse is INVALID, even with failing tests', () => {
   const dir = tempFolder('sage-bot-t156-mut-');
   try {
-    // As in the run's copy of the project: without "type": "module", Node 24.20 `--check` passes a .js file with ESM syntax that does not parse.
-    writeFileSync(join(dir, 'package.json'), '{ "type": "module" }\n');
+    // F-T185-1: no package.json above the files. `node --check <file>` reads a .js file as CommonJS there and passes ESM syntax that does not parse.
     writeFileSync(join(dir, 'good.js'), 'export const x = 1;\n');
     writeFileSync(join(dir, 'bad.js'), 'export const x = (;\n');
     assert.deepEqual([parses(join(dir, 'good.js')), parses(join(dir, 'bad.js'))], [true, false]);

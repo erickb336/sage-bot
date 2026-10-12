@@ -9,7 +9,7 @@
 // SAMPLE DATA ONLY. It never prints a sample value: it refuses to write a report that holds the world's tag. Exit 1 on FAIL or INVALID.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { constants, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -141,9 +141,11 @@ export async function prove(root, o = {}) {
  * @param {string} root @param {string[]} [made]
  */
 export function refuseUsed(root, made = []) {
+  if (!statSync(root).isDirectory()) throw Object.assign(new Error(`--out ${root} is a file: --out must be a new folder (F-T179-1). Nothing was made.`), { exitCode: 2 });
   if (readdirSync(root).some((n) => !made.includes(n))) throw Object.assign(new Error(`the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`), { exitCode: 2 });
 }
 async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host = process.env, claude, secrets = [], made = [], proof, live: sessions } = {}) {
+  if (existsSync(root)) refuseUsed(root, made); // a file is refused here, before mkdir fails on it
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
   refuseUsed(root, made);

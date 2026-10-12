@@ -630,7 +630,10 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
   const root = liveScratch();
   try {
     const fake = fakeSecurity(root);
-    const { report, summary } = await proveLive(join(root, 'run'), { env: fake.env, dryRun: true });
+    // F-T178-1: an empty bridge-session PATH has no rg on any Mac, so this proves that a dry run does not refuse on a missing rg.
+    const noRg = join(root, 'no-rg');
+    mkdirSync(noRg);
+    const { report, summary } = await proveLive(join(root, 'run'), { env: fake.env, dryRun: true, leadPath: noRg });
     assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key');
     assert.match(summary.split('\n')[0], /^sage-bot proof \(T165 \(T134 PR 2b\), dry run: dummy claude, no key\): macOS [\d.]+, Claude Code 0\.0\.0$/); // F-T165-15: no stray text
     assert.equal(report.key, 'none (dry run)');
@@ -648,6 +651,36 @@ test('a dry run reads no key, runs the dummy claude and the fixture, and reports
     assert.ok(!summary.includes('Host hook folder'));
     assert.deepEqual(report.sessions.map((s) => [s.group, s.outcome, s.costUsd]), [['L1', 'success', 0], ['L2', 'success', 0], ['L3', 'success', 0]]);
     for (const path of files(join(root, 'run'))) assert.ok(!readFileSync(path, 'latin1').includes('ANTHROPIC_API_KEY='), `${path} holds a key variable`);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T179-1: an --out that is a file is refused with one line that says --out must be a new folder, in the proof and in the live proof', async () => {
+  const root = liveScratch();
+  try {
+    const file = join(root, 'a-file');
+    writeFileSync(file, 'sample\n');
+    const line = `--out ${file} is a file: --out must be a new folder (F-T179-1). Nothing was made.`;
+    const fake = fakeSecurity(root);
+    await assert.rejects(prove(file), (e) => e.exitCode === 2 && e.message === line);
+    await assert.rejects(proveLive(file, { env: fake.env, dryRun: true }), (e) => e.exitCode === 2 && e.message === line);
+    assert.equal(readFileSync(file, 'utf8'), 'sample\n');
+    assert.deepEqual(fake.calls(), []);
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('F-T180-1: a dry run that fails in a fixture leaves nothing in --out, so the same --out works again; a folder that was there stays, and a folder that is not empty is still refused', async () => {
+  const root = liveScratch();
+  try {
+    const bad = fakeSecurity(join(root, 'bad'), { failVerb: 'create-keychain' });
+    const fresh = join(root, 'fresh'), empty = join(root, 'empty');
+    mkdirSync(empty);
+    await assert.rejects(proveLive(fresh, { env: bad.env, dryRun: true }), /create-keychain/);
+    assert.ok(!existsSync(fresh), 'a folder that the run made is removed');
+    await assert.rejects(proveLive(empty, { env: bad.env, dryRun: true }), /create-keychain/);
+    assert.deepEqual(readdirSync(empty), [], 'the empty folder stays, with nothing in it');
+    const good = fakeSecurity(join(root, 'good'));
+    const { report } = await proveLive(empty, { env: good.env, dryRun: true });
+    assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key'); // the same --out, again
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
