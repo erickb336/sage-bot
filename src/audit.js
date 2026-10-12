@@ -20,12 +20,13 @@ export const killPathOf = (config) => config.killPath ?? `${config.statePath}.le
  * Sage-lead text for sage, a MODEL reader (later, in a bridge session). An allow-list: a newline, the plain space and every printable
  * character (letters, marks, numbers, punctuation, symbols) stay; every other character (control, format, bidi, tag, private use,
  * unassigned, other separators, default-ignorable) becomes one space. `<`, `>` and each character that looks like one (LOOKS_LT,
- * LOOKS_GT) become ‹ and ›, so no text of a sage-lead can open or close a tag of sage's frame. A sage-lead is trusted with words, not with hidden characters.
+ * LOOKS_GT) become the plain parentheses ( and ), so no text of a sage-lead can open or close a tag of sage's frame. Not ‹ and ›: they look like
+ * angles themselves (F-T143-3). A sage-lead is trusted with words, not with hidden characters.
  */
 const PRINTABLE = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}]--\p{Default_Ignorable_Code_Point}]$/v;
 export const forLead = (text) => Array.from(String(text).toWellFormed(), (ch) => {
-  if (LOOKS_LT.test(ch)) return '‹';
-  if (LOOKS_GT.test(ch)) return '›';
+  if (LOOKS_LT.test(ch)) return '(';
+  if (LOOKS_GT.test(ch)) return ')';
   return ch === '\n' || ch === ' ' || PRINTABLE.test(ch) ? ch : ' ';
 }).join('');
 
