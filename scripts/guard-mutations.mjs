@@ -5,7 +5,7 @@
 // Agent, a WebFetch to 8.8.8.8). A copy that does not is a broken mutation: its test failures prove nothing, so it is
 // reported, not counted as a kill; nor is a run that does not end in 60 s. It prints one line for each surviving, broken,
 // timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in its file, so this list is out of date).
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -300,7 +300,17 @@ const MUTATIONS = [
   ['settings: a git read writes nothing (F-T144-L14)', " && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]))", ''],
   ['settings: a worktree under .claude/worktrees is a work folder (F-T144-L15)', ".replace(WORKTREE, '$1w')", ''],
   ['settings: a part after an = (F-T144-L15)', '.split(/[/=]/);', ".split('/');"],
-  ['settings: the session folder counts (F-T144-L16)', ", { text: String(cwd ?? '') });", ');'],
+  ['settings: the session folder counts (F-T144-L16)', 'targets.push(...cdTo, { text: base }, ', 'targets.push(...cdTo, '],
+  // F-T137: a relative path joined to the session folder and the cd folder; -U<n>; the hints; EnterWorktree's fields.
+  ['settings: a relative path counts joined to its folder (F-T137-L1)', ', ...targets.map((w) => ({ text: joined(base, w.text) })));', ');'],
+  ['settings: a cd folder starts the relative paths (F-T137-L1)', "const base = joined(String(cwd ?? ''), cdTo[0]?.text ?? '');", "const base = String(cwd ?? '');"],
+  ['settings: the path of a word is after its last = (F-T137-L1)', "const path = text.slice(text.lastIndexOf('=') + 1);", 'const path = text;'],
+  ['git diff -U takes no next word as its value (F-T137-L4)', "'-U': EQ, '--unified': EQ", "'-U': TEXT, '--unified': TEXT"],
+  ['a short option takes a value joined to it (F-T137-L4)', '[TEXT, EQ].includes(table[a.slice(0, 2)])', '[TEXT].includes(table[a.slice(0, 2)])'],
+  ['EnterWorktree takes only a name (F-T137-L5)', "Object.keys(i).some((k) => k !== 'name') ?", 'false ?'],
+  ['a word that starts with = gets the hint to quote it (F-T137-L3)', "parsed.startsWith('a = ') ?", 'false ?'],
+  ['a redirect to /dev/stderr gets the hint to >&2 (F-T137-L3)', '/^\\/dev\\/std(out|err)$/.test(posix.normalize(fold(dev.text))) ?', 'false ?'],
+  ['DO_NOT_TRACK and npm_config_cache may be set in front of a command (F-T137-6)', ", 'DO_NOT_TRACK', 'npm_config_cache']);", ']);'],
   ['settings: a relative path starts in the session folder (F-T144-L16)', "configPath(v.startsWith('/') ? v : `${cwd ?? ''}/${v}`)", 'configPath(v)'],
   // F-T144-L13: EnterWorktree, WebFetch, jq env, the zsh number range, the two-digit fd.
   ['EnterWorktree takes a plain name (F-T144-L13)', '/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(i.name)', '/^[A-Za-z0-9._/-]+$/.test(i.name)'],
@@ -335,13 +345,20 @@ const node = (args, cwd) => new Promise((done) => {
 /** Runs a copy of the guard with `file` as `source`: 'broken' when it fails the known-good calls, else the tests' exit code. */
 async function run(name, source, file = 'src/guard.js') {
   const dir = join(work, name.replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + Math.random().toString(36).slice(2, 6));
-  for (const f of ['package.json', 'test/guard.test.js', 'test/guard-corpus.json']) cpSync(join(ROOT, f), join(dir, f));
+  // The tests import test/bridge-setup.js, and it needs src, test/fixtures and discord.js: a copy without them fails to load,
+  // and every mutation then counted as a kill (F-T137-7).
+  for (const f of ['package.json', 'src', 'test']) cpSync(join(ROOT, f), join(dir, f), { recursive: true });
+  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
   for (const [f, text] of Object.entries({ ...SOURCES, [file]: source })) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
-  if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
-  return node(['--test', 'test/guard.test.js'], dir);
+  try {
+    if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
+    return await node(['--test', 'test/guard.test.js'], dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 const stale = MUTATIONS.filter(([, from, , file = 'src/guard.js']) => SOURCES[file].split(from).length !== 2);
