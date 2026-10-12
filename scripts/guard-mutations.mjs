@@ -5,7 +5,7 @@
 // Agent, a WebFetch to 8.8.8.8). A copy that does not is a broken mutation: its test failures prove nothing, so it is
 // reported, not counted as a kill; nor is a run that does not end in 60 s. It prints one line for each surviving, broken,
 // timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in its file, so this list is out of date).
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -219,7 +219,7 @@ const MUTATIONS = [
   ['the state tool: the NotebookEdit tool', "NotebookEdit: file('notebook_path'),", 'NotebookEdit: allow,'],
   ['a file tool without the name is allowed', 'if (namesStateTool(all.map(([, v]) => v), env)) return STATE_TOOL;', 'return STATE_TOOL;'],
   ['a file tool: the state tool is checked', '  if (namesStateTool(all.map(([, v]) => v), env)) return STATE_TOOL;\n', ''],
-  ['EnterWorktree: no name is allowed (F-T144-L13)', 'EnterWorktree: (i) => (i.name === undefined || ', 'EnterWorktree: (i) => ('],
+  ['EnterWorktree: no name is allowed (F-T144-L13)', ': i.name === undefined || (typeof i.name', ': (typeof i.name'],
   ['a refusal cuts each word it echoes (F-T133-57)', 'text.slice(0, 200).replace(', 'text.replace('],
   // F-T134-5: the deadline runs while the hook reads stdin.
   ['the hook: the deadline starts before stdin is read (F-T134-5)', "    setTimeout(() => answer(refusal(`a tool call that the guard did not decide in ${DEADLINE_MS / 1000} s`)), DEADLINE_MS);\n    // stdin is read as a stream, so that the deadline above runs while it waits (a synchronous read blocked the timer).\n    const chunks = [];\n    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n", "    const chunks = [];\n    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n    setTimeout(() => answer(refusal(`a tool call that the guard did not decide in ${DEADLINE_MS / 1000} s`)), DEADLINE_MS);\n", 'scripts/guard.mjs'],
@@ -237,9 +237,9 @@ const MUTATIONS = [
   ['git reset gets the hint to git restore (F-T144-5)', "  reset: () => how('git reset',", "  reset_: () => how('git reset',"],
   ['git --version (F-T144-5)', "  if (version(args)) return null;\n  const a = gitArgs(args);", '  const a = gitArgs(args);'],
   // F-T144-6: the read options of rg, node --test, git diff, git log, find.
-  ['a short option takes its text value joined (F-T144-6)', '    if (a.length > 2 && table[a.slice(0, 2)] === TEXT) continue;\n', ''],
-  ['a joined value only for an option with a text value (F-T144-6)', 'table[a.slice(0, 2)] === TEXT) continue;', 'table[a.slice(0, 2)] !== undefined) continue;'],
-  ['an option alone takes no joined value (F-T144-6)', 'if (a.length > 2 && table[a.slice(0, 2)]', 'if (table[a.slice(0, 2)]'],
+  ['a short option takes its text value joined (F-T144-6)', '    if (a.length > 2 && [TEXT, EQ].includes(table[a.slice(0, 2)])) continue;\n', ''],
+  ['a joined value only for an option with a text value (F-T144-6)', '[TEXT, EQ].includes(table[a.slice(0, 2)])) continue;', 'table[a.slice(0, 2)] !== undefined) continue;'],
+  ['an option alone takes no joined value (F-T144-6)', 'if (a.length > 2 && [TEXT, EQ].includes(', 'if ([TEXT, EQ].includes('],
   ['rg --hidden (F-T144-6)', "'--hidden': FLAG, ", ''],
   ['node --test-only (F-T144-6)', ", '--test-only': FLAG };", ' };'],
   ['git diff --word-diff (F-T144-6)', ", '--word-diff': FLAG }),", ' }),'],
@@ -267,7 +267,7 @@ const MUTATIONS = [
   ['a file tool: an empty path is no path (F-T144-L7)', " || !i[key]) return", ') return'],
   ['NotebookEdit: its path key is notebook_path (F-T144-L7)', "NotebookEdit: file('notebook_path')", "NotebookEdit: file('file_path')"],
   // F-T144-L8: /dev/tcp, --pretty "%h".
-  ['a redirect under /dev/ only to /dev/null (F-T144-L8)', 'if (dev) return `a redirect to', 'if (false) return `a redirect to'],
+  ['a redirect under /dev/ only to /dev/null (F-T144-L8)', 'if (dev) return /^', 'if (false) return /^'],
   ['a redirect: /dev/null is allowed (F-T144-L8)', " && posix.normalize(fold(w.text)) !== '/dev/null'", ''],
   ['a redirect: /dev/ is folded and normalized (F-T144-L8)', 'DEV.test(posix.normalize(fold(w.text)))', 'DEV.test(w.text)'],
   ['a redirect: /dev/ reached with .. (F-T144-L8)', 'const DEV = /^(\\/|(\\.\\.\\/)+)dev(\\/|$)/;', 'const DEV = /^(\\/)dev(\\/|$)/;'],
@@ -288,19 +288,44 @@ const MUTATIONS = [
   ['settings: .claude (F-T133-72)', "const CONFIG_NAMES = ['.claude', ", 'const CONFIG_NAMES = ['],
   // F-T133-72 and F-T144-L14, L15, L16: the settings rule.
   ['a file tool: no write to a settings path (F-T133-72)', '  return dir ? CONFIG(dir[1]) : null;', '  return null;'],
-  ['Bash: no write to a settings path (F-T133-72)', '  if (dir) return CONFIG(dir.text);\n', ''],
+  ['Bash: no write to a settings path (F-T133-72)', '    if (dir !== undefined) return CONFIG(dir);\n', ''],
   ['settings: the redirect targets (F-T133-72)', 'const targets = [...parsed.flatMap((seg) => seg.redirects), ', 'const targets = ['],
   ['settings: the words of a part that writes (F-T133-72)', ', ...parsed.filter(writes).flatMap((seg) => seg.words)];', '];'],
   ['settings: touch, mkdir, rm and rmdir write (F-T133-72)', '(WRITES.has(name) || CHANGES.has(name))', 'WRITES.has(name)'],
   ['settings: the path is folded (.CLAUDE) (F-T133-72)', 'posix.normalize(fold(text))', 'posix.normalize(text)'],
   ['settings: the path is normalized (F-T144-L15)', 'posix.normalize(fold(text)).replace', 'fold(text).replace'],
   ['settings: only a path key of a file tool (F-T133-72)', "all.find(([k, v]) => k.endsWith('path') && configPath(", 'all.find(([k, v]) => configPath('],
-  ['settings: a cd folder counts (F-T144-L14)', "...parsed.filter((seg) => seg.words[0]?.text === 'cd').flatMap((seg) => seg.words.slice(1)), ", ''],
+  ['settings: a cd folder counts (F-T144-L14)', 'const paths = [...targets, ...cdTo]', 'const paths = [...targets]'],
   ['settings: a wildcard part that starts with . (F-T144-L14)', "(/[*?]/.test(p) && p.startsWith('.') ? matches(p, name) : p === name)", '(p === name)'],
   ['settings: a git read writes nothing (F-T144-L14)', " && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]))", ''],
   ['settings: a worktree under .claude/worktrees is a work folder (F-T144-L15)', ".replace(WORKTREE, '$1w')", ''],
   ['settings: a part after an = (F-T144-L15)', '.split(/[/=]/);', ".split('/');"],
-  ['settings: the session folder counts (F-T144-L16)', ", { text: String(cwd ?? '') });", ');'],
+  ['settings: the session folder counts (F-T144-L16)', 'paths.push(base, ', 'paths.push('],
+  // F-T137: a relative path joined to the session folder and the cd folder; -U<n>; the hints; EnterWorktree's fields.
+  ['settings: a relative path counts joined to its folder (F-T137-L1)', ', ...(base === null ? [] : targets.flatMap((w) => joined(base, w))));', ');'],
+  ['settings: a cd folder starts the relative paths (F-T137-L1)', 'const base = cdTo[0] ? folder(resolve(here, cdTo[0].text, cdTo[0].q)) : here;', 'const base = here;'],
+  ['settings: a folder is normalized (F-T137-15)', 'p && posix.normalize(p).replace(', 'p && p.replace('],
+  ['settings: a folder has no / at its end (F-T137-15)', ".replace(/(.)\\/$/, '$1')", ''],
+  // F-T137-8, F-T137-9, F-T137-10: the whole word and its text after the first =; ~+ and an unknown ~; a quoted variable name.
+  ['settings: the path of a word after its first = (F-T137-L1)', "...(eq < 0 ? [] : [resolve(base, text.slice(eq + 1), q - eq - 1)])", ''],
+  ['settings: the path of the whole word, also with an = in it (F-T137-9)', 'return [resolve(base, text, q), ...', 'return [...'],
+  ['settings: an unquoted ~+ is the cd folder (F-T137-9)', "tilde === '~+' ? posix.join(base, p.slice(2)) : null;", 'tilde === "~+" ? posix.join(base, p) : null;'],
+  ['settings: an unquoted ~- or ~name is a folder the guard cannot know (F-T137-9)', "if (paths.includes(null)) return how(", 'if (false) return how('],
+  ['settings: a quoted ~ is a folder of that name (F-T137-9)', "if (!tilde.startsWith('~') || q < 1) return", "if (!tilde.startsWith('~')) return"],
+  ['settings: a ~ with a quote before its first / is refused: bash and zsh read it differently (F-T137-14)', 'if (q <= tilde.length) return null;', ''],
+  ['settings: cd .. into .claude/worktrees gets the hint to stay in the worktree (F-T137-8)', 'if (folder(dir) === base && /\\/\\.claude\\/worktrees$/.test(fold(base))) {', 'if (false) {'],
+  ['settings: an absolute cd to .claude/worktrees gets the same hint (F-T137-15)', 'if (folder(dir) === base &&', 'if (dir === base &&'],
+  ['settings: a shell in .claude/worktrees gets the hint to cd back into the worktree (F-T137-13)', "base === here ? 'cd <worktree name>", "false ? 'cd <worktree name>"],
+  ['a variable: no quote before its = (F-T137-10)', " && !(w.q <= w.text.indexOf('='))", ''],
+  ['a quoted variable name gets the hint to write it with no quotes (F-T137-12)', 'if (VAR.test(name)) return how(', 'if (false) return how('],
+  ['a refusal shows a word with its quotes (F-T137-12)', 'word.raw = command.slice(word.at, i);', 'word.raw = word.text;'],
+  ['a variable: a single-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        word.text += body;", '        word.text += body;'],
+  ['a variable: a double-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        for (; j <", '        for (; j <'],
+  ['git diff -U takes no next word as its value (F-T137-L4)', "'-U': EQ, '--unified': EQ", "'-U': TEXT, '--unified': TEXT"],
+  ['EnterWorktree takes only a name (F-T137-L5)', "Object.keys(i).some((k) => k !== 'name') ?", 'false ?'],
+  ['a word that starts with = gets the hint to quote it (F-T137-L3)', "parsed.startsWith('a = ') ?", 'false ?'],
+  ['a redirect to /dev/stderr gets the hint to >&2 (F-T137-L3)', '/^\\/dev\\/std(out|err)$/.test(posix.normalize(fold(dev.text))) ?', 'false ?'],
+  ['DO_NOT_TRACK and npm_config_cache may be set in front of a command (F-T137-6)', ", 'DO_NOT_TRACK', 'npm_config_cache']);", ']);'],
   ['settings: a relative path starts in the session folder (F-T144-L16)', "configPath(v.startsWith('/') ? v : `${cwd ?? ''}/${v}`)", 'configPath(v)'],
   // F-T144-L13: EnterWorktree, WebFetch, jq env, the zsh number range, the two-digit fd.
   ['EnterWorktree takes a plain name (F-T144-L13)', '/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(i.name)', '/^[A-Za-z0-9._/-]+$/.test(i.name)'],
@@ -335,20 +360,32 @@ const node = (args, cwd) => new Promise((done) => {
 /** Runs a copy of the guard with `file` as `source`: 'broken' when it fails the known-good calls, else the tests' exit code. */
 async function run(name, source, file = 'src/guard.js') {
   const dir = join(work, name.replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + Math.random().toString(36).slice(2, 6));
-  for (const f of ['package.json', 'test/guard.test.js', 'test/guard-corpus.json']) cpSync(join(ROOT, f), join(dir, f));
+  // The tests import test/bridge-setup.js, and it needs src, test/fixtures and discord.js: a copy without them fails to load,
+  // and every mutation then counted as a kill (F-T137-7).
+  for (const f of ['package.json', 'src', 'test']) cpSync(join(ROOT, f), join(dir, f), { recursive: true });
+  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
   for (const [f, text] of Object.entries({ ...SOURCES, [file]: source })) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
     writeFileSync(join(dir, f), text);
   }
-  if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
-  return node(['--test', 'test/guard.test.js'], dir);
+  try {
+    if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
+    return await node(['--test', 'test/guard.test.js'], dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 const stale = MUTATIONS.filter(([, from, , file = 'src/guard.js']) => SOURCES[file].split(from).length !== 2);
 for (const [name, from, , file = 'src/guard.js'] of stale) console.log(`STALE  ${name}: its text is not in ${file} exactly once: ${JSON.stringify(from)}`);
 const start = Date.now();
 const unmutated = await run('unmutated', SOURCES['src/guard.js']);
-if (unmutated !== 0) console.log(`FAIL   the unmutated guard: ${unmutated === 'broken' ? 'it refuses a known-good call' : 'its tests fail'}`);
+// With the unmutated guard failing, a failing test proves nothing about a removal: stop here (F-T137-7).
+if (unmutated !== 0) {
+  console.log(`FAIL   the unmutated guard: ${unmutated === 'broken' ? 'it refuses a known-good call' : unmutated === 'timeout' ? 'its tests did not end in 60 s' : 'its tests fail'}; no mutation runs`);
+  rmSync(work, { recursive: true, force: true });
+  process.exit(1);
+}
 const survivors = [];
 const broken = [];
 const timeouts = [];
@@ -369,4 +406,4 @@ for (const name of timeouts) console.log(`TIMEOUT   ${name}: the tests did not e
 const killed = MUTATIONS.length - stale.length - survivors.length - broken.length - timeouts.length;
 console.log(`guard mutations: ${killed} of ${MUTATIONS.length} rule removals fail a test; ${survivors.length} survive; ${broken.length} broken; ${timeouts.length} time out; ${stale.length} stale; ${Math.round((Date.now() - start) / 1000)} s`);
 rmSync(work, { recursive: true, force: true });
-process.exit(survivors.length || broken.length || timeouts.length || stale.length || unmutated !== 0 ? 1 : 0);
+process.exit(survivors.length || broken.length || timeouts.length || stale.length ? 1 : 0);
