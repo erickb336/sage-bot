@@ -21,6 +21,10 @@ import { DRY_RUN, foreign, isTalk, LINK_OFF, loadThreads, noRight, readAsk, save
  * also a refused one; a mention that opens a thread counts once. A /sage stop of a sage-lead or Erick does not count: the kill switch always works. */
 export const ASK_LIMIT = 10;
 export const HOUR = 3_600_000;
+/** A burst limit per person, apart from ASK_LIMIT (F-T143-2, F-T143-5): at most BURST of a sage-lead's or Erick's /sage stop, and at most
+ * BURST log lines of an apprentice's mentions over ASK_LIMIT in a sage-lead thread, in BURST_FOR. So neither floods #sage-audit or a channel. */
+export const BURST = 3;
+export const BURST_FOR = 10 * 60_000;
 const DAY = 24 * HOUR;
 /** The files that /sage files may attach: at most this many, of these types only, and at most MAX_BYTES in one reply, so also in one file.
  * 8 MiB stays under Discord's upload limit for a server with no boosts (10 MB a message) with room for the rest of the request. */
@@ -160,6 +164,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
   const asks = new Map(); // person id → the times of their asks in the last hour; only in memory
   const warned = new Map(); // person id → until when a mention over the limit gets no second note
+  const stops = new Map(); // person id → the times of their /sage stop in the last BURST_FOR (a sage-lead or Erick)
+  const stopWarned = new Map(); // person id → until when a /sage stop over BURST gets no second note
+  const overLines = new Map(); // person id → the times of an apprentice's over-limit log lines in a sage-lead thread
   const daily = new Map(); // person id → the UTC day of their last pointer in a channel that is not registered
   const say = (line) => log(forTerminal(line));
   /** The registered channel that a pointer names: the first one of the registry. */
@@ -172,12 +179,12 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     return text;
   }
 
-  /** Counts one ask of `id`. Returns null when it may go on, or the time when the next ask works. */
-  function spend(id) {
+  /** Counts one ask of `id` in `kind`, at most `max` in `span`. Returns null when it may go on, or the time when the next one works. */
+  function spend(id, kind = asks, max = ASK_LIMIT, span = HOUR) {
     const t = now();
-    const times = (asks.get(id) ?? []).filter((at) => at > t - HOUR);
-    if (times.length >= ASK_LIMIT) { asks.set(id, times); return times[0] + HOUR; }
-    asks.set(id, [...times, t]);
+    const times = (kind.get(id) ?? []).filter((at) => at > t - span);
+    if (times.length >= max) { kind.set(id, times); return times[0] + span; }
+    kind.set(id, [...times, t]);
     return null;
   }
   const limited = (at) => `You asked ${ASK_LIMIT} times in the last hour; that is the limit. Your next ask works at ${stamp(at)}.`;
@@ -240,12 +247,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
 
   /**
    * Writes one line of the sage-lead log for a message (or a /sage stop), then posts its copy to #sage-audit, which pings nobody. A sage-lead's
-   * text goes in cleaned by forLead; an apprentice's as quoted data. Throws when the log cannot be written: then nothing goes further.
+   * or Erick's text goes in cleaned by forLead (F-T143-6: Erick's /sage stop is his own action, also with no role); an apprentice's as
+   * quoted data. Throws when the log cannot be written: then nothing goes further.
    */
   function record(m, { thread = null, project = null, outcome }) {
     const raw = m.content ?? '';
+    const own = isLead(m.roles ?? []) || m.user.id === config.ownerId;
     const line = sageLeadLog.append(entryOf({ at: now(), message: m.id ?? null, author: m.user.id, roles: m.roles ?? [], raw,
-      text: isLead(m.roles ?? []) ? forLead(raw) : quoted(raw), thread, project, outcome }));
+      text: own ? forLead(raw) : quoted(raw), thread, project, outcome }));
     const copy = [`**Sage-lead log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
       shown(line.text, 1500)].join('\n');
     audit?.({ content: copy, allowedMentions: NO_MENTIONS }).catch((e) => say(`Discord refused the #sage-audit copy: code ${e?.code ?? '-'}: ${e?.message}`));
@@ -299,6 +308,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     let content;
     if (b.customId === STOP_CANCEL) content = 'Cancelled. Nothing changed.';
     else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.';
+    else if (linkOff(killPath)) content = 'The link from Discord to sage is already off. Nothing changed.'; // F-T143-2: no write, no log line
     else try {
       setLinkOff(killPath, b.user.id, now());
       say(`${b.user.id} turned off the link from Discord to sage (the kill switch ${killPath}). Turn it on again with: node scripts/leads.mjs restore`);
@@ -370,16 +380,21 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       }
       let payload;
       try {
-        // The kill switch always works (F-T131-3): a /sage stop of a sage-lead or Erick skips the limit and works in any channel.
+        // The kill switch always works (F-T131-3): a /sage stop of a sage-lead or Erick skips the limit and works in any channel. It has
+        // its own burst limit (F-T143-2): over BURST in BURST_FOR, one note, then nothing until the burst frees up.
         const stop = i.sub === 'stop' && (isLead(i.roles ?? []) || i.user.id === config.ownerId);
+        const burst = stop && spend(i.user.id, stops, BURST, BURST_FOR);
+        const quiet = burst && (stopWarned.get(i.user.id) ?? 0) > now();
+        if (burst && !quiet) stopWarned.set(i.user.id, burst);
         const at = stop ? null : await registered(i.channelId, i.parentId);
         const text = stop || at ? null : pointer(i.user.id, `I answer /sage in ${here()}, so please ask there.`);
-        if (!stop && !at && !text) { // ignored: the deferred reply goes again, so nothing stays in the channel
+        if ((!stop && !at && !text) || quiet) { // ignored: the deferred reply goes again, so nothing stays in the channel
           await i.remove().catch((e) => say(`Discord refused to remove a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`));
           return;
         }
         const next = at && spend(i.user.id);
-        payload = stop ? stopAsk(i.user, i.roles) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
+        payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. Erick can still turn the link off at the terminal.` }
+          : stop ? stopAsk(i.user, i.roles) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
       } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
@@ -436,7 +451,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * - In a registered channel: opens a thread named from the request, and answers there (src/threads.js). A sage-lead's talk opens a sage-lead thread.
      * - In a thread that sage-bot opened: continues it. In another thread of a registered channel, or a forum post: one pointer in place.
      * - Elsewhere: one pointer to a registered channel per person per UTC day (shared with /sage).
-     * Every message of a sage-lead, and of an apprentice in a sage-lead thread, goes into the sage-lead log first. The limit counts each mention
+     * Every message of a sage-lead, and of an apprentice in a sage-lead thread, goes into the sage-lead log before the reply; an apprentice's
+     * over the limit there, at most BURST in BURST_FOR (F-T143-5). The limit counts each mention
      * in a registered place once; over it, one note until the hour frees up. A bot and a member with neither sage role get nothing,
      * nothing counts and nothing is logged (G20). Never rejects.
      */
@@ -464,7 +480,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         }
         const next = spend(id);
         if (next) {
-          if (lead) record(m, { thread: parent && m.channelId, project, outcome: 'over-limit' });
+          // An apprentice's mention in a sage-lead thread is logged too (F-T143-5), at most BURST lines in BURST_FOR, so it cannot flood #sage-audit.
+          const inLead = parent && threads.get(m.channelId)?.kind === 'lead';
+          if (lead || (inLead && !spend(id, overLines, BURST, BURST_FOR))) record(m, { thread: parent && m.channelId, project, outcome: 'over-limit' });
           if ((warned.get(id) ?? 0) <= now()) { warned.set(id, next); await where(null, { content: limited(next), allowedMentions: QUIET }, true); }
           return;
         }

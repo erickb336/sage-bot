@@ -9,7 +9,7 @@ export const LABEL = 'com.sage.bot';
  */
 export const CONFIG_FIELDS = ['guildId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
 /** The fields of the config that are Discord ids, when present: the bridge refuses each one that does not match its SNOWFLAKE. */
-export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
+export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'auditChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
 
 /** The Homebrew links that `brew upgrade node` keeps, in the order the plist prefers them. */
 const BREW_LINKS = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];

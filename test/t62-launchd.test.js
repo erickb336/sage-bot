@@ -52,6 +52,11 @@ test('a Discord id field that is not 17 to 20 digits is refused, as the bridge r
   // The edges: 17 and 20 digits pass.
   const ok = launchd({ ...SAMPLE, guildId: '1'.repeat(17), leadRole: '9'.repeat(20) }, t);
   assert.equal(ok.status, 0, ok.stderr);
+  // F-T143-5: the #sage-audit channel id, when present, too.
+  const audit = launchd({ ...SAMPLE, auditChannelId: '#sage-audit' }, t);
+  assert.equal(audit.status, 1);
+  assert.equal(audit.stderr, `sage-bot launchd: in the config file ${audit.path}, auditChannelId must each be a Discord id (17 to 20 digits). No plist written: ${audit.out} is unchanged.\n`);
+  assert.equal(launchd({ ...SAMPLE, auditChannelId: '400000000000000003' }, t).status, 0);
 });
 
 test('without --out, the plist goes to stdout as before', () => {

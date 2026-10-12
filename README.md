@@ -90,7 +90,7 @@ The Discord admin gives each person on the team one of two roles. A member with 
 | Talk to sage, write, and start build sessions | No | Not built: waits on T159 |
 | Asks in a rolling hour | 10 | 10 |
 
-A member with neither role gets no reply, and nothing they do counts. Only the owner registers a channel, and only the owner turns the link to sage on again, both at the terminal.
+A member with neither role gets no reply, and nothing they do counts. The owner is the exception: with no role, the owner can use the read commands and `/sage stop`, but not `/sage unregister`. Only the owner registers a channel, and only the owner turns the link to sage on again, both at the terminal.
 
 ## What to say
 
@@ -138,7 +138,7 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 - **An hourly limit.** Each person can ask 10 times in a rolling hour, across all channels.
 - **No AI reads Discord text.** Code answers each read ask. A vote gives sage only the option's letter and sage's own option text. sage reads a reason only through `scripts/reasons.mjs`, cleaned by an allow-list.
 - **The answer shows little.** It shows a task's id, title, size, state and pull request, and the open questions. It never reads findings, briefs, reports or `decisions.tsv`.
-- **The sage-lead log.** Each message of a sage-lead to sage-bot goes into an append-only log first, with a hash chain, and a copy goes to #sage-audit.
+- **The sage-lead log.** Each message of a sage-lead to sage-bot, and each message of an apprentice in a sage-lead thread, goes into an append-only log before sage-bot replies, with a hash chain, and a copy goes to #sage-audit. Over the hourly limit, an apprentice's messages in a sage-lead thread go into the log at most 3 times in 10 minutes.
 - **The kill switch.** A sage-lead or the owner types `/sage stop` and confirms. Nothing of a sage-lead then goes to sage until the owner turns the link on again at the terminal. Read asks keep working.
 
 **For bridge sessions, not on yet (T159):**

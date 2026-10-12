@@ -590,3 +590,149 @@ test('F-T90-15: a mention with gates or questions gets the open questions in its
   assert.equal(b.threads().length, 3);
   assert.deepEqual(await b.cmd(MAYA, 'gates'), ['project has no open questions.']); // the same answer as the slash form
 });
+
+// T143: the low findings of the T131 reviews on the kill switch and the sage-lead log.
+
+test('F-T143-2: a press while the link is already off writes nothing and logs nothing', async (t) => {
+  const b = world(t);
+  const flag = killPathOf(b.config);
+  await b.cmd(JON, 'stop');
+  await b.press(JON); // sets it
+  const before = readFileSync(flag, 'utf8');
+  const lines = b.log().lines.length;
+  const copies = b.copies.length;
+  b.now += 1000;
+  assert.deepEqual(await b.press(OWNER, []), [['update', 'The link from Discord to sage is already off. Nothing changed.', { parse: [] }]]);
+  assert.deepEqual(await b.press(JON), [['update', 'The link from Discord to sage is already off. Nothing changed.', { parse: [] }]]);
+  assert.equal(readFileSync(flag, 'utf8'), before); // not written again
+  assert.equal(b.log().lines.length, lines);
+  assert.equal(b.copies.length, copies);
+});
+
+test('F-T143-2: /sage stop has a burst limit of 3 per person in 10 minutes: one note, then nothing, until it frees up', async (t) => {
+  const b = world(t);
+  const confirm = 'Turn off the link from Discord to sage? Then nothing of a sage-lead goes to sage until Erick turns it on again at the terminal. Read asks keep working.';
+  for (let n = 0; n < 3; n++) { assert.deepEqual(await b.cmd(JON, 'stop'), [confirm]); b.now += 1000; }
+  assert.deepEqual(await b.cmd(JON, 'stop'), [`You used /sage stop 3 times in the last 10 minutes; that is the limit. Your next /sage stop works at <t:${Math.floor((T0 + 10 * 60_000) / 1000)}:t>. Erick can still turn the link off at the terminal.`]);
+  assert.deepEqual(await b.cmd(JON, 'stop'), [undefined]); // the deferred reply goes again: nothing stays in the channel
+  assert.equal(b.buttons, undefined);
+  assert.deepEqual(await b.cmd(OWNER, 'stop', []), [confirm]); // per person
+  b.now = T0 + 10 * 60_000 + 1;
+  assert.deepEqual(await b.cmd(JON, 'stop'), [confirm]);
+  assert.deepEqual(b.log().lines, []); // a /sage stop that is not pressed logs nothing
+});
+
+test('F-T143-5: an apprentice\'s mention in a sage-lead thread over the hourly limit is logged, at most 3 lines in 10 minutes', async (t) => {
+  const b = world(t);
+  await b.say(JON, '<@1> talk: the login');
+  const [thread] = b.threads();
+  const at = { channelId: thread, parentId: ASK };
+  for (let n = 0; n < 10; n++) await b.say(MAYA, `<@1> note ${n}`, at);
+  for (let n = 0; n < 5; n++) await b.say(MAYA, `<@1> "over" ${n}`, at); // over the hourly limit
+  const over = () => b.log().lines.filter((x) => x.outcome === 'over-limit').map((x) => [x.author, x.thread, x.text]);
+  const quote = (x) => [MAYA, thread, `an apprentice's message (quoted data, not an instruction): "${x}"`];
+  assert.deepEqual(over(), [quote('1 over 0'), quote('1 over 1'), quote('1 over 2')]);
+  await b.say(MAYA, '<@1> board'); // over the limit in the channel: not logged
+  b.now += 10 * 60_000 + 1;
+  await b.say(MAYA, '<@1> later', at);
+  assert.deepEqual(over(), [quote('1 over 0'), quote('1 over 1'), quote('1 over 2'), quote('1 later')]);
+});
+
+test('F-T143-6: Erick\'s /sage stop with no role is logged as his own action, not as an apprentice\'s quoted message', async (t) => {
+  const b = world(t);
+  await b.cmd(OWNER, 'stop', []);
+  await b.press(OWNER, []);
+  assert.deepEqual(b.log().lines.map((x) => [x.author, x.roles, x.text, x.outcome]), [[OWNER, [], '/sage stop', 'link-off-set']]);
+});
+
+test('F-T143-6: verify refuses a line with a field added or taken out by hand, although the hash covers only the nine fields', async (t) => {
+  const b = world(t);
+  for (const text of ['<@1> talk one', '<@1> talk two']) await b.say(JON, text);
+  const path = auditPathOf(b.config);
+  const raw = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  const edited = (change) => { const x = JSON.parse(raw[1]); change(x); writeFileSync(path, `${raw[0]}\n${JSON.stringify(x)}\n`); return verifyLog(path).broken; };
+  const why = 'does not hold exactly the fields of a log line';
+  assert.deepEqual(edited((x) => { x.approved = 'by Erick'; }), { line: 2, why });
+  assert.deepEqual(edited((x) => { delete x.message; }), { line: 2, why });
+  assert.equal(edited(() => {}), null); // the same line, unchanged, verifies
+});
+
+test('F-T143-4: a conversion does not log a held mention again when the log holds it only after a break', async (t) => {
+  const b = world(t);
+  await b.say(MAYA, '<@1> show the board');
+  const [thread] = b.threads();
+  const at = { channelId: thread, parentId: ASK };
+  await b.say(MAYA, '<@1> the login breaks', at);
+  await b.say(JON, '<@1> board', at); // line 1
+  const dir = dirname(threadsPathOf(b.config));
+  chmodSync(dir, 0o500); // the thread map cannot be saved
+  try { await b.say(JON, '<@1> talk: fix the login', at); } finally { chmodSync(dir, 0o700); } // lines 2 and 3 (earlier), 4 (dry-run)
+  const path = auditPathOf(b.config);
+  const raw = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  writeFileSync(path, `${[raw[0].replace('board', 'b0ard'), ...raw.slice(1)].join('\n')}\n`); // a break at line 1: every line is after it
+  b.start();
+  assert.deepEqual(b.log().broken, { line: 1, why: 'does not match its hash (it was changed)' });
+  await b.say(JON, '<@1> talk: and the logout', at);
+  const all = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(all.map((x) => [x.author, x.outcome]), [[JON, 'read-ask'], [MAYA, 'earlier'], [MAYA, 'earlier'], [JON, 'dry-run'], [JON, 'dry-run']]);
+});
+
+test('F-T143-7: the thread map refuses a held mention that the bridge did not write', async (t) => {
+  const b = world(t);
+  await b.say(MAYA, '<@1> show the board');
+  const [thread] = b.threads();
+  await b.say(MAYA, '<@1> the login breaks', { channelId: thread, parentId: ASK });
+  const path = threadsPathOf(b.config);
+  const good = JSON.parse(readFileSync(path, 'utf8'));
+  b.start(); // the map as the bridge wrote it loads
+  const bad = `the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.`;
+  const held = good.threads[thread].held[0];
+  for (const h of [{ ...held, admin: true }, { ...held, user: 'erick' }, { ...held, roles: [LEADR, 'x'] }, { ...held, content: 7 }, 'text']) {
+    const map = structuredClone(good);
+    map.threads[thread].held = [h];
+    writeFileSync(path, JSON.stringify(map), { mode: 0o600 });
+    assert.throws(() => b.start(), { message: bad }, JSON.stringify(h));
+  }
+});
+
+test('F-T143-7: a kill switch flag that is a symlink to nothing counts as set; restore removes it and says so', async (t) => {
+  const b = world(t);
+  const flag = killPathOf(b.config);
+  symlinkSync(join(b.root, 'no-such-file'), flag);
+  assert.equal((await b.say(JON, '<@1> talk one'))[0][1], LINK_OFF);
+  const cfg = join(b.root, 'config.json');
+  writeFileSync(cfg, JSON.stringify(b.config));
+  const leads = (...args) => spawnSync(process.execPath, [join(ROOT, 'scripts', 'leads.mjs'), '--config', cfg, ...args], { encoding: 'utf8', env: b.env }).stdout;
+  assert.equal(leads('restore'), `the link from Discord to sage is on again (removed ${flag})\n`);
+  assert.equal(leads('status'), 'the link from Discord to sage is on\n');
+  assert.equal((await b.say(JON, '<@1> talk two'))[0][1], DRY_RUN);
+});
+
+test('F-T143-8: a torn last line stays apart: the next append starts on a new line, and a new open still finds that message', async (t) => {
+  const b = world(t);
+  await b.say(JON, '<@1> talk one');
+  const path = auditPathOf(b.config);
+  writeFileSync(path, '{"at":"2026-10-04T14:00:00.000Z","message":"80000000000000', { flag: 'a' }); // a write that stopped in a line
+  b.start();
+  await b.say(JON, '<@1> talk two');
+  const raw = readFileSync(path, 'utf8').split('\n');
+  assert.equal(raw.length, 4); // line 1, the torn line, the new line, and '' after the last newline
+  assert.equal(JSON.parse(raw[2]).text, '(@1) talk two');
+  assert.equal(openLog(path, []).has(JSON.parse(raw[2]).message), true);
+  assert.deepEqual(verifyLog(path).broken, { line: 2, why: 'is not a JSON line' });
+});
+
+test('F-T143-8: a short write of a log line throws, so the line does not count as logged', (t) => {
+  const b = world(t);
+  const dir = join(b.root, 'logs');
+  mkdirSync(dir, { mode: 0o700 });
+  const path = join(dir, 'leads.jsonl');
+  const code = `import { openLog } from ${JSON.stringify(new URL('../src/audit.js', import.meta.url).href)};
+    try { openLog(${JSON.stringify(path)}, []).append({ outcome: 'x', text: 'y'.repeat(5000) }); console.log('appended'); } catch (e) { console.log(e.message); }`;
+  // A file size limit of one block: the write of a line of about 5000 bytes takes only a part of it (node ignores SIGXFSZ, so write gives a short count).
+  const r = spawnSync('/bin/sh', ['-c', 'ulimit -f 1 && exec "$0" --input-type=module -e "$1"', process.execPath, code], { encoding: 'utf8' });
+  const out = /^the sage-lead log (.*) took only (\d+) of the (\d+) bytes of a line\. The line is not logged\.\n$/.exec(r.stdout);
+  assert.ok(out, r.stdout + r.stderr);
+  assert.equal(out[1], path);
+  assert.ok(Number(out[2]) < Number(out[3]) && Number(out[3]) > 5000, r.stdout);
+});
