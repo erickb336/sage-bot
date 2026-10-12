@@ -5,7 +5,9 @@
 </picture>
 </a>
 
-**sage-bot is a bridge between [sage](https://github.com/erickb336/sage) and Discord that lets a small team read and answer sage's work from a Discord server.** Mention @sage-bot in a channel, and it answers in a thread of its own. Nobody on the team needs a terminal. Today, no Discord text reaches sage as an instruction. Bridge sessions (T159, not built yet) will let a sage-lead instruct sage from a thread, inside the guardrails.
+**sage-bot is a bridge between [sage](https://github.com/erickb336/sage) and Discord that lets a small team read and answer sage's work from a Discord server.** Mention @sage-bot in a channel, and it answers in a thread of its own. Nobody on the team needs a terminal. Today, no Discord text reaches sage as an instruction. Bridge sessions will let a sage-lead instruct sage from a thread, inside the guardrails. They are not built yet: they wait on T159.
+
+Ids such as T159 are sage task ids in this project's logbook. A G-id, such as G42, is a gate: a question that sage parks for the owner. The [reference](docs/reference.md) gives the gates and findings behind each rule.
 
 <p align="center">
   <a href="https://github.com/erickb336/sage-bot/actions/workflows/check.yml"><img alt="check" src="https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg"></a>
@@ -152,7 +154,7 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 <a href="docs/assets/safety-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/safety-dark.svg">
-  <img alt="The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
+  <img alt="The guardrails: six layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
 </picture>
 </a>
 
@@ -169,12 +171,12 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 
 A bridge session will be a headless `claude -p` session that sage-bot starts for one sage-lead thread, so that a sage-lead can instruct sage. Four layers will limit it:
 
-- **The sandbox settings** (built and tested) are the guarantee (G44 A). They allow no GitHub host (F-T134-1), and they deny the sage plugin folder, every logbook (F-T134-6) and the secret files (F-T134-15).
+- **The sandbox settings** (built and tested) hold the file and network boundary. They allow no GitHub host, and they deny the sage plugin folder, every logbook and the secret files.
 - **The guard hook** (built and tested) is a second layer. It allows only the commands on its allow-list.
-- **The broker** (built in T158, not used by a session until T159) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges (F-T134-1).
+- **The broker** (built, not used by a session until T159) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges.
 - **A spend cap** (built): the bridge policy starts each session with `--max-budget-usd 5`.
 
-A text hook never guarantees a file or network boundary; only the sandbox does (G44 A). `npm run proof` checks the sandbox settings (it needs the `claude` command on PATH), and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-proof-of-the-sandbox) lists each row.
+A text hook is only a second layer: the sandbox holds each file and network boundary. `npm run proof` checks the sandbox settings (it needs the `claude` command on PATH), and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-guard-for-bridge-sessions) gives each layer and the findings behind it, and [the proof](docs/reference.md#the-proof-of-the-sandbox) lists each row.
 
 ## Set up a live trial
 
@@ -229,14 +231,19 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 
 | Path | What it is |
 | --- | --- |
-| `src/ask.js`, `src/threads.js` | The read asks, the mention threads, `/sage unregister`, `/sage stop` and the hourly limit. |
-| `src/vote.js`, `src/cards.js`, `src/handle.js` | The vote rules, the cards and the handler of a press. |
-| `src/bridge.js`, `src/discord.js` | The bridge's loop, and the only code that connects to Discord. |
-| `src/audit.js` | The sage-lead log and the kill switch. |
-| `src/guard.js`, `src/session-policy.js` | The guard hook and the sandbox settings for bridge sessions (not on yet). |
-| `scripts/` | The commands, the demo, and `graphics.mjs`, which draws the README's graphics. |
-| `docs/setup.md` | The full checklist of the live trial, and the channel registry. |
-| `docs/reference.md` | **The full reference:** every rule, case and setting. |
+| `src/ask.js` | Read asks, `/sage` and the limit |
+| `src/threads.js` | Mention threads |
+| `src/vote.js` | The vote rules |
+| `src/cards.js` | The cards |
+| `src/handle.js` | A press of a button |
+| `src/bridge.js` | The bridge's loop |
+| `src/discord.js` | The only link to Discord |
+| `src/audit.js` | Sage-lead log, kill switch |
+| `src/guard.js` | Guard hook (not on yet) |
+| `src/session-policy.js` | Sandbox (not on yet) |
+| `scripts/` | Commands, demo, graphics |
+| `docs/setup.md` | The live trial checklist |
+| `docs/reference.md` | **Every rule and setting** |
 
 To run the checks:
 

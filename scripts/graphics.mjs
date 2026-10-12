@@ -4,7 +4,8 @@
 // The Discord symbol (G77): only as a separate, labelled node of a flow, never inside or beside sage-bot's mark as one
 // combined mark. Its path comes unchanged from Discord's own files in docs/assets/brand/: the Blurple file on light, the
 // White file on dark. It is never recoloured, rotated or stretched (one uniform scale, aspect ratio kept).
-// Every text is S (36) or more in a graphic 1100 wide, so it stays readable on a phone (about 10.5 px at 320 px wide; F-T90-9).
+// Every text is S (40) or more in a graphic 1100 wide, so it stays readable on a phone: GitHub shows a graphic 309 px wide on a
+// 375 px phone, so S is about 11 px there (F-T90-9, F-T187-1).
 // So each graphic says little, and the text beside it in the README carries the detail. Cut words before you shrink a text.
 // ALT holds each graphic's short description: the README's alt text and the SVG's aria-label are the same text (a test checks it).
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +15,7 @@ import { THEMES, EMBER, text, rect, path, circle, f1, flow, backdrop, emblem, pa
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'docs/assets');
-const S = 36;
+const S = 40;
 
 /** Discord's symbol, read from its official file: the viewBox, the path and the fill, exactly as the file has them. */
 function symbolOf(file) {
@@ -76,7 +77,7 @@ const ALT = {
   how: "How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the sage-lead log.",
   threads: 'Sample data: each mention of @sage-bot in a registered channel opens its own thread, and a mention inside that thread continues it.',
   roles: 'The two roles: a sage-apprentice reads and asks; a sage-lead can also break ties, end votes early, unregister a channel and turn off the link to sage.',
-  safety: 'The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions.',
+  safety: 'The guardrails: six layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions.',
   'tip-mention': "The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on.",
 };
 
@@ -134,7 +135,7 @@ function how(t, id) {
     heading(t, 40, 826, '3 · SAGE-LEAD TALK'),
     p(0, a3, ['@sage-bot', 'talk'], 'hot'), right(0, 1, m3),
     p(1, a3, ['sage-lead log,', '#sage-audit']), right(1, 2, m3, t.line, 'muted', { dash: '7 7' }),
-    p(2, a3, ['bridge session', 'T159, not built'], 'wait'),
+    p(2, a3, ['bridge session', 'not built yet'], 'wait'),
     text(W / 2, 1036, ['No Discord text reaches sage', 'as an instruction.'], { size: S, weight: 800, fill: t.loop, anchor: 'middle', lh: 1.2 }),
     label(t, W / 2, 1140, NOTICE),
   ].join('\n');
@@ -147,7 +148,7 @@ function roles(t, id) {
   const card = (y, title, sub, hot, rows) => {
     const h = 150 + rows.length * 52;
     const out = [rect(40, y, 1020, h, { rx: 10, fill: t.tile, stroke: hot ? t.edge : t.line, sw: hot ? 2 : 1.5 }),
-      text(70, y + 56, title, { size: 40, weight: 800, fill: t.ink }), text(70, y + 102, sub, { size: S, fill: t.muted })];
+      text(70, y + 56, title, { size: 40, weight: 800, fill: t.ink }), text(70, y + 106, sub, { size: S, fill: t.muted })];
     rows.forEach(([done, line], i) => out.push(dot(t, 84, y + 160 + i * 52 - 12, done), text(110, y + 160 + i * 52, line, { size: S, fill: done ? t.ink : t.muted })));
     return out.join('');
   };
@@ -177,9 +178,9 @@ function roles(t, id) {
 
 /** A mention opens a thread: the channel on top, its two threads below. Sample data. */
 function threads(t, id) {
-  const W = 1100, H = 1500;
+  const W = 1100, H = 1520;
   const msg = (x, y, who, s, bot = false) => (bot ? botMark(t, id, x + 24, y + 4, 0.4) : circle(x + 24, y, 22, { fill: t.chip, stroke: t.line, sw: 1.5 })) +
-    text(x + 62, y - 6, who, { size: S, weight: 800, fill: bot ? t.edge : t.ink }) + text(x + 62, y + 38, s, { size: S, fill: t.ink, lh: 1.2 });
+    text(x + 62, y - 6, who, { size: S, weight: 800, fill: bot ? t.edge : t.ink }) + text(x + 62, y + 44, s, { size: S, fill: t.ink, lh: 1.2 });
   const body = [
     backdrop(t, id, W, H, { moon: [960, 110, 90], seeds: [31, 47, 5], far: [H - 60, 30, 100, 60, 120], near: [H + 30, 40, 120, 80, 150], mist: [80, 280, H - 100], mistK: 0.6, embersTo: H - 20 }),
     // The channel.
@@ -187,47 +188,48 @@ function threads(t, id) {
     text(70, 88, '# ask-sage', { size: 40, weight: 800, fill: t.ink }),
     label(t, 1030, 88, 'a registered channel', { anchor: 'end' }),
     msg(66, 160, 'Maya · apprentice', '@sage-bot board'),
-    flow(id, 'M430 186 L 582 186', t.edge, 'hot'),
+    flow(id, 'M470 186 L 582 186', t.edge, 'hot'),
     plaque(t, 590, 150, 440, 'Thread: board', 'hot'),
     msg(66, 290, 'Jon · sage-lead', ['@sage-bot talk: is', 'the release ready?']),
-    flow(id, 'M470 316 L 582 316', t.line, 'muted'),
+    flow(id, 'M520 316 L 582 316', t.line, 'muted'),
     plaque(t, 590, 280, 440, 'Sage-lead thread', 'wait'),
     label(t, 70, 440, 'Each mention opens its own thread.', { anchor: 'start', fill: t.ink, weight: 700 }),
     // The answer thread.
-    rect(40, 500, 1020, 510, { rx: 10, fill: t.tile, stroke: t.edge, sw: 2 }),
+    rect(40, 500, 1020, 520, { rx: 10, fill: t.tile, stroke: t.edge, sw: 2 }),
     text(70, 558, 'Thread: board', { size: 40, weight: 800, fill: t.ink }),
     msg(66, 630, 'sage-bot', ['Building 2 · framed 5 · merged 9', 'Open questions: G7 (A or B)'], true),
     msg(66, 790, 'Maya · apprentice', '@sage-bot T7'),
     msg(66, 900, 'sage-bot', ['T7 · Share the board · small', 'building · no pull request yet'], true),
     // The sage-lead thread.
-    rect(40, 1040, 1020, 260, { rx: 10, fill: t.tile, stroke: t.line, sw: 1.5, dash: '7 6' }),
-    text(70, 1098, 'Sage-lead thread', { size: 40, weight: 800, fill: t.ink }),
-    msg(66, 1170, 'sage-bot', ['Recorded in the sage-lead log.', 'Sessions with sage are not on yet.'], true),
-    label(t, W / 2, 1360, 'Sample data. Mention it again in its thread.'),
-    label(t, W / 2, 1420, NOTICE),
+    rect(40, 1050, 1020, 270, { rx: 10, fill: t.tile, stroke: t.line, sw: 1.5, dash: '7 6' }),
+    text(70, 1108, 'Sage-lead thread', { size: 40, weight: 800, fill: t.ink }),
+    msg(66, 1180, 'sage-bot', ['Recorded in the sage-lead log.', 'Sessions with sage are not on yet.'], true),
+    label(t, W / 2, 1384, 'Sample data. Mention it again in its thread.'),
+    label(t, W / 2, 1444, NOTICE),
   ].join('\n');
   return panel(t, id, W, H, body, ALT.threads);
 }
 
 /** The guardrails: the layers that are on now, and the ones that come with bridge sessions. */
 function safety(t, id) {
-  const W = 1100, H = 1220;
-  const bar = (y, title, sub, on) => rect(40, y, W - 80, 104, { rx: 8, fill: t.tile, stroke: on ? t.edge : t.line, sw: 1.5, dash: on ? undefined : '7 6' }) +
-    dot(t, 72, y + 32, on) + text(100, y + 44, title, { size: S, weight: 800, fill: t.ink }) + text(100, y + 88, sub, { size: S, fill: t.muted });
-  const at = (y0, i) => y0 + i * 116;
+  const W = 1100, H = 1414;
+  const bar = (y, title, sub, on) => rect(40, y, W - 80, 112, { rx: 8, fill: t.tile, stroke: on ? t.edge : t.line, sw: 1.5, dash: on ? undefined : '7 6' }) +
+    dot(t, 72, y + 32, on) + text(100, y + 44, title, { size: S, weight: 800, fill: t.ink }) + text(100, y + 94, sub, { size: S, fill: t.muted });
+  const at = (y0, i) => y0 + i * 124;
   const body = [
     backdrop(t, id, W, H, { moon: [980, 90, 80], seeds: [31, 47, 5], far: [H - 60, 30, 100, 60, 120], near: [H + 30, 40, 120, 80, 150], mist: [80, 280, H - 80], mistK: 0.6, embersTo: H - 20 }),
     heading(t, 40, 60, 'ON NOW · FOR EVERY ASK'),
-    bar(at(80, 0), 'Roles and registered channels', 'No role: no reply. The owner registers channels.', true),
+    bar(at(80, 0), 'Roles and registered channels', 'Two roles, in the owner’s channels only.', true),
     bar(at(80, 1), 'An hourly limit', '10 asks for each person in a rolling hour.', true),
-    bar(at(80, 2), 'No AI reads Discord text', 'Code answers. A vote gives sage only the option.', true),
+    bar(at(80, 2), 'No AI reads Discord text', 'Code answers. sage gets only the option.', true),
     bar(at(80, 3), 'The sage-lead log', 'Hash-chained, with a copy in #sage-audit.', true),
-    bar(at(80, 4), 'The kill switch', '/sage stop. Only the owner turns it on again.', true),
-    heading(t, 40, 712, 'BRIDGE SESSIONS · NOT ON YET (T159)'),
-    bar(at(732, 0), 'The sandbox: the guarantee · built', 'No GitHub host. Logbooks, sage, secrets denied.', false),
-    bar(at(732, 1), 'The guard hook · built', 'Only the commands on its allow-list.', false),
-    bar(at(732, 2), 'The broker · T158', 'A few GitHub verbs. None of them merges.', false),
-    bar(at(732, 3), 'A spend cap · built', 'At most $5 of model use for each session.', false),
+    bar(at(80, 4), 'The kill switch', '/sage stop. Only the owner undoes it.', true),
+    bar(at(80, 5), 'The answer shows little', 'Task id, title, size, state, open questions.', true),
+    heading(t, 40, 864, 'BRIDGE SESSIONS · NOT ON YET (T159)'),
+    bar(at(884, 0), 'The sandbox: file and network boundary · built', 'No GitHub host, logbooks, sage or secrets.', false),
+    bar(at(884, 1), 'The guard hook · built', 'Only the commands on its allow-list.', false),
+    bar(at(884, 2), 'The broker · built', 'A few GitHub verbs. None of them merges.', false),
+    bar(at(884, 3), 'A spend cap · built', 'At most $5 of model use for each session.', false),
   ].join('\n');
   return panel(t, id, W, H, body, ALT.safety);
 }
