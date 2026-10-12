@@ -10,6 +10,7 @@ import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { lock } from './state.js';
+import { notDiscordIds } from './launchd.js';
 
 /** The Keychain item that holds the bot token: a generic password with this service name. */
 export const KEYCHAIN_SERVICE = 'sage-bot';
@@ -104,6 +105,8 @@ export const routes = ({ config, ask, bridge, fetch, botId }) => ({
  */
 export function prepare(file, log, fetchChannel) {
   refuseOldRoles(file);
+  const notIds = notDiscordIds(file); // the same check as scripts/launchd.mjs (F-T143-13)
+  if (notIds.length) throw new Error(`in the config, ${notIds.join(', ')} must each be a Discord id (17 to 20 digits). Nothing was started.`);
   const projects = loadProjects(file); // a config whose projects the bridge cannot serve stops here, before the lock (G43 A)
   const own = pickProject(projects).name;
   lock(file.statePath);

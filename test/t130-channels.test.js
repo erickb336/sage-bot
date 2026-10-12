@@ -292,6 +292,19 @@ test('F-T130-9 keepHome: registering the home channel for another project keeps 
   assert.deepEqual(file(b).channels, { [ASK]: { project: 'alpha' }, [CHANNEL]: { project: 'beta', home: true } });
 });
 
+test('F-T143-13: the bridge start refuses an auditChannelId (or any Discord id of the config) that is not a Discord id, as launchd.mjs does', (t) => {
+  const b = world(t);
+  const message = 'in the config, auditChannelId must each be a Discord id (17 to 20 digits). Nothing was started.';
+  for (const id of ['sage-audit', '12345', '<#400000000000000009>', ' 400000000000000009', 400000000000000009]) {
+    assert.throws(() => prepare({ ...b.config, auditChannelId: id }, () => {}), { message }, String(id));
+  }
+  assert.throws(() => prepare({ ...b.config, auditChannelId: 'x', guildId: undefined }, () => {}),
+    { message: 'in the config, guildId, auditChannelId must each be a Discord id (17 to 20 digits). Nothing was started.' });
+  assert.equal(existsSync(`${b.statePath}.lock`), false); // refused before the lock
+  const { config } = prepare({ ...b.config, auditChannelId: '400000000000000009' }, () => {});
+  assert.equal(config.auditChannelId, '400000000000000009');
+});
+
 test('F-T130-9 withHome: the start posts the cards in the registry\'s home channel, not in the config\'s channelId', (t) => {
   const b = world(t);
   mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });

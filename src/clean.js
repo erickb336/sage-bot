@@ -1,7 +1,34 @@
 // Untrusted text that leaves the bridge for a reader other than a person on Discord. Each function is an allow-list:
 // it says what may stay, and everything else goes (standing order 12). `safe` in cards.js cleans for people on Discord.
+import { readFileSync } from 'node:fs';
 import { REASON_MAX } from './vote.js';
 
+/**
+ * Each character that looks like a quote, a backquote, `<` or `>`, and the text it looks like (its confusables target, for example `'`,
+ * `''`, `<<` or `l'`). The extract src/confusables.json comes from Unicode's confusables.txt (scripts/confusables.mjs makes it), so
+ * no hand list can miss one again (F-T131-10, F-T143-3, F-T143-10, F-T143-11). forModel keeps none of them; forLead maps the angles.
+ */
+const { extract } = JSON.parse(readFileSync(new URL('./confusables.json', import.meta.url), 'utf8'));
+const char = (hex) => String.fromCodePoint(parseInt(hex.replace('U+', ''), 16));
+const LOOKALIKES = new Map([
+  ...Object.entries(extract).map(([source, target]) => [char(source), target.split(' ').map(char).join('')]),
+  // Kept by hand: confusables 17.0.0 maps these to other brackets or to nothing, but they look like an angle (NFKC or NFKD of the
+  // fullwidth, small and ≮ ≯ forms holds < or >; the others are angle brackets).
+  ...[...'\u2329\u276C\u2770\u27E8\u3008\uFE64\uFF1C\u226E'].map((c) => [c, '<']),
+  ...[...'\u232A\u276D\u2771\u27E9\u3009\uFE65\uFF1E\u226F'].map((c) => [c, '>']),
+  // Kept by hand: letters that look like an apostrophe and that confusables 17.0.0 does not map (F-T131-9).
+  ...[...'\u02BF\u0559\uA78B'].map((c) => [c, "'"]),
+  // Kept by hand until the extract moves to a newer confusables.txt: R823 found these in the one dated 2026-08-06; 17.0.0 lacks them.
+  ['\u2D66', '<'], ['\u{1032D}', '<'], ['\u{16AEC}', '<'], ['\u{1E94B}', "'"],
+]);
+// F-T143-1: the Hebrew yod looks like an apostrophe, but it is one of the most common Hebrew letters: it stays. The double yod goes.
+LOOKALIKES.delete('\u05D9');
+/** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
+export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([, t]) => /[<>]/.test(t))
+  .map(([c, t]) => [c, t.replace(/[^<>]/g, '').replaceAll('<', '(').replaceAll('>', ')')]));
+const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
+const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
+const KEEP = /^[\p{Nd}.,:\-]$/v;
 /**
  * Text for sage, a MODEL reader (F-T28-25, F-T28-3, F-T28-14): a voter's ballot reason, before sage reads it.
  * The hazards for a model are terminal escapes, hidden or reordered text (format, bidi and tag characters), shell
@@ -11,23 +38,12 @@ import { REASON_MAX } from './vote.js';
  * Words stay words: an instruction in a reason is still there, so sage's view frames each reason as quoted data
  * (see `reasonLines`), never as an instruction. The cut comes before NFKC, so a short text that expands stays bounded (F-T28-5, F-T28-8).
  */
-/**
- * Characters that look like `<` or `>` (F-T131-10) and letters and marks that look like a quote (F-T131-9, F-T143-1), from Unicode's confusables and
- * NFKC. A model could read one as a tag bracket or as the end of a quoted frame: forModel keeps none of them, forLead maps the angles.
- */
-export const LOOKS_LT = /^[<\u2039\u02C2\u1438\u16B2\u2329\u276C\u276E\u2770\u226E\u27E8\u3008\uFE64\uFF1C\u{1D236}]$/u;
-export const LOOKS_GT = /^[>\u203A\u02C3\u1433\u232A\u276D\u276F\u2771\u226F\u27E9\u3009\uFE65\uFF1E\u{1D237}\u{16F3F}]$/u;
-// F-T143-1: also the Hebrew double yod U+05F2 (a letter; the yod U+05D9 stays) and the Miao marks U+16F51 and U+16F52.
-const LOOKS_QUOTE = /^[\u02B9-\u02BF\u02C8\u02CA\u02CB\u02EE\u0559\u05F2\u07F4\u07F5\u144A\u16CC\uA78B\uA78C\u{16F51}\u{16F52}]$/u;
-const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
-const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
-const KEEP = /^[\p{Nd}.,:\-]$/v;
 export function forModel(text) {
   const cut = Array.from(String(text).toWellFormed()).slice(0, REASON_MAX).join('').normalize('NFKC');
   let out = '';
   let marks = -1; // -1: no letter before, so no mark may stay; else the marks on the last letter
   for (const ch of cut) {
-    if (LOOKS_QUOTE.test(ch) || LOOKS_LT.test(ch) || LOOKS_GT.test(ch)) [out, marks] = [out + ' ', -1]; // a lookalike letter or mark parts words
+    if (LOOKALIKES.has(ch)) [out, marks] = [out + ' ', -1]; // a look-alike letter or mark parts words
     else if (LETTER.test(ch)) [out, marks] = [out + ch, 0];
     else if (MARK.test(ch) && marks >= 0 && marks < 3) [out, marks] = [out + ch, marks + 1];
     else if (KEEP.test(ch)) [out, marks] = [out + ch, -1];

@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { refuseOldRoles, SNOWFLAKE } from '../src/bridge.js';
+import { refuseOldRoles } from '../src/bridge.js';
 import { loadProjects } from '../src/projects.js';
-import { CONFIG_FIELDS, DISCORD_IDS, plist, stableNode } from '../src/launchd.js';
+import { CONFIG_FIELDS, notDiscordIds, plist, stableNode } from '../src/launchd.js';
 import { forTerminal } from '../src/clean.js';
 
 const args = process.argv.slice(2);
@@ -42,7 +42,7 @@ try {
 }
 const missing = CONFIG_FIELDS.filter((k) => typeof fields?.[k] !== 'string' || !fields[k]);
 if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. ${nothing}`);
-const notIds = DISCORD_IDS.filter((k) => (CONFIG_FIELDS.includes(k) || fields[k] !== undefined) && !SNOWFLAKE.test(fields[k]));
+const notIds = notDiscordIds(fields);
 if (notIds.length) stop(`in the config file ${config}, ${notIds.join(', ')} must each be a Discord id (17 to 20 digits). ${nothing}`);
 try {
   loadProjects(fields); // the projects, checked as the bridge checks them at start (T71, F-T145-L1)

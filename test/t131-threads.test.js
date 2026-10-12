@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import { createAsk, HOUR, POINTER, STOP, STOP_CANCEL } from '../src/ask.js';
 import { loadProjects } from '../src/projects.js';
 import { auditPathOf, forLead, killPathOf, openLog, quoted, verifyLog } from '../src/audit.js';
-import { LOOKS_GT, LOOKS_LT } from '../src/clean.js';
 import { openChannels, withHome } from '../src/channels.js';
 import { ChannelType } from 'discord.js';
 import { inForum, routes } from '../src/discord.js';
@@ -310,7 +309,11 @@ test('T131: 10 mentions per person per hour across all channels; a mention that 
  */
 const ANGLE_LIKE = (c) => /[<>]/.test(c.normalize('NFKD'))
   || ['\u02C2', '\u02C3', '\u1433', '\u1438', '\u16B2', '\u2329', '\u232A', '\u276C', '\u276D', '\u276E', '\u276F', '\u2770', '\u2771', '\u27E8', '\u27E9',
-    '\u3008', '\u3009', '\u{1D236}', '\u{1D237}', '\u{16F3F}', '\u2039', '\u203A'].includes(c);
+    '\u3008', '\u3009', '\u{1D236}', '\u{1D237}', '\u{16F3F}', '\u2039', '\u203A', '\u2D66', '\u{1032D}', '\u{16AEC}'].includes(c)
+  || CONFUSABLE_ANGLES.has(c);
+/** The sources that Unicode's confusables maps to a text with `<` or `>` (F-T143-10), from the extract src/confusables.json. */
+const CONFUSABLE_ANGLES = new Set(Object.entries(JSON.parse(readFileSync(join(ROOT, 'src/confusables.json'), 'utf8')).extract)
+  .filter(([, t]) => /\b003[CE]\b/.test(t)).map(([s]) => String.fromCodePoint(parseInt(s.slice(2), 16))));
 
 test('T131: the lead-text cleaner keeps newlines and printable characters, maps < and > (and each lookalike) to the plain ( and ), which look like no angle (F-T143-3), and makes every other code point a space (all code points)', () => {
   const PRINTABLE = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}]--\p{Default_Ignorable_Code_Point}]$/v;
@@ -321,8 +324,7 @@ test('T131: the lead-text cleaner keeps newlines and printable characters, maps 
     if (cp >= 0xd800 && cp <= 0xdfff) continue; // lone surrogates: tested below
     const ch = String.fromCodePoint(cp);
     const out = forLead(ch);
-    if (LOOKS_LT.test(ch)) assert.equal(out, '(', `U+${cp.toString(16)}`);
-    else if (LOOKS_GT.test(ch)) assert.equal(out, ')', `U+${cp.toString(16)}`);
+    if (ANGLE_LIKE(ch)) assert.match(out, /^[()]+$/, `U+${cp.toString(16)}`); // every angle look-alike: test/t143-confusables.test.js
     else if (ch === '\n' || ch === ' ' || PRINTABLE.test(ch)) { assert.equal(out, ch); kept++; } else { assert.equal(out, ' ', `U+${cp.toString(16)}`); spaced++; }
     if (out !== '\n' && out !== ' ') assert.ok(!HIDDEN.test(out), `U+${cp.toString(16)} left a hidden character`);
     assert.ok(!ANGLE_LIKE(out), `U+${cp.toString(16)} left a character that looks like < or > (F-T131-10, F-T143-3)`);
@@ -651,10 +653,42 @@ test('F-T143-6: verify refuses a line with a field added or taken out by hand, a
   const path = auditPathOf(b.config);
   const raw = readFileSync(path, 'utf8').split('\n').filter(Boolean);
   const edited = (change) => { const x = JSON.parse(raw[1]); change(x); writeFileSync(path, `${raw[0]}\n${JSON.stringify(x)}\n`); return verifyLog(path).broken; };
-  const why = 'does not hold exactly the fields of a log line';
+  const why = 'is not exactly a log line as the bridge writes it (a key twice, out of order, added or taken out)';
   assert.deepEqual(edited((x) => { x.approved = 'by Erick'; }), { line: 2, why });
   assert.deepEqual(edited((x) => { delete x.message; }), { line: 2, why });
   assert.equal(edited(() => {}), null); // the same line, unchanged, verifies
+});
+
+test('F-T143-12: verify refuses a line with a key twice or its keys out of order; a line in the old append form still verifies', async (t) => {
+  const b = world(t);
+  for (const text of ['<@1> talk one', '<@1> talk two']) await b.say(JON, text);
+  const path = auditPathOf(b.config);
+  const raw = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  const why = 'is not exactly a log line as the bridge writes it (a key twice, out of order, added or taken out)';
+  const as = (line2) => { writeFileSync(path, `${raw[0]}\n${line2}\n`); return verifyLog(path).broken; };
+  // A forged "text" before the real one: grep shows the forged text, JSON.parse keeps the real one, and the hash matches.
+  const twice = raw[1].replace('"text":', '"text":"approved by Erick","text":');
+  assert.equal(JSON.parse(twice).hash, JSON.parse(raw[1]).hash);
+  assert.deepEqual(as(twice), { line: 2, why });
+  const reversed = JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(raw[1])).reverse()));
+  assert.deepEqual(as(reversed), { line: 2, why });
+  assert.deepEqual(as(` ${raw[1]}`), { line: 2, why }); // a space added by hand
+  assert.equal(as(raw[1]), null);
+  // The append code of b49d35e, copied here as it was: the lines it wrote still verify, also with odd text.
+  const FIELDS = ['at', 'message', 'author', 'roles', 'textSha256', 'text', 'thread', 'project', 'outcome'];
+  const sha = (x) => createHash('sha256').update(x).digest('hex');
+  let prev = '0'.repeat(64);
+  const old = ['a "quoted" text\nwith a newline', 'x\ud800y \u2028 \u{1F600} </tag> \\ \u0000', null].map((text, i) => {
+    const line = Object.fromEntries(FIELDS.map((f) => [f, { at: '2026-10-01T00:00:00.000Z', message: `${i}`, author: JON, roles: [LEADR], text }[f] ?? null]));
+    line.prev = prev;
+    line.hash = sha(prev + JSON.stringify(FIELDS.map((f) => line[f])));
+    prev = line.hash;
+    return JSON.stringify(line);
+  });
+  writeFileSync(path, `${old.join('\n')}\n`);
+  const found = verifyLog(path);
+  assert.equal(found.broken, null);
+  assert.deepEqual(found.lines.map((x) => x.text), ['a "quoted" text\nwith a newline', 'x\ud800y \u2028 \u{1F600} </tag> \\ \u0000', null]);
 });
 
 test('F-T143-4: a conversion does not log a held mention again when the log holds it only after a break', async (t) => {

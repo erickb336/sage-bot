@@ -246,8 +246,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   }
 
   /**
-   * Writes one line of the sage-lead log for a message (or a /sage stop), then posts its copy to #sage-audit, which pings nobody. A sage-lead's
-   * or Erick's text goes in cleaned by forLead (F-T143-6: Erick's /sage stop is his own action, also with no role); an apprentice's as
+   * Writes one line of the sage-lead log for a message (or a /sage stop), then posts its copy to #sage-audit, which pings nobody. Each recorded
+   * message of a sage-lead or of Erick (also with no role: his own words, F-T143-6, F-T143-9) goes in cleaned by forLead; an apprentice's as
    * quoted data. Throws when the log cannot be written: then nothing goes further.
    */
   function record(m, { thread = null, project = null, outcome }) {
