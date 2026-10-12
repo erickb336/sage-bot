@@ -57,7 +57,8 @@ export const MEMBERS = [
   { id: SAM, name: 'Sam', roles: [] },
   { id: BOT, name: 'sage bridge', roles: [APPRENTICE, LEADR], bot: true },
 ];
-export const CONFIG = { channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
+export const GUILD = '500000000000000001';
+export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 /** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
 export const NAME = 'project';

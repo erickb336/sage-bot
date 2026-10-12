@@ -1,4 +1,5 @@
 // The launchd agent of the bridge, as text. scripts/launchd.mjs prints or writes it; the owner loads it. Nothing here runs launchctl.
+import { SNOWFLAKE } from './bridge.js';
 
 /** The label of the agent, and the name of its plist file in ~/Library/LaunchAgents. */
 export const LABEL = 'com.sage.bot';
@@ -8,8 +9,14 @@ export const LABEL = 'com.sage.bot';
  * are optional since T130: the bridge makes the channel registry from them at its first start, when there is no registry yet.
  */
 export const CONFIG_FIELDS = ['guildId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
-/** The fields of the config that are Discord ids, when present: the bridge refuses each one that does not match its SNOWFLAKE. */
-export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
+/** The fields of the config that are Discord ids, when present (and always for a field of CONFIG_FIELDS). */
+export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'auditChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
+/**
+ * The fields of DISCORD_IDS in `config` that are not a Discord id (SNOWFLAKE). The one check of the config's Discord ids (F-T143-13):
+ * the bridge start (prepare in discord.js) and scripts/launchd.mjs both refuse a config for which it gives a field.
+ */
+export const notDiscordIds = (config) => DISCORD_IDS.filter((k) => (CONFIG_FIELDS.includes(k) || config[k] !== undefined)
+  && !(typeof config[k] === 'string' && SNOWFLAKE.test(config[k]))); // a JSON number loses digits, so it is not an id
 
 /** The Homebrew links that `brew upgrade node` keeps, in the order the plist prefers them. */
 const BREW_LINKS = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
