@@ -40,7 +40,10 @@ test('F-T156-23: a mutated file that does not parse is INVALID, even with failin
     // F-T185-1: no package.json above the files. `node --check <file>` reads a .js file as CommonJS there and passes ESM syntax that does not parse.
     writeFileSync(join(dir, 'good.js'), 'export const x = 1;\n');
     writeFileSync(join(dir, 'bad.js'), 'export const x = (;\n');
-    assert.deepEqual([parses(join(dir, 'good.js')), parses(join(dir, 'bad.js'))], [true, false]);
+    // `with` is a script-only statement: `node --check <file>` takes this file as CommonJS (no import, no export) and passes it, in any Node
+    // version; the sources of the project are modules, so the run must parse them as modules whatever package.json sits above them.
+    writeFileSync(join(dir, 'script.js'), 'with (Math) { max(1, 2); }\n');
+    assert.deepEqual([parses(join(dir, 'good.js')), parses(join(dir, 'bad.js')), parses(join(dir, 'script.js'))], [true, false, false]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
   assert.deepEqual(verdict(PASS, FAIL, false), { verdict: 'INVALID', failed: 1 });
 });
