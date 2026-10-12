@@ -154,7 +154,7 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 <a href="docs/assets/safety-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/safety-dark.svg">
-  <img alt="The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
+  <img alt="The guardrails: six layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
 </picture>
 </a>
 

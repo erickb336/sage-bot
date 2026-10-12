@@ -2,7 +2,7 @@
 
 **This is the full checklist to connect sage-bot to a real Discord server.** The [README](../README.md#set-up-a-live-trial) gives the short list. The [reference](reference.md) gives every rule, case and setting.
 
-> **The live trial has not run yet.** This checklist comes from the principal engineer's check (run R260) for tasks T53 and T54. Every command in it runs in the tests, except the ones that need Discord, the Keychain or launchctl.
+> **The live trial has not run yet.** Every command in it runs in the tests, except the ones that need Discord, the Keychain or launchctl.
 
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
@@ -25,7 +25,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   cp examples/config.example.json ~/.config/sage-bot/config.json
   ```
 
-- [ ] **4. Set the parent channel's permissions.**
+- [ ] **4a. Set the parent channel's permissions.** The parent channel holds the votes and the session threads. Nobody types or uses `/sage` there.
 
   | Who | Permissions in the parent channel |
   | --- | --- |
@@ -34,7 +34,10 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | sage-lead | Deny the same five permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
-  In #ask-sage, and in each channel that you register later:
+  **Do not let the Discord plugin watch the parent channel.** Chat with sage in a separate channel.
+  **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type and use `/sage` in the parent channel and every session thread, so they must not.
+  *Why:* a session thread holds the votes and sage-bot's posts only, so nobody types in it; the buttons and the reason forms work without send permissions. `/sage` is blocked in the parent channel on purpose: a `/sage board` there would put a public answer between the vote cards. Threads take their permissions from the parent channel, so this one deny covers every session thread. The team asks in #ask-sage (step 4b). `/sage stop` works in any channel, and the "End vote now" button is not a slash command, so the deny does not affect either. A mention cannot open a thread, because nobody can send a message. The bridge needs Manage Threads to lock and unlock the threads.
+- [ ] **4b. Set the permissions of #ask-sage**, and of each channel that you register later.
 
   | Who | Permissions in #ask-sage |
   | --- | --- |
@@ -42,9 +45,8 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
   | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
 
-  **Do not let the Discord plugin watch this parent channel.** Chat with sage in a separate channel.
-  **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
-  *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. The parent channel is the home channel of the [channel registry](#channels), so sage-bot answers `/sage` there and in its threads. Without the deny of Use Application Commands, a `/sage board` in a session thread puts a public answer between the cards. Threads take their permissions from the parent channel, so this one deny covers every session thread. A mention cannot open a thread there, because nobody can send a message. The team asks in #ask-sage, and a sage-lead types `/sage stop` there too. In #ask-sage the team asks with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+  **Do not let the Discord plugin watch #ask-sage.** If it does, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts.
+  *Why:* the team asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. A sage-lead types `/sage stop` here too. sage-bot ignores a member with neither role.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
@@ -124,7 +126,7 @@ sage-bot works only in the channels that the owner registers. Each registered ch
 
 **Make the registry once.** The commands below read the bridge's config at `~/.config/sage-bot/config.json`; add `--config <config.json>` for another file.
 
-- If you used sage-bot before, you need to do nothing: at its first start the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. `/sage` now also works in the home channel.
+- If you used sage-bot before, you need to do nothing: at its first start the bridge makes the registry from `askChannelId` (for the first project) and `channelId` (the home channel), and `/sage` keeps working in #ask-sage. The home channel stays closed to `/sage` on purpose (step 4a).
 - On a new install, you can leave `channelId` and `askChannelId` out of the config. Then register the home channel first, while the bridge is stopped (see the next step). Until you do, the bridge does not start, and its message gives this command.
 
 <!-- check: run, prints "registered the channel 400000000000000001 for the project your-project (home channel of the votes and cards)" -->

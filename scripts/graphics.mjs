@@ -77,7 +77,7 @@ const ALT = {
   how: "How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the sage-lead log.",
   threads: 'Sample data: each mention of @sage-bot in a registered channel opens its own thread, and a mention inside that thread continues it.',
   roles: 'The two roles: a sage-apprentice reads and asks; a sage-lead can also break ties, end votes early, unregister a channel and turn off the link to sage.',
-  safety: 'The guardrails: five layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions.',
+  safety: 'The guardrails: six layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions.',
   'tip-mention': "The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on.",
 };
 
@@ -212,7 +212,7 @@ function threads(t, id) {
 
 /** The guardrails: the layers that are on now, and the ones that come with bridge sessions. */
 function safety(t, id) {
-  const W = 1100, H = 1290;
+  const W = 1100, H = 1414;
   const bar = (y, title, sub, on) => rect(40, y, W - 80, 112, { rx: 8, fill: t.tile, stroke: on ? t.edge : t.line, sw: 1.5, dash: on ? undefined : '7 6' }) +
     dot(t, 72, y + 32, on) + text(100, y + 44, title, { size: S, weight: 800, fill: t.ink }) + text(100, y + 94, sub, { size: S, fill: t.muted });
   const at = (y0, i) => y0 + i * 124;
@@ -224,11 +224,12 @@ function safety(t, id) {
     bar(at(80, 2), 'No AI reads Discord text', 'Code answers. sage gets only the option.', true),
     bar(at(80, 3), 'The sage-lead log', 'Hash-chained, with a copy in #sage-audit.', true),
     bar(at(80, 4), 'The kill switch', '/sage stop. Only the owner undoes it.', true),
-    heading(t, 40, 740, 'BRIDGE SESSIONS · NOT ON YET (T159)'),
-    bar(at(760, 0), 'The sandbox: the guarantee · built', 'No GitHub host, logbooks, sage or secrets.', false),
-    bar(at(760, 1), 'The guard hook · built', 'Only the commands on its allow-list.', false),
-    bar(at(760, 2), 'The broker · built', 'A few GitHub verbs. None of them merges.', false),
-    bar(at(760, 3), 'A spend cap · built', 'At most $5 of model use for each session.', false),
+    bar(at(80, 5), 'The answer shows little', 'Task id, title, size, state, open questions.', true),
+    heading(t, 40, 864, 'BRIDGE SESSIONS · NOT ON YET (T159)'),
+    bar(at(884, 0), 'The sandbox: file and network boundary · built', 'No GitHub host, logbooks, sage or secrets.', false),
+    bar(at(884, 1), 'The guard hook · built', 'Only the commands on its allow-list.', false),
+    bar(at(884, 2), 'The broker · built', 'A few GitHub verbs. None of them merges.', false),
+    bar(at(884, 3), 'A spend cap · built', 'At most $5 of model use for each session.', false),
   ].join('\n');
   return panel(t, id, W, H, body, ALT.safety);
 }
