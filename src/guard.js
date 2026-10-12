@@ -282,7 +282,7 @@ function git(args, env) {
 const gitCmd = (table) => cmd({ ...table, '--': FLAG });
 const STASH_OPTIONS = { '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG };
 const STASH = cmd(STASH_OPTIONS);
-const COMMIT = { '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG, '--amend': FLAG };
+const COMMIT = { '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG, '--amend': FLAG, '--no-edit': FLAG };
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
   diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': EQ, '--unified': EQ, '--word-diff': FLAG }),
