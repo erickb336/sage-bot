@@ -3,7 +3,7 @@
 // against the copy. Each removal must make at least one test fail; a removal that passes is a rule that no test pins.
 // A removal must keep the guard working: the copy must load and still allow the known-good calls (pwd, a Read, git status, an
 // Agent, a WebFetch to 8.8.8.8). A copy that does not is a broken mutation: its test failures prove nothing, so it is
-// reported, not counted as a kill; nor is a run that does not end in 60 s. It prints one line for each surviving, broken,
+// reported, not counted as a kill; nor is a run that does not end in its time limit (60 s, or its row's own). It prints one line for each surviving, broken,
 // timed-out or stale mutation and the counts, and exits 1 when there is any (stale: the rule's text is not found exactly once in its file, so this list is out of date).
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SOURCES = { 'src/guard.js': readFileSync(join(ROOT, 'src', 'guard.js'), 'utf8'), 'scripts/guard.mjs': readFileSync(join(ROOT, 'scripts', 'guard.mjs'), 'utf8') };
 
-// [rule, the text of the rule, what replaces it, the file (src/guard.js when there is none)]
+// [rule, the text of the rule, what replaces it, the file (src/guard.js when there is none), the time limit of its run in ms
+// (LIMIT_MS when there is none)]
 const MUTATIONS = [
   // The Bash parser
   ['double quotes: $, backtick, \\ and !', "if (/[$`\\\\!]/.test(command[j])) throw `a ${command[j]} inside double quotes`;", ''],
@@ -62,7 +63,7 @@ const MUTATIONS = [
   ['git: only the listed subcommands', 'if (!rule) return `git ${say(sub', 'if (!rule) return null && `git ${say(sub'],
   ['git: no inherited name as a subcommand', "Object.hasOwn(GIT, sub ?? '') ? GIT[sub] : null", 'GIT[sub]'],
   ['git: the option table of each subcommand', "const gitCmd = (table) => cmd({ ...table, '--': FLAG });", 'const gitCmd = () => () => null;'],
-  ['git commit: no --no-verify', "commit: cmd({ '-m': TEXT,", "commit: cmd({ '--no-verify': FLAG, '-m': TEXT,"],
+  ['git commit: no --no-verify', "const COMMIT = { '-m': TEXT,", "const COMMIT = { '--no-verify': FLAG, '-m': TEXT,"],
   ['git branch: no -D', "branch: cmd({ '-a': FLAG,", "branch: cmd({ '-D': TEXT, '-a': FLAG,"],
   ['git stash: only the listed subcommands', "['list', 'push', 'pop', 'apply', 'show', undefined].includes(args[0])", 'true'],
   ['git stash <option> is git stash push <option> (F-T133-65)', "args[0]?.startsWith('-') ? STASH(args, env, name) : ", ''],
@@ -223,7 +224,9 @@ const MUTATIONS = [
   ['a refusal cuts each word it echoes (F-T133-57)', 'text.slice(0, 200).replace(', 'text.replace('],
   // F-T134-5: the deadline runs while the hook reads stdin.
   ['the hook: the deadline starts before stdin is read (F-T134-5)', "    setTimeout(() => answer(refusal(`a tool call that the guard did not decide in ${DEADLINE_MS / 1000} s`)), DEADLINE_MS);\n    // stdin is read as a stream, so that the deadline above runs while it waits (a synchronous read blocked the timer).\n    const chunks = [];\n    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n", "    const chunks = [];\n    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n    setTimeout(() => answer(refusal(`a tool call that the guard did not decide in ${DEADLINE_MS / 1000} s`)), DEADLINE_MS);\n", 'scripts/guard.mjs'],
-  ['the hook: stdin is read as a stream (F-T134-5)', "    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n", "    chunks.push((await import('node:fs')).readFileSync(0)); (() => {\n", 'scripts/guard.mjs'],
+  // A synchronous read blocks the deadline, so each test of the hook that waits on stdin runs to its own 20 s kill: about 54 s
+  // in all, too close to LIMIT_MS under load (T198). 180 s is about 3 times that; a hang still ends as a time-out.
+  ['the hook: stdin is read as a stream (F-T134-5)', "    process.stdin.on('data', (c) => chunks.push(c)).on('error', fail).on('end', () => {\n", "    chunks.push((await import('node:fs')).readFileSync(0)); (() => {\n", 'scripts/guard.mjs', 180_000],
   // F-T144-M1 (G63 b): the Keychain front ends.
   ['the Keychain front ends are refused (G63 b)', 'if (KEYCHAIN.has(basename(fold(name)))) return', 'if (false) return'],
   ['a Keychain front end by any path (G63 b)', 'KEYCHAIN.has(basename(fold(name)))', 'KEYCHAIN.has(fold(name))'],
@@ -278,7 +281,7 @@ const MUTATIONS = [
   ['grep -r gets the hint to rg (F-T144-L10)', 'rg -n <pattern> <folder> to search a folder, or give grep', 'give grep'],
   ['npx gets the hint to npm run (F-T144-L10)', "  npx: () => how('npx (it runs any package)', 'npm run <script>, a script of package.json'),\n", ''],
   ['a variable in front gets the list of the allowed ones (F-T144-L10)', "return how(`setting ${say(name)} in front of a command`, `set only ${[...ENV].join(', ')} in front of a command`);", 'return `setting ${say(name)} in front of a command`;'],
-  ['git stash -u (F-T144-L10)', ", '-u': FLAG, '--include-untracked': FLAG });", ' });'],
+  ['git stash -u (F-T144-L10)', ", '-u': FLAG, '--include-untracked': FLAG };", ' };'],
   ['git worktree list --porcelain (F-T144-L10)', " || (args.length === 2 && args[1] === '--porcelain')", ''],
   ['uniq writes (F-T144-L10)', "'tee', 'uniq']);", "'tee']);"],
   ['zsh =word (F-T144-L10)', "} else if (c === '=' && word === null) throw", '} else if (false) throw'],
@@ -290,7 +293,7 @@ const MUTATIONS = [
   ['a file tool: no write to a settings path (F-T133-72)', '  return dir ? CONFIG(dir[1]) : null;', '  return null;'],
   ['Bash: no write to a settings path (F-T133-72)', '    if (dir !== undefined) return CONFIG(dir);\n', ''],
   ['settings: the redirect targets (F-T133-72)', 'const targets = [...parsed.flatMap((seg) => seg.redirects), ', 'const targets = ['],
-  ['settings: the words of a part that writes (F-T133-72)', ', ...parsed.filter(writes).flatMap((seg) => seg.words)];', '];'],
+  ['settings: the words of a part that writes (F-T133-72)', ', ...parsed.filter(writes).flatMap(pathWords)];', '];'],
   ['settings: touch, mkdir, rm and rmdir write (F-T133-72)', '(WRITES.has(name) || CHANGES.has(name))', 'WRITES.has(name)'],
   ['settings: the path is folded (.CLAUDE) (F-T133-72)', 'posix.normalize(fold(text))', 'posix.normalize(text)'],
   ['settings: the path is normalized (F-T144-L15)', 'posix.normalize(fold(text)).replace', 'fold(text).replace'],
@@ -313,11 +316,22 @@ const MUTATIONS = [
   ['settings: an unquoted ~- or ~name is a folder the guard cannot know (F-T137-9)', "if (paths.includes(null)) return how(", 'if (false) return how('],
   ['settings: a quoted ~ is a folder of that name (F-T137-9)', "if (!tilde.startsWith('~') || q < 1) return", "if (!tilde.startsWith('~')) return"],
   ['settings: a ~ with a quote before its first / is refused: bash and zsh read it differently (F-T137-14)', 'if (q <= tilde.length) return null;', ''],
-  ['settings: cd .. into .claude/worktrees gets the hint to stay in the worktree (F-T137-8)', 'if (folder(dir) === base && /\\/\\.claude\\/worktrees$/.test(fold(base))) {', 'if (false) {'],
-  ['settings: an absolute cd to .claude/worktrees gets the same hint (F-T137-15)', 'if (folder(dir) === base &&', 'if (dir === base &&'],
-  ['settings: a shell in .claude/worktrees gets the hint to cd back into the worktree (F-T137-13)', "base === here ? 'cd <worktree name>", "false ? 'cd <worktree name>"],
+  ['settings: a cd up out of a worktree gets the hint to stay in the worktree (F-T137-8, T199)', 'if (here.startsWith(`${base}/`) && !configPath(here)) return how(', 'if (false) return how('],
+  ['settings: only a cd up gets the hint to stay in the worktree (T199)', 'if (here.startsWith(`${base}/`) && ', 'if ('],
+  ['settings: no hint from a session folder that is a settings path (T199)', ' && !configPath(here)) return how(', ') return how('],
+  ['settings: an absolute cd to .claude/worktrees gets the same hint (F-T137-15)', 'if (folder(dir) === base) {', 'if (dir === base) {'],
+  ['settings: a shell in .claude/worktrees gets the hint to cd back into the worktree (F-T137-13)', 'if (base === here && /\\/\\.claude\\/worktrees$/.test(fold(base))) return how(', 'if (false) return how('],
   ['a variable: no quote before its = (F-T137-10)', " && !(w.q <= w.text.indexOf('='))", ''],
-  ['a quoted variable name gets the hint to write it with no quotes (F-T137-12)', 'if (VAR.test(name)) return how(', 'if (false) return how('],
+  ['a quoted variable name gets the hint to write it with no quotes (F-T137-12)', 'if (VAR.test(name)) {', 'if (false) {'],
+  ['a quoted variable: the hint to the form with no quotes only when it is allowed (T200)', 'if (plain === null) return how(why,', 'return how(why,'],
+  ['a quoted variable: the stop ending when the form with no quotes has no hint (T200)', 'plain.includes(MARK) ? why + plain.slice(plain.lastIndexOf(MARK)) : why;', 'why + plain.slice(plain.lastIndexOf(MARK));'],
+  ['a quoted variable: the checks of a part that writes see the command after it (T200)', 'findIndex((w) => !VAR.test(w.text))).map', 'findIndex((w) => !isVar(w))).map'],
+  // T202: a message of git commit and git stash is no path.
+  ['a message is no path (T202)', "const message = value === null ? w.text.startsWith('--message=') : MESSAGE.has(value);", 'const message = false;'],
+  ['a message given as --message=<text> is no path (T202)', "value === null ? w.text.startsWith('--message=') :", 'value === null ? false :'],
+  ['a message: only the value of a message option (T202)', 'MESSAGE.has(value);', 'value !== null;'],
+  ['a message: the value of an option is no option (T202)', 'value = value === null && table[w.text] === TEXT', 'value = table[w.text] === TEXT'],
+  ['a message: git stash -m (T202)', "sub === 'stash' ? STASH_OPTIONS : null", 'null'],
   ['a refusal shows a word with its quotes (F-T137-12)', 'word.raw = command.slice(word.at, i);', 'word.raw = word.text;'],
   ['a variable: a single-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        word.text += body;", '        word.text += body;'],
   ['a variable: a double-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        for (; j <", '        for (; j <'],
@@ -349,16 +363,18 @@ const calls = [['Bash', { command: 'pwd' }], ['Read', { file_path: '/sample/READ
 process.exit(calls.every(([tool_name, tool_input]) => decide({ tool_name, tool_input }, env) === null) ? 0 : 1);
 `);
 
-/** Resolves with the exit code of `node args` in `cwd`, or 'timeout' when it is killed after 60 s (a hang is not a kill). */
-const node = (args, cwd) => new Promise((done) => {
+/** The time limit of one run of the tests, unless its row gives another. */
+const LIMIT_MS = 60_000;
+/** Resolves with the exit code of `node args` in `cwd`, or 'timeout' when it is killed after `limit` ms (a hang is not a kill). */
+const node = (args, cwd, limit = LIMIT_MS) => new Promise((done) => {
   const child = spawn(process.execPath, args, { cwd, stdio: 'ignore' });
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill(); }, 60_000);
+  const timer = setTimeout(() => { timedOut = true; child.kill(); }, limit);
   child.on('close', (code) => { clearTimeout(timer); done(timedOut ? 'timeout' : code); });
 });
 
 /** Runs a copy of the guard with `file` as `source`: 'broken' when it fails the known-good calls, else the tests' exit code. */
-async function run(name, source, file = 'src/guard.js') {
+async function run(name, source, file = 'src/guard.js', limit = LIMIT_MS) {
   const dir = join(work, name.replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + Math.random().toString(36).slice(2, 6));
   // The tests import test/bridge-setup.js, and it needs src, test/fixtures and discord.js: a copy without them fails to load,
   // and every mutation then counted as a kill (F-T137-7).
@@ -370,7 +386,7 @@ async function run(name, source, file = 'src/guard.js') {
   }
   try {
     if (await node([join(work, 'check.mjs'), join(dir, 'src', 'guard.js')], dir) !== 0) return 'broken';
-    return await node(['--test', 'test/guard.test.js'], dir);
+    return await node(['--test', 'test/guard.test.js'], dir, limit);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -392,9 +408,9 @@ const timeouts = [];
 const queue = MUTATIONS.filter((m) => !stale.includes(m));
 await Promise.all(Array.from({ length: Math.max(2, availableParallelism() - 1) }, async () => {
   for (let m = queue.shift(); m; m = queue.shift()) {
-    const [name, from, to, file = 'src/guard.js'] = m;
+    const [name, from, to, file = 'src/guard.js', limit] = m;
     // A function, so that a $ in the new text is taken as it is ($` and $& are patterns of replace).
-    const result = await run(name, SOURCES[file].replace(from, () => to), file);
+    const result = await run(name, SOURCES[file].replace(from, () => to), file, limit);
     if (result === 'broken') broken.push(name);
     else if (result === 'timeout') timeouts.push(name);
     else if (result === 0) survivors.push(name);
@@ -402,7 +418,7 @@ await Promise.all(Array.from({ length: Math.max(2, availableParallelism() - 1) }
 }));
 for (const name of broken) console.log(`BROKEN    ${name}: the copy does not load or refuses a known-good call, so its failures prove nothing`);
 for (const name of survivors) console.log(`SURVIVES  ${name}: no test fails without this rule`);
-for (const name of timeouts) console.log(`TIMEOUT   ${name}: the tests did not end in 60 s, so they prove nothing`);
+for (const name of timeouts) console.log(`TIMEOUT   ${name}: the tests did not end in their time limit, so they prove nothing`);
 const killed = MUTATIONS.length - stale.length - survivors.length - broken.length - timeouts.length;
 console.log(`guard mutations: ${killed} of ${MUTATIONS.length} rule removals fail a test; ${survivors.length} survive; ${broken.length} broken; ${timeouts.length} time out; ${stale.length} stale; ${Math.round((Date.now() - start) / 1000)} s`);
 rmSync(work, { recursive: true, force: true });

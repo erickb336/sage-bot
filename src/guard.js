@@ -280,7 +280,9 @@ function git(args, env) {
 }
 
 const gitCmd = (table) => cmd({ ...table, '--': FLAG });
-const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG });
+const STASH_OPTIONS = { '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG };
+const STASH = cmd(STASH_OPTIONS);
+const COMMIT = { '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG };
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
   diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': EQ, '--unified': EQ, '--word-diff': FLAG }),
@@ -293,7 +295,7 @@ const GIT = {
   rm: gitCmd({ '--cached': FLAG, '-r': FLAG, '-q': FLAG }),
   mv: cmd({}),
   restore: gitCmd({ '--staged': FLAG, '-S': FLAG, '--worktree': FLAG, '-W': FLAG }),
-  commit: cmd({ '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG }),
+  commit: cmd(COMMIT),
   switch: cmd({ '-c': TEXT, '--create': TEXT }),
   checkout: cmd({ '-b': TEXT }, undefined, 'git restore <file> to undo the changes of a file, or git checkout -b <branch>'),
   // branch: no option that writes the config (-u, --set-upstream-to).
@@ -444,12 +446,33 @@ const VAR = /^[A-Za-z_][A-Za-z0-9_]*=/;
 /** Whether a word sets a variable: NAME=value with no quote before the =. The shell runs "HOME"=/x as a program (F-T137-10). */
 const isVar = (w) => VAR.test(w.text) && !(w.q <= w.text.indexOf('='));
 
-/** The texts of the command name and its arguments after the variables in front of it. */
-const commandOf = (words) => words.slice(words.findIndex((w) => !isVar(w))).map((w) => w.text);
+/**
+ * The texts of the command name and its arguments after the variables in front of it, also a quoted one ("HOME"=/x): the
+ * checks of a part that writes then see the command of the form with no quotes, which a quoted variable's hint names (T200).
+ */
+const commandOf = (words) => words.slice(words.findIndex((w) => !VAR.test(w.text))).map((w) => w.text);
 /** Whether a part's command writes files: a command of WRITES or CHANGES, but not a git subcommand that only reads. */
 function writes(seg) {
   const [name, ...args] = commandOf(seg.words);
   return (WRITES.has(name) || CHANGES.has(name)) && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]));
+}
+// The options of git commit and git stash whose value is a message, not a path (T202: git commit -m ~fix).
+const MESSAGE = new Set(['-m', '--message', '-am']);
+/** The words of a part that writes that can name a path: all of them, but for git commit and git stash the value of a message option (T202). */
+function pathWords({ words }) {
+  const [name, ...args] = commandOf(words);
+  const sub = name === 'git' ? gitArgs(args)?.[0] : null;
+  const table = sub === 'commit' ? COMMIT : sub === 'stash' ? STASH_OPTIONS : null;
+  if (!table) return words;
+  // The walk starts at the first word: -C is no option of these tables, so a -C folder (git -C -m -C .claude commit) is never
+  // taken as a message.
+  let value = null;
+  return words.filter((w) => {
+    const message = value === null ? w.text.startsWith('--message=') : MESSAGE.has(value);
+    // A word is an option only when it is not the value of the option before it (git commit -F -m <path>: -m is the file).
+    value = value === null && table[w.text] === TEXT ? w.text : null;
+    return !message;
+  });
 }
 
 /** Why the simple command is refused, or null. */
@@ -462,8 +485,15 @@ function simple({ words }, env) {
   }
   const [name, ...args] = texts.slice(i);
   if (!name) return 'a part with no command';
-  // "HOME"=/x is no variable (F-T137-10): the shell runs it as a program. The session meant the variable (F-T137-12).
-  if (VAR.test(name)) return how(`the word ${say(words[i].raw)} (the shell runs a variable with a quote before its = as a program)`, 'write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci');
+  // "HOME"=/x is no variable (F-T137-10): the shell runs it as a program. The session meant the variable (F-T137-12), so the
+  // refusal ends as the form with no quotes ends: its hint to that form when the guard allows it, else that form's own hint, or
+  // the stop ending (T200: HOME=/x git status is refused).
+  if (VAR.test(name)) {
+    const why = `the word ${say(words[i].raw)} (the shell runs a variable with a quote before its = as a program)`;
+    const plain = simple({ words: words.map((w, k) => (k === i ? { ...w, q: undefined } : w)) }, env);
+    if (plain === null) return how(why, 'write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci');
+    return plain.includes(MARK) ? why + plain.slice(plain.lastIndexOf(MARK)) : why;
+  }
   if (i > 0 && name === 'git') return how('a variable in front of git (git reads its config from HOME)', 'run git with no variable in front of it');
   if (KEYCHAIN.has(basename(fold(name)))) return `the Keychain front end ${say(name)} (G63 b: a bridge session reads no Keychain item)`;
   // A word that starts with a wildcard can expand to a file name that starts with -, an option that no table checked. The
@@ -502,7 +532,7 @@ export function bashRefusal(command, env, cwd) {
   // A write to a settings path: each redirect target, and each word of a part that writes. A cd folder and the session's
   // folder start each relative path after them, so they count when the command writes (F-T144-L14, F-T144-L16), and each
   // relative path counts also joined to them: ../../settings.json from .claude/worktrees/<name> is .claude/settings.json (F-T137-L1).
-  const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap((seg) => seg.words)];
+  const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap(pathWords)];
   const cdTo = parsed[0]?.words[0]?.text === 'cd' ? parsed[0].words.slice(1) : [];
   // A folder as one text: normalized, with no / at its end (cd ../ lands where cd .. lands, F-T137-15).
   const folder = (p) => p && posix.normalize(p).replace(/(.)\/$/, '$1');
@@ -513,10 +543,12 @@ export function bashRefusal(command, env, cwd) {
     paths.push(base, ...(base === null ? [] : targets.flatMap((w) => joined(base, w))));
     if (paths.includes(null)) return how('a write with a path that starts with ~-, ~<name>, or ~ and a quote before its first / (a folder that the guard cannot know, or that bash and zsh read differently)', 'name the path from the session folder, or as an absolute path');
     const dir = paths.find(configPath);
-    // cd .. from a worktree lands in .claude/worktrees: the same command runs in the worktree with no cd (F-T137-8). A shell
-    // that is already there (after an allowed cd .. && ls) goes back with a cd (F-T137-13).
-    if (folder(dir) === base && /\/\.claude\/worktrees$/.test(fold(base))) {
-      return how(CONFIG(dir), base === here ? 'cd <worktree name> && <command>, and name each path from the worktree, for example cd t9 && git add x' : 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+    // A cd up from a session folder that is no settings path into one lands above a worktree, in .claude/worktrees or .claude
+    // (cd .., cd ../..): the same command runs in the worktree with no cd (F-T137-8, T199). A shell that is already in
+    // .claude/worktrees (after an allowed cd .. && ls) goes back with a cd (F-T137-13).
+    if (folder(dir) === base) {
+      if (here.startsWith(`${base}/`) && !configPath(here)) return how(CONFIG(dir), 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+      if (base === here && /\/\.claude\/worktrees$/.test(fold(base))) return how(CONFIG(dir), 'cd <worktree name> && <command>, and name each path from the worktree, for example cd t9 && git add x');
     }
     if (dir !== undefined) return CONFIG(dir);
   }
