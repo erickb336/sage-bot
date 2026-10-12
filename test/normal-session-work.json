@@ -199,6 +199,11 @@
     {"id":"commit-non-ascii","tool_name":"Bash","tool_input":{"command":"git commit -m \"guard: café\""},"expect":"hint","leads_to":"git-commit-file","names":"git commit -F <file>"},
     {"id":"npx","tool_name":"Bash","tool_input":{"command":"npx eslint src"},"expect":"hint","leads_to":"npm-run-check","names":"npm run <script>"},
     {"id":"npm-help","tool_name":"Bash","tool_input":{"command":"npm help test"},"expect":"hint","leads_to":"web-fetch","names":"WebFetch"},
-    {"id":"foo-env","tool_name":"Bash","tool_input":{"command":"FOO=1 npm test"},"expect":"hint","leads_to":"npm-test-node-env","names":"NODE_ENV"}
+    {"id":"foo-env","tool_name":"Bash","tool_input":{"command":"FOO=1 npm test"},"expect":"hint","leads_to":"npm-test-node-env","names":"NODE_ENV"},
+    {"id":"npm-ci-scratch-cache","tool_name":"Bash","tool_input":{"command":"DO_NOT_TRACK=1 npm_config_cache=/sample/scratch/npm-cache npm ci"},"expect":"allow"},
+    {"id":"test-eq-quoted","tool_name":"Bash","tool_input":{"command":"test a '=' b"},"expect":"allow"},
+    {"id":"test-eq","tool_name":"Bash","tool_input":{"command":"test a = b"},"expect":"hint","leads_to":"test-eq-quoted","names":"test a '=' b"},
+    {"id":"echo-stderr-fd","tool_name":"Bash","tool_input":{"command":"echo done >&2"},"expect":"allow"},
+    {"id":"echo-stderr","tool_name":"Bash","tool_input":{"command":"echo done >/dev/stderr"},"expect":"hint","leads_to":"echo-stderr-fd","names":"echo <text> >&2"}
   ]
 }

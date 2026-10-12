@@ -309,7 +309,19 @@
     "echo x >> .mcp.json",
     "uniq README.md .mcp.json",
     "node {SCRATCH}/x.txt",
-    "git log --pretty \"%h (%s)\""
+    "git log --pretty \"%h (%s)\"",
+    "sort -uo .claude/settings.json README.md",
+    "sort -ruo{SCRATCH}/x README.md",
+    "sort --outp=.claude/x README.md",
+    "sort --output {SCRATCH}/x README.md",
+    "git diff -U --output={SCRATCH}/x",
+    "git diff --unified --output={SCRATCH}/x",
+    "git diff -U --ext-diff",
+    "DO_NOT_TRACK=1 git status",
+    "NPM_CONFIG_CACHE={SCRATCH}/npm npm ci",
+    "npm_config_userconfig={SCRATCH}/npmrc npm ci",
+    "test a = b",
+    "echo x >/dev/stderr"
   ],
   "broker": [
     "gh pr merge 12",
@@ -543,7 +555,14 @@
     "git stash --include-untracked",
     "git stash -u",
     "git worktree add .claude/worktrees/t9 -b claude/t9",
-    "git stash pop 'stash@{0}'"
+    "git stash pop 'stash@{0}'",
+    "DO_NOT_TRACK=1 npm test",
+    "npm_config_cache={SCRATCH}/npm-cache npm ci",
+    "git diff -U3",
+    "git diff -U",
+    "git diff --unified=3",
+    "test a '=' b",
+    "echo x >&2"
   ],
   "sandbox": [
     "git -C {HOME} status",
@@ -687,7 +706,16 @@
     "find {HOME} -name x",
     "find . -newer {HOME}/.ssh/id_ed25519",
     "git checkout main {HOME}/x",
-    "git log -- {HOME}/x"
+    "git log -- {HOME}/x",
+    "git remote get-url origin",
+    "git show HEAD -- '*.env'",
+    "git log -p --all",
+    "git show 0123abcd",
+    "rg -g credentials.json token {WT}",
+    "rg -t json token {WT}",
+    "echo x > {HOME}/.gitconfig",
+    "echo x > .gitmodules",
+    "git worktree add {SCRATCH}/elsewhere -b x"
   ],
   "tools": {
     "refuse": [
@@ -1382,6 +1410,105 @@
         {
           "file_path": "{WT}/.mcp.json",
           "content": "{}"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{WT}",
+          "glob": "credentials.json"
+        }
+      ],
+      [
+        "Grep",
+        {
+          "pattern": "token",
+          "path": "{WT}",
+          "type": "json"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[::10.0.0.1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[::127.0.0.1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[64:ff9b::192.168.1.1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[64:ff9b::8.8.8.8]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[64:ff9b:1::a00:1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[2002:c0a8:101::1]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://[2002:7f00:1::]/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://255.255.255.255/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://224.0.0.251/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "WebFetch",
+        {
+          "url": "http://198.18.0.1/",
+          "prompt": "x"
+        }
+      ],
+      [
+        "EnterWorktree",
+        {
+          "name": "t9",
+          "path": "{HOME}/x"
+        }
+      ],
+      [
+        "EnterWorktree",
+        {
+          "path": "{SCRATCH}/w"
         }
       ]
     ],

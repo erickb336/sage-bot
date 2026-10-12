@@ -134,8 +134,8 @@ export function parse(command) {
 
 // ---- Bash: options ------------------------------------------------------------------------------------------------------
 
-// The kinds of an entry in an option table: a flag, an option with a value, a flag that takes a value only as --opt=value
-// (git --pretty), or an array: the values allowed.
+// The kinds of an entry in an option table: a flag, an option with a value, a flag that takes a value only joined to it
+// (git --pretty=<value>, git diff -U<n>: the next word is never its value, F-T137-L4), or an array: the values allowed.
 const FLAG = 0, TEXT = 1, EQ = 2;
 // The entry for a number option (head -20, git log -5).
 const NUM = '-<number>';
@@ -154,8 +154,8 @@ function options(name, args, table, { posix = false, safe } = {}) {
     if (a === '--' && Object.hasOwn(table, '--')) { ops.push(...args.slice(i + 1)); break; }
     if (!a.startsWith('-') || a === '-' || (posix && ops.length)) { ops.push(a); continue; }
     if (/^-\d+$/.test(a) && Object.hasOwn(table, NUM)) continue;
-    // A short option with a text value joined to it (-n5, -U0): every value is allowed, so it needs no more check.
-    if (a.length > 2 && table[a.slice(0, 2)] === TEXT) continue;
+    // A short option with a value joined to it (-n5, -U0): every value is allowed, so it needs no more check.
+    if (a.length > 2 && [TEXT, EQ].includes(table[a.slice(0, 2)])) continue;
     const eq = a.startsWith('--') ? a.indexOf('=') : -1;
     const opt = eq < 0 ? a : a.slice(0, eq);
     const kind = Object.hasOwn(table, opt) ? table[opt] : undefined;
@@ -278,7 +278,7 @@ const gitCmd = (table) => cmd({ ...table, '--': FLAG });
 const STASH = cmd({ '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG });
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
-  diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': TEXT, '--unified': TEXT, '--word-diff': FLAG }),
+  diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': EQ, '--unified': EQ, '--word-diff': FLAG }),
   log: gitCmd({ '--all': FLAG, '--oneline': FLAG, '-p': FLAG, '--stat': FLAG, '-n': TEXT, [NUM]: FLAG, '--format': EQ, '--pretty': EQ, '--graph': FLAG, '--decorate': FLAG, '--name-only': FLAG, '--first-parent': FLAG }),
   show: gitCmd({ '--stat': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--oneline': FLAG, '-s': FLAG, '--format': EQ, '--pretty': EQ }),
   'rev-parse': gitCmd({ '--show-toplevel': FLAG, '--abbrev-ref': FLAG, '--short': FLAG, '--verify': FLAG, '--is-inside-work-tree': FLAG }),
@@ -387,6 +387,11 @@ function configPath(text) {
   const parts = posix.normalize(fold(text)).replace(WORKTREE, '$1w').split(/[/=]/);
   return parts.some((p) => CONFIG_NAMES.some((name) => (/[*?]/.test(p) && p.startsWith('.') ? matches(p, name) : p === name)));
 }
+/** The path of a word (after its last =, as in --out=<path>) joined to the folder `base`, unless it is absolute or starts with ~. */
+const joined = (base, text) => {
+  const path = text.slice(text.lastIndexOf('=') + 1);
+  return /^[/~]/.test(path) ? path : posix.join(base, path);
+};
 const CONFIG = (path) => `a write to ${say(path)} (a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc)`;
 const WILDCARD = 'name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>';
 
@@ -415,7 +420,8 @@ function patterns(ops, env, pathspec) {
 
 // Environment variables that a simple command may set in front of it; never in front of git, which reads its config
 // (that can run programs) from HOME.
-const ENV = new Set(['NODE_ENV', 'CI', 'NO_COLOR', 'FORCE_COLOR', 'HOME', 'TMPDIR']);
+// HOME, TMPDIR, DO_NOT_TRACK and npm_config_cache keep a tool's files and telemetry in the scratch folder (F-T137-6).
+const ENV = new Set(['NODE_ENV', 'CI', 'NO_COLOR', 'FORCE_COLOR', 'HOME', 'TMPDIR', 'DO_NOT_TRACK', 'npm_config_cache']);
 const VAR = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** The command name and its arguments after the variables in front of it. */
@@ -454,11 +460,11 @@ export function bashRefusal(command, env, cwd) {
   if (typeof command !== 'string') return 'a Bash call with no command text';
   if (namesStateTool([command], env)) return STATE_TOOL;
   const parsed = parse(command);
-  if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, /(^|\s)stash@\{/.test(command) ? "quote the stash name: git stash pop 'stash@{0}'" : REPHRASE);
+  if (typeof parsed === 'string') return how(`a command the guard cannot read (${parsed})`, /(^|\s)stash@\{/.test(command) ? "quote the stash name: git stash pop 'stash@{0}'" : parsed.startsWith('a = ') ? "quote a word that starts with =, for example test a '=' b" : REPHRASE);
   if (namesStateTool(parsed.flatMap((seg) => [...seg.words, ...seg.redirects]).map((w) => w.text), env)) return STATE_TOOL;
   // A redirect under /dev/ names a device (bash opens /dev/tcp/<host>/<port> as a connection); only /dev/null is allowed there.
   const dev = parsed.flatMap((seg) => seg.redirects).find((w) => DEV.test(posix.normalize(fold(w.text))) && posix.normalize(fold(w.text)) !== '/dev/null');
-  if (dev) return `a redirect to ${say(dev.text)} (under /dev/ only /dev/null)`;
+  if (dev) return /^\/dev\/std(out|err)$/.test(posix.normalize(fold(dev.text))) ? how(`a redirect to ${say(dev.text)} (under /dev/ only /dev/null)`, 'echo <text> >&2 for the error output, or no redirect for the output') : `a redirect to ${say(dev.text)} (under /dev/ only /dev/null)`;
   // A pipeline is the parts joined by |. It runs or writes as a whole when one of its parts runs a script or writes a file (a
   // renamed copy): cat x | head > y writes what cat reads. Its words are then checked with their redirect targets. A read
   // (ls dir/*, cat é.txt) runs nothing.
@@ -472,9 +478,12 @@ export function bashRefusal(command, env, cwd) {
     if (why) return why;
   }
   // A write to a settings path: each redirect target, and each word of a part that writes. A cd folder and the session's
-  // folder start each relative path after them, so they count when the command writes (F-T144-L14, F-T144-L16).
+  // folder start each relative path after them, so they count when the command writes (F-T144-L14, F-T144-L16), and each
+  // relative path counts also joined to them: ../../settings.json from .claude/worktrees/<name> is .claude/settings.json (F-T137-L1).
   const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap((seg) => seg.words)];
-  if (targets.length) targets.push(...parsed.filter((seg) => seg.words[0]?.text === 'cd').flatMap((seg) => seg.words.slice(1)), { text: String(cwd ?? '') });
+  const cdTo = parsed[0]?.words[0]?.text === 'cd' ? parsed[0].words.slice(1) : [];
+  const base = joined(String(cwd ?? ''), cdTo[0]?.text ?? '');
+  if (targets.length) targets.push(...cdTo, { text: base }, ...targets.map((w) => ({ text: joined(base, w.text) })));
   const dir = targets.find((w) => configPath(w.text));
   if (dir) return CONFIG(dir.text);
   for (const [k, seg] of parsed.entries()) {
@@ -532,8 +541,9 @@ const TOOLS = {
   Read: allow, Write: file('file_path'), Edit: file('file_path'), MultiEdit: file('file_path'), NotebookEdit: file('notebook_path'), Glob: allow,
   WebSearch: allow, TodoWrite: allow, Task: agent, Agent: agent, ToolSearch: allow, SendMessage: allow,
   TaskCreate: allow, TaskGet: allow, TaskList: allow, TaskUpdate: allow, ExitWorktree: allow,
-  // EnterWorktree makes .claude/worktrees/<name>: a plain name, or none.
-  EnterWorktree: (i) => (i.name === undefined || (typeof i.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(i.name)) ? null : how(`a worktree with the name ${say(String(JSON.stringify(i.name)))}`, 'EnterWorktree with a plain name of letters, digits, ., _ and -')),
+  // EnterWorktree makes .claude/worktrees/<name>: a plain name, or none, and no other field (a path enters any folder: F-T137-L5).
+  EnterWorktree: (i) => (Object.keys(i).some((k) => k !== 'name') ? how(`EnterWorktree with the field ${say(Object.keys(i).find((k) => k !== 'name'))}`, 'EnterWorktree with only a plain name')
+    : i.name === undefined || (typeof i.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(i.name)) ? null : how(`a worktree with the name ${say(String(JSON.stringify(i.name)))}`, 'EnterWorktree with a plain name of letters, digits, ., _ and -')),
   // A skill's tools come through this hook, but its SKILL.md can register hook commands that Claude Code runs for the rest of
   // the session, and those never pass this hook. T134 holds that (F-T134-20): --disable-slash-commands, and no write to
   // .claude/skills, .claude/agents or .claude/commands; the refusal of a write under .claude above is a second layer.

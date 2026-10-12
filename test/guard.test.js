@@ -296,7 +296,7 @@ test('T133: the reason names what is refused, and says how to rephrase when a sa
   // The usual commit form, a heredoc in $( ), stays refused, and the message says how to give the text instead.
   assert.match(why("git commit -m \"$(cat <<'EOF'\nT133\nEOF\n)\""), /cannot read \(a \$ inside double quotes\) is refused .* sage can do this instead: .*put long or special text in a file in the scratch folder and pass it with git commit -F <file>\.$/s);
   assert.equal(why('HOME={SCRATCH} git status'), 'sage-bot guard: a variable in front of git (git reads its config from HOME) is refused in a bridge session. sage can do this instead: run git with no variable in front of it.');
-  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a bridge session. sage can do this instead: set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command.');
+  assert.equal(why('GH_TOKEN=x ls'), 'sage-bot guard: setting GH_TOKEN in front of a command is refused in a bridge session. sage can do this instead: set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR, DO_NOT_TRACK, npm_config_cache in front of a command.');
   // Each option must be an entry of the command's table by its full spelling; the message lists the entries.
   assert.equal(why('grep --recur token src'), 'sage-bot guard: grep with the option --recur is refused in a bridge session. sage can do this instead: rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone.');
   assert.equal(why('pwd -L'), 'sage-bot guard: pwd with the option -L is refused in a bridge session. sage can do this instead: give pwd no option.');
@@ -591,8 +591,8 @@ test('F-T144-L7, F-T144-L10, F-T144-L13: npm, npx, grep and the variables in fro
     'npm help': hint('npm help', 'WebFetch of https://docs.npmjs.com/cli, the documentation of npm'),
     'npx eslint': hint('npx (it runs any package)', 'npm run <script>, a script of package.json'),
     'grep -r x src': hint('grep with the option -r', 'rg -n <pattern> <folder> to search a folder, or give grep only the options -n -i -in -l -c -v -w -o -h -H -E -F -q -s -x -e -A -B -C -m --, each one spelled in full and alone'),
-    'FOO=1 npm test': hint('setting FOO in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command'),
-    'PATH=/x ls': hint('setting PATH in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR in front of a command'),
+    'FOO=1 npm test': hint('setting FOO in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR, DO_NOT_TRACK, npm_config_cache in front of a command'),
+    'PATH=/x ls': hint('setting PATH in front of a command', 'set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR, DO_NOT_TRACK, npm_config_cache in front of a command'),
     'jq -n env': refused('jq with env or $ENV (it prints the environment, which can hold secrets)'),
     "jq -n '$ENV.HOME'": refused('jq with env or $ENV (it prints the environment, which can hold secrets)'),
   });
@@ -608,11 +608,13 @@ test('F-T144-L5: a git pathspec * also matches a /, so a git wildcard that can e
 });
 
 test('F-T144-5, F-T144-L8, F-T144-L13: the parser refuses what zsh and bash read in another way: =word, <n-m>, a two-digit fd, a redirect to a device', () => {
+  const EQ_WORD = 'a command the guard cannot read (a = at the start of a word (zsh reads =name as the path of a program))';
+  const EQ_HINT = "quote a word that starts with =, for example test a '=' b";
   const unread = (why) => hint(`a command the guard cannot read (${why})`, 'one command per call, or commands joined only by && (a | only into head, tail, wc, sort or grep), with no ;, ||, $, backtick, heredoc, (, {, \\ or newline; put long or special text in a file in the scratch folder and pass it with git commit -F <file>');
   assert.deepEqual(reasons(['ls =ls', 'cp a =.claude/x', '[ a = b ]', 'cat <1-10>', 'git commit -m x 10> y', 'echo x > /dev/tcp/1.2.3.4/80', 'ls 2> ../../dev/stdout', 'ls >&2x']), {
-    'ls =ls': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
-    'cp a =.claude/x': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
-    '[ a = b ]': unread('a = at the start of a word (zsh reads =name as the path of a program)'),
+    'ls =ls': hint(EQ_WORD, EQ_HINT),
+    'cp a =.claude/x': hint(EQ_WORD, EQ_HINT),
+    '[ a = b ]': hint(EQ_WORD, EQ_HINT),
     'cat <1-10>': unread('a zsh number range <n-m>'),
     'git commit -m x 10> y': unread('the number 10 before a redirect'),
     'echo x > /dev/tcp/1.2.3.4/80': refused('a redirect to /dev/tcp/1.2.3.4/80 (under /dev/ only /dev/null)'),
@@ -673,6 +675,26 @@ test('F-T144-L15, F-T144-L16: a worktree under .claude/worktrees/<name> is a wor
   assert.equal(at('/sample/repo/.claude', 'Write', { file_path: 'settings.json', content: 'x' }).reason, write('settings.json'));
   assert.equal(at('/sample/repo/.claude', 'Bash', { command: 'echo x > a.txt' }).reason, write('/sample/repo/.claude'));
   assert.equal(at('/sample/repo/.claude', 'Bash', { command: 'ls' }).decision, 'allow');
+});
+
+test('F-T137-L1: a relative path that climbs out of a worktree under .claude/worktrees by .. counts at the folder it lands in', () => {
+  const at = (cwd, command) => guard({ ...bash(command), cwd });
+  const write = (p) => `sage-bot guard: a write to ${p} ${SETTINGS}`;
+  const wt = '/sample/repo/.claude/worktrees/t9';
+  assert.equal(at(wt, 'touch ../../settings.json').reason, write('/sample/repo/.claude/settings.json'));
+  assert.equal(at(wt, 'echo x > ../../settings.json').reason, write('/sample/repo/.claude/settings.json'));
+  assert.equal(at(wt, 'cp a --target-directory=../../agents').reason, write('/sample/repo/.claude/agents'));
+  assert.equal(at(wt, 'cd ../.. && touch settings.json').reason, write('/sample/repo/.claude'));
+  assert.equal(at(wt, 'git -C ../.. add x').reason, write('/sample/repo/.claude'));
+  for (const c of ['touch src/a.js', 'echo x > notes.md', 'cp a ../t8/b', 'git add src/a.js', 'cd /sample/scratch && touch x']) assert.equal(at(wt, c).decision, 'allow', c);
+});
+
+test('F-T137-L3, F-T137-L4, F-T137-L5: test a = b and a redirect to /dev/stderr get a workable hint; git diff -U takes no next word; EnterWorktree takes only a name', () => {
+  assert.equal(guard(bash('test a = b')).reason, "sage-bot guard: a command the guard cannot read (a = at the start of a word (zsh reads =name as the path of a program)) is refused in a bridge session. sage can do this instead: quote a word that starts with =, for example test a '=' b.");
+  assert.equal(guard(bash('echo x >/dev/stderr')).reason, 'sage-bot guard: a redirect to /dev/stderr (under /dev/ only /dev/null) is refused in a bridge session. sage can do this instead: echo <text> >&2 for the error output, or no redirect for the output.');
+  assert.equal(guard(bash('echo x > /dev/tcp/example.com/80')).reason, `sage-bot guard: a redirect to /dev/tcp/example.com/80 (under /dev/ only /dev/null) is refused in a bridge session. ${STOP}`);
+  assert.match(guard(bash('git diff -U --output=/sample/x')).reason, /^sage-bot guard: git diff with the option --output=\/sample\/x is refused/);
+  assert.equal(guard(tool('EnterWorktree', { name: 't9', path: '/sample/x' })).reason, 'sage-bot guard: EnterWorktree with the field path is refused in a bridge session. sage can do this instead: EnterWorktree with only a plain name.');
 });
 
 test('F-T144-L7, F-T144-L15, F-T144-L16: a file tool must name its file in its text path key', () => {
