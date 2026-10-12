@@ -36,3 +36,10 @@ test('F-T133-68: the scan finds the old README sentence, and its fix only with t
   assert.deepEqual(unproved('The sandbox guarantees it. The guard never runs a script. The hook cannot write there (G44 A).'), ['The sandbox guarantees it.', 'The guard never runs a script.']);
   assert.deepEqual(unproved('The sandbox always holds it (G999 A). The sandbox always holds it (G63 b).'), ['The sandbox always holds it (G999 A).']);
 });
+
+test('T201: docs/reference.md gives the number of calls of test/normal-session-work.json', () => {
+  const { entries } = JSON.parse(readFileSync(join(ROOT, 'test', 'normal-session-work.json'), 'utf8'));
+  const said = readFileSync(join(ROOT, 'docs', 'reference.md'), 'utf8').match(/`test\/normal-session-work\.json` is the fixed list of normal work in a bridge session: (\d+) calls/);
+  assert.ok(said, 'the sentence with the number is in docs/reference.md');
+  assert.equal(Number(said[1]), entries.length);
+});

@@ -2396,25 +2396,43 @@
     "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"
   ],
   "worktree": {
-    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9); 'hint': [command, the hint, a form that the hint leads to]: the command is refused with the hint, and the form is allowed from the same cwd (F-T137-8, F-T137-12, F-T137-14, F-T137-15); 'allow': normal work there. 'parent' holds the same for a shell in .claude/worktrees itself, after an allowed cd .. && ls (F-T137-13).",
+    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9), also with a quoted variable in front (T200), a message option before it (T202), a -C folder that starts with --message= (F-T199-3) or after --amend (T203); 'hint': [command, the hint, a form that the hint leads to]: the command is refused with the hint, and the form is allowed from the same cwd (F-T137-8, F-T137-12, F-T137-14, F-T137-15; T199: a cd up into .claude; T200: a quoted variable gets the hint of the form with no quotes); 'allow': normal work there, also a message that starts with ~ or names .claude (T202; also --message <text>, F-T199-4) and git commit --amend and --no-edit (T203). 'parent' holds the same for a shell in .claude/worktrees itself, after an allowed cd .. && ls (F-T137-13).",
     "cwd": "{REPO}/.claude/worktrees/t9",
     "refuse": [
       "touch ../../settings.json",
       "mkdir -p ../../a=b && cp evil.md ../../a=b/../agents/evil.md",
       "cp evil.md ../../a=b/../agents/evil.md",
       "echo x > ~+/../../settings.json",
-      "cd ../../a=b/.. && touch settings.json",
       "node a.mjs --out=../../a=b/../settings.json",
       "cp x a=/../../../settings.json",
       "echo x > '~'/../../../settings.json",
       "echo x > '~+'/../../../settings.json",
-      "npm_config_cache=../.. npm ci"
+      "npm_config_cache=../.. npm ci",
+      "\"HOME\"=/x touch ../../settings.json",
+      "git commit -m x ../../settings.json",
+      "git commit -F -m ../../settings.json",
+      "git commit -F ../../settings.json",
+      "git -C ../.. commit -m x",
+      "git -C -m -C ../.. commit -m x",
+      "git -C --message=../.. commit -m x",
+      "git -C --message=x/../../.. commit -m y",
+      "git -C --message=../.. stash -m x",
+      "git -C --message=x/../../.. stash -m y",
+      "git commit --amend -m x ../../settings.json",
+      "git commit --amend --no-edit ../../settings.json"
     ],
     "hint": [
       ["cd .. && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
       ["cd .. && touch t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "touch x"],
       ["cd ../ && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
       ["cd {REPO}/.claude/worktrees/t9/.. && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd ../../ && git add x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd ../.. && git add x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd {REPO}/.claude && git add x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd ../../a=b/.. && touch settings.json", "run the command in the worktree with no cd, and name each path from there, for example git add x", "touch settings.json"],
+      ["\"HOME\"=/x git status", "run git with no variable in front of it", "git status"],
+      ["CI=1 \"HOME\"=/x git status", "run git with no variable in front of it", "git status"],
+      ["\"FOO\"=1 npm test", "set only NODE_ENV, CI, NO_COLOR, FORCE_COLOR, HOME, TMPDIR, DO_NOT_TRACK, npm_config_cache in front of a command", "CI=1 npm test"],
       ["mkdir ~+\"/\"", "name the path from the session folder, or as an absolute path", "mkdir -p src"],
       ["cp evil.md ~+\"/../../../agents/evil.md\"", "name the path from the session folder, or as an absolute path", "cp evil.md ../t8/evil.md"],
       ["touch ~+\"/../../../settings.json\"", "name the path from the session folder, or as an absolute path", "touch {REPO}/.claude/worktrees/t9/notes.md"],
@@ -2437,7 +2455,18 @@
       "echo x > ~+/notes.md",
       "cp a ../t8/b",
       "echo x > '~-'/a",
-      "HOME={SCRATCH} npm_config_cache={SCRATCH}/npm npm ci"
+      "HOME={SCRATCH} npm_config_cache={SCRATCH}/npm npm ci",
+      "git commit -m ~fix",
+      "git commit --message=~fix",
+      "git commit --message ~fix",
+      "git commit --amend -m \"~wip: tidy\"",
+      "git commit --amend -m x",
+      "git commit --amend --no-edit",
+      "git commit --no-edit -m x",
+      "git commit -am ~fix",
+      "git commit -m .claude/x",
+      "git stash push -m ~wip",
+      "git stash -m ~wip"
     ]
   }
 }

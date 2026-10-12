@@ -34,6 +34,8 @@
     {"id":"git-commit-file","tool_name":"Bash","tool_input":{"command":"git commit -F /sample/scratch/msg.txt"},"expect":"allow"},
     {"id":"git-commit-m","tool_name":"Bash","tool_input":{"command":"git commit -m \"guard: add the normal bridge-session work corpus\""},"expect":"allow"},
     {"id":"git-commit-am","tool_name":"Bash","tool_input":{"command":"git commit -am \"docs: fix a typo\""},"expect":"allow"},
+    {"id":"git-commit-amend-no-edit","tool_name":"Bash","tool_input":{"command":"git commit --amend --no-edit"},"expect":"allow"},
+    {"id":"git-commit-amend","tool_name":"Bash","tool_input":{"command":"git commit --amend -m \"docs: fix a typo\""},"expect":"allow"},
     {"id":"git-switch-c","tool_name":"Bash","tool_input":{"command":"git switch -c t200-guard"},"expect":"allow"},
     {"id":"git-switch","tool_name":"Bash","tool_input":{"command":"git switch main"},"expect":"allow"},
     {"id":"git-checkout-b","tool_name":"Bash","tool_input":{"command":"git checkout -b t200-guard"},"expect":"allow"},
