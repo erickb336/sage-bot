@@ -282,7 +282,7 @@ function git(args, env) {
 const gitCmd = (table) => cmd({ ...table, '--': FLAG });
 const STASH_OPTIONS = { '-m': TEXT, '--message': TEXT, '-q': FLAG, '--quiet': FLAG, '-p': FLAG, '--patch': FLAG, '--stat': FLAG, '-u': FLAG, '--include-untracked': FLAG };
 const STASH = cmd(STASH_OPTIONS);
-const COMMIT = { '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG };
+const COMMIT = { '-m': TEXT, '--message': TEXT, '-am': TEXT, '-a': FLAG, '--all': FLAG, '-F': TEXT, '--file': TEXT, '-q': FLAG, '--quiet': FLAG, '-s': FLAG, '--signoff': FLAG, '--allow-empty': FLAG, '-v': FLAG, '--amend': FLAG };
 const GIT = {
   status: gitCmd({ '-s': FLAG, '--short': FLAG, '-b': FLAG, '--branch': FLAG, '-sb': FLAG, '--porcelain': FLAG }),
   diff: gitCmd({ '--stat': FLAG, '--cached': FLAG, '--staged': FLAG, '--name-only': FLAG, '--name-status': FLAG, '--shortstat': FLAG, '--check': FLAG, '-U': EQ, '--unified': EQ, '--word-diff': FLAG }),
@@ -461,18 +461,18 @@ const MESSAGE = new Set(['-m', '--message', '-am']);
 /** The words of a part that writes that can name a path: all of them, but for git commit and git stash the value of a message option (T202). */
 function pathWords({ words }) {
   const [name, ...args] = commandOf(words);
-  const sub = name === 'git' ? gitArgs(args)?.[0] : null;
+  const [sub, ...rest] = (name === 'git' && gitArgs(args)) || [];
   const table = sub === 'commit' ? COMMIT : sub === 'stash' ? STASH_OPTIONS : null;
   if (!table) return words;
-  // The walk starts at the first word: -C is no option of these tables, so a -C folder (git -C -m -C .claude commit) is never
-  // taken as a message.
+  // The walk starts after the subcommand, so the value of a global option is never a message (F-T199-3: git -C --message=../.. commit).
+  const start = words.length - rest.length;
   let value = null;
-  return words.filter((w) => {
+  return words.slice(0, start).concat(words.slice(start).filter((w) => {
     const message = value === null ? w.text.startsWith('--message=') : MESSAGE.has(value);
     // A word is an option only when it is not the value of the option before it (git commit -F -m <path>: -m is the file).
     value = value === null && table[w.text] === TEXT ? w.text : null;
     return !message;
-  });
+  }));
 }
 
 /** Why the simple command is refused, or null. */

@@ -2396,7 +2396,7 @@
     "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"
   ],
   "worktree": {
-    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9), also with a quoted variable in front (T200) or a message option before it (T202); 'hint': [command, the hint, a form that the hint leads to]: the command is refused with the hint, and the form is allowed from the same cwd (F-T137-8, F-T137-12, F-T137-14, F-T137-15; T199: a cd up into .claude; T200: a quoted variable gets the hint of the form with no quotes); 'allow': normal work there, also a message that starts with ~ or names .claude (T202). 'parent' holds the same for a shell in .claude/worktrees itself, after an allowed cd .. && ls (F-T137-13).",
+    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9), also with a quoted variable in front (T200), a message option before it (T202), a -C folder that starts with --message= (F-T199-3) or after --amend (T203); 'hint': [command, the hint, a form that the hint leads to]: the command is refused with the hint, and the form is allowed from the same cwd (F-T137-8, F-T137-12, F-T137-14, F-T137-15; T199: a cd up into .claude; T200: a quoted variable gets the hint of the form with no quotes); 'allow': normal work there, also a message that starts with ~ or names .claude (T202; also --message <text>, F-T199-4) and git commit --amend (T203). 'parent' holds the same for a shell in .claude/worktrees itself, after an allowed cd .. && ls (F-T137-13).",
     "cwd": "{REPO}/.claude/worktrees/t9",
     "refuse": [
       "touch ../../settings.json",
@@ -2413,7 +2413,12 @@
       "git commit -F -m ../../settings.json",
       "git commit -F ../../settings.json",
       "git -C ../.. commit -m x",
-      "git -C -m -C ../.. commit -m x"
+      "git -C -m -C ../.. commit -m x",
+      "git -C --message=../.. commit -m x",
+      "git -C --message=x/../../.. commit -m y",
+      "git -C --message=../.. stash -m x",
+      "git -C --message=x/../../.. stash -m y",
+      "git commit --amend -m x ../../settings.json"
     ],
     "hint": [
       ["cd .. && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
@@ -2452,6 +2457,9 @@
       "HOME={SCRATCH} npm_config_cache={SCRATCH}/npm npm ci",
       "git commit -m ~fix",
       "git commit --message=~fix",
+      "git commit --message ~fix",
+      "git commit --amend -m \"~wip: tidy\"",
+      "git commit --amend -m x",
       "git commit -am ~fix",
       "git commit -m .claude/x",
       "git stash push -m ~wip",
