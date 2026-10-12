@@ -9,7 +9,7 @@
 // SAMPLE DATA ONLY. It never prints a sample value: it refuses to write a report that holds the world's tag. Exit 1 on FAIL or INVALID.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,7 +86,7 @@ export function out(file, args, o) {
 }
 
 /** The rows that need no model. Each returns [status, why]. `root`: the run's folder, for the dummy claude of F-T134-15c. */
-async function nowRows(w, policy, env, root) {
+async function nowRows(w, policy, env, entries) {
   const settings = settingsOf(policy);
   const owner = ownerHome(); // canonical: the policy refuses it otherwise
   const denied = settings.sandbox.credentials.envVars.filter((v) => v.mode === 'deny').map((v) => v.name);
@@ -103,7 +103,7 @@ async function nowRows(w, policy, env, root) {
   const t1 = status?.supported === true && status.enabled === true && status.strictMode === true && !status.unavailableReason && status.autoAllowBashIfSandboxed === true && ready.state === 'ready';
   const macos = platform() === 'darwin' ? `macOS ${out('sw_vers', ['-productVersion']) ?? '(version unknown)'}` : platform();
   // F-T134-15c (F-T165-7): the start command with a claude that reports the sandbox unavailable starts nothing.
-  const start = await startSession({ ...policy, claude: dummyClaude(join(root, 'dummy'), 'unavailable') }, env, {}, 'proof: nothing should start');
+  const start = await startSession({ ...policy, claude: dummyClaude(entries.at('dummy'), 'unavailable') }, env, {}, 'proof: nothing should start');
   const t15c = start.refused?.state === 'no sandbox';
   return {
     'F-T157-8': [t8 ? 'PASS' : 'FAIL', `envVars deny ${denied.filter((n) => n === 'ANTHROPIC_API_KEY' || n === 'CLAUDE_CODE_OAUTH_TOKEN').join(' and ') || 'neither'}; two at once ${refusesTwo ? 'refused' : 'accepted'}; one from the caller: ${Object.keys(one).filter((k) => k.endsWith('_KEY') || k.endsWith('_TOKEN')).join(', ')}`],
@@ -124,7 +124,8 @@ async function nowRows(w, policy, env, root) {
  * @param {NodeJS.ProcessEnv} [o.env]  the host's environment: its PATH finds `claude`, `security` and the controls' commands
  * @param {string} [o.claude]  a claude to run in place of the one on PATH: the dummy of a dry run, or a fake in the tests
  * @param {string[]} [o.secrets]  values that the report must never hold (the key): the run refuses to write a report that holds one
- * @param {string[]} [o.made]  the entries of `root` that the caller made before this run (refuseUsed): any other entry is an earlier run
+ * @param {ReturnType<typeof runEntries>} [o.entries]  the run's entries in `root` (runEntries), with those that the caller made before
+ *   this run (the live run's keychain, dummy and temp folders): refuseUsed allows them, and any other entry is an earlier run
  * @param {string} [o.proof]  the report's name of the proof, in place of the one that `live` or its absence gives (the dry run)
  * @param {(ctx: { root: string, world: object, policy: object, tag: string, controls: Map<string, object> }) => Promise<{ results: Map<string, { did: boolean | null, why: string }>, rows: Record<string, { status: string, why: string, checks?: object[] }>, skipped: string, sessions?: object[], keychain?: object }>} [o.live]
  *   the sessions (scripts/proof/live.mjs): `results` by probe id for the L1 probes, `rows` by row for L2 and L3, `skipped` the why of a
@@ -136,20 +137,36 @@ export async function prove(root, o = {}) {
   try { return await proveIn(root, o); } finally { removeTempRoots(); }
 }
 /**
- * Refuses a scratch folder that is not empty, with one line and `exitCode` 2 (F-T157-23, F-T167-1), apart from `made`: the entries that
- * the caller itself made there first (the live run's keychain and dummy folders), the one rule for the proof and the live run.
- * @param {string} root @param {string[]} [made]
+ * The one place that names a run's entries in its scratch folder `root` (standing order 15, F-T167-3): `at(name)` gives the path of the
+ * entry `name` and records the name before the entry is made, `names` holds every recorded name, and `remove` removes exactly those
+ * entries. refuseUsed allows only them, and a failed dry run (scripts/proof/live.mjs) calls `remove`: an entry that a run made by another
+ * path would stay and refuse the next run.
+ * @param {string} root
  */
-export function refuseUsed(root, made = []) {
-  if (!statSync(root).isDirectory()) throw Object.assign(new Error(`--out ${root} is a file: --out must be a new folder (F-T179-1). Nothing was made.`), { exitCode: 2 });
-  if (readdirSync(root).some((n) => !made.includes(n))) throw Object.assign(new Error(`the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`), { exitCode: 2 });
+export function runEntries(root) {
+  const names = new Set();
+  return {
+    names,
+    at: (name) => { names.add(name); return join(root, name); },
+    remove: () => { for (const n of names) rmSync(join(root, n), { recursive: true, force: true }); }, // a link goes as a link
+  };
 }
-async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host = process.env, claude, secrets = [], made = [], proof, live: sessions } = {}) {
-  if (existsSync(root)) refuseUsed(root, made); // a file is refused here, before mkdir fails on it
+/**
+ * Refuses a scratch folder that is not empty, with one line and `exitCode` 2 (F-T157-23, F-T167-1), apart from `made`: the names of the
+ * entries that the run itself made there first (runEntries), the one rule for the proof and the live run.
+ * @param {string} root @param {Set<string>} [made]
+ */
+export function refuseUsed(root, made = new Set()) {
+  if (!statSync(root).isDirectory()) throw Object.assign(new Error(`--out ${root} is a file: --out must be a new folder (F-T179-1). Nothing was made.`), { exitCode: 2 });
+  if (readdirSync(root).some((n) => !made.has(n))) throw Object.assign(new Error(`the scratch folder ${root} is not empty: give --out a new folder, or none for a new one in TMPDIR. Nothing was made.`), { exitCode: 2 });
+}
+async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host = process.env, claude, secrets = [], entries, proof, live: sessions } = {}) {
+  if (existsSync(root)) refuseUsed(root, entries?.names); // a file is refused here, before mkdir fails on it
   mkdirSync(root, { recursive: true });
   root = realpathSync.native(root);
-  refuseUsed(root, made);
-  const control = buildWorld(join(root, 'control'), tag), live = buildWorld(join(root, 'live'), tag);
+  entries ??= runEntries(root);
+  refuseUsed(root, entries.names);
+  const control = buildWorld(entries.at('control'), tag), live = buildWorld(entries.at('live'), tag);
   const samples = Object.fromEntries(SAMPLE_ENV.map((n) => [n, sample(n, tag)]));
   const r = spawnSync(process.execPath, [PROBE, join(control.sessionFolder, 'world.json'), '--control'], {
     cwd: control.sessionFolder, encoding: 'utf8', timeout: 600_000, env: { PATH: host.PATH, HOME: control.home, TMPDIR: control.sessionTmp, ...samples },
@@ -157,8 +174,8 @@ async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host =
   const controls = resultsOf(r.stdout).results;
   const env = { PATH: host.PATH };
   const policy = { ...policyOf(live), ...(claude && { claude }) };
-  const now = await nowRows(live, policy, env, root);
-  const session = sessions ? await sessions({ root, world: live, control, policy, tag, controls }) : null;
+  const now = await nowRows(live, policy, env, entries);
+  const session = sessions ? await sessions({ root, entries, world: live, control, policy, tag, controls }) : null;
   const skipped = session?.skipped ?? LIVE;
   const rows = ROWS.map((row) => {
     if (row.group === 'now') { const [status, why] = now[row.row]; return { ...row, status, why }; }
@@ -181,13 +198,13 @@ async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host =
     probeErrors: r.status === 0 ? null : (r.stderr || r.error?.message || '').split('\n')[0],
     rows,
     sessions: session?.sessions ?? [],
-    keychain: session?.keychain ?? { run: false, why: `only the live run makes it: ${OWNER_COMMAND}`, commands: printable(keychainPlan(join(root, 'keychain'), keychainIdOf(tag))) },
+    keychain: session?.keychain ?? { run: false, why: `only the live run makes it: ${OWNER_COMMAND}`, commands: printable(keychainPlan(entries.at('keychain'), keychainIdOf(tag))) },
   };
-  const probesAll = rows.flatMap((x) => x.probes ?? []);
+  const reportPath = entries.at('report.json'), probesAll = rows.flatMap((x) => x.probes ?? []);
   const summary = [
     `sage-bot proof (${report.proof}): ${report.platform}, Claude Code ${report.claude ?? '(not found)'}`,
     `scratch folder: ${root}`,
-    `report: ${join(root, 'report.json')}`,
+    `report: ${reportPath}`,
     `temp roots: ${report.tempRoots.join(', ')} (the policy's 44-byte limit keeps them out of the scratch folder; removed at the end of the run)`,
     ...rows.map((x) => `${x.status.padEnd(8)} ${x.row.padEnd(11)} ${x.title}${x.status === 'PASS' ? '' : ` (${x.why.slice(0, 120)})`}`),
     `${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('INVALID')} INVALID, ${count('SKIPPED')} SKIPPED${session ? '' : ` (${LIVE})`}.`,
@@ -198,7 +215,7 @@ async function proveIn(root, { tag = randomBytes(8).toString('hex'), env: host =
   const text = JSON.stringify(report);
   if (text.includes(tag) || summary.includes(tag)) throw new Error('the report holds a sample value: nothing was written.');
   if (secrets.some((s) => s && (text.includes(s) || summary.includes(s)))) throw new Error('the report holds the key: nothing was written.');
-  writeFileSync(join(root, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   return { report, summary };
 }
 

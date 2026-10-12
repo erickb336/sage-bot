@@ -700,6 +700,22 @@ test('F-T167-2: a dry run that fails removes only what it made and recorded: a f
   } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test('F-T167-3: a dry run that fails late, after prove() made the worlds, the runner copies and the sessions, leaves only the other writer\'s entries, so the same --out works again', async () => {
+  const root = liveScratch();
+  try {
+    // delete-keychain fails in the fixture's cleanup, after the sessions; breakRestore makes the restore of the search list throw there too
+    for (const [name, o, left] of [['delete', { failVerb: 'delete-keychain' }, ['other-link', 'other-process.txt']], ['restore', { breakRestore: true }, []]]) {
+      const out = join(root, `out-${name}`);
+      mkdirSync(out);
+      await assert.rejects(proveLive(out, { env: fakeSecurity(join(root, name), { ...o, intruder: out }).env, dryRun: true }), /delete-keychain|search list/);
+      assert.deepEqual(readdirSync(out).sort(), left, `${name}: only the other writer's entries are left`);
+      if (left.length) for (const n of left) rmSync(join(out, n));
+      const { report } = await proveLive(out, { env: fakeSecurity(join(root, `${name}-good`)).env, dryRun: true });
+      assert.equal(report.proof, 'T165 (T134 PR 2b), dry run: dummy claude, no key'); // the same --out, again
+    }
+  } finally { removeTempRoots(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('F-T165-23: a cd before the asked call, or a glob in place of its path, gives every L1 row INVALID; a subagent whose results are only in its reply, or whose Bash call is not the asked command, gives its probes INVALID', { timeout: 600_000 }, async () => {
   const root = liveScratch();
   try {
