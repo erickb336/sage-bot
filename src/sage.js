@@ -78,7 +78,13 @@ export function answerArgs(row, text) {
  * @param {{ sagePath: string, project: string, env?: NodeJS.ProcessEnv }} o  `env` is for the tests: a scratch HOME or SAGE_HOME.
  */
 export function sageTool({ sagePath, project, env = process.env }) {
-  const sage = async (...args) => (await run(process.execPath, [sagePath, ...args, '--project', project], { env, encoding: 'utf8' })).stdout.trim();
+  // The one caller of the state tool for this project: a fixed argv, no shell, `--project` last. `signal` kills the tool with SIGKILL
+  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code`.
+  const command = (args, { signal } = {}) => new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env, encoding: 'utf8' }, (e, out) => (e ? reject(e) : resolve(out.trim())));
+    signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
+  });
+  const sage = (...args) => command(args);
   // One lookup of the logbook folder, kept as one promise, so that tables read at the same time share it (F-T71-2). A lookup that
   // fails is not kept: the next read tries again.
   let dir;
@@ -87,6 +93,8 @@ export function sageTool({ sagePath, project, env = process.env }) {
   return {
     /** The folder of the project (loadProjects): the identity that the bridge saves with each card and mark (G45 A). */
     folder: project,
+    /** One command of the state tool, as an argv, with the project fixed: for the broker's logbook verbs (T189), which fix the argv. */
+    command,
     /** Every gate row: { id, task, question, options, recommendation, default, answer, at }. */
     gates: () => table('gates'),
     /** Every task row: { id, title, ... }. */

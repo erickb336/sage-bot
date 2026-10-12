@@ -1,7 +1,8 @@
 // The sage-bot broker (T158, T134 PR 3): the only way a bridge session reaches GitHub. A few fixed verbs, each with an allow-list of
 // input keys; everything else is refused with one line (G28 A). No verb merges, approves, deletes or changes a branch rule, and the
 // only ref that a verb writes on GitHub is the session's own branch sage-lead/s<n>, by fast-forward. T159 wires the verbs into a
-// session as in-process MCP tools of the Claude Agent SDK (G57 A); this module has no SDK.
+// session as in-process MCP tools of the Claude Agent SDK (G57 A); this module has no SDK. It is also the only way a bridge session
+// reaches its logbook (G30 A, G81, T189): four verbs on the session's own run, task and pull request, with the project fixed.
 //
 // Host-side git never runs in a session folder (docs/reference.md, "Git in a session folder"): an upload reads the object files of
 // the session's .git as plain files, into a new bare repository of the broker, and runs git only there, with hooks and config off.
@@ -18,10 +19,16 @@ export const IDENTITY = { name: 'sage-lead (via sage-bot)', email: 'sage-lead@sa
 const BASE = 'main';
 /** `bytes` and `files`: the object files that an upload copies. `object` and `inflated`: the size of each copied object and of all of
  * them, unpacked, before git reads them (F-T158-10). `gitMs`: the most time of one git call. `restMs` and `tokenMs`: the most time of
- * one REST request, with its answer, and of one call of the token function (F-T158-18). `output`: the most output of one git call (F-T191-3). */
+ * one REST request, with its answer, and of one call of the token function (F-T158-18). `output`: the most output of one git call (F-T191-3).
+ * `sageMs`: the most time of one call of the state tool; `summary`: the most characters of a finding's summary (T189). */
 export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500, files: 100_000, bytes: 512 * 2 ** 20,
   object: 50 * 2 ** 20, inflated: 512 * 2 ** 20, gitMs: 5 * 60_000, restMs: 60_000, tokenMs: 30_000,
-  output: 256 * 2 ** 20 };
+  output: 256 * 2 ** 20, sageMs: 30_000, summary: 500 };
+/** The values that the logbook verbs pass to the state tool (G81). No verdict kind that only an independent check gives a task with no
+ * build: evidence-clean lets such a task conclude, so it is not here. The tool takes run statuses done, blocked, question and failed. */
+const RUN_STATUS = ['done', 'blocked', 'question', 'failed'];
+const KINDS = ['checks-pass', 'checks-fail', 'review-clean', 'security-clean', 'ux-clean', 'qa-pass', 'qa-fail', 'findings'];
+const SEVERITY = ['low', 'medium', 'high'];
 
 /** A push that failed or took too long: GitHub can still have taken it (F-T158-14). */
 class Unsure extends Refusal {}
@@ -62,10 +69,16 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
  * The one resolver of the broker (standing order 15): the session, its branch, its folders and the repository, from the session
  * policy (`sessionPolicy` in src/session-policy.js) and the bridge's GitHub settings. Nothing else in the broker names them.
  */
-function scopeOf(policy, { owner, repo, remote }) {
+function scopeOf(policy, { owner, repo, remote }, logbook) {
   if (!SESSION.test(policy?.session ?? '')) throw new TypeError('the broker needs the session policy of one bridge session');
   if (!NAME.test(owner ?? '') || !NAME.test(repo ?? '')) throw new TypeError('the broker needs a GitHub owner and repository name');
+  // The session's fixed logbook scope (G81), from the bridge when it starts the session: its project's state tool (sageTool in
+  // src/sage.js, which fixes the project), its one task and its run. The session never gives any of them.
+  if (logbook !== undefined && !(typeof logbook?.tool?.command === 'function' && /^T\d{1,6}$/.test(logbook.task ?? '') && /^R\d{1,6}$/.test(logbook.run ?? ''))) {
+    throw new TypeError('the broker\'s logbook scope needs the project\'s state tool, one task id (T<n>) and one run id (R<n>)');
+  }
   return {
+    logbook,
     session: policy.session, branch: `sage-lead/${policy.session}`, folder: policy.folder, tmp: policy.tmp,
     owner, repo, full: `${owner}/${repo}`, remote: remote ?? `https://github.com/${owner}/${repo}.git`,
     // The key of the session's queue (F-T158-22): one bridge serves several projects, and each can have a session s1.
@@ -114,9 +127,11 @@ const envOf = (home, token) => ({
  * @param {{ policy: { session: string, folder: string, tmp: string }, github: { owner: string, repo: string, remote?: string, api?: string },
  *   token: () => string | Promise<string>, workDir: string, fetch?: typeof globalThis.fetch, git?: typeof runGit }} o
  *   `workDir` is a folder of the broker, outside every session folder; each verb makes a new folder in it and removes it after.
+ *   `logbook` ({ tool, task, run }, optional): the session's fixed logbook scope from the bridge: `tool` is sageTool({ sagePath, project })
+ *   of the session's project, `task` its one task id and `run` its run id. Without it, the four logbook verbs refuse.
  */
-export function createBroker({ policy, github, token, workDir, fetch, git = runGit, log = console.error }) {
-  const s = scopeOf(policy, github);
+export function createBroker({ policy, github, logbook, token, workDir, fetch, git = runGit, log = console.error }) {
+  const s = scopeOf(policy, github, logbook);
   const tokenNow = () => within(LIMITS.tokenMs, 'the token lookup took too long', () => token());
   const request = githubRest({ api: github.api, token: tokenNow, fetch });
   const rest = (method, path, body, onSend) => within(LIMITS.restMs, 'GitHub took too long', (signal) => request(method, path, body, { signal, onSend }));
@@ -297,7 +312,47 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
     ...(body === undefined ? {} : { body: textOf('body', body, LIMITS.body, true) }),
   });
 
+  /** The session's logbook scope, or a refusal: a session that the bridge started with no task has no logbook verb. */
+  const scope = () => s.logbook ?? refuse('this session has no task in the logbook');
+  const oneOf = (what, value, list) => (list.includes(value) ? value : refuse(`${what} is one of ${list.join(', ')}`));
+  /**
+   * One command of the state tool (G30 A, G81): the argv that the verb fixes, the project that sageTool fixes, no shell, and no longer
+   * than LIMITS.sageMs. Each option goes as --name=value, so no value can read as an option. The tool's line goes back to the
+   * session's model through the text allow-list; a refusal of the tool gives only its exit code, because its text can name a path.
+   */
+  async function state(verb, args, writes = true) {
+    let out;
+    try { out = await within(LIMITS.sageMs, 'the state tool took too long', (signal) => s.logbook.tool.command(args, { signal })); }
+    catch (e) {
+      if (!(e instanceof Refusal)) refuse(`the state tool refused ${verb}${Number.isSafeInteger(e?.code) ? ` (exit code ${e.code})` : ''}`);
+      throw writes ? new Unsure(`${e.message}; the logbook may have changed`) : e;
+    }
+    return { line: keep(out) };
+  }
+
   const VERBS = {
+    // The logbook verbs (T189): the session's own run, task and pull request only. No other command of the state tool is reachable.
+    run_done: { keys: ['status'], run: ({ status }) => {
+      const l = scope();
+      return state('run_done', ['run', 'done', l.run, `--status=${oneOf('status', status, RUN_STATUS)}`]);
+    } },
+    verdict: { keys: ['kind', 'cycle'], run: async ({ kind, cycle }) => {
+      const l = scope();
+      oneOf('kind', kind, KINDS);
+      if (!(Number.isSafeInteger(cycle) && cycle >= 1 && cycle <= 10)) refuse('cycle must be a whole number from 1 to 10');
+      // The commit is the head of the session's own open pull request, as GitHub has it now: never a commit that the session names.
+      const pr = await own();
+      if (!pr || pr.state !== 'open' || pr.merged_at) refuse('this session has no open pull request: a verdict is on the head of the session\'s own open pull request');
+      if (!SHA.test(pr.head?.sha ?? '')) refuse('GitHub gave no 40-character head id for the session\'s pull request');
+      const r = await state('verdict', ['verdict', l.task, `--sha=${pr.head.sha}`, `--kind=${kind}`, `--cycle=${cycle}`, `--pr=${pr.number}`, `--run=${l.run}`]);
+      return { ...r, sha: pr.head.sha, number: pr.number };
+    } },
+    finding_add: { keys: ['severity', 'summary'], run: ({ severity, summary }) => {
+      const l = scope();
+      oneOf('severity', severity, SEVERITY);
+      return state('finding_add', ['finding', 'add', l.task, `--source=${l.run}`, `--severity=${severity}`, `--summary=${textOf('summary', summary, LIMITS.summary, false)}`]);
+    } },
+    task_status: { keys: [], run: () => state('task_status', ['task', scope().task], false) },
     fetch: { keys: [], run: fetchVerb },
     upload: { keys: ['commit'], run: upload },
     pr_create: { keys: ['title', 'body', 'draft'], run: async (i) => {
