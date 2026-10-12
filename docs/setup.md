@@ -29,9 +29,9 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   | Who | Permissions in the parent channel |
   | --- | --- |
-  | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads. |
-  | sage-apprentice | Deny the same four permissions. |
-  | sage-lead | Deny the same four permissions. |
+  | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads, Create Private Threads and Use Application Commands. |
+  | sage-apprentice | Deny the same five permissions. |
+  | sage-lead | Deny the same five permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
   In #ask-sage, and in each channel that you register later:
@@ -44,7 +44,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   **Do not let the Discord plugin watch this parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type in every session thread, so they must not type there.
-  *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. In #ask-sage the team asks with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
+  *Why:* a session thread holds the votes and sage-bot's posts only (G16), so nobody types in it; the buttons and the reason forms work without send permissions. The parent channel is the home channel of the [channel registry](#channels), so sage-bot answers `/sage` there and in its threads. Without the deny of Use Application Commands, a `/sage board` in a session thread puts a public answer between the cards. Threads take their permissions from the parent channel, so this one deny covers every session thread. A mention cannot open a thread there, because nobody can send a message. The team asks in #ask-sage, and a sage-lead types `/sage stop` there too. In #ask-sage the team asks with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. sage-bot ignores a member with neither role. Do not let the Discord plugin watch #ask-sage either. If the plugin watches the channel, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
