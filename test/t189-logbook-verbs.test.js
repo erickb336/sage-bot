@@ -46,14 +46,14 @@ test('each logbook verb runs exactly its fixed argv, with the session\'s task, r
   const w = world();
   const P = ['--project', w.project];
   assert.deepEqual(await w.broker.call('run_done', { status: 'done' }), { ok: true, line: 'dummy run ok ' });
-  assert.deepEqual(await w.broker.call('verdict', { kind: 'review-clean', cycle: 2 }), { ok: true, line: 'dummy verdict ok ', sha: HEAD, number: 7 });
+  assert.deepEqual(await w.broker.call('verdict', { kind: 'findings', cycle: 2 }), { ok: true, line: 'dummy verdict ok ', sha: HEAD, number: 7 });
   assert.deepEqual(await w.broker.call('finding_add', { severity: 'medium', summary: 'The — summary, «quoted» & 100%' }), { ok: true, line: 'dummy finding ok ' });
   // A summary that looks like an option stays the value of --summary: it goes in the same word, after "=".
   assert.equal((await w.broker.call('finding_add', { severity: 'low', summary: '--project=/elsewhere' })).ok, true);
   assert.deepEqual(await w.broker.call('task_status', {}), { ok: true, line: 'dummy task ok ' });
   assert.deepEqual(w.argv(), [
     ['run', 'done', 'R12', '--status=done', ...P],
-    ['verdict', 'T5', `--sha=${HEAD}`, '--kind=review-clean', '--cycle=2', '--pr=7', '--run=R12', ...P],
+    ['verdict', 'T5', `--sha=${HEAD}`, '--kind=findings', '--cycle=2', '--pr=7', '--run=R12', ...P],
     ['finding', 'add', 'T5', '--source=R12', '--severity=medium', '--summary=The — summary, «quoted» & 100%', ...P],
     ['finding', 'add', 'T5', '--source=R12', '--severity=low', '--summary=--project=/elsewhere', ...P],
     ['task', 'T5', ...P],
@@ -74,12 +74,14 @@ test('every forbidden shape is refused, and the state tool never runs', async ()
   await refused('finding_add', { severity: 'low', summary: 'x', task: 'T9' }, /not "task"/);
   await refused('finding_add', { severity: 'low', summary: 'x', source: 'R9' }, /not "source"/);
   await refused('finding_add', { severity: 'low', summary: 'x', key: 'F-T5-1' }, /not "key"/);
-  await refused('verdict', { kind: 'qa-pass', cycle: 1, project: '/elsewhere' }, /not "project"/);
-  await refused('verdict', { kind: 'qa-pass', cycle: 1, sha: HEAD.replace('a', 'c') }, /verdict takes kind, cycle, not "sha"/);
-  await refused('verdict', { kind: 'qa-pass', cycle: 1, pr: 8 }, /not "pr"/);
-  await refused('verdict', { kind: 'qa-pass', cycle: 1, run: 'R9' }, /not "run"/);
+  await refused('verdict', { kind: 'qa-fail', cycle: 1, project: '/elsewhere' }, /not "project"/);
+  await refused('verdict', { kind: 'qa-fail', cycle: 1, sha: HEAD.replace('a', 'c') }, /verdict takes kind, cycle, not "sha"/);
+  await refused('verdict', { kind: 'qa-fail', cycle: 1, pr: 8 }, /not "pr"/);
+  await refused('verdict', { kind: 'qa-fail', cycle: 1, run: 'R9' }, /not "run"/);
   // Values outside the allow-lists.
-  for (const kind of ['evidence-clean', 'merged', 'qa-pass --cycle=9', '', undefined, ['qa-pass']]) await refused('verdict', { kind, cycle: 1 }, /kind is one of checks-pass, /);
+  for (const kind of ['review-clean', 'security-clean', 'ux-clean', 'qa-pass', 'evidence-clean', 'merged', 'qa-fail --cycle=9', '', undefined, ['qa-fail']]) {
+    await refused('verdict', { kind, cycle: 1 }, /kind is one of checks-pass, checks-fail, findings, qa-fail; a clean review verdict must come from an independent review outside the session/);
+  }
   for (const cycle of [0, 11, 1.5, '1', -1, undefined]) await refused('verdict', { kind: 'findings', cycle }, /cycle must be a whole number from 1 to 10/);
   for (const status of ['running', 'merged', 'Done', '', undefined]) await refused('run_done', { status }, /status is one of done, blocked, question, failed/);
   for (const severity of ['critical', 'HIGH', undefined]) await refused('finding_add', { severity, summary: 'x' }, /severity is one of low, medium, high/);
@@ -116,7 +118,7 @@ test('the verdict SHA is the head of the session\'s own open pull request, as Gi
 
 test('the scope comes from the bridge only: no scope refuses every logbook verb; a bad scope stops createBroker', async () => {
   const w = world({ logbook: false });
-  for (const [verb, input] of [['run_done', { status: 'done' }], ['verdict', { kind: 'qa-pass', cycle: 1 }], ['finding_add', { severity: 'low', summary: 'x' }], ['task_status', {}]]) {
+  for (const [verb, input] of [['run_done', { status: 'done' }], ['verdict', { kind: 'qa-fail', cycle: 1 }], ['finding_add', { severity: 'low', summary: 'x' }], ['task_status', {}]]) {
     assert.deepEqual(await w.broker.call(verb, input), { ok: false, refused: 'this session has no task in the logbook. The broker did nothing more.' });
   }
   assert.deepEqual(w.argv(), []);

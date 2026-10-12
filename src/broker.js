@@ -27,7 +27,8 @@ export const LIMITS = { title: 200, body: 60_000, message: 20_000, commits: 500,
 /** The values that the logbook verbs pass to the state tool (G81). No verdict kind that only an independent check gives a task with no
  * build: evidence-clean lets such a task conclude, so it is not here. The tool takes run statuses done, blocked, question and failed. */
 const RUN_STATUS = ['done', 'blocked', 'question', 'failed'];
-const KINDS = ['checks-pass', 'checks-fail', 'review-clean', 'security-clean', 'ux-clean', 'qa-pass', 'qa-fail', 'findings'];
+// G83: a session records only these. A clean review verdict (review-clean, security-clean, ux-clean, qa-pass) is not here: it comes from a review outside the session.
+const KINDS = ['checks-pass', 'checks-fail', 'findings', 'qa-fail'];
 const SEVERITY = ['low', 'medium', 'high'];
 
 /** A push that failed or took too long: GitHub can still have taken it (F-T158-14). */
@@ -338,7 +339,7 @@ export function createBroker({ policy, github, logbook, token, workDir, fetch, g
     } },
     verdict: { keys: ['kind', 'cycle'], run: async ({ kind, cycle }) => {
       const l = scope();
-      oneOf('kind', kind, KINDS);
+      if (!KINDS.includes(kind)) refuse(`kind is one of ${KINDS.join(', ')}; a clean review verdict must come from an independent review outside the session`);
       if (!(Number.isSafeInteger(cycle) && cycle >= 1 && cycle <= 10)) refuse('cycle must be a whole number from 1 to 10');
       // The commit is the head of the session's own open pull request, as GitHub has it now: never a commit that the session names.
       const pr = await own();
