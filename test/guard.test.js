@@ -689,6 +689,31 @@ test('F-T137-L1: a relative path that climbs out of a worktree under .claude/wor
   for (const c of ['touch src/a.js', 'echo x > notes.md', 'cp a ../t8/b', 'git add src/a.js', 'cd /sample/scratch && touch x']) assert.equal(at(wt, c).decision, 'allow', c);
 });
 
+test('F-T137-8, F-T137-9: the worktree corpus: an = in a folder name, ~+ and a quoted ~ land where the shell lands; cd .. gets the hint to stay in the worktree', () => {
+  const W = CORPUS.worktree;
+  const at = (c) => guard({ ...bash(c), cwd: fill(W.cwd) }).reason;
+  const write = (p) => `a write to ${p} ${SETTINGS.split(' is refused')[0]}`;
+  assert.deepEqual(W.refuse.map((c) => [c, at(c)]).filter(([, why]) => !why?.startsWith('sage-bot guard: a write to /sample/repo/.claude') || !why.endsWith(STOP)), []);
+  const back = hint(write('/sample/repo/.claude/worktrees'), 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+  assert.deepEqual(W.hint.map((c) => [c, at(c)]).filter(([, why]) => why !== back), []);
+  assert.deepEqual(W.allow.map((c) => [c, at(c)]).filter(([, why]) => why), []);
+  assert.deepEqual(reasons(['cp evil.md ../../a=b/../agents/evil.md', 'echo x > ~+/../../settings.json', 'cd ../../a=b/.. && touch settings.json', "echo x > '~'/../../../settings.json"], at), {
+    'cp evil.md ../../a=b/../agents/evil.md': refused(write('/sample/repo/.claude/agents/evil.md')),
+    'echo x > ~+/../../settings.json': refused(write('/sample/repo/.claude/settings.json')),
+    'cd ../../a=b/.. && touch settings.json': refused(write('/sample/repo/.claude')),
+    "echo x > '~'/../../../settings.json": refused(write('/sample/repo/.claude/settings.json')),
+  });
+  // ~- and ~<name> name a folder that the guard cannot know; a quoted ~- is a folder of that name.
+  const tilde = hint('a write with a path that starts with ~- or ~<name> (a folder that the guard cannot know)', 'name the path from the session folder, or as an absolute path');
+  assert.deepEqual(reasons(['echo x > ~-/settings.json', 'cd ~- && touch x', 'touch ~root/x', 'node a.mjs --out=~-/x'], at), Object.fromEntries(['echo x > ~-/settings.json', 'cd ~- && touch x', 'touch ~root/x', 'node a.mjs --out=~-/x'].map((c) => [c, tilde])));
+});
+
+test('F-T137-10: a variable name or = in quotes is no variable: the shell runs "HOME"=/x and HOME"=/x" as a program', () => {
+  assert.deepEqual(reasons(['"HOME"=/x npm ci', "'npm_config_cache'=/x npm ci", 'HOME"=/x" npm ci', 'HOME="/x" npm ci', 'HOME=/x "npm" ci']), {
+    '"HOME"=/x npm ci': refused('the command HOME=/x'), "'npm_config_cache'=/x npm ci": refused('the command npm_config_cache=/x'), 'HOME"=/x" npm ci': refused('the command HOME=/x'), 'HOME="/x" npm ci': 'allow', 'HOME=/x "npm" ci': 'allow',
+  });
+});
+
 test('F-T137-L3, F-T137-L4, F-T137-L5: test a = b and a redirect to /dev/stderr get a workable hint; git diff -U takes no next word; EnterWorktree takes only a name', () => {
   assert.equal(guard(bash('test a = b')).reason, "sage-bot guard: a command the guard cannot read (a = at the start of a word (zsh reads =name as the path of a program)) is refused in a bridge session. sage can do this instead: quote a word that starts with =, for example test a '=' b.");
   assert.equal(guard(bash('echo x >/dev/stderr')).reason, 'sage-bot guard: a redirect to /dev/stderr (under /dev/ only /dev/null) is refused in a bridge session. sage can do this instead: echo <text> >&2 for the error output, or no redirect for the output.');

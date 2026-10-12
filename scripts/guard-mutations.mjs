@@ -288,23 +288,32 @@ const MUTATIONS = [
   ['settings: .claude (F-T133-72)', "const CONFIG_NAMES = ['.claude', ", 'const CONFIG_NAMES = ['],
   // F-T133-72 and F-T144-L14, L15, L16: the settings rule.
   ['a file tool: no write to a settings path (F-T133-72)', '  return dir ? CONFIG(dir[1]) : null;', '  return null;'],
-  ['Bash: no write to a settings path (F-T133-72)', '  if (dir) return CONFIG(dir.text);\n', ''],
+  ['Bash: no write to a settings path (F-T133-72)', '    if (dir !== undefined) return CONFIG(dir);\n', ''],
   ['settings: the redirect targets (F-T133-72)', 'const targets = [...parsed.flatMap((seg) => seg.redirects), ', 'const targets = ['],
   ['settings: the words of a part that writes (F-T133-72)', ', ...parsed.filter(writes).flatMap((seg) => seg.words)];', '];'],
   ['settings: touch, mkdir, rm and rmdir write (F-T133-72)', '(WRITES.has(name) || CHANGES.has(name))', 'WRITES.has(name)'],
   ['settings: the path is folded (.CLAUDE) (F-T133-72)', 'posix.normalize(fold(text))', 'posix.normalize(text)'],
   ['settings: the path is normalized (F-T144-L15)', 'posix.normalize(fold(text)).replace', 'fold(text).replace'],
   ['settings: only a path key of a file tool (F-T133-72)', "all.find(([k, v]) => k.endsWith('path') && configPath(", 'all.find(([k, v]) => configPath('],
-  ['settings: a cd folder counts (F-T144-L14)', 'targets.push(...cdTo, ', 'targets.push('],
+  ['settings: a cd folder counts (F-T144-L14)', 'const paths = [...targets, ...cdTo]', 'const paths = [...targets]'],
   ['settings: a wildcard part that starts with . (F-T144-L14)', "(/[*?]/.test(p) && p.startsWith('.') ? matches(p, name) : p === name)", '(p === name)'],
   ['settings: a git read writes nothing (F-T144-L14)', " && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]))", ''],
   ['settings: a worktree under .claude/worktrees is a work folder (F-T144-L15)', ".replace(WORKTREE, '$1w')", ''],
   ['settings: a part after an = (F-T144-L15)', '.split(/[/=]/);', ".split('/');"],
-  ['settings: the session folder counts (F-T144-L16)', 'targets.push(...cdTo, { text: base }, ', 'targets.push(...cdTo, '],
+  ['settings: the session folder counts (F-T144-L16)', 'paths.push(base, ', 'paths.push('],
   // F-T137: a relative path joined to the session folder and the cd folder; -U<n>; the hints; EnterWorktree's fields.
-  ['settings: a relative path counts joined to its folder (F-T137-L1)', ', ...targets.map((w) => ({ text: joined(base, w.text) })));', ');'],
-  ['settings: a cd folder starts the relative paths (F-T137-L1)', "const base = joined(String(cwd ?? ''), cdTo[0]?.text ?? '');", "const base = String(cwd ?? '');"],
-  ['settings: the path of a word is after its last = (F-T137-L1)', "const path = text.slice(text.lastIndexOf('=') + 1);", 'const path = text;'],
+  ['settings: a relative path counts joined to its folder (F-T137-L1)', ', ...(base === null ? [] : targets.flatMap((w) => joined(base, w))));', ');'],
+  ['settings: a cd folder starts the relative paths (F-T137-L1)', "const base = cdTo[0] ? resolve(String(cwd ?? ''), cdTo[0].text, cdTo[0].q) : String(cwd ?? '');", "const base = String(cwd ?? '');"],
+  // F-T137-8, F-T137-9, F-T137-10: the whole word and its text after the first =; ~+ and an unknown ~; a quoted variable name.
+  ['settings: the path of a word after its first = (F-T137-L1)', "...(eq < 0 ? [] : [resolve(base, text.slice(eq + 1), q - eq - 1)])", ''],
+  ['settings: the path of the whole word, also with an = in it (F-T137-9)', 'return [resolve(base, text, q), ...', 'return [...'],
+  ['settings: an unquoted ~+ is the cd folder (F-T137-9)', "return tilde === '~+' ? posix.join(base, p.slice(2)) : null;", 'return tilde === "~+" ? posix.join(base, p) : null;'],
+  ['settings: an unquoted ~- or ~name is a folder the guard cannot know (F-T137-9)', "if (paths.includes(null)) return how(", 'if (false) return how('],
+  ['settings: a quoted ~ is a folder of that name (F-T137-9)', "if (tilde.startsWith('~') && q >= tilde.length)", "if (tilde.startsWith('~'))"],
+  ['settings: cd .. into .claude/worktrees gets the hint to stay in the worktree (F-T137-8)', 'if (dir === base && /\\/\\.claude\\/worktrees$/.test(fold(base))) return', 'if (false) return'],
+  ['a variable: no quote before its = (F-T137-10)', " && !(w.q <= w.text.indexOf('='))", ''],
+  ['a variable: a single-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        word.text += body;", '        word.text += body;'],
+  ['a variable: a double-quoted name is quoted (F-T137-10)', "        word.q ??= word.text.length;\n        for (; j <", '        for (; j <'],
   ['git diff -U takes no next word as its value (F-T137-L4)', "'-U': EQ, '--unified': EQ", "'-U': TEXT, '--unified': TEXT"],
   ['EnterWorktree takes only a name (F-T137-L5)', "Object.keys(i).some((k) => k !== 'name') ?", 'false ?'],
   ['a word that starts with = gets the hint to quote it (F-T137-L3)', "parsed.startsWith('a = ') ?", 'false ?'],
@@ -364,7 +373,12 @@ const stale = MUTATIONS.filter(([, from, , file = 'src/guard.js']) => SOURCES[fi
 for (const [name, from, , file = 'src/guard.js'] of stale) console.log(`STALE  ${name}: its text is not in ${file} exactly once: ${JSON.stringify(from)}`);
 const start = Date.now();
 const unmutated = await run('unmutated', SOURCES['src/guard.js']);
-if (unmutated !== 0) console.log(`FAIL   the unmutated guard: ${unmutated === 'broken' ? 'it refuses a known-good call' : 'its tests fail'}`);
+// With the unmutated guard failing, a failing test proves nothing about a removal: stop here (F-T137-7).
+if (unmutated !== 0) {
+  console.log(`FAIL   the unmutated guard: ${unmutated === 'broken' ? 'it refuses a known-good call' : unmutated === 'timeout' ? 'its tests did not end in 60 s' : 'its tests fail'}; no mutation runs`);
+  rmSync(work, { recursive: true, force: true });
+  process.exit(1);
+}
 const survivors = [];
 const broken = [];
 const timeouts = [];
@@ -385,4 +399,4 @@ for (const name of timeouts) console.log(`TIMEOUT   ${name}: the tests did not e
 const killed = MUTATIONS.length - stale.length - survivors.length - broken.length - timeouts.length;
 console.log(`guard mutations: ${killed} of ${MUTATIONS.length} rule removals fail a test; ${survivors.length} survive; ${broken.length} broken; ${timeouts.length} time out; ${stale.length} stale; ${Math.round((Date.now() - start) / 1000)} s`);
 rmSync(work, { recursive: true, force: true });
-process.exit(survivors.length || broken.length || timeouts.length || stale.length || unmutated !== 0 ? 1 : 0);
+process.exit(survivors.length || broken.length || timeouts.length || stale.length ? 1 : 0);

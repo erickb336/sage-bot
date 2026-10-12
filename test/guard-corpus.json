@@ -265,6 +265,13 @@
     "git worktree list x",
     "NODE_ENV=test",
     "HOME={SCRATCH}",
+    "\"HOME\"={SCRATCH} npm ci",
+    "\"npm_config_cache\"={SCRATCH} npm ci",
+    "'HOME'={SCRATCH} npm ci",
+    "HOME\"={SCRATCH}\" npm ci",
+    "echo x > ~-/settings.json",
+    "cd ~- && touch x",
+    "touch ~root/x",
     "node - status < {SCRATCH}/x.mjs",
     "node - < {SCRATCH}/x.mjs",
     "cp \"{SCRATCH}/café.txt\" {SCRATCH}/x.txt",
@@ -2387,5 +2394,35 @@
     "ls > ./{STARS}q && python3 -c 'print(1)'",
     "git add './{STARS}q' && python3 -c 'print(1)'",
     "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"
-  ]
+  ],
+  "worktree": {
+    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9); 'hint': refused with a hint to the same command in the worktree (F-T137-8); 'allow': normal work there.",
+    "cwd": "{REPO}/.claude/worktrees/t9",
+    "refuse": [
+      "touch ../../settings.json",
+      "mkdir -p ../../a=b && cp evil.md ../../a=b/../agents/evil.md",
+      "cp evil.md ../../a=b/../agents/evil.md",
+      "echo x > ~+/../../settings.json",
+      "cd ../../a=b/.. && touch settings.json",
+      "node a.mjs --out=../../a=b/../settings.json",
+      "cp x a=/../../../settings.json",
+      "echo x > '~'/../../../settings.json",
+      "echo x > '~+'/../../../settings.json",
+      "npm_config_cache=../.. npm ci"
+    ],
+    "hint": [
+      "cd .. && git add t9/x",
+      "cd .. && touch t9/x"
+    ],
+    "allow": [
+      "git add x",
+      "git add src/a.js",
+      "touch src/a.js",
+      "cp a ~+/b",
+      "echo x > ~+/notes.md",
+      "cp a ../t8/b",
+      "echo x > '~-'/a",
+      "HOME={SCRATCH} npm_config_cache={SCRATCH}/npm npm ci"
+    ]
+  }
 }

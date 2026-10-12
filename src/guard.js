@@ -57,7 +57,8 @@ const LINES = 'to read lines of a file: head -n 40 <file>, tail -n +20 <file> | 
 /**
  * The command as parts: [{ pipe, words: [{ text, glob }], redirects: [{ text, glob }] }], or a string: why it is refused.
  * Only && and | join parts (`pipe`: the part reads the output of the part before it); ;, ||, |& and & are refused.
- * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` holds its unquoted *, ? and [ characters.
+ * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` holds its unquoted *, ? and [ characters, and
+ * its `q` is the place in its text of its first quoted character, if any (the shell reads no "HOME"=x as a variable, F-T137-10).
  * A redirect's target is kept as a word, so that every check of a word sees it.
  */
 export function parse(command) {
@@ -91,11 +92,13 @@ export function parse(command) {
         const body = command.slice(i + 1, end);
         if (/[\0-\x08\x0b-\x1f\x7f]/.test(body)) throw 'a control character';
         word ??= { text: '', glob: '' };
+        word.q ??= word.text.length;
         word.text += body;
         i = end + 1;
       } else if (c === '"') {
         let j = i + 1;
         word ??= { text: '', glob: '' };
+        word.q ??= word.text.length;
         for (; j < command.length && command[j] !== '"'; j++) {
           if (/[$`\\!]/.test(command[j])) throw `a ${command[j]} inside double quotes`;
           if (/[\0-\x08\x0b-\x1f\x7f]/.test(command[j])) throw 'a control character';
@@ -387,10 +390,21 @@ function configPath(text) {
   const parts = posix.normalize(fold(text)).replace(WORKTREE, '$1w').split(/[/=]/);
   return parts.some((p) => CONFIG_NAMES.some((name) => (/[*?]/.test(p) && p.startsWith('.') ? matches(p, name) : p === name)));
 }
-/** The path of a word (after its last =, as in --out=<path>) joined to the folder `base`, unless it is absolute or starts with ~. */
-const joined = (base, text) => {
-  const path = text.slice(text.lastIndexOf('=') + 1);
-  return /^[/~]/.test(path) ? path : posix.join(base, path);
+/**
+ * The path that the text `p` names from the folder `base`, as the shell reads it; `q`: the place of its first quoted character.
+ * An absolute path stays; an unquoted ~ or ~/ stays (the home folder); an unquoted ~+ is `base`; any other unquoted ~ (~-, ~name)
+ * names a folder that the guard cannot know: null (F-T137-9). Any other path is joined to `base`.
+ */
+function resolve(base, p, q = Infinity) {
+  const tilde = p.split('/')[0];
+  if (p.startsWith('/') || (tilde === '~' && q >= 1)) return p;
+  if (tilde.startsWith('~') && q >= tilde.length) return tilde === '~+' ? posix.join(base, p.slice(2)) : null;
+  return posix.join(base, p);
+}
+/** The paths that a word can name from `base`: the whole word, and its text after the first = (--out=<path>, HOME=<path>: F-T137-9). */
+const joined = (base, { text, q = Infinity }) => {
+  const eq = text.indexOf('=');
+  return [resolve(base, text, q), ...(eq < 0 ? [] : [resolve(base, text.slice(eq + 1), q - eq - 1)])];
 };
 const CONFIG = (path) => `a write to ${say(path)} (a file or folder of settings that Claude Code, git or npm loads: .claude, .mcp.json, .git, .npmrc)`;
 const WILDCARD = 'name each file in full instead of a wildcard, or add its folder (git add <folder>); for the tests: npm test, or node --test <file>';
@@ -423,12 +437,14 @@ function patterns(ops, env, pathspec) {
 // HOME, TMPDIR, DO_NOT_TRACK and npm_config_cache keep a tool's files and telemetry in the scratch folder (F-T137-6).
 const ENV = new Set(['NODE_ENV', 'CI', 'NO_COLOR', 'FORCE_COLOR', 'HOME', 'TMPDIR', 'DO_NOT_TRACK', 'npm_config_cache']);
 const VAR = /^[A-Za-z_][A-Za-z0-9_]*=/;
+/** Whether a word sets a variable: NAME=value with no quote before the =. The shell runs "HOME"=/x as a program (F-T137-10). */
+const isVar = (w) => VAR.test(w.text) && !(w.q <= w.text.indexOf('='));
 
-/** The command name and its arguments after the variables in front of it. */
-const commandOf = (texts) => texts.slice(texts.findIndex((t) => !VAR.test(t)));
+/** The texts of the command name and its arguments after the variables in front of it. */
+const commandOf = (words) => words.slice(words.findIndex((w) => !isVar(w))).map((w) => w.text);
 /** Whether a part's command writes files: a command of WRITES or CHANGES, but not a git subcommand that only reads. */
 function writes(seg) {
-  const [name, ...args] = commandOf(seg.words.map((w) => w.text));
+  const [name, ...args] = commandOf(seg.words);
   return (WRITES.has(name) || CHANGES.has(name)) && !(name === 'git' && GIT_READS.has(gitArgs(args)?.[0]));
 }
 
@@ -436,7 +452,7 @@ function writes(seg) {
 function simple({ words }, env) {
   const texts = words.map((w) => w.text);
   let i = 0;
-  for (; i < texts.length && VAR.test(texts[i]); i++) {
+  for (; i < texts.length && isVar(words[i]); i++) {
     const name = texts[i].slice(0, texts[i].indexOf('='));
     if (!ENV.has(name)) return how(`setting ${say(name)} in front of a command`, `set only ${[...ENV].join(', ')} in front of a command`);
   }
@@ -470,7 +486,7 @@ export function bashRefusal(command, env, cwd) {
   // (ls dir/*, cat é.txt) runs nothing.
   const pipelines = [];
   for (const seg of parsed) (seg.pipe ? pipelines.at(-1) : pipelines[pipelines.push([]) - 1]).push(seg);
-  const rw = pipelines.filter((p) => p.some((seg) => WRITES.has(commandOf(seg.words.map((w) => w.text))[0]) || seg.redirects.length))
+  const rw = pipelines.filter((p) => p.some((seg) => WRITES.has(commandOf(seg.words)[0]) || seg.redirects.length))
     .flat().flatMap((seg) => [...seg.words, ...seg.redirects]);
   if (rw.some((w) => !ASCII.test(w.text))) return how('a character that is not printable ASCII in a part that runs or writes', ASCII_SAFE);
   for (const w of rw) {
@@ -482,13 +498,19 @@ export function bashRefusal(command, env, cwd) {
   // relative path counts also joined to them: ../../settings.json from .claude/worktrees/<name> is .claude/settings.json (F-T137-L1).
   const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap((seg) => seg.words)];
   const cdTo = parsed[0]?.words[0]?.text === 'cd' ? parsed[0].words.slice(1) : [];
-  const base = joined(String(cwd ?? ''), cdTo[0]?.text ?? '');
-  if (targets.length) targets.push(...cdTo, { text: base }, ...targets.map((w) => ({ text: joined(base, w.text) })));
-  const dir = targets.find((w) => configPath(w.text));
-  if (dir) return CONFIG(dir.text);
+  const base = cdTo[0] ? resolve(String(cwd ?? ''), cdTo[0].text, cdTo[0].q) : String(cwd ?? '');
+  if (targets.length) {
+    const paths = [...targets, ...cdTo].map((w) => w.text);
+    paths.push(base, ...(base === null ? [] : targets.flatMap((w) => joined(base, w))));
+    if (paths.includes(null)) return how('a write with a path that starts with ~- or ~<name> (a folder that the guard cannot know)', 'name the path from the session folder, or as an absolute path');
+    const dir = paths.find(configPath);
+    // cd .. from a worktree lands in .claude/worktrees: the same command runs in the worktree with no cd (F-T137-8).
+    if (dir === base && /\/\.claude\/worktrees$/.test(fold(base))) return how(CONFIG(dir), 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+    if (dir !== undefined) return CONFIG(dir);
+  }
   for (const [k, seg] of parsed.entries()) {
     const texts = seg.words.map((w) => w.text);
-    const into = commandOf(texts)[0];
+    const into = commandOf(seg.words)[0];
     if (seg.pipe && !PIPE.has(into)) return how(`a | into ${say(into ?? 'nothing')}`, `pipe only into head, tail, wc, sort or grep${READERS.has(into) ? `, or give ${into} the file (${into} <options> <file>)` : ''}, or run the commands one by one`);
     // cd only as the first part of a chain: the shell of the Bash tool keeps its folder, so a cd of its own moves the session.
     if (texts[0] === 'cd') {
