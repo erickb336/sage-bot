@@ -77,8 +77,10 @@ const shown = (text, max) => safe(cut(String(text ?? ''), max));
 const options = (text) => String(text).split('|').map((o) => o.trim()).filter(Boolean).map((o, i) => `${'ABCDE'[i] ?? i + 1}. ${shown(o, 100)}`).join(' · ');
 
 /**
- * The files of a project that its allow-list names: regular files inside the project, of an allowed type and size, sorted, each with
- * the device and inode that the check saw and the real path of its folder. An entry that cannot be checked (a dangling symlink) is left out (F-T71S-2).
+ * The files of a project that its allow-list names: regular files inside the project with one link, of an allowed type and size, sorted,
+ * each with the device and inode that the check saw and the real path of its folder. An entry that cannot be checked (a dangling symlink)
+ * is left out (F-T71S-2). The one link is checked here, before the open, because a second link removed between the open and the fstat
+ * is gone when `readShared` looks (F-T93-6).
  */
 export function sharedFiles(p) {
   const root = realpathSync(p.project);
@@ -92,7 +94,7 @@ export function sharedFiles(p) {
       const path = join(dir, name);
       let st, real;
       try { st = lstatSync(path); real = realpathSync(path); } catch { continue; }
-      if (!st.isFile() || st.size > MAX_BYTES || !real.startsWith(root + sep) || !TYPES.includes(extname(name).slice(1))) continue;
+      if (!st.isFile() || st.nlink !== 1 || st.size > MAX_BYTES || !real.startsWith(root + sep) || !TYPES.includes(extname(name).slice(1))) continue;
       found.set(real, { path, name: real.slice(root.length + 1), dev: st.dev, ino: st.ino, folder: dirname(real) });
     }
   }
@@ -103,9 +105,11 @@ export function sharedFiles(p) {
  * Reads the files that `sharedFiles` checked, each through one open file (F-T71S-1). Opened with no symlink at the end and with no wait
  * (a FIFO), it must still be a regular file with the device and inode of the check, one link (another link can be a name outside the
  * project: F-T93-1) and at most MAX_BYTES, and after the open its folder must still have the real path of the check (F-T91-1), or it is
- * left out. Node has no openat, so one window stays: a folder swapped before the open and swapped back before that check. The files fill
- * one reply up to MAX_FILES and MAX_BYTES, in order; a checked file that does not fit is in `over` (F-T93-2). Only the checked size is
- * read, also when the file grows.
+ * left out. Node has no openat, so one window stays (F-T93-7): two folder swaps, each swapped back in time, one around the lstat of the
+ * check (so the device and inode are of the outside file) and one around the open. It can send a file of any folder that the bridge can
+ * read, with one link, of an allowed type and size, and with the name of a file in that folder of the project. A link removed after the
+ * open is no race: the check refused the file with two links (F-T93-6). The files fill one reply up to MAX_FILES and MAX_BYTES, in order;
+ * a checked file that does not fit is in `over` (F-T93-2). Only the checked size is read, also when the file grows.
  * @returns {{ attached: { name: string, data: Buffer }[], over: string[] }}
  */
 export function readShared(files) {

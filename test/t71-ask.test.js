@@ -3,6 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { Client, GatewayIntentBits } from 'discord.js';
@@ -631,6 +633,21 @@ test('F-T93-1: a hard link inside the project to a file outside it is never sent
   assert.deepEqual(await files(s.ask), [{ content: 'site shares no files.', ...PUBLIC }]);
 });
 
+test('F-T93-6: a hard link to a file outside the project, removed right after the open, is never sent', async (t) => {
+  const b = world(t);
+  const s = site(t, b, { 'ok.svg': '<svg/>' }, ['shots/*.svg']);
+  const outside = join(s.root, 'outside.svg');
+  writeFileSync(outside, SECRET);
+  linkSync(outside, join(s.project, 'shots', 'hard.svg')); // two links when the bot checks the file
+  const open = fs.openSync;
+  t.after(() => { fs.openSync = open; syncBuiltinESMExports(); });
+  // The attacker's step, at the worst time: the outside link goes right after the bot's first open, before its fstat.
+  fs.openSync = (...args) => { const fd = open(...args); if (existsSync(outside)) rmSync(outside); return fd; };
+  syncBuiltinESMExports();
+  assert.deepEqual(texts(readShared(sharedFiles(s.ask.projects[0]))), { attached: [['shots/ok.svg', '<svg/>']], over: [] });
+  assert.equal(existsSync(outside), false); // the attacker's step ran
+});
+
 test('F-T91-1: a folder swapped for a link to a folder outside the project after the check is refused, also with the same file in it', async (t) => {
   const b = world(t);
   const s = site(t, b, { 'a.svg': '<svg/>' }, ['shots/*.svg']);
@@ -678,7 +695,7 @@ test('F-T93-4: a refused /sage registration is logged and the start goes on, so 
   const client = { user: { id: '100000000000000099' }, guilds: { fetch: async () => guild }, channels: { fetch: async () => null } };
   const lines = [];
   assert.equal(await enter(client, { config: { guildId: '200000000000000001' }, channels: new Map(), ask: { projects: [] }, log: (l) => lines.push(l) }), guild);
-  assert.deepEqual(lines, ['Discord refused to set /sage, so /sage does not work until the next start; the votes and cards work: code 50001, status 403: Missing Access']);
+  assert.deepEqual(lines, ['Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: code 50001, status 403: Missing Access']);
 });
 
 test('F-T93-5: a gate question and its options, a task state and the board counts are made safe; a pr that is not a number is no pull request', async (t) => {

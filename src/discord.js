@@ -124,7 +124,7 @@ export async function enter(client, { config, channels, ask, log }) {
   const guild = await client.guilds.fetch(config.guildId);
   await guild.members.fetch();
   // A refused /sage stops only /sage: the votes and cards start all the same (F-T93-4).
-  await guild.commands.set([askCommand(ask.projects)]).catch((e) => log(`Discord refused to set /sage, so /sage does not work until the next start; the votes and cards work: ${apiError(e)}`));
+  await guild.commands.set([askCommand(ask.projects)]).catch((e) => log(`Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: ${apiError(e)}`));
   for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
   return guild;
 }
