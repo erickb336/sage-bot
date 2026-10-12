@@ -3,7 +3,10 @@
 // nothing stores it here; it goes only into the Authorization header, never into a URL, an argument list or an error text.
 
 /** A refusal of the broker: one line that the session's model reads, so it names no path and holds no text from GitHub. */
-export class Refusal extends Error {}
+export class Refusal extends Error {
+  /** `status` is the HTTP status of a GitHub answer, so a caller decides by data (F-T191-8). */
+  constructor(message, status) { super(message); this.status = status; }
+}
 
 /** The short meaning of a GitHub error status (F-T191-2). */
 const meaning = (status) => (status === 401 || status === 403 ? 'the broker\'s GitHub access was refused'
@@ -32,7 +35,7 @@ export function githubRest({ api = 'https://api.github.com', token, fetch = glob
     });
     const text = await res.text();
     // The method, the status and its meaning only: no path, and no response body (it can hold text of other people).
-    if (!res.ok) throw new Refusal(`GitHub answered ${res.status} to ${method}: ${meaning(res.status)}`);
+    if (!res.ok) throw new Refusal(`GitHub answered ${res.status} to ${method}: ${meaning(res.status)}`, res.status);
     return text ? JSON.parse(text) : null;
   };
 }

@@ -277,7 +277,13 @@ export function createBroker({ policy, github, token, workDir, fetch, git = runG
   async function change(verb, method, path, body, number) {
     let sent = false;
     try {
-      await rest(method, path, body, () => { sent = true; });
+      try {
+        await rest(method, path, body, () => { sent = true; });
+      } catch (e) {
+        // A 4xx answer to the write is GitHub's definite refusal: nothing changed (F-T191-8). Only the write's own answer counts.
+        if (e instanceof Refusal && e.status >= 400 && e.status < 500) sent = false;
+        throw e;
+      }
       const pr = await own(number);
       if (!pr) refuse('GitHub does not list the session\'s pull request yet');
       return view(pr);

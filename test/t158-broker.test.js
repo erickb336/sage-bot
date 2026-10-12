@@ -605,9 +605,9 @@ test('F-T158-1, -2, -4: a fake bare repository, a rebase exec line and an altern
 const answer = (status) => new Response(JSON.stringify({ message: 'sample text of /sample/path' }), { status });
 const mayHappen = 'the change may have happened: call pr_view to check.';
 
-test('F-T191-1: once a write was sent, a 5xx, a refusal, a list that does not show it yet and a network error each say it may have happened', async () => {
+test('F-T191-1: once a write was sent, a 5xx, a list that does not show it yet and a network error each say it may have happened', async () => {
   // A POST that GitHub answers with 502 or 422.
-  for (const [status, meaning] of [[502, 'an error of GitHub'], [422, 'GitHub refused the request']]) {
+  for (const [status, meaning] of [[502, 'an error of GitHub'], [500, 'an error of GitHub']]) {
     const w = world({ branch: true, fetch: (url, init, fake) => (init.method === 'POST' ? answer(status) : fake(url, init)) });
     assert.deepEqual(await w.broker.call('pr_create', { title: 't', body: 'b' }), { ok: false, refused: `GitHub answered ${status} to POST: ${meaning}; ${mayHappen}` });
   }
@@ -626,6 +626,31 @@ test('F-T191-1: once a write was sent, a 5xx, a refusal, a list that does not sh
   // The control: a read that fails sent no change, and says so.
   const r = world({ fetch: () => Promise.reject(new TypeError('fetch failed')) });
   assert.deepEqual(await r.broker.call('pr_view'), { ok: false, refused: 'the broker could not finish pr_view (an unexpected error). The broker did nothing more.' });
+});
+
+test('F-T191-8: a GitHub 4xx answer to a write is a definite refusal: nothing changed, and the broker says so', async () => {
+  const again = { ok: false };
+  for (const status of [401, 403, 404, 422]) {
+    const meaning = status === 404 ? 'not found' : status === 422 ? 'GitHub refused the request' : 'the broker\'s GitHub access was refused';
+    const post = world({ branch: true, fetch: (url, init, fake) => (init.method === 'POST' ? answer(status) : fake(url, init)) });
+    assert.deepEqual(await post.broker.call('pr_create', { title: 't', body: 'b' }), { ...again, refused: `GitHub answered ${status} to POST: ${meaning}. The broker did nothing more.` });
+    assert.equal(post.gh.state.pulls.length, 0, 'nothing changed');
+    const pull = samplePull({ owner: OWNER, repo: REPO, number: 3, branch: 'sage-lead/s1' });
+    const patch = world({ pulls: [pull], fetch: (url, init, fake) => (init.method === 'PATCH' ? answer(status) : fake(url, init)) });
+    assert.deepEqual(await patch.broker.call('pr_edit', { title: 'x' }), { ...again, refused: `GitHub answered ${status} to PATCH: ${meaning}. The broker did nothing more.` });
+    assert.equal(patch.gh.state.pulls[0].title, pull.title, 'nothing changed');
+  }
+  // The control: a 502 after the fake made the change still says it may have happened.
+  const w = world({ branch: true, fetch: async (url, init, fake) => { const r = await fake(url, init); return init.method === 'POST' ? answer(502) : r; } });
+  assert.equal((await w.broker.call('pr_create', { title: 't', body: 'b' })).refused, `GitHub answered 502 to POST: an error of GitHub; ${mayHappen}`);
+  assert.equal(w.gh.state.pulls.length, 1);
+  // A 4xx on the read-back after a landed write is not the write's refusal: it may have happened.
+  let posted = false;
+  const rb = world({ branch: true, fetch: async (url, init, fake) => {
+    if (init.method === 'POST') { posted = true; return fake(url, init); }
+    return posted ? answer(403) : fake(url, init);
+  } });
+  assert.equal((await rb.broker.call('pr_create', { title: 't', body: 'b' })).refused, `GitHub answered 403 to GET: the broker's GitHub access was refused; ${mayHappen}`);
 });
 
 test('F-T194-1: a token lookup that takes too long before the POST sends nothing, and says so', async () => {
