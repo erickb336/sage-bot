@@ -1,11 +1,13 @@
 <a href="docs/assets/hero-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-  <img alt="sage-bot: mention @sage-bot in Discord, and it answers from sage's logbook on the owner's Mac. A sage-apprentice reads and asks; a sage-lead also breaks ties and stops." src="docs/assets/hero-light.svg" width="100%">
+  <img alt="sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results on request." src="docs/assets/hero-light.svg" width="100%">
 </picture>
 </a>
 
-**sage-bot is a bridge between [sage](https://github.com/erickb336/sage) and Discord that lets a small team read and answer sage's work from a Discord server.** Mention @sage-bot in a channel, and it answers in a thread of its own. Nobody on the team needs a terminal. Today, no Discord text reaches sage as an instruction. Bridge sessions will let a sage-lead instruct sage from a thread, inside the guardrails. They are not built yet: they wait on T159.
+**sage-bot lets a small team build software together from a Discord server.** It is a bridge between Discord and a Claude Code session that runs [sage](https://github.com/erickb336/sage). The graphic shows the goal. A sage-lead requests a new feature in a thread. sage designs it and posts its design questions back as cards. The team asks and votes, and a sage-lead breaks ties. sage builds, with reviews and tests, and shows its progress and results on request: the board, screenshots and the link to the pull request. The owner merges. Nobody on the team needs a terminal.
+
+**Today:** design questions as vote cards, team votes, a sage-lead's tie-break or early end, read asks (the board, a task, the open questions and the shared files) and the kill switch work. A sage-lead's request does not reach a live Claude Code session yet: no Discord text reaches sage as an instruction. Bridge sessions add steps 1, 2 and 6 of the graphic; they wait on T159.
 
 Ids such as T159 are sage task ids in this project's logbook. A G-id, such as G42, is a gate: a question that sage parks for the owner. The [reference](docs/reference.md) gives the gates and findings behind each rule.
 
@@ -58,14 +60,7 @@ To connect a real Discord server, follow [Set up a live trial](#set-up-a-live-tr
 
 ## How it works
 
-<a href="docs/assets/how-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-dark.svg">
-  <img alt="How sage-bot works: a read ask gets its answer in a new thread, a team vote gives sage only the chosen option, and a sage-lead's talk goes only to the sage-lead log." src="docs/assets/how-light.svg" width="100%">
-</picture>
-</a>
-
-sage-bot is one small service, the bridge, on the owner's Mac. It does three jobs:
+sage-bot is one small service, the bridge, on the owner's Mac. The graphic at the top shows the loop that it is for. Today it does three jobs:
 
 1. **It answers read asks.** A member mentions @sage-bot, or types `/sage`. The bridge checks the member's role and the hourly limit, reads sage's logbook, and answers. Code writes the answer, with no AI.
 2. **It runs team votes.** sage marks a product question for the team. The bridge posts it as a card with a button for each option. When the question is decided, the bridge gives sage only the chosen option.
@@ -75,26 +70,12 @@ The bridge only reads the logbook, and it changes it only through the sage state
 
 ### A mention opens a thread
 
-<a href="docs/assets/threads-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/threads-dark.svg">
-  <img alt="Sample data: each mention of @sage-bot in a registered channel opens its own thread, and a mention inside that thread continues it." src="docs/assets/threads-light.svg" width="100%">
-</picture>
-</a>
-
 - Each mention in a registered channel opens a public thread, named from the request. The answer goes into the thread.
 - A mention inside that thread continues it. sage-bot cannot read a message that does not mention it.
 - A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel.
 - The threads survive a restart of the bridge.
 
 ## Roles
-
-<a href="docs/assets/roles-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/roles-dark.svg">
-  <img alt="The two roles: a sage-apprentice reads and asks; a sage-lead can also break ties, end votes early, unregister a channel and turn off the link to sage." src="docs/assets/roles-light.svg" width="100%">
-</picture>
-</a>
 
 The Discord admin gives each person on the team one of two roles. A member with both counts as a sage-lead.
 
@@ -150,13 +131,6 @@ A mention that names none of these words gets a reply that lists them.
 Time left is not estimated yet: the board shows the count of tasks left. The [setup guide](docs/setup.md#channels) tells how to register a channel, and the [reference](docs/reference.md#the-bridge-service) gives every command and option.
 
 ## Safety
-
-<a href="docs/assets/safety-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/safety-dark.svg">
-  <img alt="The guardrails: six layers are on now for every ask; four more (the sandbox, the guard hook, the broker and a spend cap) come with bridge sessions." src="docs/assets/safety-light.svg" width="100%">
-</picture>
-</a>
 
 **On now, for every ask:**
 

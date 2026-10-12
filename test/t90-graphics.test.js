@@ -32,24 +32,24 @@ function differences(assets, drawn) {
   ];
 }
 
-test('T90: every file in docs/assets is what scripts/graphics.mjs draws, and it draws 6 graphics in light and dark', () => {
+test('T90: every file in docs/assets is what scripts/graphics.mjs draws, and it draws 2 graphics in light and dark (T197)', () => {
   const drawn = redraw();
   assert.deepEqual(differences(ASSETS, drawn), []);
-  assert.deepEqual(readdirSync(drawn).sort(), ['hero', 'how', 'roles', 'safety', 'threads', 'tip-mention'].flatMap((n) => [`${n}-dark.svg`, `${n}-light.svg`]));
+  assert.deepEqual(readdirSync(drawn).sort(), ['hero', 'tip-mention'].flatMap((n) => [`${n}-dark.svg`, `${n}-light.svg`]));
 });
 
 test('T90: the comparison fails for an SVG changed by hand, an SVG added by hand and an SVG removed', () => {
   const drawn = redraw();
   const copy = tempFolder('sage-bot-assets-');
   cpSync(drawn, copy, { recursive: true }); // a copy of a clean redraw, so this test does not depend on docs/assets
-  writeFileSync(join(copy, 'how-dark.svg'), readFileSync(join(copy, 'how-dark.svg'), 'utf8').replace('LEAD TALK', 'LEAD CHAT'));
-  assert.notEqual(readFileSync(join(copy, 'how-dark.svg'), 'utf8'), readFileSync(join(drawn, 'how-dark.svg'), 'utf8'));
+  writeFileSync(join(copy, 'hero-dark.svg'), readFileSync(join(copy, 'hero-dark.svg'), 'utf8').replace('sage designs', 'sage plans'));
+  assert.notEqual(readFileSync(join(copy, 'hero-dark.svg'), 'utf8'), readFileSync(join(drawn, 'hero-dark.svg'), 'utf8'));
   writeFileSync(join(copy, 'extra-light.svg'), '<svg/>');
-  rmSync(join(copy, 'roles-light.svg'));
+  rmSync(join(copy, 'tip-mention-light.svg'));
   assert.deepEqual(differences(copy, drawn), [
-    'roles-light.svg: missing; run node scripts/graphics.mjs',
+    'tip-mention-light.svg: missing; run node scripts/graphics.mjs',
     'extra-light.svg: scripts/graphics.mjs does not draw it; draw it there, or delete it',
-    'how-dark.svg: differs from scripts/graphics.mjs; run node scripts/graphics.mjs',
+    'hero-dark.svg: differs from scripts/graphics.mjs; run node scripts/graphics.mjs',
   ]);
 });
 
@@ -95,6 +95,6 @@ test('F-T187-1: each text in a graphic is 40 or more in 1100, so about 11 px or 
   assert.deepEqual(tooSmall(redraw()), []);
   // The check fails for one label of 39 in a copy of a clean redraw.
   const copy = redraw();
-  writeFileSync(join(copy, 'roles-dark.svg'), readFileSync(join(copy, 'roles-dark.svg'), 'utf8').replace('font-size="40"', 'font-size="39"'));
-  assert.deepEqual(tooSmall(copy), ['roles-dark.svg: 39 in 1100']);
+  writeFileSync(join(copy, 'hero-dark.svg'), readFileSync(join(copy, 'hero-dark.svg'), 'utf8').replace('font-size="40"', 'font-size="39"'));
+  assert.deepEqual(tooSmall(copy), ['hero-dark.svg: 39 in 1100']);
 });
