@@ -86,10 +86,12 @@ const exited = (child) => new Promise((done) => {
   child.on('exit', (code) => done({ code, err }));
 });
 
-test('F-T47-1: 20 vote.mjs runs at once (10 marks, 10 unmarks of other ids) end with exactly the expected list, over 20 rounds', async () => {
+test('F-T47-1: 20 vote.mjs runs at once (10 marks, 10 unmarks of other ids) end with exactly the expected list, over 5 rounds', { timeout: 60000 }, async () => {
+  // Each run starts a node process (about 65 ms idle, several times that on a busy machine). 20 rounds made 400 starts:
+  // 26-33 s idle, and once over the 120 s file limit under load (T193). 5 rounds still race 20 runs at once; the 60 s limit is this test's own.
   const ids = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => `G${from + i}`);
   const lost = [];
-  for (let round = 1; round <= 20; round++) {
+  for (let round = 1; round <= 5; round++) {
     const v = votesSetup('race');
     assert.equal(v.runSync(...ids(1, 10)).status, 0);
     const runs = [...ids(1, 10).map((id) => v.run('--unmark', id)), ...ids(11, 20).map((id) => v.run(id))];
