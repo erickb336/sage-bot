@@ -81,20 +81,20 @@ test('T90: the README shows each graphic in the reader\'s theme, inside a link t
   assert.deepEqual(wrong, []);
 });
 
-/** Each SVG file whose smallest text is under 36 in a graphic 1100 wide, with that size. */
+/** Each SVG file whose smallest text is under 40 in a graphic 1100 wide, with that size. */
 function tooSmall(dir) {
   return readdirSync(dir).flatMap((f) => {
     const svg = readFileSync(join(dir, f), 'utf8');
     const width = Number(/viewBox="0 0 ([\d.]+)/.exec(svg)[1]);
     const least = Math.min(...[...svg.matchAll(/font-size="([\d.]+)"/g)].map((m) => Number(m[1])));
-    return (least * 1100) / width < 36 ? [`${f}: ${least} in ${width}`] : [];
+    return (least * 1100) / width < 40 ? [`${f}: ${least} in ${width}`] : [];
   });
 }
 
-test('F-T90-9: each text in a graphic is 36 or more in 1100, so about 10.5 px or more where a phone shows it 320 px wide', () => {
+test('F-T187-1: each text in a graphic is 40 or more in 1100, so about 11 px or more where GitHub shows it 309 px wide on a 375 px phone', () => {
   assert.deepEqual(tooSmall(redraw()), []);
-  // The check fails for one label of 35 in a copy of a clean redraw.
+  // The check fails for one label of 39 in a copy of a clean redraw.
   const copy = redraw();
-  writeFileSync(join(copy, 'roles-dark.svg'), readFileSync(join(copy, 'roles-dark.svg'), 'utf8').replace('font-size="36"', 'font-size="35"'));
-  assert.deepEqual(tooSmall(copy), ['roles-dark.svg: 35 in 1100']);
+  writeFileSync(join(copy, 'roles-dark.svg'), readFileSync(join(copy, 'roles-dark.svg'), 'utf8').replace('font-size="40"', 'font-size="39"'));
+  assert.deepEqual(tooSmall(copy), ['roles-dark.svg: 39 in 1100']);
 });
