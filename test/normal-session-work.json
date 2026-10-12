@@ -201,6 +201,7 @@
     {"id":"npm-help","tool_name":"Bash","tool_input":{"command":"npm help test"},"expect":"hint","leads_to":"web-fetch","names":"WebFetch"},
     {"id":"foo-env","tool_name":"Bash","tool_input":{"command":"FOO=1 npm test"},"expect":"hint","leads_to":"npm-test-node-env","names":"NODE_ENV"},
     {"id":"npm-ci-scratch-cache","tool_name":"Bash","tool_input":{"command":"DO_NOT_TRACK=1 npm_config_cache=/sample/scratch/npm-cache npm ci"},"expect":"allow"},
+    {"id":"npm-ci-quoted-variable","tool_name":"Bash","tool_input":{"command":"\"DO_NOT_TRACK\"=1 npm_config_cache=/sample/scratch/npm-cache npm ci"},"expect":"hint","leads_to":"npm-ci-scratch-cache","names":"<name>=<value> <command>"},
     {"id":"test-eq-quoted","tool_name":"Bash","tool_input":{"command":"test a '=' b"},"expect":"allow"},
     {"id":"test-eq","tool_name":"Bash","tool_input":{"command":"test a = b"},"expect":"hint","leads_to":"test-eq-quoted","names":"test a '=' b"},
     {"id":"echo-stderr-fd","tool_name":"Bash","tool_input":{"command":"echo done >&2"},"expect":"allow"},

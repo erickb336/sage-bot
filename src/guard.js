@@ -58,7 +58,8 @@ const LINES = 'to read lines of a file: head -n 40 <file>, tail -n +20 <file> | 
  * The command as parts: [{ pipe, words: [{ text, glob }], redirects: [{ text, glob }] }], or a string: why it is refused.
  * Only && and | join parts (`pipe`: the part reads the output of the part before it); ;, ||, |& and & are refused.
  * Quoting is joined as the shell joins it (g"i"t is git). A word's `glob` holds its unquoted *, ? and [ characters, and
- * its `q` is the place in its text of its first quoted character, if any (the shell reads no "HOME"=x as a variable, F-T137-10).
+ * its `q` is the place in its text of its first quoted character, if any (the shell reads no "HOME"=x as a variable, F-T137-10),
+ * and its `raw` is the word as the command wrote it, with its quotes (a refusal shows it so: F-T137-12).
  * A redirect's target is kept as a word, so that every check of a word sees it.
  */
 export function parse(command) {
@@ -67,8 +68,10 @@ export function parse(command) {
   let seg = { pipe: false, words: [], redirects: [] };
   let word = null;
   let pendingRedirect = null;
+  let i = 0;
   const endWord = () => {
     if (word === null) return;
+    word.raw = command.slice(word.at, i);
     (pendingRedirect ? seg.redirects : seg.words).push(word);
     pendingRedirect = null;
     word = null;
@@ -79,9 +82,8 @@ export function parse(command) {
     segments.push(seg);
     seg = { pipe, words: [], redirects: [] };
   };
-  const add = (ch, glob = false) => { word ??= { text: '', glob: '' }; word.text += ch; if (glob) word.glob += ch; };
+  const add = (ch, glob = false) => { word ??= { text: '', glob: '', at: i }; word.text += ch; if (glob) word.glob += ch; };
   try {
-    let i = 0;
     while (i < command.length) {
       const c = command[i];
       // The next 4 characters: every rule below looks at most that far. (A slice to the end made long input quadratic.)
@@ -91,13 +93,13 @@ export function parse(command) {
         if (end < 0) throw 'an open quote';
         const body = command.slice(i + 1, end);
         if (/[\0-\x08\x0b-\x1f\x7f]/.test(body)) throw 'a control character';
-        word ??= { text: '', glob: '' };
+        word ??= { text: '', glob: '', at: i };
         word.q ??= word.text.length;
         word.text += body;
         i = end + 1;
       } else if (c === '"') {
         let j = i + 1;
-        word ??= { text: '', glob: '' };
+        word ??= { text: '', glob: '', at: i };
         word.q ??= word.text.length;
         for (; j < command.length && command[j] !== '"'; j++) {
           if (/[$`\\!]/.test(command[j])) throw `a ${command[j]} inside double quotes`;
@@ -393,13 +395,15 @@ function configPath(text) {
 /**
  * The path that the text `p` names from the folder `base`, as the shell reads it; `q`: the place of its first quoted character.
  * An absolute path stays; an unquoted ~ or ~/ stays (the home folder); an unquoted ~+ is `base`; any other unquoted ~ (~-, ~name)
- * names a folder that the guard cannot know: null (F-T137-9). Any other path is joined to `base`.
+ * names a folder that the guard cannot know: null (F-T137-9). A ~ with a quote before its first unquoted / is null too: bash
+ * then expands nothing and zsh expands the ~ (~+"/.." is ./~+/.. in bash, F-T137-14). Any other path is joined to `base`.
  */
 function resolve(base, p, q = Infinity) {
   const tilde = p.split('/')[0];
-  if (p.startsWith('/') || (tilde === '~' && q >= 1)) return p;
-  if (tilde.startsWith('~') && q >= tilde.length) return tilde === '~+' ? posix.join(base, p.slice(2)) : null;
-  return posix.join(base, p);
+  if (p.startsWith('/')) return p;
+  if (!tilde.startsWith('~') || q < 1) return posix.join(base, p);
+  if (q <= tilde.length) return null;
+  return tilde === '~' ? p : tilde === '~+' ? posix.join(base, p.slice(2)) : null;
 }
 /** The paths that a word can name from `base`: the whole word, and its text after the first = (--out=<path>, HOME=<path>: F-T137-9). */
 const joined = (base, { text, q = Infinity }) => {
@@ -458,6 +462,8 @@ function simple({ words }, env) {
   }
   const [name, ...args] = texts.slice(i);
   if (!name) return 'a part with no command';
+  // "HOME"=/x is no variable (F-T137-10): the shell runs it as a program. The session meant the variable (F-T137-12).
+  if (VAR.test(name)) return how(`the word ${say(words[i].raw)} (the shell runs a variable with a quote before its = as a program)`, 'write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci');
   if (i > 0 && name === 'git') return how('a variable in front of git (git reads its config from HOME)', 'run git with no variable in front of it');
   if (KEYCHAIN.has(basename(fold(name)))) return `the Keychain front end ${say(name)} (G63 b: a bridge session reads no Keychain item)`;
   // A word that starts with a wildcard can expand to a file name that starts with -, an option that no table checked. The
@@ -498,14 +504,20 @@ export function bashRefusal(command, env, cwd) {
   // relative path counts also joined to them: ../../settings.json from .claude/worktrees/<name> is .claude/settings.json (F-T137-L1).
   const targets = [...parsed.flatMap((seg) => seg.redirects), ...parsed.filter(writes).flatMap((seg) => seg.words)];
   const cdTo = parsed[0]?.words[0]?.text === 'cd' ? parsed[0].words.slice(1) : [];
-  const base = cdTo[0] ? resolve(String(cwd ?? ''), cdTo[0].text, cdTo[0].q) : String(cwd ?? '');
+  // A folder as one text: normalized, with no / at its end (cd ../ lands where cd .. lands, F-T137-15).
+  const folder = (p) => p && posix.normalize(p).replace(/(.)\/$/, '$1');
+  const here = folder(String(cwd ?? ''));
+  const base = cdTo[0] ? folder(resolve(here, cdTo[0].text, cdTo[0].q)) : here;
   if (targets.length) {
     const paths = [...targets, ...cdTo].map((w) => w.text);
     paths.push(base, ...(base === null ? [] : targets.flatMap((w) => joined(base, w))));
-    if (paths.includes(null)) return how('a write with a path that starts with ~- or ~<name> (a folder that the guard cannot know)', 'name the path from the session folder, or as an absolute path');
+    if (paths.includes(null)) return how('a write with a path that starts with ~-, ~<name>, or ~ and a quote before its first / (a folder that the guard cannot know, or that bash and zsh read differently)', 'name the path from the session folder, or as an absolute path');
     const dir = paths.find(configPath);
-    // cd .. from a worktree lands in .claude/worktrees: the same command runs in the worktree with no cd (F-T137-8).
-    if (dir === base && /\/\.claude\/worktrees$/.test(fold(base))) return how(CONFIG(dir), 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+    // cd .. from a worktree lands in .claude/worktrees: the same command runs in the worktree with no cd (F-T137-8). A shell
+    // that is already there (after an allowed cd .. && ls) goes back with a cd (F-T137-13).
+    if (folder(dir) === base && /\/\.claude\/worktrees$/.test(fold(base))) {
+      return how(CONFIG(dir), base === here ? 'cd <worktree name> && <command>, and name each path from the worktree, for example cd t9 && git add x' : 'run the command in the worktree with no cd, and name each path from there, for example git add x');
+    }
     if (dir !== undefined) return CONFIG(dir);
   }
   for (const [k, seg] of parsed.entries()) {

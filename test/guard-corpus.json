@@ -2396,7 +2396,7 @@
     "cp ./{STARS}q {SCRATCH}/out && python3 -c 'print(1)'"
   ],
   "worktree": {
-    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9); 'hint': refused with a hint to the same command in the worktree (F-T137-8); 'allow': normal work there.",
+    "about": "Bash commands in a worktree under .claude/worktrees/<name> (EnterWorktree makes them), the cwd below. 'refuse': a write that lands in a settings folder from there, by .., an = in a folder name, ~+ or a quoted ~ (F-T137-L1, F-T137-9); 'hint': [command, the hint, a form that the hint leads to]: the command is refused with the hint, and the form is allowed from the same cwd (F-T137-8, F-T137-12, F-T137-14, F-T137-15); 'allow': normal work there. 'parent' holds the same for a shell in .claude/worktrees itself, after an allowed cd .. && ls (F-T137-13).",
     "cwd": "{REPO}/.claude/worktrees/t9",
     "refuse": [
       "touch ../../settings.json",
@@ -2411,9 +2411,24 @@
       "npm_config_cache=../.. npm ci"
     ],
     "hint": [
-      "cd .. && git add t9/x",
-      "cd .. && touch t9/x"
+      ["cd .. && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd .. && touch t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "touch x"],
+      ["cd ../ && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["cd {REPO}/.claude/worktrees/t9/.. && git add t9/x", "run the command in the worktree with no cd, and name each path from there, for example git add x", "git add x"],
+      ["mkdir ~+\"/\"", "name the path from the session folder, or as an absolute path", "mkdir -p src"],
+      ["cp evil.md ~+\"/../../../agents/evil.md\"", "name the path from the session folder, or as an absolute path", "cp evil.md ../t8/evil.md"],
+      ["touch ~+\"/../../../settings.json\"", "name the path from the session folder, or as an absolute path", "touch {REPO}/.claude/worktrees/t9/notes.md"],
+      ["touch ~\"/../../../agents/x.md\"", "name the path from the session folder, or as an absolute path", "touch src/x.md"],
+      ["\"HOME\"=/x npm ci", "write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci", "HOME=/x npm ci"],
+      ["\"DO_NOT_TRACK\"=1 npm ci", "write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci", "DO_NOT_TRACK=1 npm ci"]
     ],
+    "parent": {
+      "cwd": "{REPO}/.claude/worktrees",
+      "hint": [
+        ["git add t9/x", "cd <worktree name> && <command>, and name each path from the worktree, for example cd t9 && git add x", "cd t9 && git add x"],
+        ["touch t9/x", "cd <worktree name> && <command>, and name each path from the worktree, for example cd t9 && git add x", "cd t9 && touch x"]
+      ]
+    },
     "allow": [
       "git add x",
       "git add src/a.js",

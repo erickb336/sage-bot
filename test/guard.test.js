@@ -694,8 +694,11 @@ test('F-T137-8, F-T137-9: the worktree corpus: an = in a folder name, ~+ and a q
   const at = (c) => guard({ ...bash(c), cwd: fill(W.cwd) }).reason;
   const write = (p) => `a write to ${p} ${SETTINGS.split(' is refused')[0]}`;
   assert.deepEqual(W.refuse.map((c) => [c, at(c)]).filter(([, why]) => !why?.startsWith('sage-bot guard: a write to /sample/repo/.claude') || !why.endsWith(STOP)), []);
-  const back = hint(write('/sample/repo/.claude/worktrees'), 'run the command in the worktree with no cd, and name each path from there, for example git add x');
-  assert.deepEqual(W.hint.map((c) => [c, at(c)]).filter(([, why]) => why !== back), []);
+  // Each hint row: the command gets the hint, and the form that the hint leads to is allowed from the same folder.
+  for (const { cwd, hint: rows } of [W, W.parent]) {
+    const from = (c) => guard({ ...bash(c), cwd: fill(cwd) }).reason;
+    assert.deepEqual(rows.map(([c, safe, form]) => [c, from(c), safe, from(fill(form))]).filter(([, why, safe, then]) => !why?.endsWith(`is refused in a bridge session. sage can do this instead: ${safe}.`) || then), []);
+  }
   assert.deepEqual(W.allow.map((c) => [c, at(c)]).filter(([, why]) => why), []);
   assert.deepEqual(reasons(['cp evil.md ../../a=b/../agents/evil.md', 'echo x > ~+/../../settings.json', 'cd ../../a=b/.. && touch settings.json', "echo x > '~'/../../../settings.json"], at), {
     'cp evil.md ../../a=b/../agents/evil.md': refused(write('/sample/repo/.claude/agents/evil.md')),
@@ -703,14 +706,21 @@ test('F-T137-8, F-T137-9: the worktree corpus: an = in a folder name, ~+ and a q
     'cd ../../a=b/.. && touch settings.json': refused(write('/sample/repo/.claude')),
     "echo x > '~'/../../../settings.json": refused(write('/sample/repo/.claude/settings.json')),
   });
-  // ~- and ~<name> name a folder that the guard cannot know; a quoted ~- is a folder of that name.
-  const tilde = hint('a write with a path that starts with ~- or ~<name> (a folder that the guard cannot know)', 'name the path from the session folder, or as an absolute path');
-  assert.deepEqual(reasons(['echo x > ~-/settings.json', 'cd ~- && touch x', 'touch ~root/x', 'node a.mjs --out=~-/x'], at), Object.fromEntries(['echo x > ~-/settings.json', 'cd ~- && touch x', 'touch ~root/x', 'node a.mjs --out=~-/x'].map((c) => [c, tilde])));
+  // ~- and ~<name> name a folder that the guard cannot know; a quoted ~- is a folder of that name. A ~ with a quote before
+  // its first unquoted / is read differently by bash (no expansion) and zsh (expanded), so it is refused too (F-T137-14).
+  const tilde = hint('a write with a path that starts with ~-, ~<name>, or ~ and a quote before its first / (a folder that the guard cannot know, or that bash and zsh read differently)', 'name the path from the session folder, or as an absolute path');
+  const unknown = ['echo x > ~-/settings.json', 'cd ~- && touch x', 'touch ~root/x', 'node a.mjs --out=~-/x', 'mkdir ~+"/"', 'touch ~"/../../../agents/x.md"', "echo x > ~'+'/a", 'mkdir ~"x"', 'node a.mjs --out=~+"/x"', 'cd ~"/.." && touch x'];
+  assert.deepEqual(reasons(unknown, at), Object.fromEntries(unknown.map((c) => [c, tilde])));
+  // A quote after the first unquoted /, or a ~ that is quoted itself, reads the same in both shells.
+  const same = ['cp a ~+/"b"', 'touch ~+/src/"a b.js"', "echo x > '~+/a'", 'touch "~"x'];
+  assert.deepEqual(reasons(same, at), Object.fromEntries(same.map((c) => [c, 'allow'])));
 });
 
-test('F-T137-10: a variable name or = in quotes is no variable: the shell runs "HOME"=/x and HOME"=/x" as a program', () => {
-  assert.deepEqual(reasons(['"HOME"=/x npm ci', "'npm_config_cache'=/x npm ci", 'HOME"=/x" npm ci', 'HOME="/x" npm ci', 'HOME=/x "npm" ci']), {
-    '"HOME"=/x npm ci': refused('the command HOME=/x'), "'npm_config_cache'=/x npm ci": refused('the command npm_config_cache=/x'), 'HOME"=/x" npm ci': refused('the command HOME=/x'), 'HOME="/x" npm ci': 'allow', 'HOME=/x "npm" ci': 'allow',
+test('F-T137-10, F-T137-12: a variable name or = in quotes is no variable: the shell runs "HOME"=/x and HOME"=/x" as a program; the refusal shows the word as written and the form with no quotes', () => {
+  const quoted = (w) => hint(`the word ${w} (the shell runs a variable with a quote before its = as a program)`, 'write the variable name and the = with no quotes, <name>=<value> <command>, for example HOME=/x npm ci');
+  assert.deepEqual(reasons(['"HOME"=/x npm ci', "'npm_config_cache'=/x npm ci", 'HOME"=/x" npm ci', '"DO_NOT_TRACK"=1 npm ci', 'HOME="/x" npm ci', 'HOME=/x "npm" ci', 'HOME=/x npm ci']), {
+    '"HOME"=/x npm ci': quoted('"HOME"=/x'), "'npm_config_cache'=/x npm ci": quoted("'npm_config_cache'=/x"), 'HOME"=/x" npm ci': quoted('HOME"=/x"'), '"DO_NOT_TRACK"=1 npm ci': quoted('"DO_NOT_TRACK"=1'),
+    'HOME="/x" npm ci': 'allow', 'HOME=/x "npm" ci': 'allow', 'HOME=/x npm ci': 'allow',
   });
 });
 
