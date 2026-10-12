@@ -1,11 +1,11 @@
 <a href="docs/assets/hero-light.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-  <img alt="sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results." src="docs/assets/hero-light.svg" width="100%">
+  <img alt="sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results on request." src="docs/assets/hero-light.svg" width="100%">
 </picture>
 </a>
 
-**sage-bot lets a small team build software together from a Discord server.** It is a bridge between Discord and a Claude Code session that runs [sage](https://github.com/erickb336/sage). The graphic shows the goal. A sage-lead requests a new feature in a thread. sage designs it and posts its design questions back as cards. The team asks, comments and votes, and a sage-lead breaks ties. sage builds, with reviews and tests, and posts its progress and results in the thread: the board, screenshots and the link to the pull request. The owner merges. Nobody on the team needs a terminal.
+**sage-bot lets a small team build software together from a Discord server.** It is a bridge between Discord and a Claude Code session that runs [sage](https://github.com/erickb336/sage). The graphic shows the goal. A sage-lead requests a new feature in a thread. sage designs it and posts its design questions back as cards. The team asks and votes, and a sage-lead breaks ties. sage builds, with reviews and tests, and shows its progress and results on request: the board, screenshots and the link to the pull request. The owner merges. Nobody on the team needs a terminal.
 
 **Today:** design questions as vote cards, team votes, a sage-lead's tie-break or early end, read asks (the board, a task, the open questions and the shared files) and the kill switch work. A sage-lead's request does not reach a live Claude Code session yet: no Discord text reaches sage as an instruction. Bridge sessions add steps 1, 2 and 6 of the graphic; they wait on T159.
 

@@ -64,24 +64,24 @@ function node(t, id, kind, x, y, w, name, sub) {
 }
 
 const ALT = {
-  hero: 'sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results.',
+  hero: 'sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results on request.',
   'tip-mention': "The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on.",
 };
 
 /* The loop of the hero, one step a card. lane: L (Discord, the team) or R (Claude Code, running sage).
- * now: true for a step that works today (a solid ember edge), false for one that comes with bridge sessions (a dashed edge),
- * null for the owner's own step. The first line is the step's title; the next lines say what happens. */
+ * now: true for a step that works today (a solid ember edge), false for one that comes with bridge sessions (a dashed edge).
+ * The first line is the step's title; the next lines say what happens. */
 const LOOP = [
   { lane: 'L', now: false, lines: ['1 · sage-lead', 'requests a new feature', '“add CSV export”'] },
   { lane: 'R', now: false, lines: ['2 · sage designs', 'options and', 'a recommendation'] },
   { lane: 'L', now: true, lines: ['3 · design question', 'posted as a card'] },
-  { lane: 'L', now: true, lines: ['4 · the team weighs in', 'asks, comments, votes'] },
+  { lane: 'L', now: true, lines: ['4 · the team weighs in', 'asks and votes'] },
   { lane: 'L', now: true, lines: ['5 · the choice', 'a sage-lead breaks ties'] },
   { lane: 'R', now: false, lines: ['6 · sage builds', 'reviews, tests, a PR'] },
-  { lane: 'L', now: true, lines: ['7 · progress, results', 'board, screenshots,', 'the PR link'] },
-  { lane: 'L', now: null, lines: ['8 · the team sees it', 'the owner merges'] },
+  { lane: 'L', now: true, lines: ['7 · progress, results', 'board, screenshots,', 'the PR link, on request'] },
+  { lane: 'L', now: true, lines: ['8 · the team sees it', 'the owner merges'] },
 ];
-const TODAY = ['Today: steps 3, 4, 5 and 7 work. Steps 1, 2 and 6', 'come with bridge sessions (T159).'];
+const TODAY = ['Today: steps 3, 4, 5, 7 and 8 work.', 'Steps 1, 2 and 6 come with bridge sessions (T159).'];
 
 /** The hero: sage-bot's name and the loop, with Discord (the team) on the left, Claude Code running sage on the right,
  * and sage-bot, the bridge, in the middle: every step that crosses from one side to the other goes over the bridge. */
@@ -98,14 +98,14 @@ function hero(t, id) {
   }
   const end = Math.max(bottom.L, bottom.R), H = end + 330;
   const arrows = cards.slice(1).map((c, i) => {
-    const p = cards[i], color = c.now === false ? t.line : t.edge, mk = c.now === false ? 'muted' : 'hot', o = c.now === false ? { dash: '8 7' } : {};
+    const p = cards[i], color = !c.now ? t.line : t.edge, mk = !c.now ? 'muted' : 'hot', o = !c.now ? { dash: '8 7' } : {};
     if (p.lane === c.lane) { const x = p.x + LW / 2; return flow(id, `M${x} ${p.y + p.h + 6} L ${x} ${c.y - 8}`, color, mk, o); }
     const [from, to] = p.lane === 'L' ? [p.x + LW + 4, c.x - 8] : [p.x - 4, c.x + LW + 8];
     const py = f1(p.y + p.h / 2), cy = f1(c.y + c.h / 2);
     return flow(id, `M${from} ${py} L ${MID} ${py} L ${MID} ${cy} L ${to} ${cy}`, color, mk, o);
   });
-  const card = (c) => rect(c.x, c.y, LW, c.h, { rx: 10, fill: t.tile, stroke: c.now ? t.edge : t.line, sw: c.now ? 2.5 : 1.5, dash: c.now === false ? '8 7' : undefined }) +
-    text(c.x + 28, c.y + 14 + S * 0.85, c.lines[0], { size: S, weight: 800, fill: c.now === false ? t.ink : t.loop }) +
+  const card = (c) => rect(c.x, c.y, LW, c.h, { rx: 10, fill: t.tile, stroke: c.now ? t.edge : t.line, sw: c.now ? 2.5 : 1.5, dash: !c.now ? '8 7' : undefined }) +
+    text(c.x + 28, c.y + 14 + S * 0.85, c.lines[0], { size: S, weight: 800, fill: !c.now ? t.ink : t.loop }) +
     text(c.x + 28, c.y + 14 + S * 0.85 + LH, c.lines.slice(1), { size: S, fill: t.ink, lh: 1.2 });
   const wordFill = t.dark ? `url(#${id}-word)` : t.loop;
   const body = [
