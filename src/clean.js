@@ -5,23 +5,22 @@ import { REASON_MAX } from './vote.js';
 
 /**
  * Each character that looks like a quote, a backquote, `<` or `>`, and the text it looks like (its confusables target, for example `'`,
- * `''`, `<<` or `l'`). The extract src/confusables.json comes from Unicode's confusables.txt (scripts/confusables.mjs makes it), so
- * no hand list can miss one again (F-T131-10, F-T143-3, F-T143-10, F-T143-11). forModel keeps none of them; forLead maps the angles.
+ * `''`, `<<` or `·>`). The extract src/confusables.json comes from Unicode's confusables.txt 18.0.0 (scripts/confusables.mjs makes it),
+ * so no hand list can miss one again (F-T131-10, F-T143-3, F-T143-10, F-T143-11). It holds only the characters whose target is made
+ * only of quotes, angles and middle dots: a letter that looks like a letter plus a quote, such as ơ or ґ, is not in it and stays.
+ * forModel keeps none of them; forLead maps the angles.
  */
 const { extract } = JSON.parse(readFileSync(new URL('./confusables.json', import.meta.url), 'utf8'));
 const char = (hex) => String.fromCodePoint(parseInt(hex.replace('U+', ''), 16));
 const LOOKALIKES = new Map([
   ...Object.entries(extract).map(([source, target]) => [char(source), target.split(' ').map(char).join('')]),
-  // Kept by hand: confusables 17.0.0 maps these to other brackets or to nothing, but they look like an angle (NFKC or NFKD of the
-  // fullwidth, small and ≮ ≯ forms holds < or >; the others are angle brackets).
-  ...[...'\u2329\u276C\u2770\u27E8\u3008\uFE64\uFF1C\u226E'].map((c) => [c, '<']),
-  ...[...'\u232A\u276D\u2771\u27E9\u3009\uFE65\uFF1E\u226F'].map((c) => [c, '>']),
-  // Kept by hand: letters that look like an apostrophe and that confusables 17.0.0 does not map (F-T131-9).
-  ...[...'\u02BF\u0559\uA78B'].map((c) => [c, "'"]),
-  // Kept by hand until the extract moves to a newer confusables.txt: R823 found these in the one dated 2026-08-06; 17.0.0 lacks them.
-  ['\u2D66', '<'], ['\u{1032D}', '<'], ['\u{16AEC}', '<'], ['\u{1E94B}', "'"],
+  // Kept by hand: confusables 18.0.0 maps these to other brackets or to nothing, but they look like an angle (NFKD of ≮ ≯ holds
+  // < or >; the others are angle brackets).
+  ...[...'\u2329\u276C\u2770\u27E8\u3008\u226E'].map((c) => [c, '<']),
+  ...[...'\u232A\u276D\u2771\u27E9\u3009\u226F'].map((c) => [c, '>']),
+  // Kept by hand: letters that look like an apostrophe and that confusables 18.0.0 does not map to one (F-T131-9).
+  ...[...'\u02BF\u0559'].map((c) => [c, "'"]),
 ]);
-// F-T143-1: the Hebrew yod looks like an apostrophe, but it is one of the most common Hebrew letters: it stays. The double yod goes.
 LOOKALIKES.delete('\u05D9');
 /** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
 export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([, t]) => /[<>]/.test(t))
