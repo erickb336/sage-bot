@@ -73,6 +73,9 @@ export function answerArgs(row, text) {
   throw new Error(`${row.id}: ${JSON.stringify(text)} is not the text of one of its options and does not start with ${JSON.stringify(OTHER)}`);
 }
 
+/** The environment names that the state tool reads (sage.mjs and its core), for the broker's logbook verbs; LANG and LC_* too. */
+const TOOL_ENV = ['PATH', 'HOME', 'SAGE_HOME', 'SAGE_WORKTREES', 'SAGE_BOARD_ROOTS', 'CLAUDE_CONFIG_DIR'];
+
 /**
  * The sage state tool for one project.
  * @param {{ sagePath: string, project: string, env?: NodeJS.ProcessEnv }} o  `env` is for the tests: a scratch HOME or SAGE_HOME.
@@ -80,11 +83,15 @@ export function answerArgs(row, text) {
 export function sageTool({ sagePath, project, env = process.env }) {
   // The one caller of the state tool for this project: a fixed argv, no shell, `--project` last. `signal` kills the tool with SIGKILL
   // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code`.
-  const command = (args, { signal } = {}) => new Promise((resolve, reject) => {
-    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env, encoding: 'utf8' }, (e, out) => (e ? reject(e) : resolve(out.trim())));
+  const exec = (args, childEnv, { signal } = {}) => new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out) => (e ? reject(e) : resolve(out.trim())));
     signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
   });
-  const sage = (...args) => command(args);
+  // The broker's logbook verbs get only the names that the state tool reads (an allow-list, F-T195-2): never the bridge's token or
+  // any other secret of its environment. CLAUDE_CONFIG_DIR is in it because the tool's default logbook root is under it.
+  const brokerEnv = Object.fromEntries(Object.entries(env).filter(([k]) => TOOL_ENV.includes(k) || k === 'LANG' || k.startsWith('LC_')));
+  const command = (args, o) => exec(args, brokerEnv, o);
+  const sage = (...args) => exec(args, env);
   // One lookup of the logbook folder, kept as one promise, so that tables read at the same time share it (F-T71-2). A lookup that
   // fails is not kept: the next read tries again.
   let dir;
@@ -93,7 +100,8 @@ export function sageTool({ sagePath, project, env = process.env }) {
   return {
     /** The folder of the project (loadProjects): the identity that the bridge saves with each card and mark (G45 A). */
     folder: project,
-    /** One command of the state tool, as an argv, with the project fixed: for the broker's logbook verbs (T189), which fix the argv. */
+    /** One command of the state tool, as an argv, with the project fixed and the allow-listed environment: for the broker's logbook
+     * verbs (T189), which fix the argv. */
     command,
     /** Every gate row: { id, task, question, options, recommendation, default, answer, at }. */
     gates: () => table('gates'),
