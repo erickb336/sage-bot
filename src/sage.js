@@ -82,9 +82,10 @@ const TOOL_ENV = ['PATH', 'HOME', 'SAGE_HOME', 'SAGE_WORKTREES', 'SAGE_BOARD_ROO
  */
 export function sageTool({ sagePath, project, env = process.env }) {
   // The one caller of the state tool for this project: a fixed argv, no shell, `--project` last. `signal` kills the tool with SIGKILL
-  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code`.
+  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code` and the
+  // tool's refusal as `stderr`.
   const exec = (args, childEnv, { signal } = {}) => new Promise((resolve, reject) => {
-    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out) => (e ? reject(e) : resolve(out.trim())));
+    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out, err) => (e ? reject(Object.assign(e, { stderr: err })) : resolve(out.trim())));
     signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
   });
   // The broker's logbook verbs get only the names that the state tool reads (an allow-list, F-T195-2): never the bridge's token or
@@ -109,6 +110,17 @@ export function sageTool({ sagePath, project, env = process.env }) {
     tasks: () => table('tasks'),
     /** Every decision row, in the order sage wrote them: { at, task, decision, why }. */
     decisions: () => table('decisions'),
+    /**
+     * Adds one task (T72): a fixed argv with the title as one `--title=` argument, the allow-listed environment, no shell. `size` is
+     * small or large. A title with a control character is refused: sage keeps it in a TSV row. Returns the new task id, as
+     * `task add` prints it ("T74 framed · …"); throws for any other output.
+     */
+    addTask: async ({ title, size }) => {
+      if (!['small', 'large'].includes(size)) throw new TypeError(`a task from a request is small or large, not ${JSON.stringify(size)}`);
+      if (typeof title !== 'string' || !title.trim() || /\p{Cc}/u.test(title)) throw new TypeError('a task title is one line of text');
+      const said = await command(['task', 'add', `--title=${title}`, `--size=${size}`]);
+      return /^(T\d{1,9}) framed\b/.exec(said)?.[1] ?? (() => { throw new Error(`the sage state tool added no task: ${JSON.stringify(said.slice(0, 200))}`); })();
+    },
     /** Records the answer of one gate: `text` is what gates.tsv is to hold (answerArgs). */
     answer: async (id, text) => {
       const row = (await table('gates')).find((r) => r.id === id) ?? (() => { throw new Error(`gate ${id} is not in gates.tsv`); })();
