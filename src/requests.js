@@ -1,13 +1,16 @@
-// The requests of the sage-leads (T72): a sage-lead asks for a feature, and the owner approves or declines it. An approved request
+// The requests of the sage-leads (T72): a sage-lead asks for a feature, and Erick approves or declines it. An approved request
 // becomes one sage task through the state tool (`addTask`), never by a write to the logbook. This file has the record and its
-// transitions (pure: no I/O), and a thin I/O layer on the requests file. The terminal side is scripts/requests.mjs; Discord comes in
-// T72 PR 3.
+// transitions (pure: no I/O), and the I/O layer on the requests file that the terminal (scripts/requests.mjs) and the bridge (T72
+// PR 3) both call: add, approve, decline, withdraw, the Discord fields, and the reconcile step. Each I/O function takes the config.
 // The requests file is <statePath>.requests, beside the thread map and safe like it: 0600, written whole, read with no symlink, and
 // every read-modify-write under withLock. `next` counts the ids up, and an id is never reused: no request ever leaves the file.
+// Each new or changed record is checked as the loader checks it before it is saved (F-T72-20), so no write makes the file unreadable.
 // The text of a request comes from Discord and is untrusted. sage reads only titleForSage and textForSage (forModel, made once at
-// create); people read the title and the text through forTerminal here, and through the card cleaner on Discord.
+// create); people read the title and the text through forTerminal at the terminal, and through the card cleaner on Discord.
+import { killPathOf, linkOff } from './audit.js';
 import { forModel, forTerminal } from './clean.js';
-import { ADD_TASK_MS } from './sage.js';
+import { loadProjects } from './projects.js';
+import { ADD_TASK_MS, sageTool } from './sage.js';
 import { alive, PROJECT_NAME, readOwn, startOf, withLock, writeWhole } from './state.js';
 
 /** The requests file of a config: `<statePath>.requests`. */
@@ -16,27 +19,68 @@ export const requestsPathOf = ({ statePath }) => `${statePath}.requests`;
 export const REQUEST_ID = /^RQ[1-9]\d{0,8}$/;
 /** The lengths in characters, as the Discord form enforces them: title, text, and the reason of a decline. */
 export const LIMITS = { title: [4, 70], text: [10, 500], reason: [0, 300] };
-const SNOWFLAKE = /^\d{17,20}$/;
-const STATUSES = ['pending', 'approving', 'approved', 'declined', 'withdrawn'];
+/** Each status of the file, and its word for people: at the terminal and on the card. */
+export const STATUS_WORDS = { pending: 'waiting', approving: 'being approved', approved: 'approved', declined: 'declined', withdrawn: 'withdrawn' };
+const STATUSES = Object.keys(STATUS_WORDS);
 const DECIDED = ['approved', 'declined', 'withdrawn'];
+const SNOWFLAKE = /^\d{17,20}$/;
 /** The keys of every record, in the order the file holds them. `claim` is set only while approving. */
 const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'textForSage', 'designQuestions', 'requester', 'requesterName',
   'status', 'claim', 'createdAt', 'decidedAt', 'decidedBy', 'via', 'reason', 'task', 'channel', 'line', 'card', 'thread', 'shown'];
+/** The Discord fields that the bridge sets with setDiscord. */
+const DISCORD = ['line', 'card', 'thread', 'shown'];
 
-/** A refusal for a person: one line that ends "Nothing changed." The file is as it was. */
+/** A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. */
 export class Refused extends Error {}
 const refuse = (text) => { throw new Refused(text); };
 
 const length = (s) => Array.from(s).length;
-/** A time for a person: UTC, to the minute. */
-export const when = (at) => `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+const two = (n) => String(n).padStart(2, '0');
+/** A time for a list: the local time of this computer (Erick's), to the minute, with its zone: "2026-10-12 21:26 EDT". */
+export function whenLocal(at) {
+  const d = new Date(at);
+  const zone = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d).find((p) => p.type === 'timeZoneName').value;
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())} ${zone}`;
+}
+/** A time for show and the errors: the local time with UTC beside it, "2026-10-12 21:26 EDT (01:26 UTC)"; one time when the zone is UTC. */
+export function when(at) {
+  const local = whenLocal(at);
+  const d = new Date(at);
+  return local.endsWith(' UTC') ? local : `${local} (${two(d.getUTCHours())}:${two(d.getUTCMinutes())} UTC)`;
+}
 /**
  * How long after its start a claim whose process is gone may be released (F-T72-8): the state tool that the claim started can still
  * run after a lone kill of its process, up to ADD_TASK_MS, so a release before then can lead to a second task. 2 minutes in all.
  */
 export const RETRY_AFTER = ADD_TASK_MS + 60_000;
-/** The line for a claim: since when, and when a person can retry it if its run stopped. */
-export const claimed = (c) => `since ${when(c.at)}; if that run stopped, retry after ${when(c.at + RETRY_AFTER)}`;
+/** Since when a claim runs, and when a person can approve again if its run crashed. */
+export const claimed = (c) => `since ${when(c.at)}. If it crashed, run approve again after ${when(c.at + RETRY_AFTER)}.`;
+
+/** Whether a record is one that this module writes: its keys, their types, and the fields that its status sets. */
+function isRequest(r) {
+  const text = (x) => typeof x === 'string';
+  const time = (x) => Number.isSafeInteger(x);
+  const opt = (x, ok) => x === null || ok(x);
+  const id = (x) => text(x) && SNOWFLAKE.test(x);
+  if (!r || typeof r !== 'object' || Object.keys(r).join() !== KEYS.join()) return false;
+  const decided = DECIDED.includes(r.status);
+  const c = r.claim;
+  return text(r.id) && REQUEST_ID.test(r.id) && text(r.project) && PROJECT_NAME.test(r.project) && text(r.folder) && r.folder.startsWith('/')
+    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text)
+    && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
+    && (r.status === 'approving'
+      ? !!c && Object.keys(c).sort().join() === 'at,by,pid,start,via' && text(c.by) && ['discord', 'terminal'].includes(c.via) && Number.isSafeInteger(c.pid) && text(c.start) && time(c.at)
+      : c === null)
+    && (decided ? time(r.decidedAt) && text(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
+    && (r.status === 'approved' ? text(r.task) && /^T\d{1,9}$/.test(r.task) : r.task === null)
+    && (r.status === 'declined' ? opt(r.reason, text) : r.reason === null)
+    && [r.channel, r.line, r.card, r.thread].every((x) => opt(x, id)) && opt(r.shown, (s) => STATUSES.includes(s));
+}
+/** The record, when the loader takes it back; else a TypeError, before anything is written (F-T72-20). */
+const checked = (r) => {
+  if (!isRequest(r)) throw new TypeError(`the record of ${r?.id} has a field of the wrong kind, so it was not saved. Nothing changed.`);
+  return r;
+};
 
 /**
  * A new request, and the file with it (pure). Refuses a field out of its limits, and a title or text with nothing that sage can read.
@@ -51,18 +95,15 @@ export function newRequest(file, f, at) {
     const [min, max] = LIMITS[k];
     if (typeof f[k] !== 'string' || length(f[k]) < min || length(f[k]) > max) refuse(`the ${k} must have ${min} to ${max} characters. Nothing changed.`);
   }
-  if (!PROJECT_NAME.test(f.project ?? '') || typeof f.folder !== 'string' || !f.folder.startsWith('/')) throw new TypeError('a request needs a project name and its folder');
-  if (!['team', 'owner'].includes(f.designQuestions)) throw new TypeError('designQuestions is team or owner');
-  if (!SNOWFLAKE.test(f.requester ?? '') || typeof f.requesterName !== 'string') throw new TypeError('a request needs the Discord id and the name of its requester');
   const [titleForSage, textForSage] = [forModel(f.title), forModel(f.text)];
   if (!titleForSage) refuse('the title has nothing that sage can read: it needs letters or digits. Nothing changed.');
   if (!textForSage) refuse('the text has nothing that sage can read: it needs letters or digits. Nothing changed.');
-  const request = {
+  const request = checked({
     id: `RQ${file.next}`, project: f.project, folder: f.folder, title: f.title, text: f.text, titleForSage, textForSage,
     designQuestions: f.designQuestions, requester: f.requester, requesterName: f.requesterName, status: 'pending', claim: null,
     createdAt: at, decidedAt: null, decidedBy: null, via: null, reason: null, task: null,
     channel: f.channel ?? null, line: null, card: null, thread: null, shown: null,
-  };
+  });
   return { file: { next: file.next + 1, requests: [...file.requests, request] }, request };
 }
 
@@ -77,44 +118,25 @@ const MOVES = {
 const sameClaim = (a, b) => !!a && !!b && a.pid === b.pid && a.start === b.start && a.at === b.at;
 
 /**
- * The request after one event (pure). Throws Refused, with the line for a person, for an event that the request's status does not take.
+ * The request after one event (pure). Throws Refused, with the line for a person, for an event that the request's status does not take,
+ * and a TypeError for an event whose fields the file cannot hold.
  * @param {object} r  @param {{ type: keyof MOVES } & Record<string, any>} e
  */
 export function step(r, e) {
   const [from, to] = MOVES[e.type] ?? (() => { throw new TypeError(`no request event ${e.type}`); })();
   if (r.status !== from) {
-    if (r.status === 'approving') refuse(`${r.id} is already being approved (${claimed(r.claim)}). Nothing changed.`);
-    if (DECIDED.includes(r.status)) refuse(`${r.id} was already ${r.status} at ${when(r.decidedAt)} (${r.via}). Nothing changed.`);
+    if (r.status === 'approving') refuse(`${r.id} is already being approved ${claimed(r.claim)} Nothing changed.`);
+    if (DECIDED.includes(r.status)) refuse(`${r.id} was already ${r.status} at ${when(r.decidedAt)} (${r.via})${r.task ? `: sage task ${r.task}` : ''}. Nothing changed.`);
     refuse(`${r.id} is not being approved. Nothing changed.`);
   }
   if (from === 'approving' && !sameClaim(r.claim, e.claim)) refuse(`${r.id} is being approved by another run. Nothing changed.`);
   if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the sage-lead who sent ${r.id} can withdraw it. Nothing changed.`);
-  if (e.type === 'claim') return { ...r, status: to, claim: { ...e.claim } };
-  if (e.type === 'release') return { ...r, status: to, claim: null };
-  if (e.type === 'approve') return { ...r, status: to, claim: null, task: e.task, decidedAt: e.at, decidedBy: r.claim.by, via: r.claim.via };
+  if (e.type === 'claim') return checked({ ...r, status: to, claim: { ...e.claim } });
+  if (e.type === 'release') return checked({ ...r, status: to, claim: null });
+  if (e.type === 'approve') return checked({ ...r, status: to, claim: null, task: e.task, decidedAt: e.at, decidedBy: r.claim.by, via: r.claim.via });
   const reason = e.type === 'decline' ? (e.reason ?? '').trim() : '';
   if (length(reason) > LIMITS.reason[1]) refuse(`a reason has at most ${LIMITS.reason[1]} characters. Nothing changed.`);
-  return { ...r, status: to, decidedAt: e.at, decidedBy: e.by, via: e.type === 'withdraw' ? 'discord' : e.via, reason: reason || null };
-}
-
-/** Whether a record is one that this module wrote: its keys, their types, and the fields that its status sets. */
-function isRequest(r) {
-  const text = (x) => typeof x === 'string';
-  const time = (x) => Number.isSafeInteger(x);
-  const opt = (x, ok) => x === null || ok(x);
-  const id = (x) => SNOWFLAKE.test(x);
-  if (!r || typeof r !== 'object' || Object.keys(r).join() !== KEYS.join()) return false;
-  const decided = DECIDED.includes(r.status);
-  const c = r.claim;
-  return REQUEST_ID.test(r.id) && PROJECT_NAME.test(r.project) && text(r.folder) && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text)
-    && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
-    && (r.status === 'approving'
-      ? !!c && Object.keys(c).sort().join() === 'at,by,pid,start,via' && text(c.by) && ['discord', 'terminal'].includes(c.via) && Number.isSafeInteger(c.pid) && text(c.start) && time(c.at)
-      : c === null)
-    && (decided ? time(r.decidedAt) && text(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
-    && (r.status === 'approved' ? /^T\d{1,9}$/.test(r.task) : r.task === null)
-    && (r.status === 'declined' ? opt(r.reason, text) : r.reason === null)
-    && [r.channel, r.line, r.card, r.thread].every((x) => opt(x, id)) && opt(r.shown, (s) => STATUSES.includes(s));
+  return checked({ ...r, status: to, decidedAt: e.at, decidedBy: e.by, via: e.type === 'withdraw' ? 'discord' : e.via, reason: reason || null });
 }
 
 /**
@@ -124,7 +146,7 @@ function isRequest(r) {
 export function loadRequests(path) {
   const text = readOwn(path, 'requests file');
   if (text === undefined) return { next: 1, requests: [] };
-  const bad = new TypeError(`the requests file ${path} is not a version 1 requests file that sage-bot wrote. Nothing was loaded.`);
+  const bad = new TypeError(`the requests file ${path} is not a version 1 requests file that sage-bot wrote. Nothing changed.`);
   let data;
   try { data = JSON.parse(text); } catch { throw bad; }
   if (!data || Object.keys(data).sort().join() !== 'next,requests,version' || data.version !== 1 || !Number.isSafeInteger(data.next) || data.next < 1
@@ -141,19 +163,46 @@ export function find(file, id) {
 }
 
 /** Adds a request under the lock (newRequest), and returns it. */
-export const addRequest = (path, fields, at = Date.now()) => withLock(path, () => {
-  const { file, request } = newRequest(loadRequests(path), fields, at);
-  save(path, file);
-  return request;
-});
+export function addRequest(config, fields, at = Date.now()) {
+  const path = requestsPathOf(config);
+  return withLock(path, () => {
+    const { file, request } = newRequest(loadRequests(path), fields, at);
+    save(path, file);
+    return request;
+  });
+}
 
-/** Applies one event (step) to one request under the lock, saves the file, and returns the request after it. */
-export const update = (path, id, event) => withLock(path, () => {
+/** Changes one request under the lock with `change` (a checked record), saves the file, and returns the request after it. */
+const change = (path, id, how) => withLock(path, () => {
   const file = loadRequests(path);
-  const r = step(find(file, id), event);
+  const r = how(find(file, id));
   save(path, { ...file, requests: file.requests.map((x) => (x.id === id ? r : x)) });
   return r;
 });
+const update = (path, id, event) => change(path, id, (r) => step(r, event));
+
+/**
+ * Sets the Discord fields of a request (line, card, thread, shown) under the lock; the status stays. Returns the request after it.
+ * @param {{ line?: string | null, card?: string | null, thread?: string | null, shown?: string | null }} fields
+ */
+export function setDiscord(config, id, fields) {
+  if (!Object.keys(fields).every((k) => DISCORD.includes(k))) throw new TypeError(`setDiscord sets only ${DISCORD.join(', ')}`);
+  return change(requestsPathOf(config), id, (r) => checked({ ...r, ...fields }));
+}
+
+/**
+ * The state tool of a request's project. A request names its project by name and folder (loadProjects), as a mark does (G45 A): a name
+ * that names another folder now is not its project.
+ */
+export function toolOf(config, r) {
+  let projects;
+  try { projects = loadProjects(config); } catch (e) {
+    refuse(`${String(e?.message ?? e).replace(/ Nothing (was started|changed)\.$/, '').replace(/\.$/, '')}. Nothing changed.`);
+  }
+  const p = projects.find((x) => x.name === r.project && x.project === r.folder);
+  if (!p) refuse(`the project ${r.project} (${r.folder}) is not in the config. ${r.status === 'pending' ? `Add it back, or decline ${r.id}.` : 'Add it back, then run the command again.'}`);
+  return sageTool(p);
+}
 
 /** The marker of a request's task: its title starts with it. */
 const marker = (id) => `${id}: `;
@@ -175,14 +224,17 @@ async function settle(path, r, tool, at, release = true) {
 /**
  * The reconcile step: a request whose claim's process is gone is settled by the logbook of its project. With no task there, it is
  * released only RETRY_AFTER after the claim: until then its state tool can still add the task. Any other request stays.
- * `toolOf(request)` gives the state tool of its project. When another run settled the claim first, the request as that run left it.
- * Returns the request as it is now.
+ * `tool` is the state tool, by default the one of the request's project (toolOf). When another run settled the claim first, the
+ * request as that run left it. Returns the request as it is now.
+ * @param {{ at?: number, tool?: { tasks: Function } }} [o]
  */
-export async function reconcile(path, id, toolOf, at = Date.now()) {
+export async function reconcile(config, id, { at = Date.now(), tool } = {}) {
+  const path = requestsPathOf(config);
   const r = find(loadRequests(path), id);
   if (r.status !== 'approving' || runs(r.claim)) return r;
+  const t = tool ?? toolOf(config, r);
   try {
-    return await settle(path, r, toolOf(r), at, at - r.claim.at > RETRY_AFTER);
+    return await settle(path, r, t, at, at - r.claim.at > RETRY_AFTER);
   } catch (e) {
     if (e instanceof Refused) return find(loadRequests(path), id); // another run settled it (F-T72-11)
     throw e;
@@ -194,16 +246,20 @@ export async function reconcile(path, id, toolOf, at = Date.now()) {
  * 1. under the lock, pending → approving with a claim of this process;
  * 2. with no lock, `task add --title=<id>: <titleForSage> --size=<size>` through the state tool, stopped after ADD_TASK_MS;
  * 3. under the lock, approving → approved with the task id.
- * Before step 1, a task whose title starts with "<id>: " refuses: it is not this request's, or the file is not the one that made it.
- * When step 2 fails, the logbook decides (settle): the tool can fail after it wrote the task. When the logbook cannot be read either,
- * the claim stays, and a run after RETRY_AFTER reconciles it.
- * @param {{ tool: { addTask: Function, tasks: Function }, size?: 'small' | 'large', by: string, via: 'discord' | 'terminal', now?: () => number }} o
+ * Refused while the link from Discord to sage is off. Before step 1, a task whose title starts with "<id>: " refuses: it is not this
+ * request's, or the file is not the one that made it. When step 2 fails, the logbook decides (settle): the tool can fail after it
+ * wrote the task. When the logbook cannot be read either, the claim stays, and a run after RETRY_AFTER reconciles it.
+ * @param {{ size?: 'small' | 'large', by: string, via: 'discord' | 'terminal', now?: () => number, tool?: { addTask: Function, tasks: Function },
+ *   restore?: string }} o  `tool` is the state tool, by default toolOf; `restore` is the command that restores the link, for its refusal.
  */
-export async function approve(path, id, { tool, size = 'large', by, via, now = Date.now }) {
-  const before = await reconcile(path, id, () => tool, now());
+export async function approve(config, id, { size = 'large', by, via, now = Date.now, tool, restore = 'node scripts/leads.mjs restore' }) {
+  if (linkOff(killPathOf(config))) refuse(`the link from Discord to sage is off, so ${id} cannot be approved. Restore the link first: ${restore}. Nothing changed.`);
+  const path = requestsPathOf(config);
+  const before = await reconcile(config, id, { at: now(), tool });
+  tool ??= toolOf(config, before);
   if (before.status === 'pending') {
     const other = (await tool.tasks()).find((t) => t.title.startsWith(marker(id)));
-    if (other) refuse(`a task titled ${marker(id).trim()} already exists (${other.id}). Nothing changed.`);
+    if (other) refuse(`sage task ${other.id} in ${before.project} already starts with "${marker(id)}". ${id} was not approved. Decline ${id}, or rename or remove ${other.id} in sage, then approve again.`);
   }
   const claim = { by, via, pid: process.pid, start: startOf(process.pid), at: now() };
   const r = update(path, id, { type: 'claim', claim });
@@ -214,14 +270,26 @@ export async function approve(path, id, { tool, size = 'large', by, via, now = D
     const why = forTerminal(e?.message ?? e);
     let after;
     try { after = await settle(path, r, tool, now()); } catch {
-      throw new Error(`could not add the task of ${id} (${why}), and could not read the logbook. ${id} shows as being approved (${claimed(claim)}). Nothing else changed.`);
+      throw new Error(`could not add the task of ${id} (${why}), and could not read the logbook. ${id} stays being approved ${claimed(claim)}`);
     }
     if (after.status === 'approved') return after;
-    throw new Error(`could not add the task of ${id}: ${why}. ${id} waits again. Nothing changed.`);
+    throw new Error(`could not add the task of ${id}: ${why}. ${id} still waits. Fix the cause, then run approve again.`);
   }
   try {
     return update(path, id, { type: 'approve', claim, task, at: now() });
   } catch (e) {
     throw new Error(`added sage task ${task} to ${r.project}, but could not record it (${forTerminal(e?.message ?? e).replace(/ Nothing changed\.$/, '')}). ${id} settles on the next command.`);
   }
+}
+
+/** Declines a request after the reconcile step. `reason` is for people only. Returns the request after it. */
+export async function decline(config, id, { by, via, reason, at = Date.now() }) {
+  await reconcile(config, id, { at });
+  return update(requestsPathOf(config), id, { type: 'decline', by, via, at, reason });
+}
+
+/** Withdraws a request after the reconcile step: only its requester, on Discord. Returns the request after it. */
+export async function withdraw(config, id, { by, at = Date.now() }) {
+  await reconcile(config, id, { at });
+  return update(requestsPathOf(config), id, { type: 'withdraw', by, at });
 }
