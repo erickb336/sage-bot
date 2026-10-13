@@ -124,7 +124,7 @@ test('F-T145-2: a marks file that is not 0600, or a lock that a vote run holds, 
   writeWhole(`${c.statePath}.votes`, '["G1"]');
   writeFileSync(`${c.statePath}.votes.lock`, String(process.ppid));
   c.bridge = c.make();
-  assert.deepEqual(c.lines.filter((l) => l.startsWith('the one-time update')), [update(`another vote run (pid ${process.ppid}) holds ${c.statePath}.votes.lock. If none runs, remove ${c.statePath}.votes.lock. Nothing changed.`)]);
+  assert.deepEqual(c.lines.filter((l) => l.startsWith('the one-time update')), [update(`another sage-bot run (pid ${process.ppid}) holds ${c.statePath}.votes.lock. If none runs, remove ${c.statePath}.votes.lock. Nothing changed.`)]);
   rmSync(`${c.statePath}.votes.lock`);
   await c.bridge.loop();
   assert.equal(readFileSync(`${c.statePath}.votes`, 'utf8'), JSON.stringify({ 'project/G1': c.project }));
