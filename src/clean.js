@@ -39,16 +39,89 @@ const KEEP = /^[\p{Nd}.,:\-]$/v;
  */
 export function forModel(text) {
   const cut = Array.from(String(text).toWellFormed()).slice(0, REASON_MAX).join('').normalize('NFKC');
-  let out = '';
-  let marks = -1; // -1: no letter before, so no mark may stay; else the marks on the last letter
-  for (const ch of cut) {
-    if (LOOKALIKES.has(ch)) [out, marks] = [out + ' ', -1]; // a look-alike letter or mark parts words
-    else if (LETTER.test(ch)) [out, marks] = [out + ch, 0];
-    else if (MARK.test(ch) && marks >= 0 && marks < 3) [out, marks] = [out + ch, marks + 1];
-    else if (KEEP.test(ch)) [out, marks] = [out + ch, -1];
-    else if (!MARK.test(ch)) [out, marks] = [out + ' ', -1]; // every other character parts words
-  }
+  const [out] = read(cut, -1);
   return Array.from(out.replace(/ +/g, ' ').trim()).slice(0, REASON_MAX).join('');
+}
+/**
+ * The rule of forModel for NFKC text: what sage reads of it, and the marks on its last letter after it (`marks` is the count before
+ * it; -1: no letter before, so no mark may stay). A look-alike and every other character that is not a mark part words; a mark past
+ * the third on a letter, or with no letter, goes.
+ * @returns {[string, number]}
+ */
+function read(nfkc, marks) {
+  let out = '';
+  for (const ch of nfkc) {
+    if (LOOKALIKES.has(ch)) [out, marks] = [`${out} `, -1];
+    else if (LETTER.test(ch)) [out, marks] = [out + ch, 0];
+    else if (MARK.test(ch)) { if (marks >= 0 && marks < 3) [out, marks] = [out + ch, marks + 1]; }
+    else if (KEEP.test(ch)) [out, marks] = [out + ch, -1];
+    else [out, marks] = [`${out} `, -1];
+  }
+  return [out, marks];
+}
+
+const GRAPHEMES = new Intl.Segmenter();
+const graphemes = (s) => Array.from(GRAPHEMES.segment(s), ({ segment }) => segment);
+const EMOJI = /^\p{RGI_Emoji}$/v;
+/** A character that a person can see: a letter, mark, number, punctuation, symbol or white space that is not default-ignorable. */
+const SEEN = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}\p{White_Space}]--\p{Default_Ignorable_Code_Point}]$/v;
+/**
+ * The text cut into parts whose NFKC forms, joined, are the NFKC form of the whole text: grapheme clusters, two of them joined when
+ * NFKC works across their border (가 and the compatibility jamo ㄳ are two clusters, and NFKC makes them one syllable, 갃). When that
+ * still does not hold, one part.
+ */
+function nfkcParts(text) {
+  const parts = [];
+  for (const g of graphemes(text)) {
+    const last = parts.at(-1);
+    if (last !== undefined && (last + g).normalize('NFKC') !== last.normalize('NFKC') + g.normalize('NFKC')) parts[parts.length - 1] += g;
+    else parts.push(g);
+  }
+  return parts.map((p) => p.normalize('NFKC')).join('') === text.normalize('NFKC') ? parts : [text];
+}
+
+/**
+ * The text as a person typed it, in parts that say what sage reads of each (T72): the marks of the confirm of /sage request.
+ * The rule is forModel's own (`read`, the same cut, NFKC, spaces and length), so that `parts.map((p) => p.sage).join('')` is
+ * exactly `forModel(text)`, and `parts.map((p) => p.text).join('')` is the text (with each lone surrogate as U+FFFD).
+ * - `kept`: sage reads letters or digits of it (`sage` is what it reads, after NFKC), or it is white space (a word break for sage);
+ * - `dropped`: a person sees it and sage does not read it (`sage` is '' or the one space that parts the words around it);
+ * - `hidden`: nobody sees it and sage does not read it: every character of it is a control, a format or another invisible character.
+ * `hidden` counts the invisible characters in the whole text, also those inside a kept part, but not the joiners and selectors of an emoji.
+ * @returns {{ parts: { text: string, kind: 'kept' | 'dropped' | 'hidden', sage: string }[], hidden: number }}
+ */
+export function sageMarks(text) {
+  const all = Array.from(String(text).toWellFormed());
+  const head = all.slice(0, REASON_MAX).join('');
+  let marks = -1;
+  const parts = nfkcParts(head).map((t) => {
+    let sage;
+    [sage, marks] = read(t.normalize('NFKC'), marks);
+    return { text: t, sage };
+  });
+  // forModel's spaces: one between words, none at the start or the end; then its cut of the output.
+  let space = true;
+  for (const p of parts) {
+    p.sage = p.sage.replace(/ +/g, ' ');
+    if (space && p.sage.startsWith(' ')) p.sage = p.sage.slice(1);
+    if (p.sage) space = p.sage.endsWith(' ');
+  }
+  const end = parts.findLast((p) => p.sage);
+  if (end?.sage.endsWith(' ')) end.sage = end.sage.slice(0, -1);
+  let room = REASON_MAX;
+  for (const p of parts) {
+    const kept = Array.from(p.sage).slice(0, room);
+    [p.sage, room] = [kept.join(''), room - kept.length];
+  }
+  const rest = graphemes(all.slice(REASON_MAX).join('')).map((t) => ({ text: t, sage: '' }));
+  let hidden = 0;
+  const out = [...parts, ...rest].map(({ text: t, sage }, i) => {
+    const unseen = EMOJI.test(t) ? 0 : Array.from(t).filter((ch) => !SEEN.test(ch)).length;
+    hidden += unseen;
+    const kind = /[^ ]/.test(sage) || (i < parts.length && /^\s+$/u.test(t)) ? 'kept' : unseen === Array.from(t).length ? 'hidden' : 'dropped';
+    return { text: t, kind, sage };
+  });
+  return { parts: out, hidden };
 }
 
 /**

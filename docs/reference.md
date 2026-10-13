@@ -627,6 +627,26 @@ When step 2 fails, the logbook decides too, because the tool can fail after it w
 
 What this does not cover: a tool whose approver was killed and that runs on for more than 2 minutes can still add its task after the release. When that task comes before the next approve, the approve refuses, because a task titled `<RQ id>: ` exists. When it comes after the next approve, the logbook has two tasks for one request, and Erick removes one in sage.
 
+### Request messages
+
+`src/requestCards.js` (T72 PR 2) makes the Discord messages of `/sage request` as JSON, from a request record or a draft. They are pure functions: no Client and no network. T72 PR 3 wires them into the bridge. People read every message, so the title, the text, the requester's name and the reason each pass through `safe`.
+
+| Function | The message |
+| --- | --- |
+| `requestModal(key, draft?)` | The form "Request a feature": Title (4 to 70 characters) and What and why (10 to 500). Discord enforces the lengths. Edit opens it again with the draft's words. |
+| `confirmMessage(key, draft)` | The private confirm. It shows the title and the text as typed, with each character that sage does not read struck through (Discord has no red text), and what sage reads. A field "sage does not get" lists each dropped character once, in first-seen order, cut with "…" to fit 1024 characters; it is not there when sage drops nothing. The footer counts the hidden characters. The buttons are "Send: the team votes on design questions", "Send: Erick decides design questions", Edit and Cancel, so the choice travels in the custom_id. When sage can read nothing of the title or the text, the message is the refusal with Edit and Cancel. |
+| `requestLine(r, { linkOff })` | The line in the channel that starts the thread: "Jon (sage-lead) requests a feature: {title} · RQ3 · waiting for Erick". Its end changes with the status. |
+| `requestCard(r, { ownerId, linkOff, ping })` | The card, the first post of the thread. Waiting: Approve, Decline and Withdraw. With the link off, Approve is greyed and a field says why; Decline and Withdraw still work. Being approved: all three are greyed. Approved, declined (with the reason, or "No reason given.") and withdrawn: no buttons. |
+| `declineModal(r)` | The decline form: one optional reason of at most 300 characters. |
+| `withdrawConfirm(r)`, `decidedPost(r)`, `requestNote(why, r)`, `expired(key)` | The withdraw confirm, the post in the thread after a decision, the private notes (apprentice, link off, an open request, cancelled, sent, not Erick, not the requester, a late press, approved) and the expired confirm. |
+| `requestThreadName(r)` | The thread's name: `RQ3 · {title}`, printable, at most 80 characters. |
+
+**Pings.** Only the first post of the card pings, and only Erick: `allowedMentions: { parse: [], users: [ownerId] }`. An edit of the card, and every other message, has `allowedMentions: { parse: [] }`. The hourly limit is the reply of every ask in `src/ask.js`, so it is not here.
+
+**The custom_id.** `rq1:<action>:<id>`; `rq1` is the version of the format. The draft actions (`form`, `send-team`, `send-owner`, `edit`, `cancel`) take the draft's key, `D` and up to 20 digits, which the bridge keeps with the draft. The request actions (`approve`, `decline`, `decline!`, `withdraw`, `withdraw!`, `keep`) take the request id. `parseRequestId` gives back `{ action, id }`, or null for anything else. The longest custom_id has 25 characters (Discord allows 100).
+
+**The marks.** `sageMarks(text)` in `src/clean.js` cuts the text into parts and says what sage reads of each. It runs the rule of `forModel` itself (the same cut, NFKC, character rule, spaces and length), so the `sage` texts of the parts, joined, are exactly `forModel(text)`. A part is `kept` (sage reads letters or digits of it, or it is white space), `dropped` (a person sees it and sage does not read it) or `hidden` (nobody sees it: a control, a format or another invisible character). A part is a grapheme cluster, or two of them when NFKC joins them (가 and ㄳ become 갃). `hidden` counts the invisible characters, but not the joiners and tags inside an emoji. `test/t227-request-cards.test.js` checks the marks against `forModel` over every Unicode code point in five contexts, and over 20,000 random mixes of the hard cases. It also builds every message in every state with the longest text that `safe` escapes most, and checks each Discord limit.
+
 ## Sage sessions and their threads
 
 The parent channel (for example `#sage`) is read only for people. It has one line for each sage session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
