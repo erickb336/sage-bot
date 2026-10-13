@@ -5,10 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tempFolder } from './temp-folder.js';
 import { execFileSync, SAGE, spawnSync } from './bridge-setup.js';
 
-const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
+const DEMO = fileURLToPath(new URL('../scripts/demo.mjs', import.meta.url)); // not .pathname: it percent-encodes a space (F-T145-L10)
 function demo() {
   const root = tempFolder('sage-bot-t51-');
   const out = join(root, 'demo.html');

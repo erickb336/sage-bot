@@ -150,7 +150,8 @@ function locked(file, work) {
  * A spool file that is there but cannot be read or checked is refused (a throw), and nothing is written over it (F-T132-23).
  * A session keeps the project it started in (G43 A): its first event takes the listed project whose folder holds its cwd (T132), and once
  * its spool exists, each later event is of the spool's project, whatever its cwd. A first event in a folder outside every listed project,
- * and a `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
+ * and a `gate add` in another project's logbook (by its `--project`, or else by its cwd: F-T145-L7), are not refused: they are not
+ * the session's.
  * - SessionStart: { id, cwd, startedAt, pid }; a resume or a compaction keeps the gates and tasks and takes away the end.
  * - PostToolUse on Bash: for a command that runs the sage state tool with `gate add`, the gate id of its output line and its task.
  *   A `--project` whose folder only the shell knows (a variable other than HOME, a command) is ignored (F-T29-11).
@@ -199,7 +200,8 @@ export function record(input, { projects, dir, pid, now, home }) {
     if (event === 'SessionEnd' && !old) return 'no session';
     if (!old && !here) return 'outside the projects';
     const folder = old?.cwd ?? here.project;
-    if (named !== undefined && projectAt(resolve(input.cwd, named), projects)?.project !== folder) return 'another project';
+    // A gate add counts only in the logbook of the session's folder: the folder that `--project` names, else the cwd, as sage reads it (F-T145-L7).
+    if (gate && projectAt(resolve(input.cwd, named ?? '.'), projects)?.project !== folder) return 'another project';
     const s = old ?? { id, project: here.name, cwd: folder, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;

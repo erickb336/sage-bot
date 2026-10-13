@@ -59,7 +59,7 @@ test('G43 A: two names for one folder, also by a symlink, stop every caller at l
   refusedEverywhere(b, [{ name: 'project', project: b.project }, { name: 'twin', project: link }], line(link), b.project);
 });
 
-test('F-T132-19: a session that starts in a project keeps it: its gate add and its end in a nested project\'s folder go to its spool', () => {
+test('F-T132-19, F-T145-L7: a session that starts in a project keeps it: its end in a nested project\'s folder goes to its spool; a gate add there is of the nested logbook, so not', () => {
   const b = setup({ markAll: false });
   const sub = join(b.project, 'b');
   mkdirSync(sub);
@@ -71,7 +71,7 @@ test('F-T132-19: a session that starts in a project keeps it: its gate add and i
   assert.deepEqual(hook(sub, 'PostToolUse', gateAdd), [0, '', '']);
   assert.deepEqual(hook(sub, 'SessionEnd'), [0, '', '']);
   const spool = JSON.parse(readFileSync(join(`${b.statePath}.sessions`, `${S1}.json`), 'utf8'));
-  assert.deepEqual([spool.project, spool.cwd, spool.gates, spool.tasks, typeof spool.endedAt], ['project', b.project, ['G5'], ['T3'], 'number']);
+  assert.deepEqual([spool.project, spool.cwd, spool.gates, spool.tasks, typeof spool.endedAt], ['project', b.project, [], [], 'number']);
 });
 
 test('F-T132-20: a closed card\'s body says the vote is closed, as its note does; the card of a project that returns gets its normal body back', async () => {

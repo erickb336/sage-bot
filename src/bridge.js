@@ -7,7 +7,7 @@ import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
-import { OTHER } from './sage.js';
+import { optionsOf, OTHER } from './sage.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
 import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
 import { HOUR, MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
@@ -196,7 +196,20 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const persist = () => save(statePath, [...[...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), ...parked], [...sessions.values()]);
   // The files of the time before T132 get the keys, and the files before G45 A the folders, at once. A card posted before T132 keeps its
   // old buttons, with the mark `oldButtons`, until an edit of it works: each loop tries (F-T132-5).
-  const marksMoved = migrateMarks({ statePath, votesPath: config.votesPath }, own, folders);
+  // A marks file that is refused or a vote run that holds the lock never stops the bridge: the log says why once, and sync tries the
+  // update again at each loop; until it works, a list of marks is refused, so no gate is posted (F-T145-2).
+  let unmoved = true;
+  const moveMarks = () => {
+    try {
+      const moved = migrateMarks({ statePath, votesPath: config.votesPath }, own, folders);
+      unmoved = false;
+      return moved;
+    } catch (e) {
+      sayOnce(`the one-time update of the marks did not run; the bridge tries again at each loop: ${e.message}`);
+      return false;
+    }
+  };
+  const marksMoved = moveMarks();
   if (loaded.version < 4) persist();
   if ((loaded.version < 4 && loaded.entries.length) || marksMoved) {
     say(`one-time update: each card and mark now holds the folder of its project (${[...folders].map(([n, f]) => `${n}: ${f}`).join(', ')}); a card or mark of a name that is not in projects gets no folder and stays at the terminal`);
@@ -447,8 +460,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     if (!m.message) return true;
     let line;
     const took = await edit(m.channel ?? config.channelId, m.message, payload, id, (l) => { line = l; });
-    if (line) refusedAgain(redrawWaits, id, line, '. The bridge tries again after longer and longer waits');
-    if (!took) return took === null;
+    if (took === false) {
+      if (line) refusedAgain(redrawWaits, id, line, '. The bridge tries again after longer and longer waits');
+      return false;
+    }
+    // An edit that can never work (the message or the channel is gone, the thread is locked) is logged once, and the marks go: no loop
+    // tries the card again for them, and a gate that waits gets its reminders again (F-T145-1, F-T145-L2).
+    if (line) sayOnce(`${line}. Discord can never take this edit, so the bridge stops trying it`);
     redrawWaits.delete(id);
     if (m.oldButtons || m.shut) {
       delete m.oldButtons;
@@ -538,6 +556,19 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     }
   }
 
+  /**
+   * Whether the logbook row of `sageId` is still the gate on the card of `id`: the same question and the same options. An entry that an
+   * update keyed to a project whose logbook has another gate under that id gives sage no answer, and the log says so once (F-T145-5).
+   */
+  function sameGate(id, sageId, rows) {
+    const m = meta.get(id);
+    const i = m.sage.indexOf(sageId);
+    const row = rows.find((r) => r.id === sageId);
+    if (row && gates.get(id).ask.parts[i].question === shown(row.question, 1000, row.id) && optionsOf(row).join('|') === m.texts[i].join('|')) return true;
+    sayOnce(`${keyOf(projectOfKey(id), sageId)}: the logbook of ${projectOfKey(id)} has another question or other options under ${sageId} than its card, so the bridge gives sage no answer; ${OWNER} answers it at the terminal`);
+    return false;
+  }
+
   async function sendGate(id, m) {
     const sage = sageOf(id);
     const project = projectOfKey(id);
@@ -547,8 +578,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       // The decisions before the gate rows: an answer that the read of the rows misses is after `mark` in the trail (F-T43-1).
       const mark = (await sage.decisions()).length;
       // The row again, just before the answer: an answer that the owner typed meanwhile is final, and the bridge skips it (G10).
-      await readOwner(project, await sage.gates());
-      if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text) continue;
+      const rows = await sage.gates();
+      await readOwner(project, rows);
+      if (!new Map(answersOf(id)).has(sageId) || m.sent[sageId] === text || !sameGate(id, sageId, rows)) continue;
       // Saved before the write, so that the check of the trail survives a failed write back and a stop of the bridge (F-T43-5).
       (m.restore ??= {})[sageId] = { mark, wrote: text, from: 0 };
       persist();
@@ -696,6 +728,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
    */
   async function sync(ppl) {
     // The marks are read once for every project: a gate counts by its key, so G1 of one project never takes the mark of another.
+    if (unmoved) moveMarks(); // F-T145-2
     const marks = teamVotes();
     for (const [project, sage] of sages) {
       try { await syncProject(project, sage, marks); } catch (e) { say(`${project}: the bridge could not read the logbook; it tries again: ${e?.message}`); }

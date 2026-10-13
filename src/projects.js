@@ -3,7 +3,7 @@
 // channels.mjs name a project only through loadProjects, pickProject and projectAt, so they all name a folder the same way (G43 A).
 import { execFileSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
-import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { forTerminal } from './clean.js';
 
 export const TYPES = ['png', 'jpg', 'svg', 'pdf'];
@@ -58,9 +58,15 @@ export function projectsOf(config) {
   });
 }
 
-/** Whether a folder is in a git repository, as the sage state tool asks git (its projectRoot). */
-function inGit(path) {
-  try { execFileSync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { stdio: 'ignore' }); return true; } catch { return false; }
+/**
+ * The main checkout of the git repository that holds a folder (the folder of its git common dir), by which the sage state tool names the
+ * folder's logbook (its projectRoot); undefined outside git. A repository, its subfolders and its linked worktrees all have the same one.
+ */
+function repoOf(path) {
+  try {
+    const common = execFileSync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return onDisk(dirname(common.trim()));
+  } catch { return undefined; }
 }
 
 /** The real path of a folder as the disk spells it, its letter case too, or undefined when there is none. */
@@ -74,11 +80,13 @@ const onDisk = (path) => { try { return realpathSync.native(path); } catch { ret
  * - a listed path that differs from its folder on disk only in letter case (F-T132-18);
  * - a listed path through a link to a folder that is not in git (F-T132-24);
  * - two names for one folder, also by a symlink;
+ * - two folders with one sage logbook: a repository and its subfolder, or two worktrees of one repository (F-T145-4);
  * - a config `project` that no listed project has (F-T132-1).
  * @returns {{ name: string, project: string, sagePath: string, files: string[], repo?: string, own?: true }[]}
  */
 export function loadProjects(config) {
   const seen = new Map();
+  const logbooks = new Map(); // the folder that names a logbook (repoOf, else the project's own folder) → its first project
   const projects = projectsOf(config).map((p) => {
     const real = statSync(p.project, { throwIfNoEntry: false })?.isDirectory() && onDisk(p.project);
     if (!real) throw new Error(`the folder of project ${p.name} (${p.project}) does not exist. Fix its path in projects, or take the project out. Nothing changed.`);
@@ -89,9 +97,17 @@ export function loadProjects(config) {
     const twin = seen.get(real);
     if (twin) throw new Error(`projects ${twin.name} (${twin.project}) and ${p.name} (${p.project}) are the same folder (${real}). Keep one of them. Nothing changed.`);
     // The state tool names a folder outside git by its path as written, not by its real path (F-T132-24): the bridge would read another logbook.
-    if (resolve(p.project) !== real && !inGit(p.project)) {
+    const repo = repoOf(real);
+    if (resolve(p.project) !== real && !repo) {
       throw new Error(`the path of project ${p.name} (${p.project}) is a link to ${real}, and the folder is not in git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.`);
     }
+    // Two projects of one logbook would post each of its gates twice, and give sage the second card's answer as the first's (F-T145-4).
+    const logbook = repo ?? real;
+    const sharer = logbooks.get(logbook);
+    if (sharer) {
+      throw new Error(`projects ${sharer.name} (${sharer.project}) and ${p.name} (${p.project}) share one sage logbook, the logbook of ${logbook}. Keep one of them in projects. Nothing changed.`);
+    }
+    logbooks.set(logbook, p);
     seen.set(real, p);
     return { ...p, project: real };
   });

@@ -165,18 +165,20 @@ test('F-T132-3: a settled card with old buttons answers an old press with the us
   assert.equal(b.answerOf('G1'), 'CSV');
 });
 
-test('F-T132-6, G43 A: a session keeps the project of its first event, also for an event in another project\'s folder; a gate add for another --project changes nothing', () => {
+test('F-T132-6, G43 A, F-T145-L7: a session keeps the project of its first event, also for an event in another project\'s folder; a gate add in another project\'s logbook changes nothing', () => {
   const b = two();
   const dir = `${b.statePath}.sessions`;
   const at = (cwd, extra = {}) => record({ session_id: S1, cwd, ...extra }, { projects: b.projects, dir, pid: process.pid, now: b.now, home: b.root });
   assert.equal(at(b.project, { hook_event_name: 'SessionStart' }), `SessionStart ${S1}`);
   const gateAdd = { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'node sage.mjs gate add T1 --question "Q?"' }, tool_response: { stdout: 'G7 open · Q?\n', stderr: '' } };
-  assert.equal(at(b.beta, gateAdd), `PostToolUse ${S1}`);
+  assert.equal(at(b.beta, gateAdd), 'another project'); // sage wrote G7 in beta's logbook, by its cwd (F-T145-L7)
   assert.equal(at(b.beta, { hook_event_name: 'SessionStart' }), `SessionStart ${S1}`);
   const toBeta = { ...gateAdd, tool_input: { command: `node sage.mjs gate add T1 --project ${b.beta}` }, tool_response: { stdout: 'G8 open · Q?\n' } };
   assert.equal(at(b.project, toBeta), 'another project');
+  const toOwn = { ...gateAdd, tool_input: { command: `node sage.mjs gate add T1 --project ${b.project}` }, tool_response: { stdout: 'G9 open · Q?\n' } };
+  assert.equal(at(b.beta, toOwn), `PostToolUse ${S1}`); // from beta's folder, but in the session's logbook
   const spool = JSON.parse(readFileSync(join(dir, `${S1}.json`), 'utf8'));
-  assert.deepEqual([spool.project, spool.cwd, spool.gates], ['project', b.project, ['G7']]);
+  assert.deepEqual([spool.project, spool.cwd, spool.gates], ['project', b.project, ['G9']]);
 });
 
 test('F-T132-6: a settled card of a project that left the config sends no answer and logs no failure; the own project\'s answers still go', async () => {

@@ -177,10 +177,11 @@ export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skil
  * 1. SAGE_TOOL, when it is set;
  * 2. the newest sage.mjs (by modification time) in the sage plugin's cache, <cache>/sage/<version>/skills/sage/, in claudeDirOf;
  * 3. else an error that names SAGE_TOOL.
- * HOME is the real home folder from the user database (os.userInfo), not $HOME: the demo and the tests run with HOME set to a scratch folder.
+ * The home folder is `env.HOME`, as for every other tool that the run starts, so a run with HOME in a scratch folder (npm run demo) finds
+ * the sage plugin there; with no HOME, the owner's home folder from the user database (F-T145-L9).
  * @param {{ env?: NodeJS.ProcessEnv, home?: string }} [o] @returns {string} the path of sage.mjs
  */
-export function sagePath({ env = process.env, home = ownerHome() } = {}) {
+export function sagePath({ env = process.env, home = env.HOME || ownerHome() } = {}) {
   if (env.SAGE_TOOL) {
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);
