@@ -8,7 +8,7 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
-import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
+import { cut, ephemeral, NO_MENTIONS, safe, stamp } from './cards.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadProjects, pickProject, TYPES } from './projects.js';
@@ -408,7 +408,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL go to the kill switch (stopPress). A sage-lead's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the sage-lead's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. An
-     * apprentice's press changes nothing and gets a reply of its own, so the sage-lead's confirm stays. A member with neither sage role, and a
+     * apprentice's press changes nothing and gets a private reply of its own, so the sage-lead's confirm stays. A member with neither sage role, and a
      * custom_id that is not STOP, STOP_CANCEL, CANCEL or a channel id, get nothing. Never rejects.
      */
     async press(b) {
@@ -419,7 +419,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
       let content;
       if (!roles.includes(config.leadRole)) {
-        await b.reply({ content: 'Only a sage-lead can unregister a channel. Nothing changed.', allowedMentions: NO_MENTIONS })
+        await b.reply(ephemeral('Only a sage-lead can unregister a channel. Nothing changed.')) // only they see it, so presses add nothing to the channel (F-T136-9)
           .catch((e) => say(`Discord refused the unregister reply: code ${e?.code ?? '-'}: ${e?.message}`));
         return;
       }

@@ -45,8 +45,13 @@ test('T130 file safety: the registry is 0600 and written whole; a symlink, a wro
   assert.equal(mode(b.registry), 0o600);
   assert.deepEqual(readdirSync(dirname(b.registry)).filter((n) => n.endsWith('.tmp')), []); // the temp file was renamed over it
   const good = readFileSync(b.registry, 'utf8');
-  const aside = `Move it aside with: mv ${b.registry} ${b.registry}.bad, then register the home channel again with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home`;
-  const stops = (why, fix = aside) => assert.throws(() => openChannels(b.config, projects), { message: `the channel registry ${b.registry} ${why} ${fix}` });
+  const bad = `'${b.registry}.bad-<time>'`;
+  const aside = `Move it aside with: mv '${b.registry}' ${bad}, then register the home channel again with: node scripts/channels.mjs --config <config.json> register <channel id> <project> --home. The old channels stay in ${bad}: register each one again that you need`;
+  const stops = (why, fix = aside) => {
+    let said = '';
+    try { openChannels(b.config, projects); } catch (e) { said = e.message.replace(/\.bad-\d{8}-\d{6}'/g, ".bad-<time>'"); }
+    assert.equal(said, `the channel registry ${b.registry} ${why} ${fix}`);
+  };
   // A symlink: the open refuses it (O_NOFOLLOW), also when it points to a good file.
   writeFileSync(join(b.root, 'elsewhere.json'), good, { mode: 0o600 });
   rmSync(b.registry);
@@ -56,7 +61,7 @@ test('T130 file safety: the registry is 0600 and written whole; a symlink, a wro
   // A wrong mode.
   writeFileSync(b.registry, good, { mode: 0o644 });
   chmodSync(b.registry, 0o644);
-  stops('must be a regular file of this user with mode 0600. Nothing was loaded.', `Fix it with: chmod 600 ${b.registry}`);
+  stops('must be a regular file of this user with mode 0600. Nothing was loaded.', `Fix it with: chmod 600 '${b.registry}'`);
   chmodSync(b.registry, 0o600);
   // Bad JSON, a wrong shape, a project that the config does not list, and two home channels.
   writeFileSync(b.registry, '{"version":1,');
@@ -134,7 +139,7 @@ test('T130 terminal: the script refuses while a bridge holds the lock, and chang
   const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } }).trim();
   writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`); // this test process stands in for a running bridge
   const r = script(b, 'register', OTHER, 'project');
-  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove '${b.statePath}.lock'. Nothing was changed.\n`]);
   assert.equal(existsSync(b.registry), false);
   // F-T130-5: list only reads, so it works while the bridge runs.
   openChannels(b.config, loadProjects(b.config));
@@ -177,7 +182,7 @@ test('T130 unregister: a sage-lead unregisters with a confirm; an apprentice is 
   assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'unregister'))[1].content, 'Only a sage-lead can unregister a channel. Ask a sage-lead.');
   const apprentice = press(MAYA, [APPRENTICE], `${UNREGISTER}${ASK}`);
   await ask.press(apprentice);
-  assert.deepEqual(apprentice.replies, [{ kind: 'reply', content: 'Only a sage-lead can unregister a channel. Nothing changed.', allowedMentions: { parse: [] } }]);
+  assert.deepEqual(apprentice.replies, [{ kind: 'reply', content: 'Only a sage-lead can unregister a channel. Nothing changed.', flags: 64, allowedMentions: { parse: [] } }]); // 64: ephemeral (F-T136-9)
   // The home channel: refused for a sage-lead too.
   assert.equal((await b.cmd(ask, JON, [LEADR], CHANNEL, 'unregister'))[1].content, `<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
@@ -274,8 +279,9 @@ test('F-T130-8: the home cannot move while a card waits in the old home; it can 
   b.sh('gate', 'add', 'T1', '--question', 'Which name?', '--options', 'Ada|Bo', '--recommend', 'Ada');
   await b.post(); // the card of project/G1 waits in CHANNEL, the home
   assert.equal(b.discord.in(CHANNEL).length > 0, true);
+  openChannels(b.config, loadProjects(b.config)); // the registry, as the bridge's start makes it
   let r = script(b, 'register', OTHER, 'project', '--home');
-  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: the home channel cannot move while 1 card(s) wait in the old home channel ${CHANNEL} or its threads (project/G1): their buttons would stop working. Wait until they are settled, or answer them at the terminal, then run this again. Nothing was changed.\n`]);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: the home channel cannot move while 1 card(s) wait in the old home channel ${CHANNEL} or its threads (project/G1): their buttons would stop working. Wait until they are settled. Or answer them at the terminal, then start the bridge for one loop, because only the bridge copies the answers into the gate file: start it with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist, wait until its log shows the answers, stop it with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), and run this again. Nothing was changed.\n`]);
   assert.deepEqual(file(b).channels, { [ASK]: { project: 'project' }, [CHANNEL]: { project: 'project', home: true } });
   r = script(b, 'register', CHANNEL, 'project', '--home'); // not a move
   assert.equal(r.status, 0, r.err);
@@ -455,21 +461,26 @@ test('F-T130-13: each broken registry stops the start, list and register with th
     const b = world(t);
     mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });
     make(b.registry, b);
-    const fix = kind === 'chmod' ? `Fix it with: chmod 600 ${b.registry}`
-      : `Move it aside with: mv ${b.registry} ${b.registry}.bad, then register the home channel again with: ${FIRST_LINE}`;
+    const bad = `${b.registry}.bad-<time>`; // F-T136-10: the copy's name has the UTC time to the second; `stamped` puts <time> there
+    const stamped = (text) => text.replace(/\.bad-\d{8}-\d{6}'/g, ".bad-<time>'");
+    const fix = kind === 'chmod' ? `Fix it with: chmod 600 '${b.registry}'`
+      : `Move it aside with: mv '${b.registry}' '${bad}', then register the home channel again with: ${FIRST_LINE}. The old channels stay in '${bad}': register each one again that you need`;
     const message = `the channel registry ${b.registry} ${why} ${fix}`;
-    assert.throws(() => prepare(b.config, () => {}), { message }, name); // the bridge stops before Discord
+    let said = '';
+    try { prepare(b.config, () => {}); } catch (e) { said = e.message; } // the bridge stops before Discord
+    assert.equal(stamped(said), message, name);
     rmSync(`${b.statePath}.lock`); // this test process took the lock in prepare(): the stopped bridge gives it back
     for (const args of [['list'], ['register', OTHER, 'project']]) {
-      assert.deepEqual(Object.values(script(b, ...args)).slice(0, 3), [1, '', `sage-bot channels: ${message}\n`], `${name}: ${args[0]}`);
+      const r = script(b, ...args);
+      assert.deepEqual([r.status, r.out, stamped(r.err)], [1, '', `sage-bot channels: ${message}\n`], `${name}: ${args[0]}`);
     }
     // Erick follows the printed lines, as printed.
-    const lines = kind === 'chmod' ? [`chmod 600 ${b.registry}`] : [/Move it aside with: (.+), then/.exec(message)[1], FIRST_LINE];
+    const lines = kind === 'chmod' ? [`chmod 600 '${b.registry}'`] : [/Move it aside with: (.+), then/.exec(said)[1], FIRST_LINE];
     for (const line of lines) follow(b, line);
     const { config, channels } = prepare(b.config, () => {});
     assert.equal(config.channelId, CHANNEL, name);
     assert.equal(channels.get(CHANNEL).home, true, name);
-    if (kind !== 'chmod') assert.equal(existsSync(`${b.registry}.bad`), true, name); // the bad file is kept, aside
+    if (kind !== 'chmod') assert.equal(readdirSync(dirname(b.registry)).filter((f) => /^gates\.json\.channels\.bad-\d{8}-\d{6}$/.test(f)).length, 1, name); // the bad file is kept, aside
   }
 });
 
@@ -481,9 +492,10 @@ test('F-T130-13: a path with a space or a quote is one shell word in the printed
   let message = '';
   try { loadChannels(path); } catch (e) { message = e.message; }
   const mv = /Move it aside with: (.+), then register/.exec(message)[1];
-  assert.equal(mv, `mv '${b.root}/Erick'\\''s state/gates.json.channels' '${b.root}/Erick'\\''s state/gates.json.channels.bad'`);
+  const stamp = /\.bad-(\d{8}-\d{6})'$/.exec(mv)?.[1];
+  assert.equal(mv, `mv '${b.root}/Erick'\\''s state/gates.json.channels' '${b.root}/Erick'\\''s state/gates.json.channels.bad-${stamp}'`);
   execFileSync('/bin/sh', ['-c', mv]); // the printed line, as printed
-  assert.equal(existsSync(`${path}.bad`), true);
+  assert.equal(existsSync(`${path}.bad-${stamp}`), true);
   assert.equal(loadChannels(path), undefined);
 });
 
@@ -493,7 +505,7 @@ test('F-T130-14: the refusal while the bridge runs gives the launchctl lines tha
   const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8', env: { LC_ALL: 'C', TZ: 'UTC' } }).trim();
   writeFileSync(`${b.statePath}.lock`, `${process.pid} ${start}`);
   const r = script(b, 'unregister', OTHER);
-  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove ${b.statePath}.lock. Nothing was changed.\n`]);
+  assert.deepEqual([r.status, r.err], [1, `sage-bot channels: a sage bridge runs on ${b.statePath}, and only one of the two may change the channel registry. Stop the bridge with: launchctl unload ~/Library/LaunchAgents/com.sage.bot.plist (or Ctrl-C where you run it by hand), run this again, then start the bridge with: launchctl load ~/Library/LaunchAgents/com.sage.bot.plist. list works while it runs. If no bridge runs, remove '${b.statePath}.lock'. Nothing was changed.\n`]);
   // The setup guide and the reference give the same two lines beside register and unregister.
   for (const doc of ['docs/setup.md', 'docs/reference.md']) {
     const text = readFileSync(join(ROOT, doc), 'utf8');
