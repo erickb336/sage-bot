@@ -304,6 +304,7 @@ test('F-T65-4: a reminder about a card whose tie alert is held goes after the al
   await b.bridge.loop();
   assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')), []);
   refuse.on = false;
+  b.now += MINUTE; // past the back-off after the second refusal (F-T68-1)
   await b.bridge.loop();
   assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')).map((t) => t.split(' of ')[0].split(' is ')[0]), [
     `<@&${LEADR}> project/G2+G3`, `<@&${LEADR}> reminder: part 2`]);
@@ -321,7 +322,7 @@ test('F-T65-3: a gate file with a held list that the bridge did not write is ref
     [{ content: '@everyone hi', allowedMentions: { parse: ['everyone'] } }], [{ content: 'hi', allowedMentions: { parse: [], roles: [LEADR] }, tts: true }],
     [{ content: 'x'.repeat(2001), allowedMentions: { parse: [] } }]]) {
     withHeld(held);
-    assert.throws(() => b.make(), { message: 'the gate file has an entry with held messages that the bridge did not write' }, JSON.stringify(held).slice(0, 80));
+    assert.throws(() => b.make(), { message: `the gate file ${b.statePath} has held messages for project/G1 that the bridge did not write. Nothing was loaded.` }, JSON.stringify(held).slice(0, 80));
   }
   withHeld([{ content: 'hi', allowedMentions: { parse: [] } }, { content: `<@&${LEADR}> hi`, allowedMentions: { parse: [], roles: [LEADR] } }]);
   assert.equal(typeof b.make().loop, 'function');

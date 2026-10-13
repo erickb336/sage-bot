@@ -352,13 +352,14 @@ test('F-T73-7: vote.mjs --leads with no sagePath or a wrong one prints one line,
   assert.equal(existsSync(`${b.statePath}.votes`) || existsSync(`${b.statePath}.votes.leads`), false);
 });
 
-test('F-T94-1: with the owner missing from the member list, a press on a withdrawn sage-leads-only card says Erick withdrew it', async () => {
+test('F-T94-1, F-T45-1: with the owner missing from the member list, the owner\'s own words on a sage-leads-only card show as Erick\'s final answer', async () => {
   const b = await asked({ members: MEMBERS.filter((m) => m.id !== OWNER) });
   b.sh('gate', 'answer', 'G1', 'never mind, I decide this alone');
   b.now += MINUTE;
   await b.bridge.loop();
-  assert.match(text(b), /\*\*Withdrawn by Erick at <t:\d+:t>\.\*\* Nothing to answer\.$/);
-  assert.deepEqual((await b.press(JON, 'press:project/G1:0:0')).map((r) => r.content), ['project/G1 was withdrawn by Erick. Nothing to answer.']);
+  assert.match(text(b), /\*\*Answered by Erick \(terminal\) at <t:\d+:t>: other: never mind, I decide this alone\. Final\.\*\*$/);
+  assert.deepEqual((await b.press(JON, 'press:project/G1:0:0')).map((r) => r.content),
+    ['Already answered by Erick at the terminal: other: never mind, I decide this alone. Your press did not count.']);
 });
 
 test('F-T94-2: vote.mjs --leads names the real cause when sage cannot read the gates: a project with no logbook', () => {
