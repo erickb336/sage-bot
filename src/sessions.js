@@ -3,7 +3,7 @@
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pickProject, projectAt } from './projects.js';
+import { logbookOf, pickProject, projectAt } from './projects.js';
 import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
@@ -200,8 +200,9 @@ export function record(input, { projects, dir, pid, now, home }) {
     if (event === 'SessionEnd' && !old) return 'no session';
     if (!old && !here) return 'outside the projects';
     const folder = old?.cwd ?? here.project;
-    // A gate add counts only in the logbook of the session's folder: the folder that `--project` names, else the cwd, as sage reads it (F-T145-L7).
-    if (gate && projectAt(resolve(input.cwd, named ?? '.'), projects)?.project !== folder) return 'another project';
+    // A gate add counts only in the logbook of the session's folder: the logbook of the folder that `--project` names, else of the cwd,
+    // by the state tool's own rule (logbookOf), so a linked worktree outside the project's folder counts too (F-T145-L7, F-T145-6).
+    if (gate && logbookOf(resolve(input.cwd, named ?? '.')) !== logbookOf(folder)) return 'another project';
     const s = old ?? { id, project: here.name, cwd: folder, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;

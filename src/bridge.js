@@ -559,12 +559,14 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /**
    * Whether the logbook row of `sageId` is still the gate on the card of `id`: the same question and the same options. An entry that an
    * update keyed to a project whose logbook has another gate under that id gives sage no answer, and the log says so once (F-T145-5).
+   * The question counts as the logbook wrote it (`questions`), never as `safe` cleans it today, which can change (F-T145-8). An entry saved
+   * before `questions` has only the options checked.
    */
   function sameGate(id, sageId, rows) {
     const m = meta.get(id);
     const i = m.sage.indexOf(sageId);
     const row = rows.find((r) => r.id === sageId);
-    if (row && gates.get(id).ask.parts[i].question === shown(row.question, 1000, row.id) && optionsOf(row).join('|') === m.texts[i].join('|')) return true;
+    if (row && (m.questions === undefined || m.questions[i] === row.question) && optionsOf(row).join('|') === m.texts[i].join('|')) return true;
     sayOnce(`${keyOf(projectOfKey(id), sageId)}: the logbook of ${projectOfKey(id)} has another question or other options under ${sageId} than its card, so the bridge gives sage no answer; ${OWNER} answers it at the terminal`);
     return false;
   }
@@ -768,7 +770,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const unlisted = (k) => `${k}, of project '${projectOfKey(k)}', which is not in projects; keep a project's name as it was at its first start`;
     const cardOf = (r) => parked.find((e) => {
       const i = e.sage.indexOf(r.id);
-      return !listed(e.gate.id) && i >= 0 && e.ask.task === shown(r.task, 40, 'a task') && e.ask.parts[i].question === shown(r.question, 1000, r.id);
+      return !listed(e.gate.id) && i >= 0 && e.ask.task === shown(r.task, 40, 'a task')
+        && (e.questions ? e.questions[i] === r.question : e.ask.parts[i].question === shown(r.question, 1000, r.id)); // the raw question when saved (F-T145-8)
     })?.gate.id;
     const markOf = (r) => [...marks.votes.keys(), ...marks.leads.keys()].find((k) => !listed(k) && k.endsWith(`/${r.id}`));
     const fresh = untracked.filter((r) => {
@@ -807,7 +810,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       }
       const { gate, ask, texts } = framed;
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project) });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, questions: rowsOpen.map((r) => r.question), message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
   }

@@ -10,11 +10,13 @@ import { createBridge, LOOP } from '../src/bridge.js';
 import { prepare } from '../src/discord.js';
 import { loadProjects } from '../src/projects.js';
 import { sagePath, sagePlugin, sageToolIn, sageTool } from '../src/sage.js';
+import { record } from '../src/sessions.js';
 import { writeWhole } from '../src/state.js';
 import { tempFolder } from './temp-folder.js';
 import { CONFIG, execFileSync, MAYA, MEMBERS, SAGE, setup, spawnSync, toolOf } from './bridge-setup.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const S1 = 'eeeeeeee-0000-4000-8000-000000000145';
 const SCRIPT = (name) => join(ROOT, 'scripts', name);
 const git = (...args) => execFileSync('git', ['-c', 'user.name=Sample', '-c', 'user.email=sample@example.com', ...args], { stdio: 'ignore' });
 
@@ -154,6 +156,62 @@ test('F-T145-5: a card whose gate id now names another question in its logbook g
   assert.deepEqual(b.lines.filter((l) => l.includes('another question')), [
     'project/G1: the logbook of project has another question or other options under G1 than its card, so the bridge gives sage no answer; Erick answers it at the terminal',
   ]);
+});
+
+test('F-T145-8: the check of F-T145-5 reads the question as the logbook wrote it: a card saved before it, or framed by another safe(), still gives sage its answer', async () => {
+  const b = setup();
+  b.sh('task', 'add', '--title', 'Notes', '--size', 'small');
+  b.sh('task', 'add', '--title', 'Paths', '--size', 'small');
+  b.sh('gate', 'add', 'T1', '--question', 'Keep ~/notes | archive?', '--options', 'Keep|Drop', '--recommend', 'Keep');
+  b.sh('gate', 'add', 'T2', '--question', 'Move ~/old | ~/new?', '--options', 'Move|Stay', '--recommend', 'Move');
+  await b.post();
+  // The cards as an older bridge saved them: its safe() kept ~ and |. G1's entry is from before F-T145-8 (no raw question); G2's has one.
+  const file = JSON.parse(readFileSync(b.statePath, 'utf8'));
+  for (const e of file.entries) e.ask.parts[0].question = e.gate.id === 'project/G1' ? 'Keep ~/notes | archive?' : 'Move ~/old | ~/new?';
+  delete file.entries.find((e) => e.gate.id === 'project/G1').questions;
+  assert.deepEqual(file.entries.find((e) => e.gate.id === 'project/G2').questions, ['Move ~/old | ~/new?']);
+  writeWhole(b.statePath, JSON.stringify(file));
+  b.bridge = b.make();
+  await b.press(MAYA, 'press:project/G1:0:0');
+  await b.press(MAYA, 'press:project/G2:0:0');
+  for (let i = 0; i < 2; i++) { b.now += LOOP; await b.bridge.loop(); }
+  assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['Keep', 'Move']);
+  assert.deepEqual(b.lines.filter((l) => l.includes('another question')), []);
+});
+
+test('F-T145-7: two submodules of one superproject, and two repositories whose git folders sit in one folder, have a logbook each, so they load', () => {
+  const b = setup({ markAll: false });
+  const at = (name) => join(b.root, name);
+  const repo = (path) => { git('init', '-q', path); git('-C', path, 'commit', '-q', '--allow-empty', '-m', 'sample'); };
+  repo(at('lib1'));
+  repo(at('lib2'));
+  repo(at('super'));
+  git('-c', 'protocol.file.allow=always', '-C', at('super'), 'submodule', 'add', '-q', at('lib1'), 'one');
+  git('-c', 'protocol.file.allow=always', '-C', at('super'), 'submodule', 'add', '-q', at('lib2'), 'two');
+  mkdirSync(at('gits'));
+  git('init', '-q', '--separate-git-dir', join(at('gits'), 'x.git'), at('sx'));
+  git('init', '-q', '--separate-git-dir', join(at('gits'), 'y.git'), at('sy'));
+  const list = [['project', b.project], ['one', join(at('super'), 'one')], ['two', join(at('super'), 'two')], ['sx', at('sx')], ['sy', at('sy')]];
+  const config = { project: b.project, sagePath: SAGE, projects: list.map(([name, project]) => ({ name, project })) };
+  assert.deepEqual(loadProjects(config).map((p) => [p.name, p.project]), list);
+});
+
+test('F-T145-6: a gate add from a linked worktree of the session\'s repository outside its folder counts, as sage writes it in that logbook', () => {
+  const b = setup({ markAll: false });
+  const mono = join(b.root, 'mono');
+  const out = join(b.root, 'mono-out');
+  git('init', '-q', mono);
+  git('-C', mono, 'commit', '-q', '--allow-empty', '-m', 'sample');
+  git('-C', mono, 'worktree', 'add', '-q', out, '-b', 'out');
+  const dir = `${b.statePath}.sessions`;
+  const projects = loadProjects({ project: mono, sagePath: SAGE, projects: [{ name: 'mono', project: mono }, { name: 'project', project: b.project }] });
+  const at = (cwd, extra) => record({ session_id: S1, cwd, ...extra }, { projects, dir, pid: process.pid, now: b.now, home: b.root });
+  const gateAdd = (command, id) => ({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: `${id} open · Q?\n`, stderr: '' } });
+  assert.equal(at(mono, { hook_event_name: 'SessionStart' }), `SessionStart ${S1}`);
+  assert.equal(at(out, gateAdd('node sage.mjs gate add T1 --question "Q?"', 'G1')), `PostToolUse ${S1}`);
+  assert.equal(at(b.project, gateAdd(`node sage.mjs gate add T1 --project ${out}`, 'G2')), `PostToolUse ${S1}`);
+  assert.equal(at(b.project, gateAdd('node sage.mjs gate add T1', 'G3')), 'another project'); // the other listed project's logbook
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, `${S1}.json`), 'utf8')).gates, ['G1', 'G2']);
 });
 
 test('F-T145-L1: launchd.mjs refuses a config whose listed folder is missing, with the line of the bridge, and writes no plist', () => {

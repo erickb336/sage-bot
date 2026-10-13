@@ -2,8 +2,8 @@
 // real path of its folder, in the letter case of the disk. The bridge, the hook, /sage, vote.mjs, reasons.mjs, launchd.mjs and
 // channels.mjs name a project only through loadProjects, pickProject and projectAt, so they all name a folder the same way (G43 A).
 import { execFileSync } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { forTerminal } from './clean.js';
 
 export const TYPES = ['png', 'jpg', 'svg', 'pdf'];
@@ -59,14 +59,25 @@ export function projectsOf(config) {
 }
 
 /**
- * The main checkout of the git repository that holds a folder (the folder of its git common dir), by which the sage state tool names the
- * folder's logbook (its projectRoot); undefined outside git. A repository, its subfolders and its linked worktrees all have the same one.
+ * The folder by which the sage state tool names the logbook of `path` (F-T145-6, F-T145-7). The one place in sage-bot that reads it: the
+ * shared-logbook check of loadProjects and the hook's check of a `gate add` both use it. It is a port of `projectRoot` in the state
+ * tool's core/state.mjs (sage 6ea307ffa7b5, the same in 801434a542b9): the main checkout of a repository, for the repository, its
+ * subfolders and its linked worktrees; any other folder (outside git, a submodule, a repository with a `--separate-git-dir`, a bare
+ * repository) by its path as written. test/t145-logbook-root.test.js runs both over the same git layouts, so a drift fails a test.
  */
-function repoOf(path) {
+export function logbookOf(path) {
   try {
-    const common = execFileSync('git', ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return onDisk(dirname(common.trim()));
-  } catch { return undefined; }
+    const neutral = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_ALLOW_PROTOCOL: 'file:https:ssh', GIT_TERMINAL_PROMPT: '0' };
+    const out = execFileSync('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--absolute-git-dir', '--show-toplevel'],
+      { encoding: 'utf8', env: neutral, stdio: ['ignore', 'pipe', 'ignore'] });
+    const [common, gitDir, top] = out.trim().split('\n');
+    const [realCommon, realGit, realTop] = [common, gitDir, top].map((p) => realpathSync(p));
+    const main = realGit === realCommon && dirname(realCommon) === realTop;
+    const linked = dirname(realGit) === join(realCommon, 'worktrees') && realpathSync(resolve(realGit, readFileSync(join(realGit, 'gitdir'), 'utf8').trim())) === join(realTop, '.git');
+    return main || linked ? dirname(common) : resolve(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 /** The real path of a folder as the disk spells it, its letter case too, or undefined when there is none. */
@@ -78,15 +89,15 @@ const onDisk = (path) => { try { return realpathSync.native(path); } catch { ret
  * started." for the own project) for a config that the bridge cannot serve, so every caller stops before it reads or writes anything:
  * - a listed folder that does not exist (F-T132-14);
  * - a listed path that differs from its folder on disk only in letter case (F-T132-18);
- * - a listed path through a link to a folder that is not in git (F-T132-24);
+ * - a listed path through a link to a folder that is not a checkout of git, whose logbook (logbookOf) is the link's (F-T132-24);
  * - two names for one folder, also by a symlink;
- * - two folders with one sage logbook: a repository and its subfolder, or two worktrees of one repository (F-T145-4);
+ * - two folders with one sage logbook (logbookOf): a repository and its subfolder, or two worktrees of one repository (F-T145-4, F-T145-7);
  * - a config `project` that no listed project has (F-T132-1).
  * @returns {{ name: string, project: string, sagePath: string, files: string[], repo?: string, own?: true }[]}
  */
 export function loadProjects(config) {
   const seen = new Map();
-  const logbooks = new Map(); // the folder that names a logbook (repoOf, else the project's own folder) → its first project
+  const logbooks = new Map(); // the folder that names a logbook (logbookOf) → its first project
   const projects = projectsOf(config).map((p) => {
     const real = statSync(p.project, { throwIfNoEntry: false })?.isDirectory() && onDisk(p.project);
     if (!real) throw new Error(`the folder of project ${p.name} (${p.project}) does not exist. Fix its path in projects, or take the project out. Nothing changed.`);
@@ -96,13 +107,12 @@ export function loadProjects(config) {
     }
     const twin = seen.get(real);
     if (twin) throw new Error(`projects ${twin.name} (${twin.project}) and ${p.name} (${p.project}) are the same folder (${real}). Keep one of them. Nothing changed.`);
-    // The state tool names a folder outside git by its path as written, not by its real path (F-T132-24): the bridge would read another logbook.
-    const repo = repoOf(real);
-    if (resolve(p.project) !== real && !repo) {
-      throw new Error(`the path of project ${p.name} (${p.project}) is a link to ${real}, and the folder is not in git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.`);
+    // The state tool names a folder that is not a checkout of git by its path as written, not by its real path (F-T132-24): the bridge would read another logbook.
+    const logbook = logbookOf(real);
+    if (logbookOf(p.project) !== logbook) {
+      throw new Error(`the path of project ${p.name} (${p.project}) is a link to ${real}, and the folder is not a checkout of git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.`);
     }
     // Two projects of one logbook would post each of its gates twice, and give sage the second card's answer as the first's (F-T145-4).
-    const logbook = repo ?? real;
     const sharer = logbooks.get(logbook);
     if (sharer) {
       throw new Error(`projects ${sharer.name} (${sharer.project}) and ${p.name} (${p.project}) share one sage logbook, the logbook of ${logbook}. Keep one of them in projects. Nothing changed.`);
