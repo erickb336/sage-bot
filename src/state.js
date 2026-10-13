@@ -33,6 +33,8 @@ function entryOf(e, path) {
   const ok = e && Array.isArray(e.sage) && e.sage.every((id) => GATE_ID.test(id)) && e.gate?.id === keyOf(projectOfKey(e.gate?.id), e.sage.join('+')) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
     && e.ask.parts.every((p) => p && isFinal(p.final, p))
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
+    // F-T145-8: each part's question as the logbook wrote it; absent in an entry saved before it.
+    && (e.questions === undefined || (Array.isArray(e.questions) && e.questions.length === e.sage.length && e.questions.every(isText)))
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
     // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
