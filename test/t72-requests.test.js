@@ -18,6 +18,11 @@ const MODULE = new URL('../src/requests.js', import.meta.url).pathname;
 // Every time in these tests is in one zone (F-T72-19): the local time of the test, and of each command it runs.
 const TZ = 'America/New_York';
 process.env.TZ = TZ;
+// One clock (F-T72-27): the test starts at 2026-10-12 10:00 EDT (14:00 UTC, one date in both zones) and each command it runs starts
+// at the test's time (T72_NOW). The clock runs at real speed, because the lock waits 2 s. No result depends on the real date.
+const CLOCK = `data:text/javascript,${encodeURIComponent('const real = Date.now, d = Number(process.env.T72_NOW) - real(); Date.now = () => real() + d;')}`;
+process.env.T72_NOW = String(Date.UTC(2026, 9, 12, 14, 0));
+await import(CLOCK);
 
 // The fake state tool. It logs each argv and the names of its environment to argv.log, keeps the tasks in logbook/tasks.tsv, and in
 // `task add` does what fake.json (beside it) says: ok; crash-before (kills its caller, the approver, before it writes the task: a crash
@@ -64,13 +69,14 @@ function world() {
   writeFileSync(configPath, JSON.stringify(config));
   const path = requestsPathOf(config);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), TZ };
-  const args = (a) => [SCRIPT, '--config', configPath, ...a];
+  const args = (a) => [`--import=${CLOCK}`, SCRIPT, '--config', configPath, ...a];
+  const timed = () => ({ ...env, T72_NOW: String(Date.now()) });
   const cli = (...a) => {
-    const r = spawnSync(process.execPath, args(a), { encoding: 'utf8', env });
+    const r = spawnSync(process.execPath, args(a), { encoding: 'utf8', env: timed() });
     return { code: r.status, signal: r.signal, out: r.stdout.trim(), err: r.stderr.trim() };
   };
   const cliLater = (...a) => new Promise((resolve) => {
-    const child = spawn(process.execPath, args(a), { env });
+    const child = spawn(process.execPath, args(a), { env: timed() });
     let out = '', err = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
@@ -270,7 +276,7 @@ test('list, show, approve and decline at the terminal', () => {
   // Pending first: a new request goes above the decided ones.
   w.add({}, T0 + 120_000);
   assert.match(w.cli('list').out, /^RQ3 {2}reports-app {2}waiting /);
-  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."\n/);
+  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."\n/);
   // The terminal answer is final.
   assert.match(w.cli('approve', 'RQ2').err, /^sage-bot requests: RQ2 was already declined at .* \(terminal\)\. Nothing changed\.$/);
   assert.match(w.cli('decline', 'RQ1').err, /^sage-bot requests: RQ1 was already approved at .* \(terminal\): sage task T1\. Nothing changed\.$/);
@@ -430,11 +436,11 @@ test('F-T72-8: a lone kill of the approver while its tool still runs: the claim 
     assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
     assert.deepEqual(w.tasks(), []); // the tool runs on, with no task yet
     assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
-    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\. If it crashed, run approve again after \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\.\n/);
+    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.\n/);
     assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved since .* UTC\)\. If it crashed, run approve again after .* UTC\)\. Nothing changed\.$/);
   } finally { w.release(); }
   while (!w.tasks().length) await sleep(20);
-  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}approved {2}"Jon" {2}.* EDT {2}T1 {2}"Add CSV export"$/);
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}approved {2}"Jon" {2}2026-10-04 10:00 EDT {2}T1 {2}"Add CSV export"$/);
   assert.match(w.cli('approve', 'RQ1').err, /RQ1 was already approved at /);
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
 });
@@ -556,7 +562,7 @@ test('F-T72-19: local time with UTC beside it, Erick by name, the task in the re
   assert.ok(!show.some((l) => l.includes('for sage'))); // the title and the text are what sage reads, so they show once
   assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}waiting {2}"Jon" {2}2026-10-12 21:26 EDT {2}no task yet {2}/);
   assert.equal(w.cli('approve', 'RQ1').code, 0);
-  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\nsage task: T1\n/);
+  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1\n/);
   assert.match(w.cli('approve', 'RQ1').err, / \(terminal\): sage task T1\. Nothing changed\.$/);
   // No pid in a message: the claim line and the refusal of a second approve.
   w.add();
