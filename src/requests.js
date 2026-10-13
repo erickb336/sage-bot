@@ -7,6 +7,7 @@
 // The text of a request comes from Discord and is untrusted. sage reads only titleForSage and textForSage (forModel, made once at
 // create); people read the title and the text through forTerminal here, and through the card cleaner on Discord.
 import { forModel, forTerminal } from './clean.js';
+import { ADD_TASK_MS } from './sage.js';
 import { alive, PROJECT_NAME, readOwn, startOf, withLock, writeWhole } from './state.js';
 
 /** The requests file of a config: `<statePath>.requests`. */
@@ -29,6 +30,13 @@ const refuse = (text) => { throw new Refused(text); };
 const length = (s) => Array.from(s).length;
 /** A time for a person: UTC, to the minute. */
 export const when = (at) => `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+/**
+ * How long after its start a claim whose process is gone may be released (F-T72-8): the state tool that the claim started can still
+ * run after a lone kill of its process, up to ADD_TASK_MS, so a release before then can lead to a second task. 2 minutes in all.
+ */
+export const RETRY_AFTER = ADD_TASK_MS + 60_000;
+/** The line for a claim: since when, and when a person can retry it if its run stopped. */
+export const claimed = (c) => `since ${when(c.at)}; if that run stopped, retry after ${when(c.at + RETRY_AFTER)}`;
 
 /**
  * A new request, and the file with it (pure). Refuses a field out of its limits, and a title or text with nothing that sage can read.
@@ -38,6 +46,7 @@ export const when = (at) => `${new Date(at).toISOString().slice(0, 16).replace('
  * @param {number} at
  */
 export function newRequest(file, f, at) {
+  if (!REQUEST_ID.test(`RQ${file.next}`)) refuse(`the requests file has used every request id (RQ1 to RQ999999999). Nothing changed.`);
   for (const k of ['title', 'text']) {
     const [min, max] = LIMITS[k];
     if (typeof f[k] !== 'string' || length(f[k]) < min || length(f[k]) > max) refuse(`the ${k} must have ${min} to ${max} characters. Nothing changed.`);
@@ -74,7 +83,7 @@ const sameClaim = (a, b) => !!a && !!b && a.pid === b.pid && a.start === b.start
 export function step(r, e) {
   const [from, to] = MOVES[e.type] ?? (() => { throw new TypeError(`no request event ${e.type}`); })();
   if (r.status !== from) {
-    if (r.status === 'approving') refuse(`${r.id} is already being approved (since ${when(r.claim.at)}). Nothing changed.`);
+    if (r.status === 'approving') refuse(`${r.id} is already being approved (${claimed(r.claim)}). Nothing changed.`);
     if (DECIDED.includes(r.status)) refuse(`${r.id} was already ${r.status} at ${when(r.decidedAt)} (${r.via}). Nothing changed.`);
     refuse(`${r.id} is not being approved. Nothing changed.`);
   }
@@ -146,51 +155,73 @@ export const update = (path, id, event) => withLock(path, () => {
   return r;
 });
 
-/** The id of the task of a request in the logbook: the first task whose title starts with "<id>:", or null. */
-const taskOf = async (tool, id) => (await tool.tasks()).find((t) => t.title.startsWith(`${id}:`))?.id ?? null;
+/** The marker of a request's task: its title starts with it. */
+const marker = (id) => `${id}: `;
+/** The id of the task of a request in the logbook: the task whose title is exactly `<id>: <titleForSage>` (F-T72-9), or null. */
+const taskOf = async (tool, r) => (await tool.tasks()).find((t) => t.title === `${marker(r.id)}${r.titleForSage}`)?.id ?? null;
 /** Whether the process of a claim still runs: its pid, with the start time of the claim (a pid can be reused). */
 const runs = (c) => alive(c.pid) && startOf(c.pid) === c.start;
 
-/** Ends one claim by what the logbook holds: a task of the request means approved with it; none means pending again. */
-async function settle(path, r, tool, at) {
-  const task = await taskOf(tool, r.id);
+/**
+ * Ends one claim by what the logbook holds: a task of the request means approved with it; none means pending again, but only when
+ * `release` is true. Otherwise the request stays as it is.
+ */
+async function settle(path, r, tool, at, release = true) {
+  const task = await taskOf(tool, r);
+  if (!task && !release) return r;
   return update(path, r.id, task ? { type: 'approve', claim: r.claim, task, at } : { type: 'release', claim: r.claim });
 }
 
 /**
- * The reconcile step: a request whose claim's process is gone is settled by the logbook of its project. Any other request stays.
- * `toolOf(request)` gives the state tool of its project. Returns the request as it is now.
+ * The reconcile step: a request whose claim's process is gone is settled by the logbook of its project. With no task there, it is
+ * released only RETRY_AFTER after the claim: until then its state tool can still add the task. Any other request stays.
+ * `toolOf(request)` gives the state tool of its project. When another run settled the claim first, the request as that run left it.
+ * Returns the request as it is now.
  */
 export async function reconcile(path, id, toolOf, at = Date.now()) {
   const r = find(loadRequests(path), id);
   if (r.status !== 'approving' || runs(r.claim)) return r;
-  return settle(path, r, toolOf(r), at);
+  try {
+    return await settle(path, r, toolOf(r), at, at - r.claim.at > RETRY_AFTER);
+  } catch (e) {
+    if (e instanceof Refused) return find(loadRequests(path), id); // another run settled it (F-T72-11)
+    throw e;
+  }
 }
 
 /**
  * Approves a request in three steps, so that a crash at any point leaves a state that reconcile finishes, and never two tasks:
  * 1. under the lock, pending → approving with a claim of this process;
- * 2. with no lock, `task add --title=<id>: <titleForSage> --size=<size>` through the state tool;
+ * 2. with no lock, `task add --title=<id>: <titleForSage> --size=<size>` through the state tool, stopped after ADD_TASK_MS;
  * 3. under the lock, approving → approved with the task id.
+ * Before step 1, a task whose title starts with "<id>: " refuses: it is not this request's, or the file is not the one that made it.
  * When step 2 fails, the logbook decides (settle): the tool can fail after it wrote the task. When the logbook cannot be read either,
- * the claim stays, and the next run reconciles it once this process is gone.
+ * the claim stays, and a run after RETRY_AFTER reconciles it.
  * @param {{ tool: { addTask: Function, tasks: Function }, size?: 'small' | 'large', by: string, via: 'discord' | 'terminal', now?: () => number }} o
  */
 export async function approve(path, id, { tool, size = 'large', by, via, now = Date.now }) {
-  await reconcile(path, id, () => tool, now());
+  const before = await reconcile(path, id, () => tool, now());
+  if (before.status === 'pending') {
+    const other = (await tool.tasks()).find((t) => t.title.startsWith(marker(id)));
+    if (other) refuse(`a task titled ${marker(id).trim()} already exists (${other.id}). Nothing changed.`);
+  }
   const claim = { by, via, pid: process.pid, start: startOf(process.pid), at: now() };
   const r = update(path, id, { type: 'claim', claim });
   let task;
   try {
-    task = await tool.addTask({ title: `${id}: ${r.titleForSage}`, size });
+    task = await tool.addTask({ title: `${marker(id)}${r.titleForSage}`, size });
   } catch (e) {
-    const why = forTerminal(String(e?.stderr || e?.message || e).split('\n').find(Boolean) ?? '');
+    const why = forTerminal(e?.message ?? e);
     let after;
     try { after = await settle(path, r, tool, now()); } catch {
-      throw new Error(`could not add the task of ${id} (${why}), and could not read the logbook. ${id} shows as being approved until the next run of this command. Nothing else changed.`);
+      throw new Error(`could not add the task of ${id} (${why}), and could not read the logbook. ${id} shows as being approved (${claimed(claim)}). Nothing else changed.`);
     }
     if (after.status === 'approved') return after;
     throw new Error(`could not add the task of ${id}: ${why}. ${id} waits again. Nothing changed.`);
   }
-  return update(path, id, { type: 'approve', claim, task, at: now() });
+  try {
+    return update(path, id, { type: 'approve', claim, task, at: now() });
+  } catch (e) {
+    throw new Error(`added sage task ${task} to ${r.project}, but could not record it (${forTerminal(e?.message ?? e).replace(/ Nothing changed\.$/, '')}). ${id} settles on the next command.`);
+  }
 }

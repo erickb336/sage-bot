@@ -4,11 +4,12 @@
 // SAMPLE DATA ONLY: every id, name and project is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { addRequest, LIMITS, loadRequests, newRequest, requestsPathOf, step, update } from '../src/requests.js';
+import { addRequest, LIMITS, loadRequests, newRequest, reconcile, requestsPathOf, step, update } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
+import { alive } from '../src/state.js';
 import { execFileSync, FIXTURE, JON, MAYA, spawn, spawnSync, T0 } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
 
@@ -17,8 +18,10 @@ const MODULE = new URL('../src/requests.js', import.meta.url).pathname;
 
 // The fake state tool. It logs each argv and the names of its environment to argv.log, keeps the tasks in logbook/tasks.tsv, and in
 // `task add` does what fake.json (beside it) says: ok; crash-before (kills its caller, the approver, before it writes the task: a crash
-// after step 1); crash-after (writes the task, then kills its caller: a crash after step 2); slow (waits `ms` first); refuse (exit 2,
-// no task); fail-after-write (writes the task, then exits 3).
+// after step 1); crash-after (writes the task, then kills its caller: a crash after step 2); slow (waits until the test writes the file
+// `release` beside it); orphan (kills its caller, then keeps running: waits for `release`, then writes the task: a lone kill of the
+// approver); hang (writes its pid to `pid`, then waits for `release`); refuse (exit 2, no task); silent (exit 4, no stderr);
+// fail-after-write (writes the task, then exits 3).
 const FAKE = `import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 const here = new URL('./', import.meta.url).pathname;
 const c = JSON.parse(readFileSync(here + 'fake.json', 'utf8'));
@@ -31,13 +34,17 @@ if (!existsSync(tsv)) writeFileSync(tsv, 'id\\ttitle\\tsize\\n');
 if (args[0] === 'logbook') { console.log(book); process.exit(0); }
 if (args[0] !== 'task' || args[1] !== 'add') { process.stderr.write('fake: no such command\\n'); process.exit(9); }
 if (c.mode === 'crash-before') { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
-if (c.mode === 'slow') await new Promise((r) => setTimeout(r, c.ms));
+if (c.mode === 'hang') writeFileSync(here + 'pid', String(process.pid));
+if (c.mode === 'orphan') process.kill(process.ppid, 'SIGKILL');
+if (['slow', 'orphan', 'hang'].includes(c.mode)) while (!existsSync(here + 'release')) await new Promise((r) => setTimeout(r, 20));
 if (c.mode === 'refuse') { process.stderr.write('refused: sample refusal\\n'); process.exit(2); }
+if (c.mode === 'silent') process.exit(4);
 const n = readFileSync(tsv, 'utf8').split('\\n').filter(Boolean).length;
 const title = args.find((a) => a.startsWith('--title=')).slice(8);
 const size = args.find((a) => a.startsWith('--size=')).slice(7);
 appendFileSync(tsv, 'T' + n + '\\t' + title + '\\t' + size + '\\n');
 if (c.mode === 'crash-after') { process.kill(process.ppid, 'SIGKILL'); process.exit(0); }
+if (c.mode === 'orphan') process.exit(0);
 if (c.mode === 'fail-after-write') { process.stderr.write('wrote the task, then failed\\n'); process.exit(3); }
 console.log('T' + n + ' framed · ' + size + ' · route build');
 `;
@@ -71,7 +78,19 @@ function world() {
   const tasks = () => (existsSync(join(tool, 'logbook', 'tasks.tsv')) ? readFileSync(join(tool, 'logbook', 'tasks.tsv'), 'utf8').split('\n').filter(Boolean).slice(1) : []);
   const runs = () => (existsSync(join(tool, 'argv.log')) ? readFileSync(join(tool, 'argv.log'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   const status = (id) => loadRequests(path).requests.find((r) => r.id === id).status;
-  return { root, project, config, path, fake, cli, cliLater, add, tasks, runs, status, env, killPath: `${config.statePath}.leads-off` };
+  const release = () => writeFileSync(join(tool, 'release'), '');
+  /** Moves the claim of a request `ms` back in time, as if that much time went by since step 1. */
+  const age = (id, ms) => {
+    const file = JSON.parse(readFileSync(path, 'utf8'));
+    file.requests.find((r) => r.id === id).claim.at -= ms;
+    writeFileSync(path, JSON.stringify(file));
+  };
+  /** Writes rows of tasks to the fake logbook, as a person or another config would add them. */
+  const book = (...rows) => {
+    mkdirSync(join(tool, 'logbook'), { recursive: true });
+    writeFileSync(join(tool, 'logbook', 'tasks.tsv'), ['id\ttitle\tsize', ...rows, ''].join('\n'));
+  };
+  return { root, project, tool, config, configPath, path, fake, cli, cliLater, add, tasks, runs, status, release, age, book, env, killPath: `${config.statePath}.leads-off` };
 }
 
 // ---- The record and its transitions (pure) ----
@@ -97,7 +116,7 @@ const AS = {
 };
 
 test('the transition table: every status with every event, as the status it goes to or the refusal for a person', () => {
-  const busy = 'RQ1 is already being approved (since 2026-10-04 14:01 UTC). Nothing changed.';
+  const busy = 'RQ1 is already being approved (since 2026-10-04 14:01 UTC; if that run stopped, retry after 2026-10-04 14:03 UTC). Nothing changed.';
   const idle = 'RQ1 is not being approved. Nothing changed.';
   const done = (s) => `RQ1 was already ${s} at 2026-10-04 14:02 UTC (${s === 'withdrawn' ? 'discord' : 'terminal'}). Nothing changed.`;
   const all = (s) => Object.fromEntries(Object.keys(EVENTS).map((e) => [e, done(s)]));
@@ -224,8 +243,8 @@ test('list, show, approve and decline at the terminal', () => {
   w.add({ title: 'Add "CSV" export', requesterName: 'Jon' }, T0);
   w.add({ title: 'Dark mode', text: 'A dark theme for the reports page.', requester: MAYA, requesterName: 'Ana\u001b[31m' }, T0 + 60_000);
   assert.equal(w.cli('list').out, [
-    'RQ1  reports-app  waiting  Jon  2026-10-04 14:00 UTC  -  Add "CSV" export',
-    'RQ2  reports-app  waiting  Ana [31m  2026-10-04 14:01 UTC  -  Dark mode',
+    'RQ1  reports-app  waiting  "Jon"  2026-10-04 14:00 UTC  -  "Add \\"CSV\\" export"',
+    'RQ2  reports-app  waiting  "Ana [31m"  2026-10-04 14:01 UTC  -  "Dark mode"',
   ].join('\n'));
   assert.equal(w.cli('show', 'RQ1').out, [
     `RQ1 · reports-app (${w.project}) · waiting`,
@@ -242,8 +261,8 @@ test('list, show, approve and decline at the terminal', () => {
   assert.deepEqual(w.cli('decline', 'RQ2', '--reason', 'We plan it for January.'), { code: 0, signal: null, out: 'Declined RQ2. Reason: "We plan it for January."', err: '' });
   const list = w.cli('list').out.split('\n');
   assert.deepEqual(list, [
-    'RQ1  reports-app  approved  Jon  2026-10-04 14:00 UTC  T1  Add "CSV" export',
-    'RQ2  reports-app  declined  Ana [31m  2026-10-04 14:01 UTC  -  Dark mode',
+    'RQ1  reports-app  approved  "Jon"  2026-10-04 14:00 UTC  T1  "Add \\"CSV\\" export"',
+    'RQ2  reports-app  declined  "Ana [31m"  2026-10-04 14:01 UTC  -  "Dark mode"',
   ]);
   // Pending first: a new request goes above the decided ones.
   w.add({}, T0 + 120_000);
@@ -281,7 +300,7 @@ test('a terminal approve is refused while the link is off; a decline still works
   w.add();
   writeFileSync(w.killPath, '{}\n', { mode: 0o600 });
   assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '',
-    err: 'sage-bot requests: the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link first: node scripts/leads.mjs restore. Nothing changed.' });
+    err: `sage-bot requests: the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link first: node scripts/leads.mjs --config ${w.configPath} restore. Nothing changed.` });
   assert.equal(w.status('RQ1'), 'pending');
   assert.equal(w.runs().length, 0);
   assert.equal(w.cli('decline', 'RQ2').out, 'Declined RQ2.');
@@ -297,6 +316,10 @@ test('a crash after step 1 (the claim): the next run finds no task, so the reque
   assert.equal(w.status('RQ1'), 'approving');
   assert.deepEqual(w.tasks(), []);
   w.fake();
+  // Its tool could still run (F-T72-8): the claim stays until 2 minutes after it.
+  w.age('RQ1', 110_000);
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
+  w.age('RQ1', 15_000);
   assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}waiting /);
   assert.equal(w.cli('approve', 'RQ1').out, 'Approved RQ1. Added sage task T1 to reports-app.');
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
@@ -338,7 +361,7 @@ test('the tool fails after it wrote the task: the logbook decides, so the reques
 test('a double approve, and a decline and a withdraw from a second process, while the first approve runs: one task, clear refusals', async () => {
   const w = world();
   w.add();
-  w.fake({ mode: 'slow', ms: 1500 });
+  w.fake({ mode: 'slow' }); // the tool waits until the test releases it, after the refusals (F-T72-2)
   const first = w.cliLater('approve', 'RQ1');
   while (!existsSync(w.path) || w.status('RQ1') !== 'approving') await sleep(20);
   const second = w.cli('approve', 'RQ1');
@@ -348,6 +371,7 @@ test('a double approve, and a decline and a withdraw from a second process, whil
     `import { update } from ${JSON.stringify(MODULE)}; try { update(${JSON.stringify(w.path)}, 'RQ1', { type: 'withdraw', by: '${JON}', at: 1 }); console.log('withdrawn'); } catch (e) { console.log(e.message); }`],
   { encoding: 'utf8', env: w.env });
   assert.match(withdraw.stdout, /^RQ1 is already being approved/);
+  w.release();
   assert.deepEqual(await first, { code: 0, out: 'Approved RQ1. Added sage task T1 to reports-app.', err: '' });
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
 });
@@ -375,6 +399,7 @@ test('an id is never used again: after a crash, and after a request is decided',
   w.fake({ mode: 'crash-before' });
   assert.equal(w.cli('approve', 'RQ2').signal, 'SIGKILL');
   w.fake();
+  w.age('RQ2', 125_000);
   assert.equal(w.cli('decline', 'RQ1').code, 0);
   assert.equal(w.add().id, 'RQ3');
   assert.equal(w.cli('approve', 'RQ2').out, 'Approved RQ2. Added sage task T1 to reports-app.');
@@ -390,4 +415,117 @@ test('a request whose project left the config, or names another folder now, is r
   w.add({ folder: '/sample/elsewhere' });
   assert.equal(w.cli('approve', 'RQ1').err, 'sage-bot requests: the project reports-app (/sample/elsewhere) of RQ1 is not in the config now. Nothing changed.');
   assert.equal(w.status('RQ1'), 'pending');
+});
+
+// ---- Round 1 repair (R869) ----
+
+test('F-T72-8: a lone kill of the approver while its tool still runs: the claim stays, the late task is recorded, and no second task', async () => {
+  const w = world();
+  w.add();
+  w.fake({ mode: 'orphan' });
+  try {
+    assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
+    assert.deepEqual(w.tasks(), []); // the tool runs on, with no task yet
+    assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
+    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by owner \(terminal, pid \d+\) since \d{4}-\d\d-\d\d \d\d:\d\d UTC; if that run stopped, retry after \d{4}-\d\d-\d\d \d\d:\d\d UTC\n/);
+    assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved \(since .* UTC; if that run stopped, retry after .* UTC\)\. Nothing changed\.$/);
+  } finally { w.release(); }
+  while (!w.tasks().length) await sleep(20);
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}approved {2}"Jon" {2}.* {2}T1 {2}"Add CSV export"$/);
+  assert.match(w.cli('approve', 'RQ1').err, /RQ1 was already approved at /);
+  assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
+});
+
+test('F-T72-8: addTask stops a tool that runs past its limit with SIGKILL and says so', async () => {
+  const w = world();
+  w.fake({ mode: 'hang' });
+  const tool = sageTool({ sagePath: w.config.sagePath, project: w.project, env: w.env });
+  const late = setTimeout(w.release, 15_000); // without the limit, the tool ends here and adds T1
+  try {
+    await assert.rejects(tool.addTask({ title: 'RQ1: Add CSV export', size: 'large' }, { ms: 3000 }), { message: 'the sage state tool took longer than 3 seconds and was stopped' });
+  } finally { clearTimeout(late); w.release(); }
+  assert.equal(alive(Number(readFileSync(join(w.tool, 'pid'), 'utf8'))), false);
+  assert.deepEqual(w.tasks(), []);
+});
+
+test('F-T72-9: a task titled "RQn: " that is not this request\'s refuses the approve, and never settles a claim', () => {
+  const w = world();
+  w.add();
+  w.book('T1\tRQ1: Fix the login page\tsmall'); // a person's task, or one from an older requests file
+  assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '', err: 'sage-bot requests: a task titled RQ1: already exists (T1). Nothing changed.' });
+  assert.equal(w.status('RQ1'), 'pending');
+  assert.deepEqual(w.tasks(), ['T1\tRQ1: Fix the login page\tsmall']);
+  // A dead claim with such a task beside it is released, not approved with that task.
+  w.add();
+  w.fake({ mode: 'crash-before' });
+  assert.equal(w.cli('approve', 'RQ2').signal, 'SIGKILL');
+  w.book('T1\tRQ2: Fix the login page\tsmall');
+  w.age('RQ2', 125_000);
+  assert.match(w.cli('list').out, /\nRQ2 {2}reports-app {2}waiting /);
+});
+
+test('F-T72-3: a tool that fails with no stderr gives its exit code, not the argv', () => {
+  const w = world();
+  w.add();
+  w.fake({ mode: 'silent' });
+  assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '', err: 'sage-bot requests: could not add the task of RQ1: the sage state tool stopped with exit code 4. RQ1 waits again. Nothing changed.' });
+});
+
+test('F-T72-4: the last request id is RQ999999999; the next add is refused and the file stays loadable', () => {
+  assert.equal(newRequest({ next: 999_999_999, requests: [] }, FIELDS, T0).request.id, 'RQ999999999');
+  assert.throws(() => newRequest({ next: 1_000_000_000, requests: [] }, FIELDS, T0), { message: 'the requests file has used every request id (RQ1 to RQ999999999). Nothing changed.' });
+});
+
+test('F-T72-5: list quotes the name and the title, so a newline in them never reads as a second request', () => {
+  const w = world();
+  w.add({ requesterName: 'Ann\nRQ9  reports-app  approved', title: 'Add export\nRQ8  x' });
+  assert.deepEqual(w.cli('list').out.split('\n'), ['RQ1  reports-app  waiting  "Ann RQ9  reports-app  approved"  2026-10-04 14:00 UTC  -  "Add export RQ8  x"']);
+});
+
+test('F-T72-6: a missing or unreadable config names the config and changes nothing', () => {
+  const w = world();
+  const missing = join(w.root, 'none.json'), bad = join(w.root, 'bad.json');
+  writeFileSync(bad, 'not json');
+  for (const [config, why] of [[missing, 'ENOENT'], [bad, 'not JSON']]) {
+    const r = spawnSync(process.execPath, [SCRIPT, '--config', config, 'list'], { encoding: 'utf8', env: w.env });
+    assert.deepEqual([r.status, r.stdout, r.stderr], [1, '', `sage-bot requests: could not read the config ${config} (${why}). Nothing changed.\n`]);
+  }
+});
+
+test('F-T72-10: a lock that times out at step 3, after the task was added, says so; the next command records the task', async () => {
+  const w = world();
+  w.add();
+  w.fake({ mode: 'slow' });
+  const first = w.cliLater('approve', 'RQ1');
+  while (!existsSync(w.path) || w.status('RQ1') !== 'approving') await sleep(20);
+  const lock = `${w.path}.lock`;
+  writeFileSync(lock, String(process.pid)); // a live run holds the lock
+  w.release();
+  const r = await first;
+  rmSync(lock);
+  assert.deepEqual(r, { code: 1, out: '', err: `sage-bot requests: added sage task T1 to reports-app, but could not record it (another sage-bot run (pid ${process.pid}) holds ${lock}. If none runs, remove ${lock}.). RQ1 settles on the next command.` });
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}approved {2}.* {2}T1 {2}/);
+  assert.equal(w.tasks().length, 1);
+});
+
+test('F-T72-11: one claim that cannot be checked lists as it is, with its error, and the rest list; a claim another run settled is no error', async () => {
+  const w = world();
+  w.add();
+  w.add({ title: 'Dark mode' });
+  w.fake({ mode: 'crash-before' });
+  assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
+  const file = JSON.parse(readFileSync(w.path, 'utf8'));
+  file.requests[0].folder = '/sample/elsewhere'; // its project left the config
+  writeFileSync(w.path, JSON.stringify(file));
+  w.age('RQ1', 125_000);
+  const r = w.cli('list');
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.out.split('\n').map((l) => l.split('  ').slice(0, 3).join(' ')), ['RQ2 reports-app waiting', 'RQ1 reports-app being approved']);
+  assert.equal(r.err, 'sage-bot requests: could not check RQ1: the project reports-app (/sample/elsewhere) of RQ1 is not in the config now. Nothing changed.');
+  // Two runs reconcile one dead claim: the one that comes second gets the request as the first left it.
+  file.requests[0].folder = w.project;
+  writeFileSync(w.path, JSON.stringify(file));
+  w.age('RQ1', 125_000);
+  const first = { tasks: async () => { update(w.path, 'RQ1', { type: 'release', claim: loadRequests(w.path).requests[0].claim }); return []; } };
+  assert.equal((await reconcile(w.path, 'RQ1', () => first)).status, 'pending');
 });
