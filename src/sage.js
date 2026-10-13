@@ -74,6 +74,9 @@ export function answerArgs(row, text) {
 }
 
 /** The environment names that the state tool reads (sage.mjs and its core), for the broker's logbook verbs; LANG and LC_* too. */
+/** How long `task add` of a request may run before addTask kills it (F-T72-8). reconcile waits longer than this: RETRY_AFTER. */
+export const ADD_TASK_MS = 60_000;
+
 const TOOL_ENV = ['PATH', 'HOME', 'SAGE_HOME', 'SAGE_WORKTREES', 'SAGE_BOARD_ROOTS', 'CLAUDE_CONFIG_DIR'];
 
 /**
@@ -82,9 +85,10 @@ const TOOL_ENV = ['PATH', 'HOME', 'SAGE_HOME', 'SAGE_WORKTREES', 'SAGE_BOARD_ROO
  */
 export function sageTool({ sagePath, project, env = process.env }) {
   // The one caller of the state tool for this project: a fixed argv, no shell, `--project` last. `signal` kills the tool with SIGKILL
-  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code`.
+  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code` and the
+  // tool's refusal as `stderr`.
   const exec = (args, childEnv, { signal } = {}) => new Promise((resolve, reject) => {
-    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out) => (e ? reject(e) : resolve(out.trim())));
+    const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out, err) => (e ? reject(Object.assign(e, { stderr: err })) : resolve(out.trim())));
     signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
   });
   // The broker's logbook verbs get only the names that the state tool reads (an allow-list, F-T195-2): never the bridge's token or
@@ -109,6 +113,23 @@ export function sageTool({ sagePath, project, env = process.env }) {
     tasks: () => table('tasks'),
     /** Every decision row, in the order sage wrote them: { at, task, decision, why }. */
     decisions: () => table('decisions'),
+    /**
+     * Adds one task (T72): a fixed argv with the title as one `--title=` argument, the allow-listed environment, no shell. `size` is
+     * small or large. A title with a control character is refused: sage keeps it in a TSV row. The tool is killed (SIGKILL) after
+     * `ms` (ADD_TASK_MS). Returns the new task id, as `task add` prints it ("T74 framed · …"); throws for any other output, and for a
+     * failure with the first line of the tool's stderr, or a fixed text with the exit code (never Node's line with the argv: F-T72-3).
+     */
+    addTask: async ({ title, size }, { ms = ADD_TASK_MS } = {}) => {
+      if (!['small', 'large'].includes(size)) throw new TypeError(`a task from a request is small or large, not ${JSON.stringify(size)}`);
+      if (typeof title !== 'string' || !title.trim() || /\p{Cc}/u.test(title)) throw new TypeError('a task title is one line of text');
+      const signal = AbortSignal.timeout(ms);
+      let said;
+      try { said = await command(['task', 'add', `--title=${title}`, `--size=${size}`], { signal }); } catch (e) {
+        if (signal.aborted) throw new Error(`the sage state tool took longer than ${ms / 1000} seconds and was stopped`);
+        throw new Error(String(e.stderr ?? '').split('\n').find((l) => l.trim()) || `the sage state tool stopped with ${e.signal ? `signal ${e.signal}` : `exit code ${e.code}`}`);
+      }
+      return /^(T\d{1,9}) framed\b/.exec(said)?.[1] ?? (() => { throw new Error(`the sage state tool added no task: ${JSON.stringify(said.slice(0, 200))}`); })();
+    },
     /** Records the answer of one gate: `text` is what gates.tsv is to hold (answerArgs). */
     answer: async (id, text) => {
       const row = (await table('gates')).find((r) => r.id === id) ?? (() => { throw new Error(`gate ${id} is not in gates.tsv`); })();

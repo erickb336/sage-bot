@@ -215,7 +215,7 @@ export function withLock(path, work) {
     try { text = readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
     const pid = /^\d+$/.test(text) ? Number(text) : undefined;
     if (pid !== undefined && (pid === process.pid || !alive(pid))) { unlock(file, text); continue; }
-    if (Date.now() > until) throw new Error(`another vote run (pid ${pid ?? 'unknown'}) holds ${file}. If none runs, remove ${file}. Nothing changed.`);
+    if (Date.now() > until) throw new Error(`another sage-bot run (pid ${pid ?? 'unknown'}) holds ${file}. If none runs, remove ${file}. Nothing changed.`);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   }
 }

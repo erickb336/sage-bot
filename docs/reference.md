@@ -593,6 +593,52 @@ node scripts/leads.mjs read 5
 
 `verify` exits 1 and prints "BROKEN: … a break at line N" when a line is not byte for byte the line that the bridge writes for its values: the eleven keys (the nine fields, `prev` and `hash`) once each, in that order, with no other byte (F-T143-6, F-T143-12; a key put twice is a break, although JSON.parse would keep the last copy and grep shows the first), does not hold the hash of the line before it, or does not match its own hash. So it finds an edit, a removal or a reorder of a line, when no one has hashed the lines after it again. The chain has no key, so a person who can write the file can edit a line and hash again that line and every line after it: `verify` then says intact. The chain shows tampering only against a known earlier head (the hash of a line that someone kept), such as the hash in each #sage-audit copy. So `verify` also does not find a cut tail or an older copy put back; only the #sage-audit copy shows those (anchoring the chain is T135). A session runs as Erick's user, so the file modes do not keep a session out: the sandbox of the sessions must deny the state folder (T134, F-T134-2). `read n` takes n of 1 or more; after a break it prints the lines from the break on as they are, each starting with UNVERIFIED. Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`.
 
+### Requests (terminal)
+
+`src/requests.js` and `scripts/requests.mjs` (T72 PR 1). A sage-lead's request for a feature is one record in `<statePath>.requests`, beside the thread map and safe like it (0600, written whole, read with `O_NOFOLLOW`; a file of another shape is refused). Every change is a read-modify-write under the file's lock. Erick approves or declines a request at the terminal. An approved request becomes one sage task through the state tool. Discord comes in T72 PR 3: the `/sage request` form, the thread and the card. Until then, no code makes a request but the tests.
+
+<!-- check: run, prints "no requests" -->
+```sh
+node scripts/requests.mjs list
+```
+
+- `list`: one line per request, waiting first: id, project, status, requester, time, task, title. The time is the local time of the computer, with its zone. The task is "no task yet" while the request waits or is being approved, and "no task" after a decline or a withdraw. The requester's name and the title are in double quotes as quoted data. A request that `list` cannot check (for example, its project left the config) lists as it is, and its error follows the list.
+- `show <RQ id>`: every field. Each time is the local time with UTC beside it, for example "2026-10-12 17:26 EDT (21:26 UTC)". When the UTC date is another day, it shows too: "2026-10-12 22:00 EDT (2026-10-13 02:00 UTC)". The title and the text as typed are each in double quotes as quoted data. The title and the text for sage (`forModel`) show only when they differ from the typed ones. sage reads a request with this command. For a waiting request, the last line says what an approve does: `If you approve: sage adds the task "RQ1: Add CSV export" to reports-app, size large (use --size small to change).`
+- `approve <RQ id> [--size small|large]`: adds the sage task `<RQ id>: <title for sage>`, large by default, and says the size: "Approved RQ1. Added sage task T1 to reports-app (large)." Refused while the link from Discord to sage is off: restore the link first (the refusal gives the command, with `--config <path>` when the config is not the default one). Refused when the project's logbook already has a task whose title starts with `<RQ id>: ` (a person's task, a task from an older requests file, or one of another config): `sage task T4 in reports-app already starts with "RQ1: ". RQ1 was not approved. Decline RQ1, or rename or remove T4 in sage, then approve again.`
+- `decline <RQ id> [--reason <text>]`: the reason has at most 300 characters, for people only. For the bridge, `decline` refuses a reason that is not text with a TypeError ("reason must be text, not number. Nothing changed.") before it writes anything.
+- `--help`: prints the usage and exits 0.
+
+Each line that refuses ends with "Nothing changed." or with the next step. A refusal for a request that was decided gives the time and the way (terminal or Discord), and for an approved one its task: "RQ1 was already approved at 2026-10-12 21:30 EDT (2026-10-13 01:30 UTC) (terminal): sage task T1. Nothing changed." When the state tool fails: "could not add the task of RQ1: <the tool's error>. RQ1 still waits. Fix the cause, then run approve again." When the project of a request left the config: "the project reports-app (<folder>) is not in the config. Add it back, or decline RQ1."
+
+**The status words.** The file and the code use the status; people see its word (`STATUS_WORDS` in `src/requests.js`, which the card on Discord uses too):
+
+| Status in the file | Word for people |
+| --- | --- |
+| `pending` | waiting |
+| `approving` | being approved |
+| `approved` | approved |
+| `declined` | declined |
+| `withdrawn` | withdrawn |
+
+**The record**: `id` (`RQ` and a number; `next` in the file counts up, and an id is never reused), `project` and `folder` (the identity of `loadProjects`), `title` (4 to 70 characters), `text` (10 to 500), `titleForSage` and `textForSage` (`forModel`, made once), `designQuestions` (`team` or `owner`; "the team votes" or "Erick decides"), `requester` and `requesterName` (1 to 100 characters), `status`, `claim` (only while approving; its `by` is as `decidedBy`), `createdAt` and `decidedAt` (whole milliseconds in the range of a JavaScript Date), `decidedBy` (`owner` for Erick, who shows as "Erick", or a Discord id), `via` (`discord` or `terminal`), `reason`, `task`, and the Discord fields `channel`, `line`, `card`, `thread` and `shown`. Only the requester withdraws, on Discord. Each new or changed record is checked as the loader checks it before it is saved (for example, each Discord id is a string of 17 to 20 digits): a record with a field of the wrong kind is refused, nothing is written, and so no write makes the file unreadable.
+
+**For the bridge (T72 PR 3).** `src/requests.js` holds every rule, and the terminal only reads the command line and prints. Each function takes the config: `addRequest`, `approve`, `decline`, `withdraw` (each of the last three runs the reconcile step first), `setDiscord(config, id, { line, card, thread, shown })` (sets only those fields, under the lock; the status stays), `reconcile` and `toolOf` (the state tool of a request's project: its name and folder in `loadProjects`). `approve` checks the link itself, and again under the lock of the claim, because the link can go off while it reads the logbook.
+
+**An approval** has three steps, so that a crash leaves no second task:
+
+1. Under the lock, `pending` becomes `approving` with a claim: who, how, the time, and the pid and start time of the process.
+2. With no lock, `task add --title=<RQ id>: <title for sage> --size=<size>`, as one fixed argv with the allow-listed environment. The approver kills the tool with SIGKILL after 60 seconds (`ADD_TASK_MS` in `src/sage.js`). A failure gives the first line of the tool's stderr, or "the sage state tool stopped with exit code N" when it printed none.
+3. Under the lock, `approving` becomes `approved` with the task id. When the lock is not free within 2 seconds, the task is added but not recorded: "added sage task T4 to <project>, but could not record it (…). RQ1 settles on the next command."
+
+A claim whose approve no longer runs is settled by the logbook of its project. For a claim of another process, that means its process is gone. For a claim of this process (the bridge runs for a long time), it means its approve ended: for example, step 3 could not take the lock, or step 2 failed and the logbook could not be read. Each command does this before it reads or changes a request:
+
+- A task whose title is exactly `<RQ id>: <title for sage>` means approved with that task, at any age of the claim.
+- No such task means waiting again, but only when more than 2 minutes went by since the claim (`RETRY_AFTER` in `src/requests.js`: the 60 seconds of step 2 and 60 seconds more). Until then, the request stays "being approved", because the tool that the claim started can still run: a kill of the approver alone does not stop its tool. `show` and the refusal of a second approve say when a person can approve again: "RQ1 is already being approved since 2026-10-12 17:26 EDT (21:26 UTC). If it crashed, run approve again after 2026-10-12 17:28 EDT (21:28 UTC). Nothing changed."
+
+When step 2 fails, the logbook decides too, because the tool can fail after it wrote the task. A second approve or a decline during step 2 gets "already being approved". When two commands settle one claim at once, the second one takes the request as the first one left it.
+
+What this does not cover: a tool whose approver was killed and that runs on for more than 2 minutes can still add its task after the release. When that task comes before the next approve, the approve refuses, because a task titled `<RQ id>: ` exists. When it comes after the next approve, the logbook has two tasks for one request, and Erick removes one in sage.
+
 ## Sage sessions and their threads
 
 The parent channel (for example `#sage`) is read only for people. It has one line for each sage session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
