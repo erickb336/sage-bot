@@ -270,7 +270,7 @@ test('list, show, approve and decline at the terminal', () => {
   // Pending first: a new request goes above the decided ones.
   w.add({}, T0 + 120_000);
   assert.match(w.cli('list').out, /^RQ3 {2}reports-app {2}waiting /);
-  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."\n/);
+  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."\n/);
   // The terminal answer is final.
   assert.match(w.cli('approve', 'RQ2').err, /^sage-bot requests: RQ2 was already declined at .* \(terminal\)\. Nothing changed\.$/);
   assert.match(w.cli('decline', 'RQ1').err, /^sage-bot requests: RQ1 was already approved at .* \(terminal\): sage task T1\. Nothing changed\.$/);
@@ -430,7 +430,7 @@ test('F-T72-8: a lone kill of the approver while its tool still runs: the claim 
     assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
     assert.deepEqual(w.tasks(), []); // the tool runs on, with no task yet
     assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
-    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since \d{4}-\d\d-\d\d \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after \d{4}-\d\d-\d\d \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.\n/);
+    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\. If it crashed, run approve again after \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\.\n/);
     assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved since .* UTC\)\. If it crashed, run approve again after .* UTC\)\. Nothing changed\.$/);
   } finally { w.release(); }
   while (!w.tasks().length) await sleep(20);
@@ -551,12 +551,12 @@ test('F-T72-19: local time with UTC beside it, Erick by name, the task in the re
   const w = world();
   w.add({ designQuestions: 'owner' }, Date.UTC(2026, 9, 13, 1, 26)); // the evening before, in New York
   const show = w.cli('show', 'RQ1').out.split('\n');
-  assert.equal(show.find((l) => l.startsWith('requested by')), `requested by: "Jon" (${JON}) at 2026-10-12 21:26 EDT (01:26 UTC)`);
+  assert.equal(show.find((l) => l.startsWith('requested by')), `requested by: "Jon" (${JON}) at 2026-10-12 21:26 EDT (2026-10-13 01:26 UTC)`); // F-T72-26: the UTC date, as it is another day there
   assert.ok(show.includes('design questions: Erick decides'));
   assert.ok(!show.some((l) => l.includes('for sage'))); // the title and the text are what sage reads, so they show once
   assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}waiting {2}"Jon" {2}2026-10-12 21:26 EDT {2}no task yet {2}/);
   assert.equal(w.cli('approve', 'RQ1').code, 0);
-  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1\n/);
+  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at \d{4}-\d\d-\d\d \d\d:\d\d EDT \((\d{4}-\d\d-\d\d )?\d\d:\d\d UTC\)\nsage task: T1\n/);
   assert.match(w.cli('approve', 'RQ1').err, / \(terminal\): sage task T1\. Nothing changed\.$/);
   // No pid in a message: the claim line and the refusal of a second approve.
   w.add();
@@ -631,4 +631,118 @@ test('T211: approve, decline and withdraw for the bridge: each reconciles first;
   const r = await approve(w.config, 'RQ3', { by: 'owner', via: 'discord' });
   assert.deepEqual([r.status, r.task, r.via], ['approved', 'T2', 'discord']);
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge', 'T2\tRQ3: Print view\tlarge']);
+});
+
+// ---- Round 3 repair (R891) ----
+
+test('F-T72-24: in one process (the bridge), a claim whose approve failed at step 3 is not running: reconcile settles it by the logbook', async () => {
+  const w = world();
+  w.add();
+  w.add({ title: 'Dark mode' });
+  w.add({ title: 'Print view' });
+  const at = T0 + 600_000;
+  const opts = (tool, t = at) => ({ by: 'owner', via: 'discord', now: () => t, tool });
+  // addTask answers "T1 ", an id the file cannot hold, so step 3 fails. RQ1 and RQ2: no task in the logbook.
+  const none = { tasks: async () => [], addTask: async () => 'T1 ' };
+  for (const id of ['RQ1', 'RQ2']) {
+    await assert.rejects(approve(w.config, id, opts(none)), { message: `added sage task T1  to reports-app, but could not record it (the record of ${id} has a field of the wrong kind, so it was not saved.). ${id} settles on the next command.` });
+  }
+  // The age rule still holds: before RETRY_AFTER the claim stays; after it, no task means waiting again.
+  assert.equal((await reconcile(w.config, 'RQ1', { at: at + 60_000, tool: none })).status, 'approving');
+  assert.equal((await reconcile(w.config, 'RQ1', { at: at + 125_000, tool: none })).status, 'pending');
+  assert.equal((await decline(w.config, 'RQ1', { by: 'owner', via: 'discord', at: at + 125_000 })).status, 'declined');
+  const again = await approve(w.config, 'RQ2', opts(undefined, at + 125_000));
+  assert.deepEqual([again.status, again.task], ['approved', 'T1']);
+  // RQ3: the tool wrote the task with the exact title, so reconcile approves it with that task, at any age.
+  let book = [];
+  const wrote = { tasks: async () => book, addTask: async ({ title }) => { book = [{ id: 'T7', title }]; return 'T7 '; } };
+  await assert.rejects(approve(w.config, 'RQ3', opts(wrote)), { message: /RQ3 settles on the next command\.$/ });
+  const r = await reconcile(w.config, 'RQ3', { at, tool: wrote });
+  assert.deepEqual([r.status, r.task], ['approved', 'T7']);
+});
+
+test('F-T72-24: in one process, step 2 fails and the logbook cannot be read: approve again after the time it gives works', async () => {
+  const w = world();
+  w.add();
+  const at = T0 + 600_000;
+  let broken = false;
+  const tool = { tasks: async () => { if (broken) throw new Error('sample: logbook unreadable'); return []; }, addTask: async () => { broken = true; throw new Error('sample failure'); } };
+  await assert.rejects(approve(w.config, 'RQ1', { by: 'owner', via: 'discord', now: () => at, tool }),
+    { message: 'could not add the task of RQ1 (sample failure), and could not read the logbook. RQ1 stays being approved since 2026-10-04 10:10 EDT (14:10 UTC). If it crashed, run approve again after 2026-10-04 10:12 EDT (14:12 UTC).' });
+  assert.equal(w.status('RQ1'), 'approving');
+  await assert.rejects(approve(w.config, 'RQ1', { by: 'owner', via: 'discord', now: () => at + 60_000 }), { message: /^RQ1 is already being approved since / });
+  const r = await approve(w.config, 'RQ1', { by: 'owner', via: 'discord', now: () => at + 125_000 });
+  assert.deepEqual([r.status, r.task], ['approved', 'T1']);
+  assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
+});
+
+test('F-T72-24: in one process, a claim whose approve still runs stays running, even after RETRY_AFTER: a decline is refused', async () => {
+  const w = world();
+  w.add();
+  let go;
+  const wait = new Promise((resolve) => { go = resolve; });
+  const tool = { tasks: async () => [], addTask: async () => { await wait; return 'T1'; } };
+  const first = approve(w.config, 'RQ1', { by: 'owner', via: 'discord', now: () => T0, tool });
+  while (w.status('RQ1') !== 'approving') await sleep(5);
+  await assert.rejects(decline(w.config, 'RQ1', { by: 'owner', via: 'discord', at: T0 + 125_000 }), { message: /^RQ1 is already being approved since / });
+  go();
+  assert.equal((await first).status, 'approved');
+});
+
+test('F-T72-25: a decline with a reason that is not text is refused with a clear TypeError, and nothing is written', async () => {
+  const w = world();
+  w.add();
+  const before = readFileSync(w.path, 'utf8');
+  for (const [reason, kind] of [[5, 'number'], [['x'], 'object']]) {
+    await assert.rejects(decline(w.config, 'RQ1', { by: 'owner', via: 'terminal', reason }), { name: 'TypeError', message: `reason must be text, not ${kind}. Nothing changed.` });
+  }
+  assert.equal(readFileSync(w.path, 'utf8'), before);
+  assert.equal((await decline(w.config, 'RQ1', { by: 'owner', via: 'terminal', reason: 'Not now.' })).reason, 'Not now.');
+});
+
+const wrongKind = (id) => ({ message: `the record of ${id} has a field of the wrong kind, so it was not saved. Nothing changed.` });
+
+test('R891: a time out of the Date range is refused before any write; the last time of the range is taken', () => {
+  const w = world();
+  for (const at of [8.64e15 + 1, -8.64e15 - 1]) assert.throws(() => w.add({}, at), wrongKind('RQ1'), String(at));
+  assert.equal(existsSync(w.path), false);
+  assert.equal(w.add({}, 8.64e15).createdAt, 8.64e15);
+});
+
+test('R891: a requester name has 1 to 100 characters (code points)', () => {
+  const w = world();
+  for (const requesterName of ['', 'x'.repeat(101)]) assert.throws(() => w.add({ requesterName }), wrongKind('RQ1'), requesterName);
+  assert.equal(existsSync(w.path), false);
+  assert.equal(w.add({ requesterName: '\u{1F600}'.repeat(100) }).requesterName.length, 200); // 100 emoji are 200 UTF-16 units
+});
+
+test('R891: decidedBy and claim.by are "owner" or a Discord id; another value writes nothing and runs no task add', async () => {
+  const w = world();
+  w.add();
+  w.add();
+  const before = readFileSync(w.path, 'utf8');
+  await assert.rejects(decline(w.config, 'RQ1', { by: 'Erick', via: 'terminal' }), wrongKind('RQ1'));
+  await assert.rejects(approve(w.config, 'RQ2', { by: 'Erick', via: 'terminal' }), wrongKind('RQ2'));
+  assert.equal(readFileSync(w.path, 'utf8'), before);
+  assert.equal(w.runs().filter((r) => r.args[1] === 'add').length, 0);
+  assert.equal((await decline(w.config, 'RQ1', { by: MAYA, via: 'discord' })).decidedBy, MAYA);
+  assert.equal((await approve(w.config, 'RQ2', { by: MAYA, via: 'discord' })).decidedBy, MAYA);
+});
+
+test('R891: the link that goes off while approve reads the logbook refuses the claim under its lock; no task is added', async () => {
+  const w = world();
+  w.add();
+  let added = 0;
+  const tool = { tasks: async () => { writeFileSync(w.killPath, '{}\n', { mode: 0o600 }); return []; }, addTask: async () => { added += 1; return 'T1'; } };
+  await assert.rejects(approve(w.config, 'RQ1', { by: 'owner', via: 'discord', tool }),
+    (e) => e instanceof Refused && e.message === 'the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link first: node scripts/leads.mjs restore. Nothing changed.');
+  assert.deepEqual([w.status('RQ1'), added], ['pending', 0]);
+});
+
+test('F-T72-26: show gives the UTC date beside the local time only when it is another day there', () => {
+  const w = world();
+  w.add({}, Date.UTC(2026, 9, 13, 2, 0)); // 22:00 the evening before, in New York
+  w.add({}, Date.UTC(2026, 9, 12, 14, 0));
+  assert.match(w.cli('show', 'RQ1').out, /\nrequested by: "Jon" \(\d+\) at 2026-10-12 22:00 EDT \(2026-10-13 02:00 UTC\)\n/);
+  assert.match(w.cli('show', 'RQ2').out, /\nrequested by: "Jon" \(\d+\) at 2026-10-12 10:00 EDT \(14:00 UTC\)\n/);
 });

@@ -42,14 +42,18 @@ export function whenLocal(at) {
   const zone = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(d).find((p) => p.type === 'timeZoneName').value;
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())} ${zone}`;
 }
-/** A time for show and the errors: the local time with UTC beside it, "2026-10-12 21:26 EDT (01:26 UTC)"; one time when the zone is UTC. */
+/**
+ * A time for show and the errors: the local time with UTC beside it, "2026-10-12 21:26 EDT (01:26 UTC)"; with the UTC date too when
+ * it is another day there, "2026-10-12 22:00 EDT (2026-10-13 02:00 UTC)"; one time when the zone is UTC.
+ */
 export function when(at) {
   const local = whenLocal(at);
-  const d = new Date(at);
-  return local.endsWith(' UTC') ? local : `${local} (${two(d.getUTCHours())}:${two(d.getUTCMinutes())} UTC)`;
+  if (local.endsWith(' UTC')) return local;
+  const utc = new Date(at).toISOString(); // 2026-10-13T02:00:00.000Z
+  return `${local} (${local.startsWith(utc.slice(0, 10)) ? '' : `${utc.slice(0, 10)} `}${utc.slice(11, 16)} UTC)`;
 }
 /**
- * How long after its start a claim whose process is gone may be released (F-T72-8): the state tool that the claim started can still
+ * How long after its start a claim whose approve no longer runs may be released (F-T72-8): the state tool that the claim started can still
  * run after a lone kill of its process, up to ADD_TASK_MS, so a release before then can lead to a second task. 2 minutes in all.
  */
 export const RETRY_AFTER = ADD_TASK_MS + 60_000;
@@ -59,19 +63,20 @@ export const claimed = (c) => `since ${when(c.at)}. If it crashed, run approve a
 /** Whether a record is one that this module writes: its keys, their types, and the fields that its status sets. */
 function isRequest(r) {
   const text = (x) => typeof x === 'string';
-  const time = (x) => Number.isSafeInteger(x);
+  const time = (x) => Number.isSafeInteger(x) && Math.abs(x) <= 8.64e15; // the range of a Date
   const opt = (x, ok) => x === null || ok(x);
   const id = (x) => text(x) && SNOWFLAKE.test(x);
+  const by = (x) => x === 'owner' || id(x); // Erick, or a Discord id
   if (!r || typeof r !== 'object' || Object.keys(r).join() !== KEYS.join()) return false;
   const decided = DECIDED.includes(r.status);
   const c = r.claim;
   return text(r.id) && REQUEST_ID.test(r.id) && text(r.project) && PROJECT_NAME.test(r.project) && text(r.folder) && r.folder.startsWith('/')
-    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text)
+    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= 100
     && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
     && (r.status === 'approving'
-      ? !!c && Object.keys(c).sort().join() === 'at,by,pid,start,via' && text(c.by) && ['discord', 'terminal'].includes(c.via) && Number.isSafeInteger(c.pid) && text(c.start) && time(c.at)
+      ? !!c && Object.keys(c).sort().join() === 'at,by,pid,start,via' && by(c.by) && ['discord', 'terminal'].includes(c.via) && Number.isSafeInteger(c.pid) && text(c.start) && time(c.at)
       : c === null)
-    && (decided ? time(r.decidedAt) && text(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
+    && (decided ? time(r.decidedAt) && by(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
     && (r.status === 'approved' ? text(r.task) && /^T\d{1,9}$/.test(r.task) : r.task === null)
     && (r.status === 'declined' ? opt(r.reason, text) : r.reason === null)
     && [r.channel, r.line, r.card, r.thread].every((x) => opt(x, id)) && opt(r.shown, (s) => STATUSES.includes(s));
@@ -208,8 +213,16 @@ export function toolOf(config, r) {
 const marker = (id) => `${id}: `;
 /** The id of the task of a request in the logbook: the task whose title is exactly `<id>: <titleForSage>` (F-T72-9), or null. */
 const taskOf = async (tool, r) => (await tool.tasks()).find((t) => t.title === `${marker(r.id)}${r.titleForSage}`)?.id ?? null;
-/** Whether the process of a claim still runs: its pid, with the start time of the claim (a pid can be reused). */
-const runs = (c) => alive(c.pid) && startOf(c.pid) === c.start;
+/** The claims whose approve runs in this process now, by `<path> <id> <claim time>` (F-T72-24). */
+const approving = new Set();
+const claimKey = (path, r) => `${path} ${r.id} ${r.claim.at}`;
+/**
+ * Whether the approve of a claim still runs: in this process, only while its approve is in `approving` (a long-lived bridge outlives a
+ * failed approve); in another, while that process lives, with the start time of the claim (a pid can be reused).
+ */
+const runs = (path, r) => (r.claim.pid === process.pid && r.claim.start === startOf(process.pid)
+  ? approving.has(claimKey(path, r))
+  : alive(r.claim.pid) && startOf(r.claim.pid) === r.claim.start);
 
 /**
  * Ends one claim by what the logbook holds: a task of the request means approved with it; none means pending again, but only when
@@ -222,7 +235,7 @@ async function settle(path, r, tool, at, release = true) {
 }
 
 /**
- * The reconcile step: a request whose claim's process is gone is settled by the logbook of its project. With no task there, it is
+ * The reconcile step: a request whose claim's approve no longer runs (runs) is settled by the logbook of its project. With no task there, it is
  * released only RETRY_AFTER after the claim: until then its state tool can still add the task. Any other request stays.
  * `tool` is the state tool, by default the one of the request's project (toolOf). When another run settled the claim first, the
  * request as that run left it. Returns the request as it is now.
@@ -231,7 +244,7 @@ async function settle(path, r, tool, at, release = true) {
 export async function reconcile(config, id, { at = Date.now(), tool } = {}) {
   const path = requestsPathOf(config);
   const r = find(loadRequests(path), id);
-  if (r.status !== 'approving' || runs(r.claim)) return r;
+  if (r.status !== 'approving' || runs(path, r)) return r;
   const t = tool ?? toolOf(config, r);
   try {
     return await settle(path, r, t, at, at - r.claim.at > RETRY_AFTER);
@@ -253,7 +266,8 @@ export async function reconcile(config, id, { at = Date.now(), tool } = {}) {
  *   restore?: string }} o  `tool` is the state tool, by default toolOf; `restore` is the command that restores the link, for its refusal.
  */
 export async function approve(config, id, { size = 'large', by, via, now = Date.now, tool, restore = 'node scripts/leads.mjs restore' }) {
-  if (linkOff(killPathOf(config))) refuse(`the link from Discord to sage is off, so ${id} cannot be approved. Restore the link first: ${restore}. Nothing changed.`);
+  const refuseIfOff = () => { if (linkOff(killPathOf(config))) refuse(`the link from Discord to sage is off, so ${id} cannot be approved. Restore the link first: ${restore}. Nothing changed.`); };
+  refuseIfOff();
   const path = requestsPathOf(config);
   const before = await reconcile(config, id, { at: now(), tool });
   tool ??= toolOf(config, before);
@@ -262,7 +276,17 @@ export async function approve(config, id, { size = 'large', by, via, now = Date.
     if (other) refuse(`sage task ${other.id} in ${before.project} already starts with "${marker(id)}". ${id} was not approved. Decline ${id}, or rename or remove ${other.id} in sage, then approve again.`);
   }
   const claim = { by, via, pid: process.pid, start: startOf(process.pid), at: now() };
-  const r = update(path, id, { type: 'claim', claim });
+  // The link again, under the lock of the claim: it can go off while the logbook is read.
+  const r = change(path, id, (x) => (refuseIfOff(), step(x, { type: 'claim', claim })));
+  approving.add(claimKey(path, r));
+  try {
+    return await addAndRecord(path, r, tool, size, now);
+  } finally { approving.delete(claimKey(path, r)); }
+}
+
+/** Steps 2 and 3 of approve, for the claim of step 1 in `r`. */
+async function addAndRecord(path, r, tool, size, now) {
+  const { id, claim } = r;
   let task;
   try {
     task = await tool.addTask({ title: `${marker(id)}${r.titleForSage}`, size });
@@ -284,6 +308,7 @@ export async function approve(config, id, { size = 'large', by, via, now = Date.
 
 /** Declines a request after the reconcile step. `reason` is for people only. Returns the request after it. */
 export async function decline(config, id, { by, via, reason, at = Date.now() }) {
+  if (reason != null && typeof reason !== 'string') throw new TypeError(`reason must be text, not ${typeof reason}. Nothing changed.`);
   await reconcile(config, id, { at });
   return update(requestsPathOf(config), id, { type: 'decline', by, via, at, reason });
 }
