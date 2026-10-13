@@ -100,6 +100,7 @@ test('F-T132-15: a closed card of a project that returns gets no reminder until 
   assert.deepEqual(b.discord.posts.slice(posts).filter((p) => /beta\/G1/.test(p.content ?? '')), []);
   assert.equal(b.discord.latest(card).content, GONE);
   b.discord.edit = edit;
+  b.now += 10 * 60_000; // past the wait after the sixth refusal (F-T45-3)
   await b.bridge.loop();
   assert.deepEqual([buttons(b.discord.latest(card)), b.discord.latest(card).content, shutOf(b)], [['press:beta/G1:0:0', 'press:beta/G1:0:1'], '', undefined]);
   await b.press(MAYA, 'press:beta/G1:0:1');

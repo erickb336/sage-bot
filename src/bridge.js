@@ -267,11 +267,14 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     persist();
     for (const [id] of moving) say(`${id}: its card moves to the parent channel, because the thread of ${x.title} is gone (G17)`);
   };
-  /** Edits a message; true when Discord took the edit, null when it refused an edit that can never work (NO_EDIT), else false. */
-  const edit = async (target, message, payload, what) => {
+  /**
+   * Edits a message; true when Discord took the edit, null when it refused an edit that can never work (NO_EDIT), else false.
+   * `log` gets the line of a refusal (a lost thread has its own lines).
+   */
+  const edit = async (target, message, payload, what, log = say) => {
     try { await discord.edit(target, message, payload); return true; } catch (e) {
       const x = goneThread(target, e);
-      if (x) lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
+      if (x) lost(x, e); else log(`Discord refused the edit of ${what}: ${apiError(e)}`);
       return NO_EDIT.has(e?.code) ? null : false;
     }
   };
@@ -363,6 +366,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   // A card whose held message Discord refused: the next try waits, twice as long after each refusal in a row, up to an hour. The log
   // says each kind of refusal once, not each try (F-T68-1). Only in memory: a restart tries at once.
   const backoff = new Map(); // card id → { at, wait, line }
+  /** Records the refusal `line` of `id` in `waits`: the next try waits LOOP, then twice as long each time, up to an hour; a new line is logged. */
+  const refusedAgain = (waits, id, line, more) => {
+    const last = waits.get(id);
+    const wait = Math.min(2 * (last?.wait ?? LOOP / 2), HOUR);
+    if (line !== last?.line) say(`${line}${more}`);
+    waits.set(id, { at: clock() + wait, wait, line });
+  };
   async function postHeldNow(id) {
     const m = meta.get(id);
     if (!m.held?.length) return;
@@ -378,10 +388,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       let line;
       if (!(await post(m.channel, m.held[0], (l) => { line = l; }))) {
         if (!line) return; // the thread is gone: `lost` moved the card, and sync posts it again
-        const last = backoff.get(id);
-        const wait = Math.min(2 * (last?.wait ?? LOOP / 2), HOUR);
-        if (line !== last?.line) say(`${id}: ${line}. Its held messages wait; the bridge tries again after longer and longer waits`);
-        backoff.set(id, { at: clock() + wait, wait, line });
+        refusedAgain(backoff, id, `${id}: ${line}`, '. Its held messages wait; the bridge tries again after longer and longer waits');
         return;
       }
       backoff.delete(id);
@@ -429,14 +436,18 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
    * before T132 the buttons with the keys, so it loses its mark `oldButtons` (F-T132-5), and gives a card that `closeGone` closed its
    * buttons back without the note, so it loses its mark `shut` (F-T132-15). False when Discord refused an edit that a later try can
    * get through; true for a card with nothing to try again: not posted yet, or an edit that can never work.
+   * A refused edit waits like a held message: the loop tries the card again only when `redrawDue`, and the log says each reason once (F-T45-3).
    */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
     const m = meta.get(id);
     const payload = { ...card(gate, ask, ppl), ...(m.shut && { content: '' }) };
     if (!m.message) return true;
-    const took = await edit(m.channel ?? config.channelId, m.message, payload, id);
+    let line;
+    const took = await edit(m.channel ?? config.channelId, m.message, payload, id, (l) => { line = l; });
+    if (line) refusedAgain(redrawWaits, id, line, '. The bridge tries again after longer and longer waits');
     if (!took) return took === null;
+    redrawWaits.delete(id);
     if (m.oldButtons || m.shut) {
       delete m.oldButtons;
       delete m.shut;
@@ -444,6 +455,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     }
     return true;
   }
+
+  /** The cards whose redraw Discord refused, as `backoff` holds the held messages; only in memory. */
+  const redrawWaits = new Map(); // card id → { at, wait, line }
+  /** Whether the loop may try the redraw of `id` now. A press redraws at once: it changed the card. */
+  const redrawDue = (id) => clock() >= (redrawWaits.get(id)?.at ?? 0);
 
   /** The parts of a batch that wait for a sage-lead: tied after the vote, with no final answer from the terminal. */
   const tiedParts = (gate, ask) => gate.parts.flatMap((part, i) => (part.outcome.status === 'open' && !ask.parts[i].final ? [i] : []));
@@ -538,6 +554,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         continue;
       }
       m.sent[sageId] = text;
+      m.restore[sageId].landed = true; // sage took the write, so the trail must show it (F-T45-2)
       persist();
       say(`sage gate ${keyOf(project, sageId)} answered: ${text}`);
       await keepOwner(id, sageId);
@@ -552,6 +569,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
    * An answer after `wrote` stands (the owner's later answer). The marker is in the gate file until a check finds nothing to write back,
    * so a write back that sage refused, or a stop of the bridge, is done again at the next flush (F-T43-5). Then the card shows the
    * answer in sage as final in the same turn (F-T43-6). `m.sent` keeps the bridge's text, so the bridge never sends again.
+   * The check finds the answer rows by sage's why text (ANSWER_WHYS). When sage took the bridge's write (`landed`) and the trail shows no
+   * row of it, that text changed: the marker stays, and the log says that the owner's answer is not protected (F-T45-2).
    */
   async function keepOwner(id, sageId) {
     const m = meta.get(id);
@@ -573,12 +592,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const others = rows.filter((r) => r.task === row.task && r.question.length > row.question.length);
     const ofGate = (d) => d.task === row.task && ANSWER_WHYS.has(d.why) && d.decision.startsWith(head(row)) && !others.some((r) => d.decision.startsWith(head(r)));
     for (let wrote = false; ; wrote = true) {
-      const { mark, wrote: text, from } = m.restore[sageId];
+      const { mark, wrote: text, from, landed } = m.restore[sageId];
       const trail = await sage.decisions();
       const all = trail.slice(mark).filter(ofGate).map((d) => d.decision.slice(head(row).length));
       if (trail.length < mark || all.length < from) { stop('the decisions trail is shorter than at the last check'); break; }
       const said = all.slice(from);
       const mine = said.lastIndexOf(text);
+      if (landed && mine === -1) {
+        sayOnce(`${keyOf(project, sageId)}: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected`);
+        return;
+      }
       if (mine === -1 && from > 0 && said.length === 0) {
         // a write back that did not land, and no answer after it: write it again, but never twice in one flush
         if (wrote) { stop('the decisions trail does not show the write back'); break; }
@@ -845,7 +868,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
         // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
         // after reconcile: their thread is open again now.
-        for (const [id, m] of meta) if (m.oldButtons || m.shut) await redraw(id, ppl);
+        for (const [id, m] of meta) if ((m.oldButtons || m.shut) && redrawDue(id)) await redraw(id, ppl);
         // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
         // place that has an open question.
         if (lastEnd !== null && wall - lastEnd > SLEPT) {
@@ -858,7 +881,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         // The new holders count as drawn only when Discord took every edit, so a refused edit is tried again at the next turn (F-T45-1).
         const holders = [...ppl.holders].sort().join();
         let drawn = true;
-        if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) drawn = (await redraw(id, ppl)) && drawn;
+        if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) drawn = (redrawDue(id) && (await redraw(id, ppl))) && drawn;
         if (drawn) lastHolders = holders;
         await timers(ppl);
         await sync(ppl);

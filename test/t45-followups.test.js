@@ -51,6 +51,7 @@ test('F-T45-1: a redraw for new holders that Discord refuses is tried again at t
   members[1].roles = []; // Maya loses the sage-apprentice role
   await b.bridge.loop(); // the redraw is refused
   const edits = b.discord.messages.get(id).length;
+  b.now += LOOP; // the next loop: a refused redraw waits one loop (F-T45-3)
   await b.bridge.loop();
   assert.equal(b.discord.messages.get(id).length, edits + 1);
 });

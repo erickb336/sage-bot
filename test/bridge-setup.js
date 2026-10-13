@@ -68,9 +68,9 @@ export const key = (id) => `${NAME}/${id}`;
 /**
  * A scratch project with a sage logbook, and a bridge on it with the fake Discord layer and a clock that the test moves.
  * With `markAll` (the default, for the tests of the rules before G13) each `gate add` also marks the new gate as a team vote;
- * the G13 tests pass `markAll: false` and mark gates with `b.mark`.
+ * the G13 tests pass `markAll: false` and mark gates with `b.mark`. `tool` is the sage state tool (default SAGE), for a test on a changed copy.
  */
-export function setup({ members = MEMBERS, markAll = true } = {}) {
+export function setup({ members = MEMBERS, markAll = true, tool = SAGE } = {}) {
   const root = realpathSync.native(tempFolder('sage-bot-b3-')); // the folder as the disk spells it, as loadProjects resolves it
   const project = join(root, 'project');
   mkdirSync(project);
@@ -78,7 +78,7 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   const statePath = join(root, 'state', 'gates.json');
   const discord = fakeDiscord(members);
   const lines = [];
-  const b = { root, project, env, discord, lines, now: T0, statePath };
+  const b = { root, project, env, discord, lines, now: T0, statePath, sagePath: tool };
   const run = toolOf(b, project);
   const sh = (...args) => {
     const out = run(...args);
@@ -89,7 +89,7 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
   sh('init');
   /** Marks sage gates of the project as team votes, as scripts/vote.mjs does: by their keys, with the folder of the project (G45 A). */
   b.mark = (...ids) => saveVotes(`${statePath}.votes`, new Map([...loadVotes(`${statePath}.votes`), ...ids.map((id) => [`${NAME}/${id}`, project])]));
-  b.sage = sageTool({ sagePath: SAGE, project, env });
+  b.sage = sageTool({ sagePath: tool, project, env });
   b.make = () => createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord, config: CONFIG, statePath: b.statePath, now: () => b.now, log: (l) => lines.push(l) });
   b.bridge = b.make();
   b.gates = () => readFileSync(join(sh('logbook'), 'gates.tsv'), 'utf8');
@@ -109,7 +109,7 @@ export function setup({ members = MEMBERS, markAll = true } = {}) {
  * sage keeps them as "other: <words>".
  */
 export function toolOf(b, folder) {
-  const run = (...args) => execFileSync(process.execPath, [SAGE, ...args, '--project', folder], { env: b.env, encoding: 'utf8' }).trim();
+  const run = (...args) => execFileSync(process.execPath, [b.sagePath ?? SAGE, ...args, '--project', folder], { env: b.env, encoding: 'utf8' }).trim();
   const typed = (id, text) => {
     const row = rowsOf(run('logbook'), 'gates').find((r) => r.id === id);
     const options = optionsOf(row);
