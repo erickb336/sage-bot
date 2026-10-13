@@ -38,7 +38,7 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   await b.press(MAYA, 'press:project/G4:0:0');
   await b.press(MAYA, 'press:project/G2+G3:0:0');
   const batchBefore = cardIn(b, thread, 'Batch vote project/G2+G3 · T2 ').embeds;
-  assert.match(batchBefore[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/);
+  assert.match(batchBefore[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(\*\*Maya\*\*\)/);
   b.discord.deleteThread(thread);
 
   // The vote ends: the edit of the batch card finds the thread gone, the open cards move, and the tie post goes with them, in the
@@ -50,8 +50,8 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   assert.deepEqual(rest.slice(0, 2), ['Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ']);
   assert.match(rest[2], new RegExp(`^<@&${LEADR}> project/G2\\+G3 is tied after its vote`));
   const moved = cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ');
-  assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/); // the vote cast in the thread
-  assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: no votes\.\*\*/);
+  assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(\*\*Maya\*\*\)/); // the vote cast in the thread
+  assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: A, B\.\*\*/);
   assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[1])[0].content,
     `<@&${APPRENTICE}> <@&${LEADR}> project T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
   assert.deepEqual(b.lines.filter((l) => /\(G17\)$/.test(l)), [
@@ -172,7 +172,7 @@ for (const hangAt of [1, 2]) {
     await b.bridge.loop();
     await b.bridge.loop();
     assert.deepEqual(cards(b), ['Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ']);
-    assert.match(cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ').embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(Maya\)/);
+    assert.match(cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ').embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(\*\*Maya\*\*\)/);
     b.now += 2 * HOUR;
     await b.bridge.loop();
     const after = shown(b, CHANNEL);

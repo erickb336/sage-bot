@@ -42,10 +42,10 @@ export const LEADS_QUESTION = 'Switch the automatic-merge mode on for this sessi
 export const RECOMMENDED = ' (sage-leads recommend; the owner decides)';
 /** Why a sage gate row cannot be sage-leads only, or null when it can. scripts/vote.mjs and the bridge both ask this. */
 export function notLeadsOnly(row) {
-  if (row.question !== LEADS_QUESTION) return `${row.id} is sage-leads only, and a sage-leads-only question must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
-  const options = row.options.split('|').map((o) => o.trim().toLowerCase()).filter(Boolean).sort().join('|');
-  return options === 'no|yes' ? null : `${row.id} is sage-leads only, and a sage-leads-only question needs the options Yes|No`;
+  if (row.question !== LEADS_QUESTION) return `${row.id} cannot be sage-leads only: a sage-leads-only question must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
+  return row.options === 'Yes|No' ? null : `${row.id} cannot be sage-leads only: a sage-leads-only question needs the options Yes|No, exactly`; // F-T94-6
 }
+const NOT_MARKED = 'sage did not mark it as a team vote';
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
@@ -173,6 +173,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const firstSeen = new Map(); // sage gate id → when the bridge first saw it open; only in memory
   const refused = new Set(); // groups already refused, so that the log says it once
   const kept = new Set(); // sage gate ids already logged as kept at the terminal (not marked, or about a merge), so that the log says it once
+  // The gate keys in neither marks file at the last read. A move between the two files leaves a gate in neither for one read, so the log
+  // says that sage did not mark a gate only at its second read in a row (F-T94-5).
+  const unmarked = new Set();
   const votesPath = votesPathOf({ statePath, votesPath: config.votesPath });
   const leadsPath = leadsPathOf({ statePath, votesPath: config.votesPath });
   let votesError = null; // the last refusal of the team votes file, so that the log says it once
@@ -574,14 +577,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     }
     await flush();
     const answered = effects.find((e) => e.type === 'closed' && e.outcome.status === 'answered');
-    if (ask.leads && answered) {
+    // The flush reads the owner's answers again just before it writes: an answer typed at the terminal in that window is final, and
+    // sage never got the recommendation, so nothing says that it did (F-T94-3).
+    if (ask.leads && answered && !gates.get(id).ask.parts[0].final) {
       // T73: the sage-leads only recommend. sage gets the answer marked as their recommendation, and the owner decides at the terminal (G10). The bridge never
       // switches a mode of sage, and its texts name the switch only in words.
       // The next step follows the advice: only a Yes asks the owner to switch the mode on (F-T73-3).
       const { sage: [sageId], texts: [texts] } = meta.get(id);
       const advice = texts[KEYS.indexOf(answered.outcome.option)];
       await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${OWNER} decides at the terminal.`, allowedMentions: NO_MENTIONS });
-      say(`${keyOf(projectOfKey(id), sageId)}: sage-leads recommend ${advice}. ${/^yes$/i.test(advice) ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
+      say(`${keyOf(projectOfKey(id), sageId)}: sage-leads recommend ${advice}. ${advice === 'Yes' ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
     }
   }
 
@@ -671,9 +676,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs'
         : leadsOnly(r) ? null : !voted(r) && markOf(r) ? `it has no mark of ${project}; the mark is ${unlisted(markOf(r))}`
         : !voted(r) && elsewhere(r) !== undefined ? `its mark is of the folder ${elsewhere(r) ?? '(none)'}, not of ${project}'s folder now. Mark it again with scripts/vote.mjs`
-        : !voted(r) ? 'sage did not mark it as a team vote'
+        : !voted(r) ? NOT_MARKED
         : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
-      if (why && !r.answer && !kept.has(key(r.id))) { kept.add(key(r.id)); say(`${key(r.id)} stays at the terminal: ${why}`); }
+      const moving = why === NOT_MARKED && !unmarked.has(key(r.id));
+      if (why === NOT_MARKED) unmarked.add(key(r.id)); else unmarked.delete(key(r.id));
+      if (why && !moving &&!r.answer && !kept.has(key(r.id))) { kept.add(key(r.id)); say(`${key(r.id)} stays at the terminal: ${why}`); }
       return !why;
     });
     const tasks = new Map();

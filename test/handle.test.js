@@ -66,8 +66,8 @@ test('a batch press counts at once and opens the reason modal; the modal submit 
   assert.equal(sent.reply.kind, 'update');
   assert.deepEqual(ballotsOf(sent.gate.parts[1]).get(JON), { option: 'B', at: clock(14, 41), via: 'discord', reason: 'Our EU customers read day/month first.' });
   assert.deepEqual(sent.reply.embeds[0].fields.at(-1), { name: 'Jon, part 2', value: 'Our EU customers read day/month first.' });
-  assert.match(sent.reply.embeds[0].fields[1].value, /\*\*B\.\*\* 04\/10\/2026 \(the user's locale\) · 1 vote \(Jon\)\n/);
-  assert.match(sent.reply.embeds[0].fields[1].value, /Voted: Jon · Not voted: Erick, Maya\nAhead: B$/);
+  assert.match(sent.reply.embeds[0].fields[1].value, /\*\*B\.\*\* 04\/10\/2026 \(the user's locale\) · 1 vote \(\*\*Jon\*\*\)\n/);
+  assert.match(sent.reply.embeds[0].fields[1].value, /Voted: \*\*Jon\*\* · Not voted: \*\*Erick\*\*, \*\*Maya\*\*\nAhead: B$/);
   // A changed vote replaces the ballot and the reason goes with the old ballot.
   const changed = await b.press(JON, 'press:B7:1:0');
   assert.deepEqual(ballotsOf(changed.gate.parts[1]).get(JON), { option: 'A', at: clock(14, 41), via: 'discord' });
@@ -79,7 +79,7 @@ test('a modal submit after the vote ended gets the vote-ended note, and the time
   await b.press(MAYA, 'press:B7:0:0');
   b.now = clock(15, 1);
   const late = await b.press(MAYA, 'reason:B7:0:0', { reason: 'late' });
-  assert.deepEqual(late.replies, [{ kind: 'reply', content: 'The vote on B7 ended at <t:1791126060:t>. Your press did not count.', ...PRIVATE }]);
+  assert.deepEqual(late.replies, [{ kind: 'reply', content: 'The vote on B7 ended at <t:1791126060:t>. Your vote counts; your reason came after the end, so it is not on the card.', ...PRIVATE }]);
   assert.deepEqual(late.effects, [{ type: 'vote-ended', by: null }, { type: 'decided', part: 0, option: 'A', how: 'votes' }, { type: 'ignored', by: MAYA, why: 'closed' }]);
   assert.equal(late.gate.phase, 'tied');
 });
@@ -96,7 +96,7 @@ test('end vote now: a sage-lead gets a confirm, confirms, and the vote ends; a n
   b.now = clock(15, 28);
   const confirm = await b.press(JON, 'end:B9');
   assert.equal(confirm.reply.kind, 'reply');
-  assert.equal(confirm.reply.content, ['**End B9 now?**', 'Part 1 goes to A: 2 of 3 votes (Erick, Jon).',
+  assert.equal(confirm.reply.content, ['**End B9 now?**', 'Part 1 goes to A: 2 of 3 votes (**Erick**, **Jon**).',
     'Part 2 has no votes. It stays open until a sage-lead breaks the tie.', 'Nobody can vote after this.'].join('\n'));
   assert.deepEqual(confirm.reply.components[0].components.map((c) => [c.custom_id, c.label, c.style]), [['cancel:B9', 'Cancel', 2], ['end!:B9', 'End vote now', 4]]);
   assert.equal(confirm.gate.phase, 'voting');
@@ -166,6 +166,32 @@ test('by, via and at never come from the interaction: a press with a forged at a
   const out = await handle(i, b);
   assert.deepEqual(ballotsOf(out.gate.parts[0]).get(MAYA), { option: 'B', at: clock(14, 45), via: 'discord' });
   assert.equal(ballotsOf(out.gate.parts[0]).has(ERICK), false);
+});
+
+test('F-T42-1: past the time limit, a reason says the vote counts, and a Cancel says the vote ended, also with no event since', async () => {
+  const b = bridge(['B9'], clock(15, 10));
+  b.now = clock(15, 20);
+  await b.press(JON, 'press:B9:0:0');
+  assert.equal((await b.press(JON, 'end:B9')).reply.content.split('\n')[0], '**End B9 now?**');
+  b.now = clock(15, 41); // the limit was 15:40, and no event came since
+  const cancel = await b.press(JON, 'cancel:B9', undefined, true);
+  assert.deepEqual(cancel.replies, [{ kind: 'update', content: `The vote on B9 ended at <t:${clock(15, 40) / 1000}:t> meanwhile. Nothing to cancel.`, ...PRIVATE, components: [] }]);
+  const late = await b.press(JON, 'reason:B9:0:0', { reason: 'too late' });
+  assert.deepEqual(late.replies, [{ kind: 'reply', content: `The vote on B9 ended at <t:${clock(15, 40) / 1000}:t>. Your vote counts; your reason came after the end, so it is not on the card.`, ...PRIVATE }]);
+  assert.equal(ballotsOf(late.gate.parts[0]).get(JON).option, 'A');
+  // A person with no ballot still gets "did not count".
+  const none = await b.press(MAYA, 'reason:B9:0:0', { reason: 'never pressed' });
+  assert.match(none.reply.content, /Your press did not count\.$/);
+});
+
+test('F-T56-1: the end confirm shows the owner\'s final answer from the terminal for that part, not "no votes"', async () => {
+  const b = bridge(['B9'], clock(15, 10));
+  const final = { by: ERICK, at: clock(15, 15), option: 'B', text: 'B. Only a "Create report" button' };
+  b.gates.set('B9', { gate: b.gate('B9'), ask: { ...ASKS.B9, parts: ASKS.B9.parts.with(0, { ...ASKS.B9.parts[0], final }) } });
+  b.now = clock(15, 20);
+  assert.deepEqual((await b.press(JON, 'end:B9')).reply.content.split('\n'), ['**End B9 now?**',
+    'Part 1 has the final answer from the terminal: B. Only a "Create report" button.',
+    'Part 2 has no votes. It stays open until a sage-lead breaks the tie.', 'Nobody can vote after this.']);
 });
 
 test('a bad clock gives the bad-time note and a clock that goes back gives the out-of-order note', async () => {

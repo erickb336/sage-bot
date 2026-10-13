@@ -30,7 +30,7 @@ test('F-T27-46: only non-spacing marks count toward the cap of 3, so Burmese and
   assert.equal(safe('\u0301\u093e\u20e3'), ''); // a mark on nothing still goes
   // On the card: the Burmese name is whole in the voter list and the reason field.
   const embed = build(['မြန်မာ ကျော်', 'Jon'], ['ကျော် agrees']);
-  assert.match(embed.fields[0].value, /\nVoted: မြန်မာ ကျော်, Jon · Not voted: nobody\n/);
+  assert.match(embed.fields[0].value, /\nVoted: \*\*မြန်မာ ကျော်\*\*, \*\*Jon\*\* · Not voted: nobody\n/);
   assert.deepEqual(embed.fields[1], { name: 'မြန်မာ ကျော်, part 1', value: 'ကျော် agrees' });
 });
 
@@ -69,7 +69,7 @@ test('F-T27-48: a joiner also sits between a letter and a mark of a joining scri
   assert.equal(safe('😀\u200d😀'), '😀😀');
   assert.equal(safe(`ب${'\u064e\u200d'.repeat(50)}`), 'ب\u064e\u200d\u064e\u200d\u064e\u200d'); // marks still cap at 3; each kept joiner follows a mark
   const embed = build(['র\u200d্য Roy', 'Jon'], ['ണ്\u200d ok']);
-  assert.match(embed.fields[0].value, /\nVoted: র\u200d্য Roy, Jon · Not voted: nobody\n/);
+  assert.match(embed.fields[0].value, /\nVoted: \*\*র\u200d্য Roy\*\*, \*\*Jon\*\* · Not voted: nobody\n/);
   assert.deepEqual(embed.fields[1], { name: 'র\u200d্য Roy, part 1', value: 'ണ്\u200d ok' });
 });
 

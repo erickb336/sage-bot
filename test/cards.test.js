@@ -26,15 +26,15 @@ test('an open batch card: a live countdown, the tally per part with voters and n
   assert.equal(embed.description, `3 product questions of T7. Vote on each part; change your vote until the vote ends. The work on the task goes on. Closes at <t:${ts(END)}:t> (<t:${ts(END)}:R>).`);
   assert.equal(embed.fields[0].name, 'Part 1 · Which columns go in the export?');
   assert.equal(embed.fields[0].value, [
-    '**A.** Only the columns visible in the table · Recommended · 2 votes (Erick (terminal), Jon)',
+    '**A.** Only the columns visible in the table · Recommended · 2 votes (**Erick** (terminal), **Jon**)',
     '**B.** All fields, also the hidden ones · 0 votes',
     '**C.** Visible columns, plus an "Include hidden fields" box · 0 votes',
     'sage recommends A: A matches what the user sees; B can leak internal ids.',
-    'Voted: Erick (terminal), Jon · Not voted: Maya',
+    'Voted: **Erick** (terminal), **Jon** · Not voted: **Maya**',
     'Ahead: A',
   ].join('\n'));
-  assert.match(embed.fields[1].value, /Voted: Erick, Jon · Not voted: Maya\nEven so far$/);
-  assert.match(embed.fields[2].value, /Voted: nobody yet · Not voted: Erick, Maya, Jon\nNo votes yet$/);
+  assert.match(embed.fields[1].value, /Voted: \*\*Erick\*\*, \*\*Jon\*\* · Not voted: \*\*Maya\*\*\nEven so far$/);
+  assert.match(embed.fields[2].value, /Voted: nobody yet · Not voted: \*\*Erick\*\*, \*\*Maya\*\*, \*\*Jon\*\*\nNo votes yet$/);
   assert.deepEqual(embed.fields[3], { name: 'Jon, part 2', value: 'Our EU customers read day/month first.' });
   assert.deepEqual(buttons(c), [
     ['press:B7:0:0 Part 1, A: Only the columns visible in the table s1', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2',
@@ -56,7 +56,7 @@ test('a reason with mentions, markdown, newlines and backticks shows as one iner
   // A hostile display name is made inert the same way, everywhere a name shows.
   const names = new Map([[MAYA, '**@everyone** <@1>']]);
   const named = card(gate, ASKS.B7, { ...PEOPLE, names });
-  assert.match(named.embeds[0].fields[0].value, /1 vote \(\\\*\\\*@everyone\\\*\\\* \\<@1\\>\)/); // `<@1>` escaped, so no mention renders (round 6)
+  assert.match(named.embeds[0].fields[0].value, /1 vote \(\*\*\\\*\\\*@everyone\\\*\\\* \\<@1\\>\*\*\)/); // `<@1>` escaped, so no mention renders (round 6)
   assert.equal(note('closed', run(openAsk('G5', T0), [{ type: 'press', by: MAYA, option: 'A', at: T0, via: 'discord' }]), names).content,
     'Already answered by \\*\\*@everyone\\*\\* \\<@1\\>: A');
 });
@@ -71,7 +71,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   const c = card(gate, ASKS.B7, PEOPLE);
   assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
   assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 of 3 votes$/);
-  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B at 1 vote each\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
+  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
   assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 of 3 votes$/);
   assert.deepEqual(buttons(c), [
     ['press:B7:0:0 Part 1, A: Only the columns visible in the table s3 off', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2 off',
@@ -83,7 +83,7 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
   const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
   assert.equal(e.embeds[0].description, `Ended early by Jon (sage-lead) at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
-  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: no votes\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
+  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
   assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (sage-lead only) s4']);
 });
 
@@ -91,7 +91,7 @@ test('a withdrawn batch says who withdrew it and when, decides nothing and disab
   const gate = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'A', T0 + MINUTE), { type: 'withdraw', by: ERICK, at: clock(15, 20) }]);
   const c = card(gate, ASKS.B9, PEOPLE);
   assert.equal(c.embeds[0].description, `**Withdrawn by Erick at <t:${ts(clock(15, 20))}:t>.** Closed: nothing is decided.`);
-  assert.match(c.embeds[0].fields[0].value, /Voted: Erick, Jon · Not voted: Maya$/);
+  assert.match(c.embeds[0].fields[0].value, /Voted: \*\*Erick\*\*, \*\*Jon\*\* · Not voted: \*\*Maya\*\*$/);
   assert.doesNotMatch(c.embeds[0].fields[0].value, /Decided|Provisional|Ahead/);
   assert.deepEqual(buttons(c), [['press:B9:0:0 Part 1, A: An example report and a "Create report" button s1 off', 'press:B9:0:1 Part 1, B: Only a "Create report" button s2 off'],
     ['press:B9:1:0 Part 2, A: Yes, under the button s1 off', 'press:B9:1:1 Part 2, B: No s2 off']]);
@@ -137,6 +137,29 @@ test('the reason modal and the end confirm carry the limits and the custom ids; 
   const ask = { kind: 'batch', task: 'T', title: 't', parts: wide.parts.map(() => ({ question: 'q', why: 'w', recommended: 'a', options: { a: 'a' } })) };
   assert.throws(() => card(wide, ask, PEOPLE), RangeError);
   assert.equal(card(run(wide, [{ type: 'tick', at: END }]), ask, PEOPLE).components.length, 5); // no end row after the vote
+});
+
+test('F-T36-1: after a voter loses the role, the tied line names the tied options with no count, so it never disagrees with the option lines', () => {
+  const gate = run(openAsk('B9', T0), [ballot(ERICK, 1, 'A', T0 + MINUTE), ballot(JON, 1, 'B', T0 + MINUTE), ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'tick', at: END }]);
+  const noJon = peopleOf(MEMBERS.map((m) => (m.id === JON ? { ...m, roles: [] } : m)), CONFIG);
+  const value = card(gate, ASKS.B9, noJon).embeds[0].fields[1].value;
+  assert.match(value, /\*\*B\.\*\* No · 0 votes\n/);
+  assert.match(value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\./);
+});
+
+test('F-T37-1: each voter name is bold, so a name such as "Maya, Erick, Jon" reads as one voter; the count stays 1', () => {
+  const names = new Map([...PEOPLE.names, [MAYA, 'Maya, Erick, Jon']]);
+  const gate = run(openAsk('B9', T0), [ballot(MAYA, 0, 'A', T0 + MINUTE)]);
+  const [field] = card(gate, ASKS.B9, { ...PEOPLE, names }).embeds[0].fields;
+  assert.match(field.value, /· 1 vote \(\*\*Maya, Erick, Jon\*\*\)\n/);
+  assert.match(field.value, /\nVoted: \*\*Maya, Erick, Jon\*\* · Not voted: \*\*Erick\*\*, \*\*Jon\*\*\n/);
+});
+
+test('F-T50-1: safe escapes every asterisk, also in a run of 32, so no star of a name starts or ends bold', () => {
+  assert.equal(safe('*'.repeat(32)), '\\*'.repeat(32));
+  assert.equal(safe('a**b***c'), 'a\\*\\*b\\*\\*\\*c');
+  for (const c of '_~|') assert.equal(safe(c.repeat(9)), `\\${c}`.repeat(9), c); // the same for the other markdown runs
+  assert.equal(safe('x_y \\*'), 'x\\_y \\\\\\*'); // the other escapes are as before
 });
 
 test('custom ids carry indexes, never option text, and parse back; a gate id may hold a colon', () => {

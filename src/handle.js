@@ -2,7 +2,7 @@
 // `by` is always the interaction's user id, `via` is always 'discord', and `at` comes from the injected clock:
 // nothing in the interaction's data chooses them. The custom_id holds indexes only; the option is read from the gate.
 import { MessageFlags } from 'discord.js';
-import { step } from './vote.js';
+import { ballotsOf, step } from './vote.js';
 import { card, confirmEnd, ephemeral, note, parseCustomId, reasonModal, stamp } from './cards.js';
 
 /**
@@ -68,10 +68,11 @@ function decide(interaction, { gates, people, clock }) {
   const { gate, ask } = entry;
   const by = interaction.user.id;
   if (action === 'cancel') {
-    // A confirm exists only for a batch vote; after the vote ended, the cancel says so instead of "The vote goes on" (F-T27-21, F-T27-29).
-    const text = gate.kind === 'single' ? note('wrong-kind') : gate.phase === 'voting' ? ephemeral('Cancelled. The vote goes on.')
+    // A confirm exists only for a batch vote; after the vote ended, the cancel says so instead of "The vote goes on" (F-T27-21, F-T27-29),
+    // also past the time limit when no event has ended the vote yet (F-T42-1).
+    const text = gate.kind === 'single' ? note('wrong-kind') : gate.phase === 'voting' && clock() < gate.endsAt ? ephemeral('Cancelled. The vote goes on.')
       : gate.outcome.status === 'withdrawn' ? note('closed', gate, people.names)
-      : ephemeral(`The vote on ${gate.id} ended at ${stamp(gate.votingEndedAt)} meanwhile. Nothing to cancel.`);
+      : ephemeral(`The vote on ${gate.id} ended at ${stamp(gate.votingEndedAt ?? gate.endsAt)} meanwhile. Nothing to cancel.`);
     return update({ ...text, components: [] }, gate);
   }
   // The option comes from the gate, never from the custom_id: a forged part or index is refused here.
@@ -90,8 +91,11 @@ function decide(interaction, { gates, people, clock }) {
   const refused = out.effects.find((e) => e.type === 'ignored');
   // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a sage-lead, ended, closed, withdrawn,
   // or past the time limit by the clock), and the confirm shows only when the end would count (F-T27-13).
-  if (action === 'end' && !refused) return reply(confirmEnd(gate, people), gate);
-  const result = refused ? reply(note(refused.why === 'not-holder' ? 'leads-only' : refused.why, out.gate, people.names, ask), out.gate, out.effects)
+  if (action === 'end' && !refused) return reply(confirmEnd(gate, people, ask), gate);
+  // A reason after the vote ended: the press before the form counted, so the note says that only the reason is late (F-T42-1).
+  const late = refused?.why === 'closed' && action === 'reason' && out.gate.votingEndedAt !== null && out.gate.outcome.status !== 'withdrawn' && ballotsOf(out.gate.parts[part]).has(by);
+  const why = refused?.why === 'not-holder' ? 'leads-only' : late ? 'late-reason' : refused?.why;
+  const result = refused ? reply(note(why, out.gate, people.names, ask), out.gate, out.effects)
     : action === 'end!' ? update({ ...ephemeral(`You ended the vote on ${gate.id} at ${stamp(base.at)}.`), components: [] }, out.gate, out.effects)
     : action === 'press' && gate.kind === 'batch' ? { send: interaction.showModal, payload: reasonModal(out.gate, ask, part, index), gate: out.gate, effects: out.effects } // the vote counts already
     : update(card(out.gate, ask, people), out.gate, out.effects);

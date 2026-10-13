@@ -162,7 +162,7 @@ test('F-T27-16: with every part tied the card does not call the other parts prov
   const gate = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.leads).gate;
   assert.equal(card(gate, ASKS.B9, PEOPLE).embeds[0].description, 'Voting ended at <t:1791126060:t>. 2 parts are tied: they wait for a sage-lead. T9 waits.');
   const voted = [ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'A', T0 + MINUTE)].reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.leads).gate, openAsk('B9', T0));
-  assert.match(confirmEnd(voted, PEOPLE).content, /\nPart 1 goes to A: 2 of 3 votes \(Erick, Jon\)\.\n/);
+  assert.match(confirmEnd(voted, PEOPLE).content, /\nPart 1 goes to A: 2 of 3 votes \(\*\*Erick\*\*, \*\*Jon\*\*\)\.\n/);
 });
 
 test('F-T27-18: the form title shows the option within 45 characters; Cancel comes first; an early end says so on the card', () => {

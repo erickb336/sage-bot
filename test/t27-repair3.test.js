@@ -74,7 +74,7 @@ test('F-T27-25: a visibly empty reason (joiners, tags, word joiners or combining
   const gate = apply(openAsk('B9', T0), PEOPLE, ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes'), ballot(JON, 1, 'B', T0 + MINUTE));
   const [embed] = card(gate, ASKS.B9, { ...PEOPLE, names }).embeds;
   assert.deepEqual(embed.fields.at(-1), { name: 'member, part 1', value: 'yes' });
-  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(member\)/);
+  assert.match(embed.fields[1].value, /\*\*B\.\*\* No · 1 vote \(\*\*member\*\*\)/);
 });
 
 test('F-T27-28: the 200-character cut keeps a flag or a family emoji whole or drops it whole, never a half', () => {
@@ -105,7 +105,7 @@ test('F-T27-27, F-T27-26: every field fits Discord (name 256, value 1024) for an
   assert.ok(embed.fields[0].value.length <= 1024, `${embed.fields[0].value.length}`);
   assert.ok(embed.fields[0].value.length > 900, `shrunk more than needed: ${embed.fields[0].value.length}`);
   assert.match(embed.fields[0].value, /\*\*A\.\*\* a a a a /); // the labels are still there, cut at a word
-  assert.match(embed.fields[0].value, /Voted: Member number 0!{17}, Member number 1!{17} \(terminal\)/);
+  assert.match(embed.fields[0].value, /Voted: \*\*Member number 0!{17}\*\* and 4 more · /);
   // The sample asks are not cut at all for a team of 3.
   const b7 = apply(openAsk('B7', T0), PEOPLE, ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'B', T0 + MINUTE), ballot(MAYA, 0, 'C', T0 + MINUTE));
   assert.doesNotMatch(card(b7, ASKS.B7, PEOPLE).embeds[0].fields[0].value, /…/);
@@ -181,10 +181,10 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
     assert.doesNotMatch(text, /123456789012346789/);
   }
   assert.match(texts[0], /member …6789, part 1\nyes/);
-  assert.match(texts[0], /\*\*A\.\*\* An example report and a "Create report" button · Recommended · 2 votes \(member …6789, Maya\)/);
-  assert.match(texts[0], /Voted: member …6789, Maya · Not voted: Jon/);
+  assert.match(texts[0], /\*\*A\.\*\* An example report and a "Create report" button · Recommended · 2 votes \(\*\*member …6789\*\*, \*\*Maya\*\*\)/);
+  assert.match(texts[0], /Voted: \*\*member …6789\*\*, \*\*Maya\*\* · Not voted: \*\*Jon\*\*/);
   assert.equal(texts[2], 'Only member …6789, who asked B9, can withdraw it.');
-  assert.match(texts[1], /Part 1 goes to A: 2 of 3 votes \(member …6789, Maya\)\./);
+  assert.match(texts[1], /Part 1 goes to A: 2 of 3 votes \(\*\*member …6789\*\*, \*\*Maya\*\*\)\./);
 });
 
 test('F-T27-26: the README states the field limits, when handle throws, what replyError means and what B3 logs of it', () => {

@@ -155,7 +155,7 @@ test('F-T28-31: when a voter loses the role, the next loop redraws the open card
   b.now += MINUTE;
   await b.bridge.loop();
   const part1 = lastCard(b).embeds[0].fields[0].value;
-  assert.match(part1, /\*\*A\.\*\* x · Recommended · 1 vote \(Erick\)\n\*\*B\.\*\* y · 0 votes/);
+  assert.match(part1, /\*\*A\.\*\* x · Recommended · 1 vote \(\*\*Erick\*\*\)\n\*\*B\.\*\* y · 0 votes/);
   assert.match(part1, /Ahead: A/);
   b.now += 30 * MINUTE;
   await b.bridge.loop();
