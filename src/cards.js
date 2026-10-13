@@ -23,6 +23,8 @@ const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'itali
 /** Discord's limits on one message, in characters (fields: a count). A reason shows on the card cut to REASON_ON_CARD characters; the gate keeps the full text. */
 const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 2048, name: 256, value: 1024, button: 80, modal: 45, content: 2000 };
 const REASON_ON_CARD = 200;
+/** An owner's final answer in the end-early confirm: at most this many characters, so the confirm of 4 parts fits in 2000 (F-T206-1). */
+const FINAL_IN_CONFIRM = 200;
 
 /**
  * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42, F-T27-46, F-T27-48). The cards are for people; no model reads them.
@@ -327,14 +329,15 @@ export function reasonModal(gate, ask, part, index) {
 
 /**
  * The private confirm before a sage-lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters.
- * A part with the owner's final answer from the terminal (`ask.parts[i].final`) shows that answer: the end does not change it (F-T56-1).
+ * A part with the owner's final answer from the terminal (`ask.parts[i].final`) shows that answer: the end does not change it (F-T56-1),
+ * cut to FINAL_IN_CONFIRM characters, so that 4 long answers still fit (F-T206-1).
  */
 export function confirmEnd(gate, { holders, names }, ask) {
   const tallies = gate.parts.map((part) => tally(part, holders));
   const text = (cap) => [`**End ${gate.id} now?**`, ...tallies.map((counts, i) => {
     const { top, tied } = leaders(counts);
     const final = ask?.parts[i].final;
-    return final ? `Part ${i + 1} has the final answer from the terminal: ${final.text}.`
+    return final ? `Part ${i + 1} has the final answer from the terminal: ${cut(final.text, FINAL_IN_CONFIRM)}.`
       : top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
       : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${list(counts.get(tied[0]).map((id) => bold(id, names)), cap)}).`
       : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until a ${LEAD} breaks the tie.`;

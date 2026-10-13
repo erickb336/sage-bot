@@ -51,6 +51,8 @@ export function notLeadsOnly(row) {
 const NOT_MARKED = 'sage did not mark it as a team vote';
 /** Why a gate stays at the terminal while the marks files are refused: the bridge cannot tell whether sage marked it (F-T46-1). */
 const UNREAD = 'the bridge cannot read the marks, so no gate is posted (see the line "no gate is posted")';
+/** A reminder never comes this soon after the card's last ping: a moved card posted just before a 2-hour mark waits for the next one (F-T66-1). */
+export const QUIET = 10 * MINUTE;
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
@@ -504,7 +506,10 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         const { gate, ask } = gates.get(id);
         const said = byId.get(sageId)?.answer ?? '';
         // A gate with an open check of the trail waits for it: the answer in sage may be the bridge's write back of an older owner answer.
-        if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || m.restore?.[sageId]) continue;
+        // A check whose write landed waits for nothing: an owner's answer before that write leaves the bridge's text (m.sent) in sage, and
+        // one after it is the owner's, and final (F-T207-1).
+        const checking = m.restore?.[sageId] && !m.restore[sageId].landed;
+        if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || checking) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
         const option = optionOf(said, m.texts[i]);
         if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a sage-leads' recommendation), never the owner's
@@ -599,7 +604,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       const said = all.slice(from);
       const mine = said.lastIndexOf(text);
       if (landed && mine === -1) {
-        sayOnce(`${keyOf(project, sageId)}: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected`);
+        sayOnce(`${keyOf(project, sageId)}: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected. Update sage-bot so it reads sage's new answer rows, then restart the bridge`);
         return;
       }
       if (mine === -1 && from > 0 && said.length === 0) {
@@ -695,12 +700,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     for (const [project, sage] of sages) {
       try { await syncProject(project, sage, marks); } catch (e) { say(`${project}: the bridge could not read the logbook; it tries again: ${e?.message}`); }
     }
-    // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17) and still
-    // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it, or dropped when it is
+    // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17), while it
+    // still waits. A settled card is not posted again (F-T65-1), and a new card that the owner answered at the terminal before its first
+    // post (after a crash: syncProject read the answer just now) is never posted (F-T66-1). Then the messages held for a moved card, below it, or dropped when it is
     // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
       try {
-        if (!m.message && (waits(id) || !moved(m))) await postCard(id, ppl, m.channel ?? await placeOf(m.session, projectOfKey(id)));
+        if (!m.message && waits(id)) await postCard(id, ppl, m.channel ?? await placeOf(m.session, projectOfKey(id)));
         await postHeld(id);
       } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
     }
@@ -780,7 +786,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       if (gate.phase === 'voting' && clock() >= gate.endsAt) await apply(id, { type: 'tick', at: clock() }, ppl);
       const { gate: g, ask } = gates.get(id);
       const m = meta.get(id);
-      const due = waits(id) && nextReminderAt(g, m.remindedAt);
+      let due = waits(id) && nextReminderAt(g, m.remindedAt);
+      // A 2-hour mark just after the card's last ping (its post, its tie post or a late reminder) waits for the next mark (F-T66-1).
+      if (due && due.at - m.remindedAt < QUIET) due = nextReminderAt(g, due.at);
       if (!due || due.at > clock() || !m.message || m.shut) continue; // a closed card first gets its buttons back (F-T132-15)
       // A reminder waits until the messages held for the card are posted, so a lasting refusal never adds one to them (F-T68-1).
       if (m.held?.length) await postHeld(id);

@@ -5,9 +5,10 @@
 // execFileSync from here, which give each child SAGE_TOOL (testEnv), so that a script that looks for sage (scripts/demo.mjs) gets the
 // tests' copy and never the owner's plugin cache (F-T162-2). t162-sage-fixture.test.js checks that no other test file imports it.
 import * as cp from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
@@ -40,6 +41,19 @@ export function testSage(env = process.env) {
   return sagePath({ env: { SAGE_TOOL: path } });
 }
 export const SAGE = testSage();
+/** A scratch copy of the pinned sage whose `gate answer` writes decision rows with another why text, as a newer sage may (F-T45-2). */
+export function changedSage() {
+  const root = join(dirname(FIXTURE), '..', '..');
+  // The real path: sage runs its command only when its argv[1] is its own real path, and TMPDIR may be a link (/var on macOS).
+  const copy = join(realpathSync.native(tempFolder('sage-bot-why-')), 'sage');
+  cpSync(root, copy, { recursive: true });
+  const state = join(copy, 'core', 'state.mjs');
+  const before = readFileSync(state, 'utf8');
+  const after = before.replace(`"the user's answer" : "the user's own words"`, `"the owner's answer" : "the owner's own words"`);
+  assert.notEqual(after, before, 'the copy changes the why text');
+  writeFileSync(state, after);
+  return join(copy, 'skills', 'sage', 'sage.mjs');
+}
 /** The environment of each child process of the tests: `env` (default process.env) with SAGE_TOOL, unless `env` names its own. */
 export const testEnv = (env = process.env) => ({ ...env, SAGE_TOOL: env.SAGE_TOOL || SAGE });
 const withEnv = (start) => (file, args = [], options = {}) => start(file, args, { ...options, env: testEnv(options.env) });

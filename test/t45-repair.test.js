@@ -2,28 +2,12 @@
 // SAMPLE DATA ONLY: every id, name and answer is made up. HOME and SAGE_HOME are in a scratch folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { LOOP } from '../src/bridge.js';
-import { FIXTURE, MAYA, MEMBERS, setup } from './bridge-setup.js';
-import { tempFolder } from './temp-folder.js';
+import { changedSage, MAYA, MEMBERS, setup } from './bridge-setup.js';
 
 const add = (b, question) => b.sh('gate', 'add', 'T1', '--question', question, '--options', 'x|y', '--recommend', 'x');
-const LOUD = "project/G1: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected";
-
-/** A scratch copy of the pinned sage whose `gate answer` writes decision rows with another why text, as a newer sage may. */
-function changedSage() {
-  const root = join(dirname(FIXTURE), '..', '..');
-  // The real path: sage runs its command only when its argv[1] is its own real path, and TMPDIR may be a link (/var on macOS).
-  const copy = join(realpathSync.native(tempFolder('sage-bot-why-')), 'sage');
-  cpSync(root, copy, { recursive: true });
-  const state = join(copy, 'core', 'state.mjs');
-  const before = readFileSync(state, 'utf8');
-  const after = before.replace(`"the user's answer" : "the user's own words"`, `"the owner's answer" : "the owner's own words"`);
-  assert.notEqual(after, before, 'the copy changes the why text');
-  writeFileSync(state, after);
-  return join(copy, 'skills', 'sage', 'sage.mjs');
-}
+const LOUD = "project/G1: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected. "
+  + "Update sage-bot so it reads sage's new answer rows, then restart the bridge";
 
 test('F-T45-2: when sage changes the why of its answer rows, the bridge says so loudly and keeps its check, also after a restart', async () => {
   const b = setup({ tool: changedSage() });

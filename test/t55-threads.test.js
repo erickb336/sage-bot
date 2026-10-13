@@ -231,6 +231,23 @@ test('T65: Discord refuses the new posts of moved cards for 3 hours: the tie pos
   assert.equal(all.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of project/G2+G3 still tied`)).length, 1);
 });
 
+test('F-T66-1: a moved card posted just before a 2-hour mark gets no reminder a minute later; the next mark reminds', async () => {
+  const b = await movedSetup(); // G1 opened at T0 + 30 s
+  await b.press(MAYA, 'press:project/G2+G3:1:0'); // the edit of the batch card finds the thread gone: G1 moves
+  assert.equal(b.bridge.threadOf(S1), undefined);
+  const opened = b.bridge.entry('project/G1').gate.openedAt;
+  b.now = opened + 2 * HOUR - 30_000;
+  await b.bridge.loop(); // G1 is posted again in the parent channel, 30 s before its 2-hour mark
+  assert.deepEqual(cards(b), ['Question project/G1 · T1 ']);
+  const reminders = () => pings(b).filter((t) => t.includes('reminder: project/G1'));
+  b.now += MINUTE;
+  await b.bridge.loop();
+  assert.deepEqual(reminders(), []); // the card's own post pinged the team a minute ago
+  b.now = opened + 4 * HOUR;
+  await b.bridge.loop();
+  assert.equal(reminders().length, 1);
+});
+
 test('T65: the bridge stops before the new post of a moved card whose vote ended tied: after the restart the card comes first, then its tie post, once', async () => {
   const b = await movedSetup();
   const real = b.discord.post;

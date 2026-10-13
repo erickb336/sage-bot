@@ -72,7 +72,8 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPT
 /**
  * Open a gate. A single gate has one list of options; a batch has parts, each a list of options.
  * Throws on a gate it refuses: a kind other than single or batch, no id or askedBy,
- * a time that is not a safe integer (ms), or empty or duplicate options or parts, or more than MAX_OPTIONS options in one list.
+ * a time that is not a safe integer (ms), a batch whose end (`at` + 30 minutes) is not a safe integer, or empty or duplicate options or parts,
+ * or more than MAX_OPTIONS options in one list.
  * @returns {Gate}
  */
 export function openGate({ id, kind, options, parts, askedBy, at }) {
@@ -84,6 +85,7 @@ export function openGate({ id, kind, options, parts, askedBy, at }) {
     if (!isOptions(options)) throw new TypeError('openGate: a single gate needs a non-empty list of unique options');
     return freeze({ ...base, phase: 'open', options: [...options] });
   }
+  if (!Number.isSafeInteger(at + BATCH_LIMIT)) throw new RangeError('openGate: a batch needs a time whose end, 30 minutes later, is in whole ms');
   if (!(Array.isArray(parts) && parts.length > 0 && parts.every(isOptions))) {
     throw new TypeError('openGate: a batch needs a non-empty list of parts, each with a non-empty list of unique options');
   }
@@ -287,7 +289,7 @@ function gateProblem(g) {
     const ok = g.phase === 'open' ? status === 'open' : g.phase === 'closed' && (status === 'withdrawn' || answered);
     return ok ? '' : 'the phase and the outcome do not match';
   }
-  if (g.endsAt !== g.openedAt + BATCH_LIMIT) return 'endsAt is not 30 minutes after openedAt';
+  if (!Number.isSafeInteger(g.endsAt) || g.endsAt !== g.openedAt + BATCH_LIMIT) return 'endsAt is not 30 minutes after openedAt';
   const ended = g.votingEndedAt;
   if (ended !== null && !(inTime(ended) && ended <= g.endsAt)) return 'votingEndedAt is not a time';
   // A sage-lead ends the vote only before the time limit; at the limit nobody ends it.
@@ -301,6 +303,8 @@ function gateProblem(g) {
     const problem = partProblem(part, ballotTime, (t) => inTime(t) && ended !== null && t >= ended);
     if (problem) return problem;
   }
+  // After the end of the vote the vote rules take no ballot (F-T35-1).
+  if (ended !== null && g.parts.some((p) => p.ballots.some(([, b]) => b.at > ended))) return 'a ballot comes after the end of the vote';
   const open = g.parts.filter((p) => p.outcome.status === 'open');
   const all = open.length === g.parts.length;
   // A voting gate has seen no event at or after its time limit: such an event ends the vote.
@@ -314,7 +318,11 @@ function partProblem(part, inTime, breakTime) {
   if (!keysAre(part, ['options', 'ballots', 'outcome'], ['tied']) || !isOptions(part.options)) return 'a part is not options, ballots and outcome';
   const among = (option) => part.options.includes(option);
   if (part.tied !== undefined && !(isOptions(part.tied) && part.tied.every(among))) return 'a part has tied options that it does not have';
+  // A tie is two or more options, or every option of a part with no votes: one option alone of several is a win, never a tie (F-T35-1).
+  if (part.tied?.length === 1 && part.options.length > 1) return 'a part has one tied option of several';
   const o = part.outcome;
+  // A part that the votes decide has one leader, so the vote rules never give it tied options (F-T35-1).
+  if (o?.how === 'votes' && part.tied !== undefined) return 'a part decided by votes has tied options';
   // A tie-break saved before T39 has no by and at: it still loads, with the sage-lead unknown.
   const plain = keysAre(o, ['status', 'option', 'how']);
   const named = keysAre(o, ['status', 'option', 'how', 'by', 'at']) && isId(o.by) && breakTime(o.at);
