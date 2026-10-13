@@ -2,7 +2,7 @@
 // sage logbooks. SAMPLE DATA ONLY: every id, name and answer is made up. HOME and SAGE_HOME are in a scratch folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openLog } from '../src/audit.js';
@@ -195,7 +195,7 @@ test('F-T145-L9: the demo\'s lookup of the state tool reads HOME: a sage plugin 
 });
 
 test('F-T145-L10: the test setup finds the pinned sage in a repository whose path has a space', () => {
-  const copy = join(tempFolder('sage-bot-t145-space-'), 'a repo');
+  const copy = join(realpathSync.native(tempFolder('sage-bot-t145-space-')), 'a repo'); // the real path, as node loads a module (TMPDIR may be under /var)
   for (const part of ['src', 'test/bridge-setup.js', 'test/temp-folder.js', 'test/fixtures/sage', 'package.json']) cpSync(join(ROOT, part), join(copy, part), { recursive: true });
   symlinkSync(join(ROOT, 'node_modules'), join(copy, 'node_modules'));
   const setupFile = join(copy, 'test', 'bridge-setup.js');
