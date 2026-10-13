@@ -70,7 +70,8 @@ function world() {
   const project = join(root, 'project'), tool = join(root, 'tool'), state = join(root, 'state');
   for (const d of [project, tool, state]) mkdirSync(d, { mode: 0o700 });
   writeFileSync(join(tool, 'fake.mjs'), FAKE);
-  const fake = (o = {}) => writeFileSync(join(tool, 'fake.json'), JSON.stringify({ mode: 'ok', ...o }));
+  let mode;
+  const fake = (o = {}) => { mode = o.mode ?? 'ok'; writeFileSync(join(tool, 'fake.json'), JSON.stringify({ mode, ...o })); };
   fake();
   const config = { project, statePath: join(state, 'gates.json'), sagePath: join(tool, 'fake.mjs'), projects: [{ name: 'reports-app', project }] };
   const configPath = join(root, 'config.json');
@@ -81,6 +82,11 @@ function world() {
   const timed = () => ({ ...env, T72_NOW: String(Date.now()) });
   const cli = (...a) => {
     const r = spawnSync(process.execPath, args(a), { encoding: 'utf8', env: timed() });
+    // A tool that kills its approver (crash-before, crash-after) ends just after it; the claim lives until then (T210). Only the
+    // orphan runs on.
+    if (r.signal && mode !== 'orphan') {
+      for (const { claim } of loadRequests(path).requests) while (claim?.tool && alive(claim.tool.pid)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
     return { code: r.status, signal: r.signal, out: r.stdout.trim(), err: r.stderr.trim() };
   };
   const cliLater = (...a) => new Promise((resolve) => {
@@ -513,8 +519,9 @@ test('F-T72-10: a lock that times out at step 3, after the task was added, says 
   w.add();
   w.fake({ mode: 'slow' });
   const first = w.cliLater('approve', 'RQ1');
-  while (!existsSync(w.path) || w.status('RQ1') !== 'approving') await sleep(20);
+  // Step 2 runs once the claim names its tool and the approver has let go of the lock (T210).
   const lock = `${w.path}.lock`;
+  while (!existsSync(w.path) || !loadRequests(w.path).requests[0].claim?.tool || existsSync(lock)) await sleep(20);
   writeFileSync(lock, String(process.pid)); // a live run holds the lock
   w.release();
   const r = await first;
