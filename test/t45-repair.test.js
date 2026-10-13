@@ -2,7 +2,7 @@
 // SAMPLE DATA ONLY: every id, name and answer is made up. HOME and SAGE_HOME are in a scratch folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { LOOP } from '../src/bridge.js';
 import { FIXTURE, MAYA, MEMBERS, setup } from './bridge-setup.js';
@@ -14,7 +14,8 @@ const LOUD = "project/G1: the decisions trail does not show the bridge's write: 
 /** A scratch copy of the pinned sage whose `gate answer` writes decision rows with another why text, as a newer sage may. */
 function changedSage() {
   const root = join(dirname(FIXTURE), '..', '..');
-  const copy = join(tempFolder('sage-bot-why-'), 'sage');
+  // The real path: sage runs its command only when its argv[1] is its own real path, and TMPDIR may be a link (/var on macOS).
+  const copy = join(realpathSync.native(tempFolder('sage-bot-why-')), 'sage');
   cpSync(root, copy, { recursive: true });
   const state = join(copy, 'core', 'state.mjs');
   const before = readFileSync(state, 'utf8');
