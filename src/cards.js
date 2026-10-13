@@ -21,7 +21,7 @@ const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x
 const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
   'codeBlockContent', 'inlineCodeContent', 'escape', 'heading', 'bulletedList', 'numberedList'].map((k) => [k, true]));
 /** Discord's limits on one message, in characters (fields: a count). A reason shows on the card cut to REASON_ON_CARD characters; the gate keeps the full text. */
-const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 2048, name: 256, value: 1024, button: 80, modal: 45, content: 2000 };
+export const LIMIT = { embed: 6000, fields: 25, title: 256, description: 4096, footer: 2048, name: 256, value: 1024, button: 80, modal: 45, content: 2000 };
 const REASON_ON_CARD = 200;
 /** An owner's final answer in the end-early confirm: at most this many characters, so the confirm of 4 parts fits in 2000 (F-T206-1). */
 const FINAL_IN_CONFIRM = 200;
@@ -213,7 +213,7 @@ export function card(gate, ask, { holders, names }, { shut = false } = {}) {
   return { embeds: [{ ...embed, color }], components: rows.map((r) => r.toJSON()), allowedMentions: NO_MENTIONS };
 }
 
-const button = (id, text, style, { chosen = false, disabled = false } = {}) => new ButtonBuilder().setCustomId(id)
+export const button = (id, text, style, { chosen = false, disabled = false } = {}) => new ButtonBuilder().setCustomId(id)
   .setLabel(cut(text, LIMIT.button)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
 const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key), cap)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
 
