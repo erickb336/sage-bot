@@ -125,18 +125,20 @@ test('the bridge\'s own answer in sage, without its save (a crash in between), s
   assert.deepEqual(decisionsOf(b, 'Q?'), ['Q? → y']);
 });
 
-test('F-T28-28: a question about a merge is never posted, in any form; a word that only holds "merg" is', async () => {
+test('F-T28-28, F-T41-1: a question about a merge is never posted, in any form; any word that holds "merg" stays at the terminal too', async () => {
   for (const q of ['Merge PR 12 now?', 'Shall I keep merges small?', 'PR 12 merged with a conflict: revert?', 'Start merging the stack?', 'Which way?']) {
     const b = setup();
     b.sh('gate', 'add', 'T1', '--question', q, '--options', q === 'Which way?' ? 'squash and merge|rebase' : 'yes|no', '--recommend', '1');
     await b.post();
     assert.equal(b.discord.posts.length, 0, q);
   }
-  assert.deepEqual(['emerge', 'emerging', 'submerged', 'Merger'].map((w) => MERGE.test(w)), [false, false, false, false]);
+  // F-T41-1: the rule is wide on purpose: a word that only holds "merg" stays at the terminal, where the owner answers it.
+  assert.deepEqual(['emerge', 'emerging', 'submerged', 'Merger'].map((w) => MERGE.test(w)), [true, true, true, true]);
   const b = setup();
   b.sh('gate', 'add', 'T1', '--question', 'Which fix should emerge first?', '--options', 'a|b', '--recommend', 'a');
+  b.sh('gate', 'add', 'T2', '--question', 'Which fix should come first?', '--options', 'a|b', '--recommend', 'a');
   await b.post();
-  assert.equal(b.discord.posts.length, 1);
+  assert.deepEqual(b.discord.posts.map((p) => p.embeds[0].title.split(' · ')[0]), ['Question project/G2']);
 });
 
 test('F-T28-31: when a voter loses the role, the next loop redraws the open card, and the card then shows what the tick decides', async () => {

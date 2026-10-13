@@ -17,9 +17,10 @@ const isFinal = (f, part) => f === undefined || (f && isText(f.by) && isTime(f.a
 const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().join() : null);
 /**
  * A message held for a moved card (T65), exactly as the bridge makes it: a text in Discord's 2,000 characters that pings nobody, or one
- * role (F-T65-3). Discord would ping @everyone for a payload with no allowedMentions.
+ * role (F-T65-3). Discord would ping @everyone for a payload with no allowedMentions. A text with nothing but spaces is not one: Discord
+ * refuses it, so it would hold up every message after it (F-T68-1).
  */
-const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content) && p.content.length <= 2000
+const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content) && p.content.trim() !== '' && p.content.length <= 2000
   && Array.isArray(p.allowedMentions.parse) && p.allowedMentions.parse.length === 0
   && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && Array.isArray(p.allowedMentions.roles)
     && p.allowedMentions.roles.length === 1 && /^\d{17,20}$/.test(p.allowedMentions.roles[0])));
@@ -28,7 +29,7 @@ const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content
  * One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make.
  * Its gate id is its key (T132): the project name, a slash and the sage gate ids of the entry, so `G1` of two projects are two entries.
  */
-function entryOf(e) {
+function entryOf(e, path) {
   const ok = e && Array.isArray(e.sage) && e.sage.every((id) => GATE_ID.test(id)) && e.gate?.id === keyOf(projectOfKey(e.gate?.id), e.sage.join('+')) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
     && e.ask.parts.every((p) => p && isFinal(p.final, p))
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
@@ -46,7 +47,7 @@ function entryOf(e) {
     && (e.folder === null || isText(e.folder));
   if (!ok) throw new TypeError('the gate file has an entry that the bridge did not write');
   if (e.held !== undefined && !(Array.isArray(e.held) && e.held.every(isHeld))) {
-    throw new TypeError('the gate file has an entry with held messages that the bridge did not write');
+    throw new TypeError(`the gate file ${path} has held messages for ${e.gate.id} that the bridge did not write. Nothing was loaded.`);
   }
   return { ...e, session: e.session ?? null, gate: parseGate(e.gate) };
 }
@@ -81,7 +82,7 @@ export function load(path, own, folders = new Map()) {
   // An old entry with a card gets the mark `oldButtons`: its buttons name the bare gate id until the bridge edits the card (F-T132-5).
   const keyed = data.version < 3 ? data.entries.map((e) => ({ ...e, gate: e?.gate && { ...e.gate, id: keyOf(own, e.gate.id) }, ...(e?.message && { oldButtons: true }) })) : data.entries;
   const entries = data.version < VERSION ? keyed.map((e) => ({ ...e, folder: folders.get(projectOfKey(e?.gate?.id)) ?? null })) : keyed;
-  return { version: data.version, entries: entries.map(entryOf), sessions: sessions.map(sessionOf) };
+  return { version: data.version, entries: entries.map((e) => entryOf(e, path)), sessions: sessions.map(sessionOf) };
 }
 
 /**

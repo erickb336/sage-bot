@@ -10,7 +10,7 @@ import { handle, peopleOf } from './handle.js';
 import { OTHER } from './sage.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
 import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
-import { MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
+import { HOUR, MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
 export const SNOWFLAKE = /^\d{17,20}$/;
@@ -31,8 +31,11 @@ export const SLEPT = LOOP + MINUTE;
 export const SETTLE = 30_000;
 /** The gates of one task whose `at` (sage's time of `gate add`) are at most this far from the first one go on one card (G9, F-T28-29). */
 export const ASKED_TOGETHER = 30_000;
-/** A question about a merge in any form: merges never go to a vote, also when sage marked one (F-T28-28, a second guard to G13). */
-export const MERGE = /\bmerg(?:e|es|ed|ing)\b/i;
+/**
+ * A question about a merge in any form: merges never go to a vote, also when sage marked one (F-T28-28, a second guard to G13). Any
+ * word that holds "merg" counts, in any letter case: mergeable, unmerged, automerge, auto_merge and MERGE_CHECK too (F-T41-1).
+ */
+export const MERGE = /merg/i;
 /**
  * T73, G18 item 8: the only question that may be sage-leads only, word for word, with the options Yes|No. A sage-lead's answer to any other gate
  * would close a decision of the owner, so scripts/vote.mjs refuses to mark another gate, and the bridge refuses to post one (F-T73-1).
@@ -46,6 +49,8 @@ export function notLeadsOnly(row) {
   return row.options === 'Yes|No' ? null : `${row.id} cannot be sage-leads only: a sage-leads-only question needs the options Yes|No, exactly`; // F-T94-6
 }
 const NOT_MARKED = 'sage did not mark it as a team vote';
+/** Why a gate stays at the terminal while the marks files are refused: the bridge cannot tell whether sage marked it (F-T46-1). */
+const UNREAD = 'the bridge cannot read the marks, so no gate is posted (see the line "no gate is posted")';
 /** A card holds 5 rows of buttons, and a batch uses one row per part and one for "End vote now" (F-T28-19). */
 export const MAX_PARTS = 4;
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
@@ -99,6 +104,8 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
   return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
 }
 
+/** The why of each decision row that `sage gate answer` writes: an option, or the owner's own words (pinned sage, core/state.mjs). */
+const ANSWER_WHYS = new Set(["the user's answer", "the user's own words"]);
 /** The option key of an answer in sage: sage keeps the option's own text (`gate answer --option <n>`, T176), else undefined. */
 const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
 /**
@@ -172,14 +179,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const clock = monotonic(now, Math.max(0, ...[...gates.values()].map((e) => e.gate.lastAt)));
   const firstSeen = new Map(); // sage gate id → when the bridge first saw it open; only in memory
   const refused = new Set(); // groups already refused, so that the log says it once
-  const kept = new Set(); // sage gate ids already logged as kept at the terminal (not marked, or about a merge), so that the log says it once
+  // The sage gate keys logged as kept at the terminal, each with the reason of its line: the log says a reason once, and a new reason
+  // again, for example the merge line after an unmarked gate gets its mark (F-T46-1).
+  const kept = new Map();
   // The gate keys in neither marks file at the last read. A move between the two files leaves a gate in neither for one read, so the log
   // says that sage did not mark a gate only at its second read in a row (F-T94-5).
   const unmarked = new Set();
   const votesPath = votesPathOf({ statePath, votesPath: config.votesPath });
   const leadsPath = leadsPathOf({ statePath, votesPath: config.votesPath });
   let votesError = null; // the last refusal of the team votes file, so that the log says it once
-  let lastLoop = null;
+  let lastEnd = null; // the wall clock at the end of the last turn of the loop
   let lastHolders = null; // the holders at the last loop, to redraw the open cards when they change (F-T28-31)
 
   const persist = () => save(statePath, [...[...gates].map(([id, { gate, ask }]) => ({ gate, ask, ...meta.get(id) })), ...parked], [...sessions.values()]);
@@ -234,11 +243,12 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const holderRoles = (ask) => (ask.leads ? [config.leadRole] : [config.apprenticeRole, config.leadRole]);
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
-  const post = async (target, payload) => {
+  /** Posts a message; null when Discord refused it. `log` gets the line of a refusal (a lost thread has its own lines). */
+  const post = async (target, payload, log = say) => {
     // A payload with no allowedMentions would ping every mention in its text: the bridge's default pings nobody (F-T65-3).
     try { return await discord.post(target, { allowedMentions: NO_MENTIONS, ...payload }); } catch (e) {
       const x = goneThread(target, e);
-      if (x) lost(x, e); else say(`Discord refused a post: ${apiError(e)}`);
+      if (x) lost(x, e); else log(`Discord refused a post: ${apiError(e)}`);
       return null;
     }
   };
@@ -257,12 +267,15 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     persist();
     for (const [id] of moving) say(`${id}: its card moves to the parent channel, because the thread of ${x.title} is gone (G17)`);
   };
-  /** Edits a message; true when Discord took the edit. */
-  const edit = async (target, message, payload, what) => {
+  /**
+   * Edits a message; true when Discord took the edit, null when it refused an edit that can never work (NO_EDIT), else false.
+   * `log` gets the line of a refusal (a lost thread has its own lines).
+   */
+  const edit = async (target, message, payload, what, log = say) => {
     try { await discord.edit(target, message, payload); return true; } catch (e) {
       const x = goneThread(target, e);
-      if (x) lost(x, e); else say(`Discord refused the edit of ${what}: ${apiError(e)}`);
-      return false;
+      if (x) lost(x, e); else log(`Discord refused the edit of ${what}: ${apiError(e)}`);
+      return NO_EDIT.has(e?.code) ? null : false;
     }
   };
   const setLocked = async (x, locked) => {
@@ -343,17 +356,45 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /**
    * Posts the messages held for the card of `id` below it, in order, while the card waits for them. A settled card drops them: a tie
    * alert or a reminder after the answer would call the team for nothing (F-T65-4).
+   * One run at a time per card: a press and the loop that both call it share the run, so no held message posts twice (F-T68-1).
    */
-  async function postHeld(id) {
+  const holding = new Map(); // card id → its run of postHeld
+  function postHeld(id) {
+    if (!holding.has(id)) holding.set(id, postHeldNow(id).finally(() => holding.delete(id)));
+    return holding.get(id);
+  }
+  // A card whose held message Discord refused: the next try waits, twice as long after each refusal in a row, up to an hour. The log
+  // says each kind of refusal once, not each try (F-T68-1). Only in memory: a restart tries at once.
+  const backoff = new Map(); // card id → { at, wait, line }
+  /** Records the refusal `line` of `id` in `waits`: the next try waits LOOP, then twice as long each time, up to an hour; a new line is logged. */
+  const refusedAgain = (waits, id, line, more) => {
+    const last = waits.get(id);
+    const wait = Math.min(2 * (last?.wait ?? LOOP / 2), HOUR);
+    if (line !== last?.line) say(`${line}${more}`);
+    waits.set(id, { at: clock() + wait, wait, line });
+  };
+  async function postHeldNow(id) {
     const m = meta.get(id);
     if (!m.held?.length) return;
     if (!waits(id)) {
       say(`${id}: it is settled, so the bridge drops the ${m.held.length} message(s) that waited for its card`);
       delete m.held;
+      backoff.delete(id);
       persist();
       return;
     }
-    while (m.message && m.held.length && (await post(m.channel, m.held[0]))) { m.held.shift(); persist(); }
+    if (clock() < (backoff.get(id)?.at ?? 0)) return;
+    while (m.message && m.held.length) {
+      let line;
+      if (!(await post(m.channel, m.held[0], (l) => { line = l; }))) {
+        if (!line) return; // the thread is gone: `lost` moved the card, and sync posts it again
+        refusedAgain(backoff, id, `${id}: ${line}`, '. Its held messages wait; the bridge tries again after longer and longer waits');
+        return;
+      }
+      backoff.delete(id);
+      m.held.shift();
+      persist();
+    }
   }
 
   /**
@@ -393,18 +434,32 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /**
    * Edits the card of a gate with `card()`, from the gate as it is now (F-T28-17). The first edit that works gives a card of the time
    * before T132 the buttons with the keys, so it loses its mark `oldButtons` (F-T132-5), and gives a card that `closeGone` closed its
-   * buttons back without the note, so it loses its mark `shut` (F-T132-15).
+   * buttons back without the note, so it loses its mark `shut` (F-T132-15). False when Discord refused an edit that a later try can
+   * get through; true for a card with nothing to try again: not posted yet, or an edit that can never work.
+   * A refused edit waits like a held message: the loop tries the card again only when `redrawDue`, and the log says each reason once (F-T45-3).
    */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
     const m = meta.get(id);
     const payload = { ...card(gate, ask, ppl), ...(m.shut && { content: '' }) };
-    if (m.message && (await edit(m.channel ?? config.channelId, m.message, payload, id)) && (m.oldButtons || m.shut)) {
+    if (!m.message) return true;
+    let line;
+    const took = await edit(m.channel ?? config.channelId, m.message, payload, id, (l) => { line = l; });
+    if (line) refusedAgain(redrawWaits, id, line, '. The bridge tries again after longer and longer waits');
+    if (!took) return took === null;
+    redrawWaits.delete(id);
+    if (m.oldButtons || m.shut) {
       delete m.oldButtons;
       delete m.shut;
       persist();
     }
+    return true;
   }
+
+  /** The cards whose redraw Discord refused, as `backoff` holds the held messages; only in memory. */
+  const redrawWaits = new Map(); // card id → { at, wait, line }
+  /** Whether the loop may try the redraw of `id` now. A press redraws at once: it changed the card. */
+  const redrawDue = (id) => clock() >= (redrawWaits.get(id)?.at ?? 0);
 
   /** The parts of a batch that wait for a sage-lead: tied after the vote, with no final answer from the terminal. */
   const tiedParts = (gate, ask) => gate.parts.flatMap((part, i) => (part.outcome.status === 'open' && !ask.parts[i].final ? [i] : []));
@@ -437,13 +492,12 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
 
   /**
    * Reads the answers in sage that the bridge did not write: they are the owner's, typed at the terminal, and final whatever the
-   * owner's roles (G10). Each one closes its part on the card, so no press and no answer of the bridge replaces it. An answer that
-   * names no option on an open single gate is a withdraw instead: those gate ids come back, for the caller to apply. `rows` are the
-   * gate rows of `project`, and only its entries read them (T132).
+   * owner's roles (G10). Each one closes its part on the card, so no press and no answer of the bridge replaces it. An answer in the
+   * owner's own words ("other: …") is final the same way, also on a single question: sage keeps it as the answer (F-T45-1). `rows` are
+   * the gate rows of `project`, and only its entries read them (T132).
    */
   async function readOwner(project, rows) {
     const byId = new Map(rows.map((r) => [r.id, r]));
-    const withdraws = [];
     for (const [id, m] of entriesOf(project)) {
       const own = new Map(answersOf(id)); // what the bridge gives sage; the same text in sage is the bridge's (a crash before its save)
       for (const [i, sageId] of m.sage.entries()) {
@@ -454,7 +508,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
         const option = optionOf(said, m.texts[i]);
         if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a sage-leads' recommendation), never the owner's
-        if (!option && gate.kind === 'single' && gate.phase === 'open') { withdraws.push(id); continue; }
         const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');
         const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };
         gates.set(id, { gate, ask: { ...ask, parts: ask.parts.with(i, { ...ask.parts[i], final }) } });
@@ -463,7 +516,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         await redraw(id, await people());
       }
     }
-    return withdraws;
   }
 
   /** Gives sage each final answer that it does not have yet. Only a settled gate has any (R142).
@@ -502,6 +554,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         continue;
       }
       m.sent[sageId] = text;
+      m.restore[sageId].landed = true; // sage took the write, so the trail must show it (F-T45-2)
       persist();
       say(`sage gate ${keyOf(project, sageId)} answered: ${text}`);
       await keepOwner(id, sageId);
@@ -516,6 +569,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
    * An answer after `wrote` stands (the owner's later answer). The marker is in the gate file until a check finds nothing to write back,
    * so a write back that sage refused, or a stop of the bridge, is done again at the next flush (F-T43-5). Then the card shows the
    * answer in sage as final in the same turn (F-T43-6). `m.sent` keeps the bridge's text, so the bridge never sends again.
+   * The check finds the answer rows by sage's why text (ANSWER_WHYS). When sage took the bridge's write (`landed`) and the trail shows no
+   * row of it, that text changed: the marker stays, and the log says that the owner's answer is not protected (F-T45-2).
    */
   async function keepOwner(id, sageId) {
     const m = meta.get(id);
@@ -527,21 +582,32 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       persist();
       say(`${sageId}: ${why}; the bridge stops its check of the owner's answer and writes nothing back`);
     };
-    const row = (await sage.gates()).find((r) => r.id === sageId);
+    const rows = await sage.gates();
+    const row = rows.find((r) => r.id === sageId);
     if (!row) return stop('the gate is not in gates.tsv any more');
-    const head = `${row.question} → `;
+    const head = (r) => `${r.question} → `;
+    // The decision rows carry no gate id. A row is an answer of this gate when `gate answer` wrote it (its why), and this gate's question
+    // is the longest question of the task that the row starts with: so neither a log line nor another gate whose question starts with
+    // this question counts (F-T61-1).
+    const others = rows.filter((r) => r.task === row.task && r.question.length > row.question.length);
+    const ofGate = (d) => d.task === row.task && ANSWER_WHYS.has(d.why) && d.decision.startsWith(head(row)) && !others.some((r) => d.decision.startsWith(head(r)));
     for (let wrote = false; ; wrote = true) {
-      const { mark, wrote: text, from } = m.restore[sageId];
+      const { mark, wrote: text, from, landed } = m.restore[sageId];
       const trail = await sage.decisions();
-      const all = trail.slice(mark).filter((d) => d.task === row.task && d.decision.startsWith(head)).map((d) => d.decision.slice(head.length));
+      const all = trail.slice(mark).filter(ofGate).map((d) => d.decision.slice(head(row).length));
       if (trail.length < mark || all.length < from) { stop('the decisions trail is shorter than at the last check'); break; }
       const said = all.slice(from);
       const mine = said.lastIndexOf(text);
+      if (landed && mine === -1) {
+        sayOnce(`${keyOf(project, sageId)}: the decisions trail does not show the bridge's write: sage's gate answer rows changed; the owner's answer is not protected`);
+        return;
+      }
       if (mine === -1 && from > 0 && said.length === 0) {
         // a write back that did not land, and no answer after it: write it again, but never twice in one flush
         if (wrote) { stop('the decisions trail does not show the write back'); break; }
-      } else if (mine <= 0 || mine < said.length - 1) {
-        // no answer between the reads and the write, a write of the bridge that did not land, or a later answer that stands
+      } else if (mine <= 0 || mine < said.length - 1 || said[mine - 1] === text) {
+        // no answer between the reads and the write, a write of the bridge that did not land, a later answer that stands, or an owner's
+        // answer with the bridge's own text, which the write did not change (F-T61-1)
         delete m.restore[sageId];
         persist();
         break;
@@ -590,7 +656,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     }
   }
 
-  /** Applies one event of the bridge's own (a tick or a withdraw) to the gate of `id`. */
+  /** Applies one event of the bridge's own (a tick) to the gate of `id`. */
   async function apply(id, event, ppl) {
     const { gate, ask } = gates.get(id);
     const out = step(gate, event, ppl.holders, ppl.leads);
@@ -598,11 +664,6 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     if (out.gate === gate) return;
     gates.set(id, { gate: out.gate, ask });
     await after(id, out.effects, ppl, event.by);
-  }
-
-  /** Takes in the owner's answers at the terminal from the gate rows of `project`: the final answers, and the withdraws. */
-  async function takeOwner(project, rows, ppl) {
-    for (const id of await readOwner(project, rows)) await apply(id, { type: 'withdraw', by: config.ownerId, at: clock() }, ppl);
   }
 
   /**
@@ -620,7 +681,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     } catch (e) {
       if (e.message !== votesError) say(`no gate is posted: ${e.message}`);
       votesError = e.message;
-      return { votes: new Set(), leads: new Set() };
+      return { votes: new Map(), leads: new Map(), refused: true };
     }
   }
 
@@ -632,7 +693,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     // The marks are read once for every project: a gate counts by its key, so G1 of one project never takes the mark of another.
     const marks = teamVotes();
     for (const [project, sage] of sages) {
-      try { await syncProject(project, sage, marks, ppl); } catch (e) { say(`${project}: the bridge could not read the logbook; it tries again: ${e?.message}`); }
+      try { await syncProject(project, sage, marks); } catch (e) { say(`${project}: the bridge could not read the logbook; it tries again: ${e?.message}`); }
     }
     // Post every entry that has no card yet, with the role alert: a new card, or a card that moved to the parent channel (G17) and still
     // waits; a settled card is not posted again (F-T65-1). Then the messages held for a moved card, below it, or dropped when it is
@@ -646,9 +707,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /** Reads the logbook of one project and makes the entries of its new open gates (T132: the keys of `project`). */
-  async function syncProject(project, sage, marks, ppl) {
+  async function syncProject(project, sage, marks) {
     const rows = await sage.gates();
-    await takeOwner(project, rows, ppl);
+    await readOwner(project, rows);
     const key = (id) => keyOf(project, id);
     // New gates, by task and then by the time sage asked them (G9). A question added after its task's card has its own card (G10 c).
     const tracked = new Set(entriesOf(project).flatMap(([, m]) => m.sage));
@@ -673,6 +734,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const markOf = (r) => [...marks.votes.keys(), ...marks.leads.keys()].find((k) => !listed(k) && k.endsWith(`/${r.id}`));
     const fresh = untracked.filter((r) => {
       const why = cardOf(r) ? `its card is ${unlisted(cardOf(r))}`
+        : marks.refused ? UNREAD
         : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs'
         : leadsOnly(r) ? null : !voted(r) && markOf(r) ? `it has no mark of ${project}; the mark is ${unlisted(markOf(r))}`
         : !voted(r) && elsewhere(r) !== undefined ? `its mark is of the folder ${elsewhere(r) ?? '(none)'}, not of ${project}'s folder now. Mark it again with scripts/vote.mjs`
@@ -680,13 +742,15 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         : MERGE.test(`${r.question} ${r.options}`) ? 'it is about a merge, and a merge never goes to a vote' : null;
       const moving = why === NOT_MARKED && !unmarked.has(key(r.id));
       if (why === NOT_MARKED) unmarked.add(key(r.id)); else unmarked.delete(key(r.id));
-      if (why && !moving &&!r.answer && !kept.has(key(r.id))) { kept.add(key(r.id)); say(`${key(r.id)} stays at the terminal: ${why}`); }
+      if (why && !moving && !r.answer && kept.get(key(r.id)) !== why) { kept.set(key(r.id), why); say(`${key(r.id)} stays at the terminal: ${why}`); }
       return !why;
     });
     const tasks = new Map();
-    for (const r of fresh.filter((x) => !leadsOnly(x))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    // A sage-leads-only question is always one question on its own card, never part of a batch (T73).
-    const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter(leadsOnly).map((x) => [x])];
+    const alone = (r) => leadsOnly(r) || !r.task;
+    for (const r of fresh.filter((x) => !alone(x))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
+    // A sage-leads-only question is always one question on its own card, never part of a batch (T73). So is a gate of no task: gates
+    // of no task are not of one task, so nothing says that sage asked them together (F-T49-1).
+    const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter(alone).map((x) => [x])];
     const open = groups.map((g) => g.filter((r) => !r.answer));
     const titles = open.some((g) => g.length) ? new Map((await sage.tasks()).map((x) => [x.id, x.title])) : new Map();
     for (const [n, group] of groups.entries()) {
@@ -718,6 +782,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       const m = meta.get(id);
       const due = waits(id) && nextReminderAt(g, m.remindedAt);
       if (!due || due.at > clock() || !m.message || m.shut) continue; // a closed card first gets its buttons back (F-T132-15)
+      // A reminder waits until the messages held for the card are posted, so a lasting refusal never adds one to them (F-T68-1).
+      if (m.held?.length) await postHeld(id);
+      if (m.held?.length) continue;
       m.remindedAt = clock();
       persist();
       await postAbout(id, due.to === 'holders'
@@ -790,30 +857,39 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     /** One turn of the loop: notices a sleep, redraws the open cards when the holders changed, sends the due ticks and reminders,
      * reads the logbook, gives sage its answers. */
     async loop() {
-      const ppl = await people();
+      // A sleep is a long gap from the end of the last turn to the start of this one, never a long turn: during a turn the bridge
+      // runs, and presses reach it (F-T49-1). The end counts only for a turn that got past the check.
       const wall = now();
-      readSessions();
-      await closeGone(ppl);
-      await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
-      // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
-      // after reconcile: their thread is open again now.
-      for (const [id, m] of meta) if (m.oldButtons || m.shut) await redraw(id, ppl);
-      // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
-      // place that has an open question.
-      if (lastLoop !== null && wall - lastLoop > SLEPT) {
-        const places = new Set();
-        for (const [id, m] of meta) if (m.message && waits(id)) places.add(m.channel ?? config.channelId);
-        for (const at of places) await post(at, { content: `The host was asleep from ${stamp(lastLoop)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
+      let checked = false;
+      try {
+        const ppl = await people();
+        readSessions();
+        await closeGone(ppl);
+        await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
+        // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
+        // after reconcile: their thread is open again now.
+        for (const [id, m] of meta) if ((m.oldButtons || m.shut) && redrawDue(id)) await redraw(id, ppl);
+        // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
+        // place that has an open question.
+        if (lastEnd !== null && wall - lastEnd > SLEPT) {
+          const places = new Set();
+          for (const [id, m] of meta) if (m.message && waits(id)) places.add(m.channel ?? config.channelId);
+          for (const at of places) await post(at, { content: `The host was asleep from ${stamp(lastEnd)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
+        }
+        checked = true;
+        // A card counts only the votes of the holders: when a role changed, each open card shows the count that the tick will use.
+        // The new holders count as drawn only when Discord took every edit, so a refused edit is tried again at the next turn (F-T45-1).
+        const holders = [...ppl.holders].sort().join();
+        let drawn = true;
+        if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) drawn = (redrawDue(id) && (await redraw(id, ppl))) && drawn;
+        if (drawn) lastHolders = holders;
+        await timers(ppl);
+        await sync(ppl);
+        await flush();
+        await reconcile(); // again, for the lines of the sessions that got a card or an answer in this loop
+      } finally {
+        if (checked) lastEnd = now();
       }
-      lastLoop = wall;
-      // A card counts only the votes of the holders: when a role changed, each open card shows the count that the tick will use.
-      const holders = [...ppl.holders].sort().join();
-      if (lastHolders !== null && holders !== lastHolders) for (const id of gates.keys()) if (waits(id)) await redraw(id, ppl);
-      lastHolders = holders;
-      await timers(ppl);
-      await sync(ppl);
-      await flush();
-      await reconcile(); // again, for the lines of the sessions that got a card or an answer in this loop
     },
     /** One Discord interaction (a button or the reason form). A member with neither sage role gets no reply, and nothing changes (G20). Never rejects. */
     async interaction(i) {
@@ -841,7 +917,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
           await i.reply(ephemeral(`This question's project is no longer served; ${OWNER} answers it at the terminal.`));
           return;
         }
-        if (sages.has(project)) await takeOwner(project, await sages.get(project).gates(), ppl);
+        if (sages.has(project)) await readOwner(project, await sages.get(project).gates());
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;
         if (final || (target && target.gate.phase !== 'closed' && !waits(pressed.gateId))) {
