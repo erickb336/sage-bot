@@ -1,7 +1,7 @@
 // Sage sessions (T29). A session is one Claude Code session id. scripts/hook.mjs writes one spool file per session from three
 // hooks (SessionStart, PostToolUse on Bash, SessionEnd); the bridge reads the spool folder at each loop. The rest of this file is
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { logbookOf, pickProject, projectAt } from './projects.js';
 import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
@@ -185,8 +185,12 @@ export function record(input, { projects, dir, pid, now, home }) {
   } else if (event !== 'SessionStart' && event !== 'SessionEnd') {
     throw new TypeError('not a hook event of the sage bridge');
   }
+  // The cwd as sage sees it: its real path, links resolved, as process.cwd() gives it to the state tool (F-T145-10). A cwd that does not
+  // exist (gone since the event) keeps its path as given.
+  let cwd;
+  try { cwd = realpathSync.native(input.cwd); } catch { cwd = resolve(input.cwd); }
   const file = spoolPath(dir, id);
-  const here = projectAt(input.cwd, projects);
+  const here = projectAt(cwd, projects);
   if (!existsSync(file)) {
     if (event === 'SessionEnd') return 'no session';
     if (!here) return 'outside the projects';
@@ -200,9 +204,10 @@ export function record(input, { projects, dir, pid, now, home }) {
     if (event === 'SessionEnd' && !old) return 'no session';
     if (!old && !here) return 'outside the projects';
     const folder = old?.cwd ?? here.project;
-    // A gate add counts only in the logbook of the session's folder: the logbook of the folder that `--project` names, else of the cwd,
-    // by the state tool's own rule (logbookOf), so a linked worktree outside the project's folder counts too (F-T145-L7, F-T145-6).
-    if (gate && logbookOf(resolve(input.cwd, named ?? '.')) !== logbookOf(folder)) return 'another project';
+    // A gate add counts only in the logbook of the session's folder: the logbook of the folder that `--project` names (from the real
+    // cwd), else of the real cwd, by the state tool's own rule (logbookOf), so a linked worktree outside the project's folder counts too
+    // (F-T145-L7, F-T145-6, F-T145-10).
+    if (gate && logbookOf(resolve(cwd, named ?? '.')) !== logbookOf(folder)) return 'another project';
     const s = old ?? { id, project: here.name, cwd: folder, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;
