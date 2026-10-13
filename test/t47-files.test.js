@@ -111,7 +111,7 @@ test('F-T47-1: a vote lock of a live run blocks a change for 2 s; a stale lock (
   const t0 = Date.now();
   const held = v.runSync('G5');
   assert.equal(held.status, 1);
-  assert.equal(held.stderr, `sage-bot vote: another vote run (pid ${process.pid}) holds ${v.votes}.lock. If none runs, remove ${v.votes}.lock. Nothing changed.\n`);
+  assert.equal(held.stderr, `sage-bot vote: another sage-bot run (pid ${process.pid}) holds ${v.votes}.lock. If none runs, remove ${v.votes}.lock. Nothing changed.\n`);
   assert.ok(Date.now() - t0 >= 2000);
   assert.equal(existsSync(v.votes), false);
   const dead = spawnSync(process.execPath, ['-e', '']).pid;

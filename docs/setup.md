@@ -110,7 +110,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   node scripts/vote.mjs --project your-project G42
   ```
 
-  While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another vote run holds the lock, wait and run it again. If no vote run is running, remove the lock file that the message names.
+  While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another sage-bot run holds the lock, wait and run it again. If no sage-bot run is running, remove the lock file that the message names.
 
   Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and sage gets it in the logbook.
 
