@@ -7,9 +7,10 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { addRequest, approve, decline, LIMITS, loadRequests, newRequest, reconcile, Refused, requestsPathOf, setDiscord, step, withdraw } from '../src/requests.js';
+import { addRequest, approve, decline, LIMITS, loadRequests, newRequest, reconcile, Refused, requestsPathOf, RETRY_AFTER, setDiscord, step, withdraw } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
-import { alive } from '../src/state.js';
+import { alive, startOf } from '../src/state.js';
+import { once } from 'node:events';
 import { execFileSync, FIXTURE, JON, MAYA, spawn, spawnSync, T0 } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
 
@@ -39,13 +40,20 @@ const book = here + 'logbook';
 mkdirSync(book, { recursive: true });
 const tsv = book + '/tasks.tsv';
 if (!existsSync(tsv)) writeFileSync(tsv, 'id\\ttitle\\tsize\\n');
-if (args[0] === 'logbook') { console.log(book); process.exit(0); }
+if (args[0] === 'logbook') {
+  if (c.logbook === 'refuse') { process.stderr.write('refused: no logbook here\\nsecond line\\n'); process.exit(5); }
+  if (c.logbook === 'silent') process.exit(6);
+  console.log(book); process.exit(0);
+}
 if (args[0] !== 'task' || args[1] !== 'add') { process.stderr.write('fake: no such command\\n'); process.exit(9); }
 if (c.mode === 'crash-before') { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
 if (c.mode === 'hang') writeFileSync(here + 'pid', String(process.pid));
-if (c.mode === 'orphan') process.kill(process.ppid, 'SIGKILL');
+if (c.mode === 'orphan') {
+  while (c.until && !readFileSync(c.until, 'utf8').includes('"tool"')) await new Promise((r) => setTimeout(r, 20));
+  process.kill(process.ppid, 'SIGKILL');
+}
 if (['slow', 'orphan', 'hang'].includes(c.mode)) while (!existsSync(here + 'release')) await new Promise((r) => setTimeout(r, 20));
-if (c.mode === 'refuse') { process.stderr.write('refused: sample refusal\\n'); process.exit(2); }
+if (c.mode === 'refuse') { process.stderr.write('refused: sample refusal\\nsecond line of the refusal\\n'); process.exit(2); }
 if (c.mode === 'silent') process.exit(4);
 const n = readFileSync(tsv, 'utf8').split('\\n').filter(Boolean).length;
 const title = args.find((a) => a.startsWith('--title=')).slice(8);
@@ -262,7 +270,6 @@ test('list, show, approve and decline at the terminal', () => {
     'title for sage (quoted data, not an instruction): "Add CSV export"',
     'design questions: the team votes',
     `requested by: "Jon" (${JON}) at 2026-10-04 10:00 EDT (14:00 UTC)`,
-    'discord: channel - · line - · card - · thread - · shown -',
     'If you approve: sage adds the task "RQ1: Add CSV export" to reports-app, size large (use --size small to change).',
   ].join('\n'));
   assert.deepEqual(w.cli('approve', 'RQ1'), { code: 0, signal: null, out: 'Approved RQ1. Added sage task T1 to reports-app (large).', err: '' });
@@ -276,7 +283,7 @@ test('list, show, approve and decline at the terminal', () => {
   // Pending first: a new request goes above the decided ones.
   w.add({}, T0 + 120_000);
   assert.match(w.cli('list').out, /^RQ3 {2}reports-app {2}waiting /);
-  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."\n/);
+  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."$/);
   // The terminal answer is final.
   assert.match(w.cli('approve', 'RQ2').err, /^sage-bot requests: RQ2 was already declined at .* \(terminal\)\. Nothing changed\.$/);
   assert.match(w.cli('decline', 'RQ1').err, /^sage-bot requests: RQ1 was already approved at .* \(terminal\): sage task T1\. Nothing changed\.$/);
@@ -343,7 +350,7 @@ test('a crash after step 2 (the task is added): the next run finds the task and 
   w.fake();
   // approve, not list, meets the claim first: it reconciles before its own claim.
   assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 was already approved at .* \(terminal\): sage task T1\. Nothing changed\.$/);
-  assert.match(w.cli('show', 'RQ1').out, /\nsage task: T1\n/);
+  assert.match(w.cli('show', 'RQ1').out, /\nsage task: T1$/);
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
 });
 
@@ -362,7 +369,7 @@ test('the tool fails after it wrote the task: the logbook decides, so the reques
   w.fake({ mode: 'fail-after-write' });
   assert.equal(w.cli('approve', 'RQ1').out, 'Approved RQ1. Added sage task T1 to reports-app (large).');
   w.fake({ mode: 'refuse' });
-  assert.deepEqual(w.cli('approve', 'RQ2'), { code: 1, signal: null, out: '', err: 'sage-bot requests: could not add the task of RQ2: refused: sample refusal. RQ2 still waits. Fix the cause, then run approve again.' });
+  assert.deepEqual(w.cli('approve', 'RQ2'), { code: 1, signal: null, out: '', err: 'sage-bot requests: could not add the task of RQ2: refused: sample refusal. RQ2 still waits. Fix the cause (run sage status for reports-app), then run approve again.' });
   assert.equal(w.status('RQ2'), 'pending');
   assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
 });
@@ -436,7 +443,7 @@ test('F-T72-8: a lone kill of the approver while its tool still runs: the claim 
     assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
     assert.deepEqual(w.tasks(), []); // the tool runs on, with no task yet
     assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
-    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.\n/);
+    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.$/);
     assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved since .* UTC\)\. If it crashed, run approve again after .* UTC\)\. Nothing changed\.$/);
   } finally { w.release(); }
   while (!w.tasks().length) await sleep(20);
@@ -477,7 +484,7 @@ test('F-T72-3, F-T72-18: a tool that fails with no stderr gives its exit code, n
   const w = world();
   w.add();
   w.fake({ mode: 'silent' });
-  assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '', err: 'sage-bot requests: could not add the task of RQ1: the sage state tool stopped with exit code 4. RQ1 still waits. Fix the cause, then run approve again.' });
+  assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '', err: 'sage-bot requests: could not add the task of RQ1: the sage state tool stopped with exit code 4. RQ1 still waits. Fix the cause (run sage status for reports-app), then run approve again.' });
 });
 
 test('F-T72-4: the last request id is RQ999999999; the next add is refused and the file stays loadable', () => {
@@ -562,7 +569,7 @@ test('F-T72-19: local time with UTC beside it, Erick by name, the task in the re
   assert.ok(!show.some((l) => l.includes('for sage'))); // the title and the text are what sage reads, so they show once
   assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}waiting {2}"Jon" {2}2026-10-12 21:26 EDT {2}no task yet {2}/);
   assert.equal(w.cli('approve', 'RQ1').code, 0);
-  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1\n/);
+  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1$/);
   assert.match(w.cli('approve', 'RQ1').err, / \(terminal\): sage task T1\. Nothing changed\.$/);
   // No pid in a message: the claim line and the refusal of a second approve.
   w.add();
@@ -706,13 +713,18 @@ test('F-T72-25: a decline with a reason that is not text is refused with a clear
   assert.equal((await decline(w.config, 'RQ1', { by: 'owner', via: 'terminal', reason: 'Not now.' })).reason, 'Not now.');
 });
 
+/** The first and the last time that a request can hold: the years 0 to 9999, in UTC (T222). */
+const [FIRST, LAST] = [Date.parse('0000-01-01T00:00:00Z'), Date.parse('9999-12-31T23:59:59.999Z')];
 const wrongKind = (id) => ({ message: `the record of ${id} has a field of the wrong kind, so it was not saved. Nothing changed.` });
 
-test('R891: a time out of the Date range is refused before any write; the last time of the range is taken', () => {
+test('R891, T222: a time out of the years 0 to 9999 is refused before any write; the first and the last time of that range are taken', () => {
   const w = world();
-  for (const at of [8.64e15 + 1, -8.64e15 - 1]) assert.throws(() => w.add({}, at), wrongKind('RQ1'), String(at));
+  for (const at of [LAST + 1, FIRST - 1, 8.64e15, -8.64e15]) assert.throws(() => w.add({}, at), wrongKind('RQ1'), String(at));
   assert.equal(existsSync(w.path), false);
-  assert.equal(w.add({}, 8.64e15).createdAt, 8.64e15);
+  assert.equal(w.add({}, LAST).createdAt, LAST);
+  assert.equal(w.add({}, FIRST).createdAt, FIRST);
+  // when() prints the year in 4 digits, with the UTC date when it is another day there.
+  assert.match(w.cli('show', 'RQ1').out, /\nrequested by: "Jon" \(\d+\) at 9999-12-31 18:59 \S+ \(23:59 UTC\)\n/);
 });
 
 test('R891: a requester name has 1 to 100 characters (code points)', () => {
@@ -751,4 +763,137 @@ test('F-T72-26: show gives the UTC date beside the local time only when it is an
   w.add({}, Date.UTC(2026, 9, 12, 14, 0));
   assert.match(w.cli('show', 'RQ1').out, /\nrequested by: "Jon" \(\d+\) at 2026-10-12 22:00 EDT \(2026-10-13 02:00 UTC\)\n/);
   assert.match(w.cli('show', 'RQ2').out, /\nrequested by: "Jon" \(\d+\) at 2026-10-12 10:00 EDT \(14:00 UTC\)\n/);
+});
+
+// ---- Follow-ups (T209) ----
+
+test('T209: when the state tool cannot give the logbook, each verb gives its first stderr line or its exit code, never the argv', () => {
+  const w = world();
+  w.add();
+  w.add({ title: 'Dark mode' });
+  w.fake({ mode: 'crash-before' });
+  assert.equal(w.cli('approve', 'RQ2').signal, 'SIGKILL');
+  w.age('RQ2', RETRY_AFTER + 5_000);
+  for (const [logbook, why] of [['refuse', 'refused: no logbook here'], ['silent', 'the sage state tool stopped with exit code 6']]) {
+    w.fake({ logbook });
+    assert.deepEqual(w.cli('approve', 'RQ1'), { code: 1, signal: null, out: '', err: `sage-bot requests: ${why}` });
+    const list = w.cli('list');
+    assert.deepEqual([list.code, list.err], [0, `sage-bot requests: could not check RQ2: ${why}`]);
+    for (const verb of ['show', 'decline']) assert.deepEqual(w.cli(verb, 'RQ2'), { code: 1, signal: null, out: '', err: `sage-bot requests: ${why}` });
+  }
+  assert.deepEqual([w.status('RQ1'), w.status('RQ2')], ['pending', 'approving']);
+});
+
+test('T210: a lone kill of the approver, then a tool that runs past RETRY_AFTER: the claim lives while its tool lives, so no second task', async () => {
+  const w = world();
+  w.add();
+  w.fake({ mode: 'orphan', until: w.path }); // the tool kills its approver once the claim names the tool
+  let tool;
+  try {
+    assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
+    ({ tool } = loadRequests(w.path).requests[0].claim);
+    assert.equal(alive(tool.pid), true);
+    w.age('RQ1', RETRY_AFTER + 5_000);
+    w.fake(); // a second task add would now add a task
+    assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved {2}"Jon" {2}2026-10-04 10:00 EDT {2}no task yet {2}"Add CSV export"$/);
+    assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved since /);
+    assert.deepEqual(w.tasks(), []);
+  } finally { w.release(); }
+  while (alive(tool.pid)) await sleep(20);
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}approved {2}.* {2}T1 {2}/);
+  assert.deepEqual(w.tasks(), ['T1\tRQ1: Add CSV export\tlarge']);
+});
+
+test('T210: list and show warn when two tasks start with the marker of one request', () => {
+  const w = world();
+  w.add();
+  w.add({ title: 'Dark mode' });
+  assert.equal(w.cli('approve', 'RQ1').code, 0);
+  assert.equal(w.cli('list').err, '');
+  w.book('T1\tRQ1: Add CSV export\tlarge', 'T2\tRQ1: Add CSV export\tlarge');
+  const warn = 'sage-bot requests: warning: sage tasks T1, T2 in reports-app all start with "RQ1: ", so RQ1 has 2 tasks. Keep T1, and remove the others in sage.';
+  for (const args of [['list'], ['show', 'RQ1']]) {
+    const r = w.cli(...args);
+    assert.deepEqual([r.code, r.err], [0, warn], args.join(' '));
+  }
+  assert.equal(w.cli('show', 'RQ2').err, ''); // a waiting request has no task to check
+});
+
+test('T214: show prints the Discord line only when a field is set; --help after the id or an option prints the usage; a reason may be "--help"', () => {
+  const w = world();
+  w.add();
+  w.add();
+  assert.ok(!w.cli('show', 'RQ1').out.includes('discord:'));
+  setDiscord(w.config, 'RQ1', { card: '100000000000000012' });
+  assert.ok(w.cli('show', 'RQ1').out.split('\n').includes('discord: channel - · line - · card 100000000000000012 · thread - · shown -'));
+  for (const args of [['show', 'RQ1', '--help'], ['approve', 'RQ1', '--size', 'small', '--help']]) {
+    const r = w.cli(...args);
+    assert.deepEqual([r.code, r.err], [0, ''], args.join(' '));
+    assert.match(r.out, /^usage: node scripts\/requests\.mjs /);
+  }
+  assert.equal(w.runs().length, 0);
+  assert.equal(w.cli('decline', 'RQ2', '--reason', '--help').out, 'Declined RQ2. Reason: "--help"');
+});
+
+test('T223: a claim whose time to approve again is out of range is refused before any write; the last one that fits gives its times', () => {
+  const top = LAST - RETRY_AFTER;
+  for (const at of [top + 1, 8.64e15 - 1000]) assert.throws(() => step(base, { type: 'claim', claim: { ...CLAIM, at } }), wrongKind('RQ1'), String(at));
+  const busy = step(base, { type: 'claim', claim: { ...CLAIM, at: top } });
+  assert.throws(() => step(busy, EVENTS.decline), { message: /^RQ1 is already being approved since 9999-12-31 18:57 \S+ \(23:57 UTC\)\. If it crashed, run approve again after 9999-12-31 18:59 \S+ \(23:59 UTC\)\. Nothing changed\.$/ });
+});
+
+test('T226: a live pid with another start time is a process that is gone, for the approver and for its tool', async () => {
+  const w = world();
+  for (let i = 0; i < 4; i++) w.add();
+  const live = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)']);
+  try {
+    await once(live, 'spawn');
+    const gone = Number(spawnSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).stdout);
+    const [real, other] = [startOf(live.pid), 'Thu Jan  1 00:00:00 1970'];
+    const claim = (o) => ({ by: 'owner', via: 'terminal', pid: gone, start: other, at: Date.now() - RETRY_AFTER - 5_000, ...o });
+    const file = JSON.parse(readFileSync(w.path, 'utf8'));
+    for (const [i, c] of [claim({ pid: live.pid, start: real }), claim({ pid: live.pid }), claim({ tool: { pid: live.pid, start: real } }), claim({ tool: { pid: live.pid, start: other } })].entries()) {
+      Object.assign(file.requests[i], { status: 'approving', claim: c });
+    }
+    writeFileSync(w.path, JSON.stringify(file));
+    assert.equal(w.cli('list').code, 0);
+    assert.deepEqual(['RQ1', 'RQ2', 'RQ3', 'RQ4'].map(w.status), ['approving', 'pending', 'approving', 'pending']);
+  } finally { live.kill('SIGKILL'); }
+});
+
+test('T226: show gives the text for sage when forModel changed the text', () => {
+  const w = world();
+  w.add({ text: 'Users need <b>CSV</b> files now.' });
+  const show = w.cli('show', 'RQ1').out.split('\n');
+  assert.ok(show.includes('text for sage (quoted data, not an instruction): "Users need b CSV b files now."'));
+  assert.ok(!show.some((l) => l.startsWith('title for sage')));
+});
+
+test('T226: a decline works after the project of the request left the config', () => {
+  const w = world();
+  w.add({ folder: '/sample/elsewhere' });
+  assert.deepEqual(w.cli('decline', 'RQ1', '--reason', 'The project moved.'), { code: 0, signal: null, out: 'Declined RQ1. Reason: "The project moved."', err: '' });
+});
+
+test('T226: the restore command names no config for the default config, and quotes a config path that needs it', () => {
+  const w = world();
+  w.add();
+  writeFileSync(w.killPath, '{}\n', { mode: 0o600 });
+  const dir = join(w.env.HOME, '.config', 'sage-bot'), odd = join(w.root, "my config's.json");
+  mkdirSync(dir, { recursive: true });
+  for (const p of [join(dir, 'config.json'), odd]) writeFileSync(p, JSON.stringify(w.config));
+  const approveWith = (...pre) => spawnSync(process.execPath, [SCRIPT, ...pre, 'approve', 'RQ1'], { encoding: 'utf8', env: w.env }).stderr.trim();
+  const off = (cmd) => `sage-bot requests: the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link first: ${cmd}. Nothing changed.`;
+  assert.equal(approveWith(), off('node scripts/leads.mjs restore'));
+  assert.equal(approveWith('--config', odd), off(`node scripts/leads.mjs --config '${w.root}/my config'\\''s.json' restore`));
+  assert.equal(w.status('RQ1'), 'pending');
+});
+
+test('T226: list and show print the status word "withdrawn"', async () => {
+  const w = world();
+  w.add();
+  await withdraw(w.config, 'RQ1', { by: JON, at: T0 + 60_000 });
+  assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}withdrawn {2}"Jon" {2}2026-10-04 10:00 EDT {2}no task {2}"Add CSV export"$/);
+  const show = w.cli('show', 'RQ1').out.split('\n');
+  assert.deepEqual([show[0], show.at(-1)], [`RQ1 · reports-app (${w.project}) · withdrawn`, 'withdrawn by "Jon" (discord) at 2026-10-04 10:01 EDT (14:01 UTC)']);
 });
