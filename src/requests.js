@@ -27,7 +27,8 @@ export class Refused extends Error {}
 const refuse = (text) => { throw new Refused(text); };
 
 const length = (s) => Array.from(s).length;
-const when = (at) => new Date(at).toISOString().slice(0, 16).replace('T', ' ');
+/** A time for a person: UTC, to the minute. */
+export const when = (at) => `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 
 /**
  * A new request, and the file with it (pure). Refuses a field out of its limits, and a title or text with nothing that sage can read.

@@ -97,9 +97,9 @@ const AS = {
 };
 
 test('the transition table: every status with every event, as the status it goes to or the refusal for a person', () => {
-  const busy = 'RQ1 is already being approved (since 2026-10-04 14:01). Nothing changed.';
+  const busy = 'RQ1 is already being approved (since 2026-10-04 14:01 UTC). Nothing changed.';
   const idle = 'RQ1 is not being approved. Nothing changed.';
-  const done = (s) => `RQ1 was already ${s} at 2026-10-04 14:02 (${s === 'withdrawn' ? 'discord' : 'terminal'}). Nothing changed.`;
+  const done = (s) => `RQ1 was already ${s} at 2026-10-04 14:02 UTC (${s === 'withdrawn' ? 'discord' : 'terminal'}). Nothing changed.`;
   const all = (s) => Object.fromEntries(Object.keys(EVENTS).map((e) => [e, done(s)]));
   const TABLE = {
     pending: { claim: 'approving', approve: idle, release: idle, decline: 'declined', withdraw: 'withdrawn' },

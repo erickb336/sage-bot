@@ -9,13 +9,12 @@ import { readFileSync } from 'node:fs';
 import { killPathOf, linkOff } from '../src/audit.js';
 import { forTerminal } from '../src/clean.js';
 import { loadProjects } from '../src/projects.js';
-import { approve, find, loadRequests, reconcile, REQUEST_ID, requestsPathOf, update } from '../src/requests.js';
+import { approve, find, loadRequests, reconcile, REQUEST_ID, requestsPathOf, update, when } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
 import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/requests.mjs [--config <config.json>] list | show <RQ id> | approve <RQ id> [--size small|large] | decline <RQ id> [--reason <text>]';
 const say = (line) => console.log(forTerminal(line));
-const when = (at) => (at === null ? '-' : `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`);
 /** Untrusted text as quoted data for a person or a model: printable, one line, in double quotes that always close. */
 const quoted = (text) => JSON.stringify(forTerminal(text));
 const STATUS = { pending: 'waiting', approving: 'being approved' };
