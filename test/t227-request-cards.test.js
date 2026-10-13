@@ -117,14 +117,26 @@ test('the confirm: the text as typed with the marks, what sage reads, the hidden
   const [e] = c.embeds;
   assert.equal(e.title, 'Your request · reports-app');
   assert.equal(e.description, '**Title:** Add CSV export\n\n**What and why:** Users need it ~~(~~for Excel~~)~~ now.');
-  assert.deepEqual(e.fields, [{ name: 'sage reads', value: 'Add CSV export\nUsers need it for Excel now.' }]);
+  assert.deepEqual(e.fields, [{ name: 'sage reads', value: 'Add CSV export\nUsers need it for Excel now.' }, { name: 'sage does not get', value: '( )' }]);
   assert.equal(e.footer.text, '1 hidden character in your request: nobody sees them, and sage does not read them. This confirm expires after 10 minutes. You can have 1 open request at a time.');
   assert.deepEqual(c.components[0].components.map((b) => [b.custom_id, b.label, b.style]), [
     ['rq1:send-team:D7', 'Send: the team votes on design questions', 3], ['rq1:send-owner:D7', 'Send: Erick decides design questions', 1],
     ['rq1:edit:D7', 'Edit', 2], ['rq1:cancel:D7', 'Cancel', 2]]);
-  // With no hidden character, the footer says only the rules.
-  assert.equal(confirmMessage('D7', { project: 'p', title: 'Add CSV', text: 'Some words here' }).embeds[0].footer.text,
-    'This confirm expires after 10 minutes. You can have 1 open request at a time.');
+  // With no hidden character, the footer says only the rules; with nothing dropped, there is no list.
+  const plain = confirmMessage('D7', { project: 'p', title: 'Add CSV', text: 'Some words here' }).embeds[0];
+  assert.deepEqual([plain.footer.text, plain.fields.map((f) => f.name)], ['This confirm expires after 10 minutes. You can have 1 open request at a time.', ['sage reads']]);
+});
+
+test('the confirm lists each character that sage drops once, in first-seen order, made safe, and cut with "…" when long', () => {
+  const list = (title, text) => confirmMessage('D7', { project: 'p', title, text }).embeds[0].fields[1]?.value;
+  assert.equal(list("Add CSV (it's)", "Export it! (now) 😀 <@123> see https://x.test *ok*"), "( ' ) ! 😀 \\< @ \\> / \\*");
+  // A hidden character is counted in the footer, not listed; white space is never listed.
+  assert.equal(list('Add CSV', 'a​b   c\n\td e'), undefined);
+  // 500 distinct emoji: the list stops after the last whole one that fits in 1024, then " …".
+  const many = Array.from({ length: 499 }, (_, i) => String.fromCodePoint(0x1f400 + i)).join('');
+  const long = list('Add CSV', `a${many}`);
+  assert.ok(long.length <= 1024 && long.endsWith(' …'), `${long.length}`);
+  assert.equal(long.slice(0, -2), Array.from(many).slice(0, Array.from(long.slice(0, -2).split(' ')).length).join(' '));
 });
 
 test('the confirm refuses a title or a text with nothing that sage can read, and keeps Edit', () => {
@@ -236,7 +248,9 @@ function overLimits(p) {
 
 test('worst cases: every payload in every state stays in Discord\'s limits with the longest text that safe escapes most', () => {
   const words = (unit, n) => Array.from({ length: n }, (_, i) => unit[i % unit.length]).join('');
-  const worst = ['*', '[', 'a(', 'a😀', '://a', '\\', 'a\u0301\u0301\u0301\u0301', '-#', '~|_`', '@everyone '];
+  const worst = ['*', '[', 'a(', 'a😀', '://a', '\\', 'a\u0301\u0301\u0301\u0301', '-#', '~|_`', '@everyone ',
+    // 500 distinct symbols that safe escapes or that take two UTF-16 units: the longest list of what sage does not get.
+    `a${Array.from({ length: 250 }, (_, i) => String.fromCodePoint(0x1f400 + i)).join('')}${'*[]<>_~|\\#'.repeat(25)}`];
   for (const unit of worst) {
     const title = words(Array.from(unit), 70);
     const text = words(Array.from(unit), 500);

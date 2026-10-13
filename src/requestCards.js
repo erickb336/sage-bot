@@ -72,6 +72,21 @@ export function marked(text) {
   }).join('').replace(/ +/g, ' ').trim();
 }
 
+/**
+ * Each dropped part of sageMarks once, in first-seen order, made safe and parted by a space; '' when sage drops nothing. A list longer
+ * than a field value (1024) ends with "…" after the last whole item that fits.
+ */
+function dropped(parts) {
+  const items = [...new Set(parts.filter((p) => p.kind === 'dropped').map((p) => safe(p.text)).filter(Boolean))];
+  let out = '';
+  for (const [i, item] of items.entries()) {
+    const next = out ? `${out} ${item}` : item;
+    if (next.length > LIMIT.value - (i < items.length - 1 ? 2 : 0)) return `${out} …`;
+    out = next;
+  }
+  return out;
+}
+
 const editRow = (key) => new ActionRowBuilder().addComponents(
   button(requestId('edit', key), 'Edit', ButtonStyle.Primary), button(requestId('cancel', key), 'Cancel', ButtonStyle.Secondary)).toJSON();
 
@@ -86,11 +101,13 @@ export function confirmMessage(key, { project, title, text }) {
   for (const k of ['title', 'text']) {
     if (!sage[k]) return { ...ephemeral(`Your ${k} has nothing that sage can read: it needs letters or digits. Nothing was sent.`), components: [editRow(key)] };
   }
-  const hidden = sageMarks(title).hidden + sageMarks(text).hidden;
+  const marks = [sageMarks(title), sageMarks(text)];
+  const hidden = marks[0].hidden + marks[1].hidden;
+  const gone = dropped(marks.flatMap((m) => m.parts));
   const embed = {
     title: cut(`Your request · ${safe(project)}`, LIMIT.title),
     description: `**Title:** ${marked(title)}\n\n**What and why:** ${marked(text)}`,
-    fields: [{ name: 'sage reads', value: `${safe(sage.title)}\n${safe(sage.text)}` }],
+    fields: [{ name: 'sage reads', value: `${safe(sage.title)}\n${safe(sage.text)}` }, ...(gone ? [{ name: 'sage does not get', value: gone }] : [])],
     footer: { text: `${hidden ? `${plural(hidden, 'hidden character')} in your request: nobody sees them, and sage does not read them. ` : ''}`
       + 'This confirm expires after 10 minutes. You can have 1 open request at a time.' },
     color: COLOR.open,
