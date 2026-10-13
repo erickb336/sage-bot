@@ -579,6 +579,30 @@ node scripts/leads.mjs read 5
 
 `verify` exits 1 and prints "BROKEN: … a break at line N" when a line is not byte for byte the line that the bridge writes for its values: the eleven keys (the nine fields, `prev` and `hash`) once each, in that order, with no other byte (F-T143-6, F-T143-12; a key put twice is a break, although JSON.parse would keep the last copy and grep shows the first), does not hold the hash of the line before it, or does not match its own hash. So it finds an edit, a removal or a reorder of a line, when no one has hashed the lines after it again. The chain has no key, so a person who can write the file can edit a line and hash again that line and every line after it: `verify` then says intact. The chain shows tampering only against a known earlier head (the hash of a line that someone kept), such as the hash in each #sage-audit copy. So `verify` also does not find a cut tail or an older copy put back; only the #sage-audit copy shows those (anchoring the chain is T135). A session runs as Erick's user, so the file modes do not keep a session out: the sandbox of the sessions must deny the state folder (T134, F-T134-2). `read n` takes n of 1 or more; after a break it prints the lines from the break on as they are, each starting with UNVERIFIED. Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`.
 
+### Requests (terminal)
+
+`src/requests.js` and `scripts/requests.mjs` (T72 PR 1). A sage-lead's request for a feature is one record in `<statePath>.requests`, beside the thread map and safe like it (0600, written whole, read with `O_NOFOLLOW`; a file of another shape is refused). Every change is a read-modify-write under the file's lock. The owner approves or declines a request at the terminal. An approved request becomes one sage task through the state tool. Discord comes in T72 PR 3: the `/sage request` form, the thread and the card. Until then, no code makes a request but the tests.
+
+<!-- check: run, prints "no requests" -->
+```sh
+node scripts/requests.mjs list
+```
+
+- `list`: one line per request, pending first: id, project, status, requester, time, task, title.
+- `show <RQ id>`: every field. The title and the text as typed, and the text for sage (`forModel`), are each in double quotes as quoted data. sage reads a request with this command.
+- `approve <RQ id> [--size small|large]`: adds the sage task `<RQ id>: <title for sage>`, large by default. Refused while the link from Discord to sage is off: restore the link first.
+- `decline <RQ id> [--reason <text>]`: the reason has at most 300 characters, for people only.
+
+**The record**: `id` (`RQ` and a number; `next` in the file counts up, and an id is never reused), `project` and `folder` (the identity of `loadProjects`), `title` (4 to 70 characters), `text` (10 to 500), `titleForSage` and `textForSage` (`forModel`, made once), `designQuestions` (`team` or `owner`), `requester` and `requesterName`, `status`, `claim` (only while approving), `createdAt`, `decidedAt`, `decidedBy`, `via` (`discord` or `terminal`), `reason`, `task`, and the Discord fields `channel`, `line`, `card`, `thread` and `shown`. The status is `pending`, `approving`, `approved`, `declined` or `withdrawn`. Only the requester withdraws, on Discord.
+
+**An approval** has three steps, so that a crash leaves no second task:
+
+1. Under the lock, `pending` becomes `approving` with a claim: who, how, and the pid and start time of the process.
+2. With no lock, `task add --title=<RQ id>: <title for sage> --size=<size>`, as one fixed argv with the allow-listed environment.
+3. Under the lock, `approving` becomes `approved` with the task id.
+
+A claim whose process is gone is settled by the logbook: a task whose title starts with `<RQ id>:` means approved with that task; none means pending again. Each command does this before it reads or changes a request. When step 2 fails, the logbook decides too, because the tool can fail after it wrote the task. A second approve or a decline during step 2 gets "already being approved".
+
 ## Sage sessions and their threads
 
 The parent channel (for example `#sage`) is read only for people. It has one line for each sage session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
