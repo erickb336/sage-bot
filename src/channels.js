@@ -22,8 +22,11 @@ export const NEEDED = [['ViewChannel', 'View Channel'], ['SendMessages', 'Send M
 /** How Erick makes the first registry when the config has no channelId (the README, Channels). */
 export const FIRST = 'node scripts/channels.mjs --config <config.json> register <channel id> <project> --home';
 
-/** A path as one shell word: as it is when it is plain, else in single quotes. */
-const word = (path) => (/^[\w./~+-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`);
+/**
+ * A path as one shell word for a printed command: always in single quotes, so the shell does not expand a `~` at its start, and with
+ * `./` before a `-` at its start, so the command does not read it as an option (F-T136-7).
+ */
+export const word = (path) => `'${(path.startsWith('-') ? `./${path}` : path).replaceAll("'", "'\\''")}'`;
 
 /**
  * The registry: a Map of channel id to `{ project, home? }`, in the order of the file; undefined when there is no file. Throws for a
@@ -32,27 +35,31 @@ const word = (path) => (/^[\w./~+-]+$/.test(path) ? path : `'${path.replaceAll("
  * the home channel again. It does not check the projects: `staleOf` names the ones that the config does not list.
  */
 export function loadChannels(path) {
-  const aside = `Move it aside with: mv ${word(path)} ${word(`${path}.bad`)}, then register the home channel again with: ${FIRST}`;
-  const bad = (why, fix = aside) => new TypeError(`the channel registry ${path} ${why}. Nothing was loaded. ${fix}`);
+  // A new name for each copy, so that a second move aside keeps the first copy (F-T136-10): `.bad-` and the UTC time to the second.
+  const t = new Date().toISOString().replace(/\D/g, '');
+  const bad = `${path}.bad-${t.slice(0, 8)}-${t.slice(8, 14)}`;
+  const aside = `Move it aside with: mv ${word(path)} ${word(bad)}, then register the home channel again with: ${FIRST}. `
+    + `The old channels stay in ${word(bad)}: register each one again that you need`;
+  const refuse = (why, fix = aside) => new TypeError(`the channel registry ${path} ${why}. Nothing was loaded. ${fix}`);
   let text;
   try { text = readOwn(path, 'channel registry'); } catch (e) {
     const st = lstatSync(path, { throwIfNoEntry: false });
     const own = st?.isFile() && st.uid === process.getuid();
     if (!st || (own && (st.mode & 0o477) === 0o400)) throw e; // the file is good: the fault is elsewhere (its folder), and the message says it
-    throw bad('must be a regular file of this user with mode 0600', own ? `Fix it with: chmod 600 ${word(path)}` : aside);
+    throw refuse('must be a regular file of this user with mode 0600', own ? `Fix it with: chmod 600 ${word(path)}` : aside);
   }
   if (text === undefined) return undefined;
   let data;
-  try { data = JSON.parse(text); } catch { throw bad('is not JSON'); }
-  if (shape(data) !== 'channels,version' || data.version !== 1 || shape(data.channels) === null) throw bad('is not a version 1 registry');
+  try { data = JSON.parse(text); } catch { throw refuse('is not JSON'); }
+  if (shape(data) !== 'channels,version' || data.version !== 1 || shape(data.channels) === null) throw refuse('is not a version 1 registry');
   const map = new Map();
   for (const [id, e] of Object.entries(data.channels)) {
     if (!SNOWFLAKE.test(id) || !(shape(e) === 'project' || (shape(e) === 'home,project' && e.home === true)) || typeof e.project !== 'string') {
-      throw bad('has an entry that the bridge did not write');
+      throw refuse('has an entry that the bridge did not write');
     }
     map.set(id, e.home ? { project: e.project, home: true } : { project: e.project });
   }
-  if ([...map.values()].filter((e) => e.home).length !== 1) throw bad('must have exactly one home channel (the channel of the votes and cards)');
+  if ([...map.values()].filter((e) => e.home).length !== 1) throw refuse('must have exactly one home channel (the channel of the votes and cards)');
   return map;
 }
 
@@ -68,24 +75,24 @@ export const homeOf = (map) => [...map].find(([, e]) => e.home)[0];
 export const withHome = (config, map) => ({ ...config, channelId: homeOf(map) });
 
 /**
- * A new registry made from the config of the time before T130, saved, so that an existing install keeps working: askChannelId (the old
+ * A new registry made from the config of the time before T130, so that an existing install keeps working: askChannelId (the old
  * #ask-sage) goes to the first project, and channelId (the old parent channel) becomes the home channel, for the bridge's own project.
- * Undefined, and nothing saved, when the config has no channelId. Call it only with the bridge lock held.
+ * Undefined when the config has no channelId. It saves nothing: the caller saves it when nothing refuses the change (F-T136-2).
  */
-export function migrate(config, projects, log = () => {}) {
+export function migrate(config, projects) {
   if (config.channelId === undefined) return undefined;
   for (const key of ['channelId', 'askChannelId']) {
     if (config[key] !== undefined && !SNOWFLAKE.test(config[key])) throw new TypeError(`the config: ${key} must be a Discord id (17 to 20 digits)`);
   }
-  const path = channelsPathOf(config);
   const own = pickProject(projects).name;
   const map = new Map();
   if (config.askChannelId && config.askChannelId !== config.channelId) map.set(config.askChannelId, { project: projects[0].name });
   map.set(config.channelId, { project: config.askChannelId === config.channelId ? projects[0].name : own, home: true });
-  saveChannels(path, map);
-  log(`made the channel registry ${path} from the config: ${[...map].map(([id, e]) => `${id} -> ${e.project}${e.home ? ' (home)' : ''}`).join(', ')}`);
   return map;
 }
+
+/** The line that says that `migrate` made the registry `path`, for after its save. */
+export const madeLine = (path, map) => `made the channel registry ${path} from the config: ${[...map].map(([id, e]) => `${id} -> ${e.project}${e.home ? ' (home)' : ''}`).join(', ')}`;
 
 /**
  * The registry of the bridge at its start: the file, or a new one made by `migrate`. Throws, and the bridge stops before Discord, when
@@ -94,7 +101,8 @@ export function migrate(config, projects, log = () => {}) {
  */
 export function openChannels(config, projects, log = () => {}) {
   const path = channelsPathOf(config);
-  const map = loadChannels(path) ?? migrate(config, projects, log);
+  let map = loadChannels(path);
+  if (!map && (map = migrate(config, projects))) { saveChannels(path, map); log(madeLine(path, map)); }
   if (!map) throw new TypeError(`there is no channel registry ${path}, and the config has no channelId to make one from. Register the home channel with: ${FIRST}`);
   const names = projects.map((p) => p.name);
   const stale = staleOf(map, names);
