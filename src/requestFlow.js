@@ -255,6 +255,8 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
         if (due) await draw(r.id).catch(() => {}); // logged in `draw`; tried again at the next turn
       }
     },
+    /** The threads of the open requests, for the catch-up (T241); none while the file cannot be read (the loop logs why). */
+    threads: () => { try { return load().requests.filter((r) => OPEN.includes(r.status) && r.thread).map((r) => r.thread); } catch { return []; } },
     /** The open requests of a project (its name and folder), oldest first, for /sage board. */
     waiting: (p) => load().requests.filter((r) => r.project === p.name && r.folder === p.project && OPEN.includes(r.status)),
   };

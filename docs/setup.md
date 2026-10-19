@@ -14,7 +14,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   - On the **Installation** page, keep only **Guild Install**: turn off **User Install**.
   - On the **Bot** page, turn off **Public Bot**, so that only you can add it to a server.
   - Turn on the **Server Members** intent. Leave the **Message Content** intent off.
-  - Invite it to your server with the `bot` and `applications.commands` scopes.
+  - Invite it to your server with the `bot` and `applications.commands` scopes and the permission integer `326417632256`. It includes Read Message History: after the Mac sleeps, sage-bot reads back the mentions that it missed (see [the catch-up](reference.md#the-catch-up)).
   - On the Bot page, choose **Reset Token**, and keep the token only for step 5.
 
   *Why:* the bridge reads the members' roles to know who is in the crew, and it adds the `/sage` command to your server at each start. Each person runs their own sage-bot, with their own app, on their own Mac. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.

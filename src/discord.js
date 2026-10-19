@@ -14,6 +14,7 @@ import { forTerminal } from './clean.js';
 import { NO_MENTIONS } from './cards.js';
 import { CREW, crewRoleIds, crewWarning, oldRoleKeys, ownerOf } from './crew.js';
 import { lock } from './state.js';
+import { alivePathOf, createCatchUp, loadAlive, PAGE } from './catchup.js';
 import { notDiscordIds } from './launchd.js';
 
 /** The Keychain item that holds the bot token: a generic password with this service name. */
@@ -115,10 +116,22 @@ export async function accepts(i, channelId, fetch) {
   return i.channelId === channelId || await parentOf(i, fetch) === channelId;
 }
 
+/** Whether a message goes to the mention path: in the guild `guildId`, not from a bot or a webhook, and it mentions the bot `botId`. */
+export const forMe = (m, guildId, botId) => m.guildId === guildId && !m.author.bot && !m.webhookId && m.mentions.users.has(botId);
+
+/**
+ * The gateway events of the catch-up (T241): `ready` at each new session (shardReady) and each resume (shardResume), so also after a
+ * sleep, which does not restart the process; `down` when the connection goes (shardDisconnect, shardReconnecting).
+ */
+export function watchGateway(client, { ready, down }) {
+  for (const event of [Events.ShardReady, Events.ShardResume]) client.on(event, () => { ready(); });
+  for (const event of [Events.ShardDisconnect, Events.ShardReconnecting]) client.on(event, () => { down(); });
+}
+
 /**
  * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js, the buttons and forms of a request (in any
  * registered channel and its threads: the request route, T228) to src/requestFlow.js, and the bridge's buttons and forms to the bridge;
- * `message` takes a message that mentions the bot (`botId`) and is not from a bot to src/ask.js. Anything from another guild gets nothing.
+ * `message` takes a message that mentions the bot (`botId`) and is not from a bot or a webhook (forMe) to src/ask.js. Anything from another guild gets nothing.
  * Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf).
  */
 export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles }) => ({
@@ -134,7 +147,7 @@ export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles
     return accepts(i, config.channelId, fetch).then((ok) => ok && bridge.interaction(i));
   },
   message(m) {
-    if (m.guildId !== config.guildId || m.author.bot || !m.mentions.users.has(botId)) return undefined;
+    if (!forMe(m, config.guildId, botId)) return undefined;
     return ask.mention({ id: m.id, user: { id: m.author.id, bot: false }, roles: rolesOf(m.member, guildRoles), channelId: m.channelId,
       parentId: parentOf(m, fetch), forum: inForum(m, fetch), content: m.content, reply: (payload) => m.reply(payload),
       // A public thread from the message (T131). Discord archives a quiet thread after a day; a mention in it opens it again.
@@ -162,7 +175,7 @@ export function prepare(file, log, fetchChannel) {
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
-  const files = openAskFiles(config, projects);
+  const files = { ...openAskFiles(config, projects), alive: loadAlive(alivePathOf(config)) }; // the catch-up file too (T241)
   // #sage-audit (T131): a copy of each audit log line. Without auditChannelId, the audit log only, and the start says so.
   let auditChannel = null;
   const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
@@ -265,9 +278,17 @@ export async function start(file) {
     });
     const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
-    client.on(Events.MessageCreate, (m) => { on.message(m); });
+    // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
+    const catchUp = createCatchUp({ config, log, alive: files.alive,
+      places: () => [...channels.keys(), ...files.threads.keys(), ...requests.threads()],
+      fetch: async (at, after) => [...(await (await place(at)).messages.fetch({ after, limit: PAGE, cache: false })).values()].map((m) => ({
+        id: m.id, forMe: forMe(m, config.guildId, client.user.id), user: { id: m.author.id }, roles: rolesOf(m.member, guild.roles.cache),
+        reply: (payload) => m.reply(payload), handle: () => on.message(m) })),
+      post: async (at, payload) => (await place(at)).send(payload) });
+    client.on(Events.MessageCreate, (m) => { if (m.guildId === config.guildId) catchUp.live(m.channelId, m.id, () => on.message(m)); });
     let busy = false;
     const turn = async () => {
+      catchUp.beat(); // the heartbeat, also while a long turn runs
       if (busy) return;
       busy = true;
       try {
@@ -275,6 +296,9 @@ export async function start(file) {
         await requests.loop(); // never rejects
       } finally { busy = false; }
     };
+    // The requests and the sessions reconcile, and the cards redraw, in the turn at each ready too.
+    watchGateway(client, { ready: () => { catchUp.run(); turn(); }, down: () => catchUp.down() });
+    catchUp.run(); // the first ready came during the login
     setInterval(turn, LOOP);
     await turn();
   } catch (e) {

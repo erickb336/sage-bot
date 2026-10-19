@@ -1,6 +1,8 @@
 // A fake Discord interaction for the tests and the preview: the shape that `handle` reads, and a record of
 // every reply. No Client, no login, no network, no token. SAMPLE DATA ONLY.
-import { MessageFlags, MessageFlagsBitField } from 'discord.js';
+import { EventEmitter } from 'node:events';
+import { Events, MessageFlags, MessageFlagsBitField } from 'discord.js';
+import { idAt } from './catchup.js';
 
 /**
  * An interaction-like object. `replies` records each answer as `{ kind, ...payload }`,
@@ -64,6 +66,10 @@ export function fakeDiscord(members, roles = []) {
     if (deleted.has(target)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
   };
   let next = 900000000000000000n;
+  const history = []; // the members' messages (said), for fetchAfter
+  const reads = [];
+  const noHistory = new Map(); // place → the code of a refused read
+  let seq = 0;
   const nonces = new Map(); // `<place> <nonce>` → the id of the message that took it
   const archived = (target, { edit = false } = {}) => {
     const t = threads.get(target);
@@ -87,6 +93,32 @@ export function fakeDiscord(members, roles = []) {
       deleted.add(id);
     },
     deleteMessage: (id) => { messages.delete(id); where.delete(id); },
+    /**
+     * A message of a member at the time `at` (T241), with an id that holds that time as Discord's ids do: `{ user, roles, bot, webhook,
+     * mentions, content }`, where `mentions` says that it mentions sage-bot. It goes into `history`; nothing tells the bridge.
+     */
+    said: (place, { at, user, roles = [], bot = false, webhook = false, mentions = true, content = '' }) => {
+      const id = String(BigInt(idAt(at)) + BigInt(seq++));
+      messages.set(id, [{ content }]);
+      where.set(id, place);
+      history.push({ id, place, user, roles, bot, webhook, mentions, content });
+      return id;
+    },
+    /** Makes each read of the history of `place` refuse with `code` (null: read again). */
+    refuseHistory: (place, code) => { if (code === null) noHistory.delete(place); else noHistory.set(place, code); },
+    /** The reads of history, each [place, after]. */
+    reads,
+    /**
+     * Get Channel Messages with `after`: at most `limit` (100) of the members' messages of `place` right after the id `after`, newest
+     * first, as Discord gives them.
+     */
+    async fetchAfter(place, after, limit = 100) {
+      reads.push([place, after]);
+      gone(place);
+      if (noHistory.has(place)) throw Object.assign(new Error('Missing Access'), { code: noHistory.get(place), status: 403 });
+      return history.filter((m) => m.place === place && BigInt(m.id) > BigInt(after)).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
+        .slice(0, limit).reverse().map((m) => ({ ...m }));
+    },
     archive: (id) => { threads.get(id).archived = true; },
     async post(target, payload) {
       gone(target);
@@ -153,16 +185,33 @@ export function fakeCommand({ user, name = 'Sample member', roles = [], bot = fa
  * A fake message that mentions the bot, as src/discord.js maps a real one: `{ id, user: { id, bot }, roles, channelId, parentId, forum,
  * content, reply, startThread, post }`. `replies` records the replies in place. The threads and their posts go to `place`, a
  * fakeDiscord (a new one when none is given): the message is posted in its channel there first, so `startThread` opens a thread from it.
- * `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }` (Missing Permissions). SAMPLE DATA ONLY.
+ * `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }` (Missing Permissions). `id` is a message that
+ * `said` made in `place` already: the catch-up gives it to the mention path. SAMPLE DATA ONLY.
  */
-export function fakeMention({ user, roles = [], bot = false, channelId, parentId = null, forum = false, content = '', place = fakeDiscord([]), refuse = {} }) {
+export function fakeMention({ user, roles = [], bot = false, channelId, parentId = null, forum = false, content = '', place = fakeDiscord([]), refuse = {}, id: had }) {
   const replies = [];
   const no = (call) => { if (refuse[call]) throw Object.assign(new Error('Missing Permissions'), { code: refuse[call], status: 403 }); };
-  const id = String(800000000000000000n + BigInt(place.messages.size));
-  place.messages.set(id, [{ content }]);
-  place.where.set(id, channelId);
+  const id = had ?? String(800000000000000000n + BigInt(place.messages.size));
+  if (!had) {
+    place.messages.set(id, [{ content }]);
+    place.where.set(id, channelId);
+  }
   return { id, user: { id: user, bot }, roles, channelId, parentId, forum, content, replies, place,
     reply: async (payload) => { no('reply'); replies.push(structuredClone(payload)); },
     startThread: async (name) => { no('startThread'); return place.startThread(id, name); },
     post: async (thread, payload) => { no('post'); return place.post(thread, payload); } };
+}
+
+/**
+ * A fake gateway (T241): an EventEmitter that emits the discord.js events of a connection: `drop()` (shardDisconnect), `reconnecting()`,
+ * `ready()` (shardReady: a new session) and `resume()` (shardResume: the old session goes on, with no restart). SAMPLE DATA ONLY.
+ */
+export function fakeGateway() {
+  const g = new EventEmitter();
+  return Object.assign(g, {
+    drop: () => g.emit(Events.ShardDisconnect, { code: 1006 }, 0),
+    reconnecting: () => g.emit(Events.ShardReconnecting, 0),
+    ready: () => g.emit(Events.ShardReady, 0, new Set()),
+    resume: () => g.emit(Events.ShardResume, 0, 3),
+  });
 }

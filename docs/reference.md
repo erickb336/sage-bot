@@ -286,7 +286,7 @@ This command renders the card JSON of the design's ten moments, plus a card of a
 
 ## The bridge service
 
-`src/bridge.js` is the bridge. It runs on the owner's Mac, as one process for one sage project and one Discord channel. Every 15 seconds it does one turn of its loop:
+`src/bridge.js` is the bridge. It runs on the owner's Mac, as one process for one sage project and one Discord channel. Every 15 seconds it writes the time to `<statePath>.alive` (the heartbeat of [the catch-up](#the-catch-up)) and does one turn of its loop:
 
 1. It notices a sleep of the Mac: more than 75 seconds from the end of one turn to the start of the next. A long turn is no sleep, because the bridge runs and takes presses during it. When a gate is open, it posts: "The host was asleep from 22:10 to 08:05. Presses in that time did not count. Please press again on any open question." A press while the Mac slept never reached the bridge: Discord showed "This interaction failed".
 2. It sends the tick at `gate.endsAt` to each batch vote at or after its limit, also after a sleep.
@@ -598,6 +598,25 @@ node scripts/leads.mjs read 5
 ```
 
 `verify` exits 1 and prints "BROKEN: … a break at line N" when a line is not byte for byte the line that the bridge writes for its values: the eleven keys (the nine fields, `prev` and `hash`) once each, in that order, with no other byte (F-T143-6, F-T143-12; a key put twice is a break, although JSON.parse would keep the last copy and grep shows the first), does not hold the hash of the line before it, or does not match its own hash. So it finds an edit, a removal or a reorder of a line, when no one has hashed the lines after it again. The chain has no key, so a person who can write the file can edit a line and hash again that line and every line after it: `verify` then says intact. The chain shows tampering only against a known earlier head (the hash of a line that someone kept), such as the hash in each #sage-audit copy. So `verify` also does not find a cut tail or an older copy put back; only the #sage-audit copy shows those (anchoring the chain is T135). A session runs as Erick's user, so the file modes do not keep a session out: the sandbox of the sessions must deny the state folder (T134, F-T134-2). `read n` takes n of 1 or more; after a break it prints the lines from the break on as they are, each starting with UNVERIFIED. Each command takes `--config <config.json>` first; the default is `~/.config/sage-bot/config.json`.
+
+### The catch-up
+
+`src/catchup.js` (T241, R918 C9). Discord does not send again the messages of a time when sage-bot was not connected: the Mac slept, the network went, or the bridge restarted. A sleep does not restart the process, and launchd restarts it only after a crash or at login. So the bridge reads those messages back at each gateway ready: the first ready after the login, each new session (`shardReady`) and each resume (`shardResume`).
+
+**The file.** `<statePath>.alive`, beside the gate file and safe like it (0600, written whole, read with no symlink). It holds the time of the last loop turn (the heartbeat, written at each turn) and the last message id that the bridge saw in each watched place. The bridge records a place's id at each message that the gateway brings, so the first catch-up has a start point. A file that the bridge did not write stops the start.
+
+**The gap.** It starts at the last loop turn before a pause of more than 2 loop turns (30 s), or before the gateway went (`shardDisconnect`, `shardReconnecting`). It ends at the ready.
+
+**What a catch-up does.** For each watched place (each registered channel, each thread of the thread map, each thread of an open request):
+
+1. It reads the messages after the place's last id, 100 at a time (Get Channel Messages with `after`), until a page has fewer than 100. A place with no id starts at the start of the gap, so nothing older comes; the first run ever (no heartbeat) starts now. A place that Discord refuses is logged once ("sage-bot needs View Channel and Read Message History there" for codes 50001 and 50013), and the others go on.
+2. It keeps the mentions of sage-bot from the crew and the owner (`src/crew.js` placeOf). A message from a bot or a webhook, a message with no mention, and a mention from anyone else get nothing, as in the mention path.
+3. When it kept any, it posts one line in the place, with no ping: "I was offline from 22:10 to 08:05. I picked up 2 messages." A place where it kept nothing gets no line.
+4. It gives each kept mention to the normal mention path ([Mention threads](#mention-threads)), oldest first, and records its id after each one, so a later run skips it. A mention older than 24 hours (owner decision) gets one reply in place instead, with no ping: "This is old, please ask again."
+
+A message that the gateway brings while a catch-up waits or runs, or between a drop of the gateway and the next ready, is handled at once, and the catch-up skips it. The place's id moves past such a message only after the run, so the run never skips a message that it has still to read. At each ready the bridge also runs a loop turn: the requests and the sessions reconcile, and the cards redraw.
+
+**The buttons (R918 C11).** A press while sage-bot is offline never reaches the bridge, and Discord says that the interaction failed. So the footer of an open card, of a batch vote that still waits and of an open request card ends with "If a button does not respond, sage-bot is offline. Press it again later."
 
 ### Requests (terminal)
 
