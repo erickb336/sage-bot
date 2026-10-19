@@ -340,6 +340,7 @@ test('F-T65-3: a gate file with a held list that the bridge did not write is ref
     [{ content: '@everyone hi', allowedMentions: { parse: ['everyone'] } }], [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW_ROLE] }, tts: true }],
     [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW] } }], [{ content: 'hi', allowedMentions: { parse: [], users: [OWNER, JON] } }],
     [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW_ROLE, CREW_ROLE] } }],
+    [{ content: 'hi', allowedMentions: { parse: [], roles: ELEVEN } }], // more roles than crewAlert ever pings (F-T232-1)
     [{ content: 'x'.repeat(2001), allowedMentions: { parse: [] } }]]) {
     withHeld(held);
     assert.throws(() => b.make(), { message: `the gate file ${b.statePath} has held messages for project/G1 that the bridge did not write. Nothing was loaded.` }, JSON.stringify(held).slice(0, 80));
@@ -348,3 +349,35 @@ test('F-T65-3: a gate file with a held list that the bridge did not write is ref
     { content: `<@${OWNER}> hi`, allowedMentions: { parse: [], users: [OWNER] } }]);
   assert.equal(typeof b.make().loop, 'function');
 });
+
+// F-T232-1: the crew reminder of a moved card is held with the roles named sage-crew. No such role, or more than ten of them (anyone with
+// Manage Roles can make them), gives a held message that the next start loads; before the repair, the start refused the gate file.
+const ELEVEN = Array.from({ length: 11 }, (_, n) => `3000000000000001${String(n).padStart(2, '0')}`);
+for (const [what, roles, pinged] of [
+  ['no role named sage-crew', [], []],
+  ['eleven roles named sage-crew', ELEVEN.map((id) => ({ id, name: CREW })), ELEVEN.slice(0, 10)],
+]) {
+  test(`F-T232-1: ${what}: a reminder held for a moved card whose new post Discord refuses loads at the next start, and pings ${pinged.length} role(s)`, async () => {
+    const b = setup({ roles });
+    hook(b, 'SessionStart');
+    gateAdd(b, 'T1');
+    await b.post();
+    // The reminder's post is the first to find the thread gone (Discord's Unknown Channel), and every post in the parent channel is refused.
+    const thread = b.bridge.threadOf(S1);
+    const real = b.discord.post;
+    b.discord.post = (target, payload) => (target === thread && payload.content?.includes('reminder:') ? Promise.reject(Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 }))
+      : target === CHANNEL ? Promise.reject(Object.assign(new Error('Internal Server Error'), { status: 500 })) : real(target, payload));
+    b.now += 2 * HOUR + MINUTE; // past the crew's 2-hour reminder: its post finds the thread gone, the card moves, its new post is refused
+    await b.bridge.loop();
+    const held = heldOf(b, 'project/G1');
+    assert.equal(held.length, 1);
+    assert.equal(held[0].content, `${pinged.map((r) => `<@&${r}> `).join('')}reminder: project/G1 waits for an answer since <t:1791122430:t>. T1 waits.`);
+    assert.deepEqual(held[0].allowedMentions, { parse: [], roles: pinged });
+    b.bridge = b.make(); // the restart: the gate file loads
+    b.discord.post = real;
+    await b.bridge.loop();
+    await b.bridge.loop();
+    assert.deepEqual(heldOf(b, 'project/G1'), []);
+    assert.equal(shown(b, CHANNEL).filter((t) => /reminder: project\/G1 waits/.test(t ?? '')).length, 1);
+  });
+}

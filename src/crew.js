@@ -20,8 +20,16 @@ export const placeOf = (id, roleNames, ownerId) => ({ owner: typeof ownerId === 
  */
 export const mayStop = (place) => place.owner || place.crew;
 
-/** The ids of the guild's roles named exactly CREW, from `[{ id, name }]`: the roles that a new card pings. */
+/** The ids of the guild's roles named exactly CREW, from `[{ id, name }]`. */
 export const crewRoleIds = (roles) => [...roles].filter((r) => r.name === CREW).map((r) => r.id);
+
+/**
+ * The most crew roles that one message pings (F-T232-1). Many roles named CREW (anyone with Manage
+ * Roles can make them) never make a message that the gate file refuses at the next start, and crewWarning names them all.
+ */
+export const PINGED_ROLES = 10;
+/** The ids of the roles that a crew alert pings: the roles named CREW, at most PINGED_ROLES; none when no role has the name. */
+export const crewPings = (roles) => crewRoleIds(roles).slice(0, PINGED_ROLES);
 
 /** The one warning line when two or more roles are named CREW (all of them count), else null. */
 export function crewWarning(roles) {

@@ -5,7 +5,7 @@
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp } from './cards.js';
-import { crewRoleIds } from './crew.js';
+import { crewPings } from './crew.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { optionsOf, OTHER } from './sage.js';
@@ -243,9 +243,9 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
   /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
-  /** A message that pings the crew roles (every role named sage-crew, read now) and nobody else; the text is the bridge's own, with untrusted parts made safe. */
+  /** A message that pings the crew roles (src/crew.js crewPings, read now) and nobody else; the text is the bridge's own, with untrusted parts made safe. */
   const crewAlert = (text) => {
-    const roles = crewRoleIds(discord.roles());
+    const roles = crewPings(discord.roles());
     return { content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } };
   };
   /** A message that pings the owner and nobody else: a tie waits for the owner (C1). */

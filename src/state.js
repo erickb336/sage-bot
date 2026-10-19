@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseGate } from './vote.js';
+import { PINGED_ROLES } from './crew.js';
 
 const isText = (x) => typeof x === 'string';
 const isTime = (x) => Number.isSafeInteger(x);
@@ -15,18 +16,18 @@ const isFinal = (f, part) => f === undefined || (f && isText(f.by) && isTime(f.a
 
 /** The keys of an object, sorted and joined, to compare its shape with the one the bridge writes. */
 const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().join() : null);
-/** A list of 1 to `max` different Discord ids. */
-const ids = (x, max) => Array.isArray(x) && x.length >= 1 && x.length <= max && new Set(x).size === x.length && x.every((id) => /^\d{17,20}$/.test(id));
+/** A list of `min` to `max` different Discord ids. */
+const ids = (x, min, max) => Array.isArray(x) && x.length >= min && x.length <= max && new Set(x).size === x.length && x.every((id) => /^\d{17,20}$/.test(id));
 /**
  * A message held for a moved card (T65), exactly as the bridge makes it: a text in Discord's 2,000 characters that pings nobody, the
- * crew roles (F-T65-3; since T232 every role named sage-crew, so more than one when two roles share the name), or the owner alone (a tie,
- * T232). Discord would ping @everyone for a payload with no allowedMentions. A text with nothing but spaces is not one: Discord
+ * crew roles (F-T65-3; since T232 the roles named sage-crew: none when no role has the name, at most PINGED_ROLES, F-T232-1), or the
+ * owner alone (a tie, T232). Discord would ping @everyone for a payload with no allowedMentions. A text with nothing but spaces is not one: Discord
  * refuses it, so it would hold up every message after it (F-T68-1).
  */
 const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content) && p.content.trim() !== '' && p.content.length <= 2000
   && Array.isArray(p.allowedMentions.parse) && p.allowedMentions.parse.length === 0
-  && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && ids(p.allowedMentions.roles, 10))
-    || (shape(p.allowedMentions) === 'parse,users' && ids(p.allowedMentions.users, 1)));
+  && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && ids(p.allowedMentions.roles, 0, PINGED_ROLES))
+    || (shape(p.allowedMentions) === 'parse,users' && ids(p.allowedMentions.users, 1, 1)));
 
 /**
  * One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make.
