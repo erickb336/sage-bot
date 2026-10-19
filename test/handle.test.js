@@ -209,10 +209,10 @@ test('every why code of the vote rules has its own private note, and so does the
   const codes = ['bad-event', 'bad-time', 'out-of-order', 'not-holder', 'not-owner', 'owner-needs-discord', 'not-asker', 'unknown-option',
     'unknown-part', 'wrong-kind', 'not-tied', 'not-tied-option', 'closed', 'unknown-gate'];
   const gate = openAsk('B7', clock(14, 31));
-  const texts = codes.map((why) => note(why, gate, PEOPLE.names).content);
+  const texts = codes.map((why) => note(why, gate, PEOPLE).content);
   assert.equal(new Set(texts).size, codes.length);
-  for (const n of codes.map((why) => note(why, gate, PEOPLE.names))) assert.deepEqual([n.flags, n.allowedMentions], [64, { parse: [] }]);
-  assert.equal(note('not-asker', gate, PEOPLE.names).content, 'Only Erick, who asked B7, can withdraw it.');
+  for (const n of codes.map((why) => note(why, gate, PEOPLE))) assert.deepEqual([n.flags, n.allowedMentions], [64, { parse: [] }]);
+  assert.equal(note('not-asker', gate, PEOPLE).content, 'Only Erick, who asked B7, can withdraw it.');
   const withdrawn = step(gate, { type: 'withdraw', by: ERICK, at: clock(14, 32) }, PEOPLE.holders, PEOPLE.ownerId).gate;
-  assert.equal(note('closed', withdrawn, PEOPLE.names).content, 'B7 was withdrawn by Erick. Nothing to answer.');
+  assert.equal(note('closed', withdrawn, PEOPLE).content, 'B7 was withdrawn by Erick. Nothing to answer.');
 });

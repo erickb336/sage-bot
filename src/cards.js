@@ -12,12 +12,13 @@ import { CREW } from './crew.js';
 
 /** The people who may answer and vote: the crew (T232). */
 const HOLDERS = `${CREW} member`;
-/** The owner, who ends a vote, breaks a tie and decides at the terminal. The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
-export const OWNER = 'Erick';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
-/** The footer line of a card with buttons (T241, R918 C11): a press while sage-bot is offline gets no answer from Discord. */
-export const OFFLINE = 'If a button does not respond, sage-bot is offline. Press it again later.';
+/**
+ * The footer line of a card with buttons (T241, R918 C11): a press while sage-bot is offline gets no answer from Discord. `us` is
+ * src/crew.js namesOf: the copy names the owner and the bot by their Discord names (T244), so each sage-bot of a server says whose it is.
+ */
+export const offline = (us) => `If a button does not respond, ${us.bot} is offline. Press it again later.`;
 const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x8a8a8a };
 // Not `maskedLink`: it escapes only the first link. `safe` escapes every `[` and `]` itself (F-T27-8).
 const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
@@ -113,7 +114,7 @@ const who = (id, names) => safe(names.get(id) ?? '') || (/^\d{4,}$/.test(id) ? `
 const bold = (id, names) => `**${who(id, names)}**`;
 const label = (p, key) => p.options[key] ?? key;
 /** The person who ended a vote or broke a tie, or the owner when the gate does not know (a gate saved before T39). */
-const actor = (id, names) => (id ? who(id, names) : OWNER);
+const actor = (id, names, us) => (id ? who(id, names) : us.owner);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** `items` joined with ', ' within `cap` characters, the rest as "and N more"; the first item always shows. */
 function list(items, cap) {
@@ -192,7 +193,7 @@ const leaders = (counts) => {
 export const settled = (gate, ask) => gate.phase === 'closed'
   || (gate.parts ?? [gate]).every((p, i) => ask.parts[i].final || p.outcome.status === 'decided');
 /** The body line of a closed card of a project that left the config: the vote is closed (F-T132-20). */
-const SHUT = `**Closed:** this question's project is no longer served; ${OWNER} answers it at the terminal.`;
+const shutLine = (us) => `**Closed:** this question's project is no longer served; ${us.owner} answers it at the terminal.`;
 /** The line of a part that the owner answered at the terminal. */
 const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
 
@@ -202,14 +203,14 @@ const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at
  * @param {import('./vote.js').Gate} gate
  * @param {{ task: string, title: string, parts: { question: string, why: string, recommended: string, default?: string, options: Record<string, string>,
  *   final?: { by: string, at: number, option?: string, text: string } }[] }} ask  `final`: the owner's answer at the terminal, made safe
- * @param {{ holders: Set<string>, names: Map<string, string> }} people
+ * @param {{ holders: Set<string>, names: Map<string, string>, us: { owner: string, bot: string } }} people  `us`: src/crew.js namesOf
  * @param {{ shut?: boolean }} [o]  `shut`: the card of a project that left the config (F-T132-20): its body has no rule, no reminder
  *   and no who-can-answer line, only the line that the owner answers it at the terminal
  */
-export function card(gate, ask, { holders, names }, { shut = false } = {}) {
+export function card(gate, ask, { holders, names, us }, { shut = false } = {}) {
   const closed = settled(gate, ask);
   const withdrawn = gate.outcome.status === 'withdrawn';
-  const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names, shut) : batch(gate, ask, holders, names, shut);
+  const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names, shut, us) : batch(gate, ask, holders, names, shut, us);
   const color = withdrawn ? COLOR.withdrawn : closed ? COLOR.decided : gate.phase === 'tied' ? COLOR.tied : COLOR.open;
   if (rows.length > 5) throw new RangeError('card: Discord allows 5 rows of buttons on one message');
   return { embeds: [{ ...embed, color }], components: rows.map((r) => r.toJSON()), allowedMentions: NO_MENTIONS };
@@ -219,11 +220,11 @@ export const button = (id, text, style, { chosen = false, disabled = false } = {
   .setLabel(cut(text, LIMIT.button)).setStyle(chosen ? ButtonStyle.Success : style).setDisabled(disabled);
 const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key), cap)}${key === p.recommended ? ' · Recommended' : ''}${extra}`;
 
-function single(gate, ask, names, shut) {
+function single(gate, ask, names, shut, us) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
   // A crew-recommendation question (T73): the crew recommends, and the owner decides at the terminal (G10).
-  const owner = ask.leads ? OWNER : who(gate.askedBy, names);
+  const owner = ask.leads ? us.owner : who(gate.askedBy, names);
   const build = ({ why, label: cap, question }) => ({
     title: cut(`${ask.leads ? `Recommend for ${owner}: ` : ''}Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     description: [
@@ -231,22 +232,22 @@ function single(gate, ask, names, shut) {
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first answer is the crew's recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+      ...(shut ? [shutLine(us)] : ask.leads ? [`**Rule:** the first answer is the crew's recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
         `**Who can answer:** every ${HOLDERS}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
-        : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${who(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${owner} decides at the terminal.**`]
+        : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${who(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${us.Owner} decides at the terminal.**`]
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${owner} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
-    ...(!shut && !settled(gate, ask) && { footer: { text: OFFLINE } }),
+    ...(!shut && !settled(gate, ask) && { footer: { text: offline(us) } }),
   });
   const row = new ActionRowBuilder().addComponents(gate.options.map((k, i) => button(customId('press', gate.id, 0, i), `${k}. ${label(p, k)}`,
     k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary, { chosen: o.option === k, disabled: settled(gate, ask) })));
   return { embed: budget(build, caps(ask), { why: 1, label: gate.options.length, question: 1 }), rows: [row] };
 }
 
-function batch(gate, ask, holders, names, shut) {
+function batch(gate, ask, holders, names, shut, us) {
   const done = settled(gate, ask);
   const voting = gate.phase === 'voting' && !done;
   const withdrawn = gate.outcome.status === 'withdrawn';
@@ -270,12 +271,12 @@ function batch(gate, ask, holders, names, shut) {
     const o = part.outcome;
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
-      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${actor(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${part.tied.join(', ')}.**${shut ? '' : ` ${OWNER} breaks the tie. sage-bot reminds ${OWNER} every 2 h.`}`
+      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${actor(o.by, names, us)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
+      : !voting ? `**Tied: ${part.tied.join(', ')}.**${shut ? '' : ` ${us.Owner} breaks the tie. ${us.bot} reminds ${us.owner} every 2 h.`}`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
-      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${OWNER} only)`, ButtonStyle.Danger) : null)
+      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${us.owner} only)`, ButtonStyle.Danger) : null)
       : button(customId('press', gate.id, i, j), `Part ${n}, ${k}: ${label(p, k)}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
         { chosen: p.final ? p.final.option === k : o.status === 'decided' && o.option === k, disabled: !voting || Boolean(p.final) })).filter(Boolean)));
     /** The field of the part under the caps of a plan: the voter lists, the why, the labels and the question shrink; the keys and the counts never. */
@@ -292,18 +293,18 @@ function batch(gate, ask, holders, names, shut) {
       };
     };
   });
-  if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${OWNER} only)`, ButtonStyle.Danger)));
+  if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${us.owner} only)`, ButtonStyle.Danger)));
   const ended = gate.votingEndedAt === null ? ''
-    : gate.votingEndedAt < gate.endsAt ? `Ended early by ${actor(gate.endedBy, names)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
+    : gate.votingEndedAt < gate.endsAt ? `Ended early by ${actor(gate.endedBy, names, us)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
     : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
-  const description = shut && !withdrawn ? SHUT : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
+  const description = shut && !withdrawn ? shutLine(us) : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
     : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote on each part; change your vote until the vote ends. The work on the task goes on. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
-    : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for ${OWNER}. ` +
+    : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for ${us.owner}. ` +
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
-  const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for ${OWNER} · ` +
-    `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press${done ? '' : ` · ${OFFLINE}`}` };
+  const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for ${us.owner} · ` +
+    `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press${done ? '' : ` · ${offline(us)}`}` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
     title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
@@ -355,10 +356,10 @@ export function confirmEnd(gate, { holders, names }, ask) {
   return { ...ephemeral(content), components: [row.toJSON()] };
 }
 
-/** The private note for a `why` code of the vote rules (or the bridge's own `unknown-gate`). */
-export function note(why, gate, names, ask) {
+/** The private note for a `why` code of the vote rules (or the bridge's own `unknown-gate`), to a person of `people` (peopleOf). */
+export function note(why, gate, people, ask) {
   const text = NOTES[why] ?? NOTES['bad-event'];
-  return ephemeral(text(gate, names, ask));
+  return ephemeral(text(gate, people, ask));
 }
 const NOTES = {
   'unknown-gate': () => 'I do not know this button or its question. Nothing changed.',
@@ -367,9 +368,9 @@ const NOTES = {
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
   // The owner without the crew role: the crew answers and votes, the owner decides at the terminal or with the owner's buttons.
   'not-holder': () => `Only a ${HOLDERS} answers or votes here. To vote, give yourself the ${CREW} role. Your answer at the terminal is final.`,
-  'not-owner': () => `Only ${OWNER} can do this: ask ${OWNER}. Your votes on the parts count like everyone's.`,
+  'not-owner': (g, { us }) => `Only ${us.owner} can do this: ask ${us.owner}. Your votes on the parts count like everyone's.`,
   'owner-needs-discord': () => 'Ending a vote or breaking a tie works only here in Discord, not at the terminal.',
-  'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,
+  'not-asker': (g, { names }) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,
   'unknown-option': () => 'This option is not on the card. Nothing changed.',
   'unknown-part': () => 'This part is not on the card. Nothing changed.',
   'wrong-kind': () => 'This is a single question, not a vote: there is nothing to end and no tie to break.',
@@ -379,9 +380,9 @@ const NOTES = {
   'late-reason': (g) => `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your vote counts; your reason came after the end, so it is not on the card.`,
   full: () => 'This part already has the most voters it can count. Your press did not count.',
   // On a crew-recommendation card (T73) every press is a recommendation: the owner decides only at the terminal.
-  closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${who(g.outcome.by, names)}: ${g.outcome.option}. `
-      + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${OWNER} decides at the terminal. Your press did not count.`
+  closed: (g, { names, us }, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${who(g.outcome.by, names)}: ${g.outcome.option}. `
+      + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${us.owner} decides at the terminal. Your press did not count.`
     : g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
-    : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${ask?.leads ? OWNER : who(g.askedBy, names)}. Nothing to answer.`
+    : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${ask?.leads ? us.owner : who(g.askedBy, names)}. Nothing to answer.`
     : `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your press did not count.`,
 };

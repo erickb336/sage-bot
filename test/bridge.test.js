@@ -12,7 +12,8 @@ import { peopleOf } from '../src/handle.js';
 import { sageTool } from '../src/sage.js';
 import { load, save } from '../src/state.js';
 import { ballotsOf, HOUR, MINUTE, openGate, parseGate, MAX_BALLOTS } from '../src/vote.js';
-import { CREW, NOT_CREW } from '../src/crew.js';
+import { CREW } from '../src/crew.js';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const card = (b, id = [...b.discord.messages.keys()][0]) => b.discord.latest(id);
 const text = (payload) => JSON.stringify(payload);

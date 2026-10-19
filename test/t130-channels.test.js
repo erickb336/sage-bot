@@ -14,7 +14,8 @@ import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } f
 import { enter, prepare, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { CHANNEL, CONFIG, execFileSync, MAYA, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
-import { CREW, NOT_CREW } from '../src/crew.js';
+import { CREW } from '../src/crew.js';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // the old #ask-sage

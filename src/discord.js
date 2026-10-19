@@ -12,10 +12,43 @@ import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { NO_MENTIONS } from './cards.js';
-import { CREW, crewRoleIds, crewWarning, oldRoleKeys, ownerOf } from './crew.js';
+import { CREW, crewRoleIds, crewWarning, namesOf, oldRoleKeys, ownerOf } from './crew.js';
 import { lock } from './state.js';
 import { alivePathOf, createCatchUp, loadAlive, PAGE } from './catchup.js';
 import { notDiscordIds } from './launchd.js';
+
+/**
+ * The options of the discord.js Client. GuildMessages (not privileged) brings the messages that mention the bot, with their text; no
+ * MessageContent intent (PE R314). `allowedMentions` (C5): a message that sets no allowedMentions of its own pings nobody, so a missed
+ * NO_MENTIONS can never ping @everyone, a role or a person. A message that sets its own (the owner's ping on a request card, the
+ * crew alert) keeps it: discord.js takes the message's allowedMentions in place of the client's.
+ */
+export const CLIENT_OPTIONS = { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages], allowedMentions: { parse: [] } };
+
+/**
+ * One sage-bot serves one server (C4): it leaves each server that is not `guildId`, the ones it is in at the start and each one it is
+ * added to later (GuildCreate), with one log line each. The owner keeps Public Bot off in the Developer Portal (docs/setup.md), so only
+ * the owner can add it to a server; this is the second layer. A refused leave is logged, and the bot ignores that server all the same.
+ * Returns the promise of the leaves at the start.
+ */
+export function keepToGuild(client, guildId, log) {
+  const leave = (g) => {
+    if (g.id === guildId) return undefined;
+    log(`sage-bot left the server ${g.id} (${g.name}): it serves only the server ${guildId} of its config`);
+    return g.leave().catch((e) => log(`Discord refused to let sage-bot leave the server ${g.id}; it ignores that server all the same: ${apiError(e)}`));
+  };
+  client.on(Events.GuildCreate, leave);
+  return Promise.all([...client.guilds.cache.values()].map(leave));
+}
+
+/**
+ * The owner's name for the copy (T244), raw: their display name in the server `guildId`, else their Discord display name, else
+ * undefined (src/crew.js namesOf then says "the owner"). namesOf cleans it; nothing else reads it.
+ */
+export async function ownerNameOf(client, guildId, ownerId) {
+  try { return (await (await client.guilds.fetch(guildId)).members.fetch(ownerId)).displayName; } catch { /* not a member: the user */ }
+  try { return (await client.users.fetch(ownerId)).displayName; } catch { return undefined; }
+}
 
 /** The Keychain item that holds the bot token: a generic password with this service name. */
 export const KEYCHAIN_SERVICE = 'sage-bot';
@@ -228,7 +261,7 @@ export async function enter(client, { config, channels, ask, log }) {
   const guild = await client.guilds.fetch(config.guildId);
   await guild.members.fetch();
   // A refused /sage stops only /sage: the votes and cards start all the same (F-T93-4).
-  await guild.commands.set([askCommand(ask.projects)]).catch((e) => log(`Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: ${apiError(e)}`));
+  await guild.commands.set([askCommand(ask.projects, namesOf(config))]).catch((e) => log(`Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: ${apiError(e)}`));
   for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
   return guild;
 }
@@ -245,19 +278,22 @@ export async function start(file) {
   // Before the token is read: a sage tool that does not take the bridge's `gate answer` form refuses the start with one line (T176).
   for (const sagePath of new Set(projects.map((p) => p.sagePath))) await probeTool(sagePath);
   const token = await readToken();
-  // GuildMessages (not privileged) brings the messages that mention the bot, with their text; no MessageContent intent (PE R314).
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
+  const client = new Client(CLIENT_OPTIONS);
   client.on(Events.Error, (e) => log(`Discord error: ${apiError(e)}`));
   const ready = new Promise((done) => client.once(Events.ClientReady, done));
   // Any failure of the start from the login on closes the connection to Discord, so the process ends (F-T232-3).
   try {
     await client.login(token);
     await ready;
+    await keepToGuild(client, prepared.config.guildId, log); // C4: before any other work, so no other server sees a reply
     // The owner (C12): the config's ownerId, else the owner of this Discord application. The one read of the owner: every check of the
     // crew and the owner goes through src/crew.js with this id.
     const owner = ownerOf(prepared.config.ownerId, appOf(await client.application.fetch()));
     if (owner.warning) log(owner.warning);
-    const config = { ...prepared.config, ownerId: owner.ownerId };
+    // The names in the copy (T244): the owner's display name and the bot's own name, raw; src/crew.js namesOf is their one reader.
+    const ownerName = await ownerNameOf(client, prepared.config.guildId, owner.ownerId);
+    if (ownerName === undefined) log(`Discord did not give the name of the owner ${owner.ownerId}: the copy says "the owner"`);
+    const config = { ...prepared.config, ownerId: owner.ownerId, ownerName, botName: client.user.displayName };
     const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
     // The requests (T228): a line in the request's channel, a thread from it, and the card in the thread. Discord archives a quiet
     // thread after a week; a post opens it again.

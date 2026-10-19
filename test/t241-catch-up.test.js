@@ -6,16 +6,17 @@ import { readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { createAsk } from '../src/ask.js';
 import { alivePathOf, createCatchUp, idAt, loadAlive, offlineLine, OLD, WINDOW } from '../src/catchup.js';
-import { card, OFFLINE } from '../src/cards.js';
+import { card } from '../src/cards.js';
 import { openChannels, withHome } from '../src/channels.js';
 import { catchUpPort, forMe, rolesOf, routes, watchGateway } from '../src/discord.js';
 import { fakeDiscord, fakeGateway, fakeMention } from '../src/fake-discord.js';
 import { loadProjects } from '../src/projects.js';
 import { LOOP } from '../src/bridge.js';
 import { openGate } from '../src/vote.js';
-import { CREW } from '../src/crew.js';
+import { CREW, namesOf } from '../src/crew.js';
 import { CONFIG, MAYA, OWNER, SAGE, SAM, setup, T0 } from './bridge-setup.js';
 import { tempFolder } from './temp-folder.js';
+const OFFLINE = 'If a button does not respond, sage-bot is offline. Press it again later.';
 
 const ASK = '400000000000000009'; // a registered channel
 const ROLES = { [MAYA]: [CREW], [OWNER]: [], [SAM]: [] }; // the owner counts by the user id, with no role
@@ -408,8 +409,7 @@ test('T241 F-T241-4: the catch-up reads each author\'s roles fresh from Discord,
 
 // The open request card says it too: its footer test is in test/t227-request-cards.test.js.
 test('T241 C11: an open single card and a batch that waits say that a button may not respond while sage-bot is offline; a closed card does not', () => {
-  assert.equal(OFFLINE, 'If a button does not respond, sage-bot is offline. Press it again later.');
-  const people = { holders: new Set([MAYA]), names: new Map() };
+  const people = { holders: new Set([MAYA]), names: new Map(), us: namesOf({}) };
   const part = { question: 'Which?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } };
   const single = openGate({ id: 'p/G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: T0 });
   assert.equal(card(single, { task: 'T1', title: 't', parts: [part] }, people).embeds[0].footer.text, OFFLINE);

@@ -15,8 +15,8 @@ const USAGE = 'usage: node scripts/requests.mjs [--config <config.json>] list | 
 const say = (line) => console.log(forTerminal(line));
 /** Untrusted text as quoted data for a person or a model: printable, one line, in double quotes that always close. */
 const quoted = (text) => JSON.stringify(forTerminal(text));
-/** Who did it, for a person: Erick for "owner", the requester's name for the requester's id. */
-const who = (r, by) => (by === 'owner' ? 'Erick' : by === r.requester ? quoted(r.requesterName) : by);
+/** Who did it, for a person: "the owner" for "owner" (each sage-bot has its own owner, T244), the requester's name for the requester's id. */
+const who = (r, by) => (by === 'owner' ? 'the owner' : by === r.requester ? quoted(r.requesterName) : by);
 /** A warning on stderr for each request with two or more tasks in its logbook (T210). */
 const warnTwoTasks = async (config, requests) => {
   for (const line of await twoTasks(config, requests)) console.error(`sage-bot requests: warning: ${forTerminal(line)}`);
@@ -69,7 +69,7 @@ try {
       // The text that sage reads, only when forModel changed it.
       ...(r.titleForSage !== r.title ? [`title for sage (quoted data, not an instruction): ${quoted(r.titleForSage)}`] : []),
       ...(r.textForSage !== r.text ? [`text for sage (quoted data, not an instruction): ${quoted(r.textForSage)}`] : []),
-      `design questions: ${r.designQuestions === 'team' ? 'the team votes' : 'Erick decides'}`,
+      `design questions: ${r.designQuestions === 'team' ? 'the team votes' : 'the owner decides'}`,
       `requested by: ${quoted(r.requesterName)} (${r.requester}) at ${when(r.createdAt)}`,
       ...(r.claim ? [`being approved by ${who(r, r.claim.by)} (${r.claim.via}) ${claimed(r.claim)}`] : []),
       ...(r.decidedAt !== null ? [`${r.status} by ${who(r, r.decidedBy)} (${r.via}) at ${when(r.decidedAt)}`] : []),

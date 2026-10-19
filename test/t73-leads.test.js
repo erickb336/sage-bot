@@ -12,7 +12,8 @@ import { load, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
 import { SETTLE } from '../src/bridge.js';
 import { CHANNEL, CREW_ROLE, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
-import { CREW, NOT_CREW } from '../src/crew.js';
+import { CREW } from '../src/crew.js';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
 const QUESTION = ['Switch the automatic-merge mode on for this session?', 'Yes|No'];

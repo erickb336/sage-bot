@@ -9,12 +9,14 @@ import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
 import { Client, GatewayIntentBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
-import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
+import { askCommand, attachmentName, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
 import { loadProjects, projectsOf } from '../src/projects.js';
 import { enter, rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { BOT, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
-import { CREW, NOT_CREW } from '../src/crew.js';
+import { CREW, namesOf } from '../src/crew.js';
+const BUILDS = 'Builds are for Erick: ask Erick.';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000003'; // a channel that is not registered
@@ -291,7 +293,7 @@ test('the config is checked at load: a traversal, a type or an absolute file ent
 });
 
 test('the /sage command has seven subcommands (unregister and stop have no options), guild only, with the listed projects as the only choices', () => {
-  const json = askCommand([{ name: 'sage-bot' }, { name: 'site' }]);
+  const json = askCommand([{ name: 'sage-bot' }, { name: 'site' }], namesOf(CONFIG));
   assert.equal(json.name, 'sage');
   assert.deepEqual(json.contexts, [0]);
   assert.deepEqual(json.options.map((s) => [s.name, s.options.map((o) => [o.name, o.required ?? false, o.choices?.map((c) => c.value)])]), [

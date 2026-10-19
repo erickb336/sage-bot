@@ -32,7 +32,7 @@ const MEMBERS = [
   { id: '100000000000000005', name: 'sage bridge', roles: [CREW], bot: true },
 ];
 const NAMES = new Map(MEMBERS.map((m) => [m.id, m.name]));
-const CONFIG = { channelId: CHANNEL, ownerId: ERICK };
+const CONFIG = { channelId: CHANNEL, ownerId: ERICK, ownerName: 'Erick' }; // ownerName as src/discord.js reads it at the start (T244)
 const SESSION = 'aaaaaaaa-0000-4000-8000-000000000051';
 const T0 = Date.UTC(2026, 9, 4, 14, 0);
 

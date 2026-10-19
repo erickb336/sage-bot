@@ -46,7 +46,7 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
  * locked thread is refused, and so is an edit of a message in another place. `archive` does what Discord does to a quiet thread: an edit
  * there is refused with code 50083 until `unarchive` (refused for a locked thread), and a post opens the thread again. A post with
- * `enforceNonce` and a `nonce` that this place already took gives back that message's id and posts nothing, as Discord does for a few minutes. `deleteThread` and `deleteMessage` do what a member's delete
+ * `enforceNonce` and a `nonce` that this place already took from the same author (`by`, the third argument of `post`: one bot by default) gives back that message's id and posts nothing, as Discord does for a few minutes. `deleteThread` and `deleteMessage` do what a member's delete
  * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
  * message with code 10008 (Unknown Message). With `{ keepOnLine: true }`, `deleteThread` does what Discord can do: the message keeps
  * the deleted thread, so a new thread from it is refused with code 160004, and a fetch of the thread with code 10003. `members` is the list that `members()` gives, as
@@ -70,7 +70,7 @@ export function fakeDiscord(members, roles = []) {
   const reads = [];
   const noHistory = new Map(); // place → the code of a refused read
   let seq = 0;
-  const nonces = new Map(); // `<place> <nonce>` → the id of the message that took it
+  const nonces = new Map(); // `<author> <place> <nonce>` → the id of the message that took it: Discord keeps a nonce per author (T244)
   const archived = (target, { edit = false } = {}) => {
     const t = threads.get(target);
     if (t?.locked || (edit && t?.archived)) throw Object.assign(new Error(t.locked ? 'Thread is locked' : 'Thread is archived'), { code: 50083, status: 400 });
@@ -120,10 +120,10 @@ export function fakeDiscord(members, roles = []) {
         .slice(0, limit).reverse().map((m) => ({ ...m }));
     },
     archive: (id) => { threads.get(id).archived = true; },
-    async post(target, payload) {
+    async post(target, payload, by = 'sage-bot') {
       gone(target);
       archived(target);
-      const once = payload.enforceNonce && payload.nonce !== undefined ? `${target} ${payload.nonce}` : null;
+      const once = payload.enforceNonce && payload.nonce !== undefined ? `${by} ${target} ${payload.nonce}` : null;
       if (nonces.has(once)) return nonces.get(once);
       const id = String(next++);
       if (once) nonces.set(once, id);
@@ -200,6 +200,26 @@ export function fakeMention({ user, roles = [], bot = false, channelId, parentId
     reply: async (payload) => { no('reply'); replies.push(structuredClone(payload)); },
     startThread: async (name) => { no('startThread'); return place.startThread(id, name); },
     post: async (thread, payload) => { no('post'); return place.post(thread, payload); } };
+}
+
+/**
+ * A fake discord.js Client for the servers of a bot (C4): `guilds.cache` holds the servers that it is in at the start (`ids`), and
+ * `join(id)` adds one and emits GuildCreate, as Discord does when someone adds the bot. Each server's `leave()` takes it out of the
+ * cache and records it in `left`; with `refuse` (a code), the leave of that server is refused. SAMPLE DATA ONLY.
+ */
+export function fakeGuilds(ids, { refuse = {} } = {}) {
+  const client = new EventEmitter();
+  const left = [];
+  const guild = (id) => ({ id, name: `server ${id.slice(-2)}`, leave: async () => {
+    if (refuse[id]) throw Object.assign(new Error('Missing Access'), { code: refuse[id], status: 403 });
+    client.guilds.cache.delete(id);
+    left.push(id);
+  } });
+  return Object.assign(client, {
+    guilds: { cache: new Map(ids.map((id) => [id, guild(id)])) },
+    left,
+    join: (id) => { const g = guild(id); client.guilds.cache.set(id, g); client.emit(Events.GuildCreate, g); },
+  });
 }
 
 /**

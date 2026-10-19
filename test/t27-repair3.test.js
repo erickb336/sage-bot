@@ -175,7 +175,7 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
   const texts = [
     card(b9, ASKS.B9, people).embeds[0].fields.map((f) => `${f.name}\n${f.value}`).join('\n'),
     confirmEnd(b9, people).content,
-    note('not-asker', b9, people.names).content,
+    note('not-asker', b9, people).content,
     card(apply(b9, people, { type: 'withdraw', by: id, at: T0 + 2 * MINUTE }), ASKS.B9, people).embeds[0].description,
     card(apply(openGate({ id: 'G5', kind: 'single', options: ['A', 'B', 'C'], askedBy: id, at: T0 }), people, { type: 'press', by: id, option: 'A', at: T0 + MINUTE, via: 'discord' }), ASKS.G5, people).embeds[0].description,
   ];

@@ -76,7 +76,8 @@ export const MEMBERS = [
   { id: BOT, name: 'sage bridge', roles: [CREW], bot: true },
 ];
 export const GUILD = '500000000000000001';
-export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER };
+/** `ownerName` as src/discord.js reads it at the start (T244): the copy names the owner Erick. */
+export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER, ownerName: 'Erick' };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 /** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
 export const NAME = 'project';
