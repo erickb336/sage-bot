@@ -27,9 +27,10 @@ export function loadThreads(path) {
   let data;
   try { data = JSON.parse(text); } catch { throw bad; }
   if (shape(data) !== 'threads,version' || data.version !== 1 || shape(data.threads) === null) throw bad;
-  // `roles`: the role NAMES of the member since T232 (Discord allows 1 to 100 characters), role ids before it. They only go to the audit log.
+  // `roles`: the role NAMES of the member since T232 (Discord allows 1 to 100 characters, counted as code points, so 100 emoji are 200
+  // UTF-16 units: F-T232-2), role ids before it. They only go to the audit log.
   const isHeld = (h) => shape(h) === 'content,id,roles,user' && SNOWFLAKE.test(h.id) && SNOWFLAKE.test(h.user) && typeof h.content === 'string'
-    && Array.isArray(h.roles) && h.roles.every((r) => typeof r === 'string' && r.length >= 1 && r.length <= 100);
+    && Array.isArray(h.roles) && h.roles.every((r) => typeof r === 'string' && r !== '' && Array.from(r).length <= 100);
   for (const [id, t] of Object.entries(data.threads)) {
     if (!SNOWFLAKE.test(id) || shape(t) !== { answer: 'at,by,channel,held,kind,project', lead: 'at,by,channel,kind,project' }[t?.kind]
       || !SNOWFLAKE.test(t.channel) || !SNOWFLAKE.test(t.by) || typeof t.project !== 'string' || !Number.isSafeInteger(t.at)

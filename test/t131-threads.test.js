@@ -712,20 +712,23 @@ test('F-T143-7: the thread map refuses a held mention that the bridge did not wr
   const b = world(t);
   await b.say(MAYA, '<@1> show the board');
   const [thread] = b.threads();
-  await b.say(MAYA, '<@1> the login breaks', { channelId: thread, parentId: ASK });
+  // F-T232-2: a role name of 100 emoji (Discord's limit counts code points; 200 UTF-16 units) is held as the bridge saves it.
+  await b.say(MAYA, '<@1> the login breaks', { channelId: thread, parentId: ASK, roles: [CREW, '\u{1F600}'.repeat(100)] });
   const path = threadsPathOf(b.config);
   const good = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(good.threads[thread].held.map((h) => h.roles), [[CREW], [CREW, '\u{1F600}'.repeat(100)]]);
   b.start(); // the map as the bridge wrote it loads
   const bad = `the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.`;
   const held = good.threads[thread].held[0];
   // T232: a held mention keeps the role NAMES (1 to 100 characters, as Discord allows); a map of before T232 with role ids still loads.
-  for (const roles of [[CREW, 'Moderators'], ['300000000000000001'], []]) {
+  // F-T232-2: Discord counts code points, so a name of 100 emoji (200 UTF-16 units) is one that the bridge saves, and it loads.
+  for (const roles of [[CREW, 'Moderators'], ['300000000000000001'], [], ['r'.repeat(100), '\u{1F600}'.repeat(100)]]) {
     const map = structuredClone(good);
     map.threads[thread].held = [{ ...held, roles }];
     writeFileSync(path, JSON.stringify(map), { mode: 0o600 });
     b.start();
   }
-  for (const h of [{ ...held, admin: true }, { ...held, user: 'erick' }, { ...held, roles: [CREW, 7] }, { ...held, roles: [''] }, { ...held, roles: ['r'.repeat(101)] }, { ...held, content: 7 }, 'text']) {
+  for (const h of [{ ...held, admin: true }, { ...held, user: 'erick' }, { ...held, roles: [CREW, 7] }, { ...held, roles: [''] }, { ...held, roles: ['r'.repeat(101)] }, { ...held, roles: ['\u{1F600}'.repeat(101)] }, { ...held, content: 7 }, 'text']) {
     const map = structuredClone(good);
     map.threads[thread].held = [h];
     writeFileSync(path, JSON.stringify(map), { mode: 0o600 });
