@@ -4,7 +4,7 @@
 // SAMPLE DATA ONLY: every id and name is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, ClientApplication, GatewayIntentBits } from 'discord.js';
 import { tempFolder } from './temp-folder.js';
@@ -178,7 +178,8 @@ test('the role keys of before T232: the bridge starts and ignores them, and laun
   const { ownerId, ...example } = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
   assert.equal(ownerId, OWNER);
   const path = join(dir, 'config.json');
-  writeFileSync(path, JSON.stringify({ ...example, ...old, project: dir, projects: undefined }));
+  // The project as the disk spells it: the temp folder may be a link (/var on macOS), and the projects check refuses a link.
+  writeFileSync(path, JSON.stringify({ ...example, ...old, project: realpathSync.native(dir), projects: undefined }));
   const r = spawnSync(process.execPath, [join(ROOT, 'scripts/launchd.mjs'), path], { encoding: 'utf8', env: { ...process.env, HOME: dir } });
   assert.equal(r.stderr.split('\n')[0], `sage-bot launchd: warning: ${warning}`);
   assert.equal(r.status, 0, r.stderr);
