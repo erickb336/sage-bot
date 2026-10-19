@@ -9,7 +9,7 @@ import { accepts } from '../src/discord.js';
 import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, JON, LEADR, MAYA, OWNER, SAGE, setAt, setup, spawnSync, T0 } from './bridge-setup.js';
+import { APPRENTICE, CHANNEL, execFileSync, JON, LEADR, MAYA, OWNER, SAGE, setAt, setup, spawnSync, T0 } from './bridge-setup.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;
@@ -422,7 +422,8 @@ test('F-T29-3: the hook ignores a gate add for another project; a gate id in two
   assert.equal(post(S1, `node sage.mjs gate add T9 --project=${other}/ --question "Q?"`, 'G1 open · Q?\n'), 'another project');
   assert.equal(post(S1, `cd ${b.project} && node sage.mjs gate add T9 --project ../other`, 'G1 open · Q?\n'), 'another project');
   assert.deepEqual(spool(b, S1).gates, []);
-  // --project naming this project, or a worktree folder in it, counts.
+  // --project naming this project, or a worktree folder in it, counts: both have the project's logbook, as the project is in git (F-T145-6).
+  execFileSync('git', ['init', '-q', b.project]);
   mkdirSync(join(b.project, '.claude', 'worktrees', 'x'), { recursive: true });
   assert.equal(post(S1, `node sage.mjs gate add T8 --project '${b.project}/.claude/worktrees/x'`, 'G5 open · Q?\n'), `PostToolUse ${S1}`);
   assert.deepEqual(spool(b, S1).gates, ['G5']);
@@ -501,6 +502,7 @@ test('F-T29-6 and F-T29-4: a press that posts while the loop waits for a session
 
 test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to the project; a first event outside the project is ignored with no stderr', async () => {
   const b = setup();
+  execFileSync('git', ['init', '-q', b.project]); // a subfolder has the project's logbook only in git, as sage reads it (F-T145-6)
   const sub = join(b.project, '.claude', 'worktrees', 't9', 'src');
   mkdirSync(sub, { recursive: true });
   symlinkSync(b.project, join(b.root, 'link'));
@@ -578,6 +580,7 @@ test('F-T29-10: a press in a thread that is not in the cache (i.channel is null)
 test('F-T29-11: the hook records only a run of the sage state tool with gate add; ~ and $HOME in --project are the hook\'s HOME, any other shell value is ignored; a folder named ..cache is inside', () => {
   const b = setup();
   const home = b.root; // so ~/project is the project, and ~/other is outside it
+  execFileSync('git', ['init', '-q', b.project]); // so its subfolders have its logbook, as sage reads it (F-T145-6)
   mkdirSync(join(b.root, 'other'));
   mkdirSync(join(b.project, '~', 'project'), { recursive: true });
   const post = (command, stdout = 'G4 open · Q?\n', cwd = b.project) => record(

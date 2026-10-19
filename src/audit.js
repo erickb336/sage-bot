@@ -7,9 +7,10 @@
 // session runs as the same user, so these modes do not stop a session: the sandbox of the sessions must deny the state folder (T134).
 // The kill switch is a flag file: while it is there, nothing of a sage-lead goes to sage. A flag that cannot be checked counts as set.
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync, rmSync, writeSync } from 'node:fs';
-import { dirname, sep } from 'node:path';
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { ANGLES, forModel } from './clean.js';
+import { projectAt } from './projects.js';
 import { readOwn, writeWhole } from './state.js';
 
 /** The sage-lead log: `auditPath` in the config, else `<statePath>.leads.jsonl`, beside the gate file in its 0700 folder. */
@@ -52,14 +53,9 @@ function checkFolder(path, projects) {
   if (!st.isDirectory() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) {
     throw new Error(`the sage-lead log folder ${dir} must be a folder of this user with mode 0700. Nothing was started.`);
   }
-  const real = realpathSync(dir);
-  for (const p of projects) {
-    let root;
-    try { root = realpathSync(p.project); } catch { continue; }
-    if (real === root || real.startsWith(root + sep)) {
-      throw new Error(`the sage-lead log folder ${dir} is in the project folder of ${p.name}: a session there could change it. Put auditPath outside every project. Nothing was started.`);
-    }
-  }
+  // The one resolver of a folder's project: the real path in the letter case of the disk, so another letter case is no way out (F-T145-L3).
+  const p = projectAt(dir, projects);
+  if (p) throw new Error(`the sage-lead log folder ${dir} is in the project folder of ${p.name}: a session there could change it. Put auditPath outside every project. Nothing was started.`);
 }
 
 /**

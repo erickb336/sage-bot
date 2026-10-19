@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
@@ -18,7 +19,7 @@ import { loadVotes, saveVotes } from '../src/state.js';
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
 
 /** The pinned copy of the sage state tool (test/fixtures/sage/README.md). */
-export const FIXTURE = new URL('fixtures/sage/6ea307ffa7b5/skills/sage/sage.mjs', import.meta.url).pathname;
+export const FIXTURE = fileURLToPath(new URL('fixtures/sage/6ea307ffa7b5/skills/sage/sage.mjs', import.meta.url)); // not .pathname: it percent-encodes a space (F-T145-L10)
 /**
  * The sage state tool of the tests: SAGE_TOOL when it is set, else the pinned copy. It refuses a path in the owner's real
  * ~/.claude (os.userInfo, not $HOME), for example the sage plugin's cache, so that no test depends on it.

@@ -172,7 +172,7 @@ test('F-T132-24: a listed symlink path to a folder outside git is refused at loa
   const link = join(b.root, 'link');
   symlinkSync(b.project, link);
   const config = { project: link, projects: [{ name: 'project', project: link, sagePath: SAGE }] };
-  assert.throws(() => loadProjects(config), { message: `the path of project project (${link}) is a link to ${b.project}, and the folder is not in git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.` });
+  assert.throws(() => loadProjects(config), { message: `the path of project project (${link}) is a link to ${b.project}, and the folder is not a checkout of git, so the sage state tool keeps its logbook by the path as written. Write the real path in projects. Nothing changed.` });
   execFileSync('git', ['init', '-q', b.project]);
   assert.equal(loadProjects(config)[0].project, b.project);
 });
