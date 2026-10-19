@@ -157,6 +157,24 @@ export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles
 });
 
 /**
+ * The Discord side of the catch-up (src/catchup.js): `fetch`, `roles` and `post` on the guild `guild`, with `place(id)` the channel or
+ * thread and `on` the routes. `roles` reads the member fresh from Discord (force), never the cache: a role that changed while sage-bot was
+ * offline counts as now (F-T241-4). The fetch also puts the fresh member in the cache, so the mention path (on.message, through
+ * `Message.member`) reads the same roles. A user who is not a member now (Unknown Member or Unknown User) gets null.
+ */
+export const catchUpPort = ({ guild, place, botId, on }) => ({
+  fetch: async (at, after) => [...(await (await place(at)).messages.fetch({ after, limit: PAGE, cache: false })).values()].map((m) => ({
+    id: m.id, forMe: forMe(m, guild.id, botId), user: { id: m.author.id }, reply: (payload) => m.reply(payload), handle: () => on.message(m) })),
+  roles: async (user) => {
+    try { return rolesOf(await guild.members.fetch({ user, force: true }), guild.roles.cache); } catch (e) {
+      if (e?.code === 10007 || e?.code === 10013) return null;
+      throw e;
+    }
+  },
+  post: async (at, payload) => (await place(at)).send(payload),
+});
+
+/**
  * The start before Discord: checks the config's ids, the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
  * or a bad registry, stops here, before the Keychain. Then it opens the thread map and the audit log (src/ask.js openAskFiles): a file
@@ -279,12 +297,11 @@ export async function start(file) {
     const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
     // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
-    const catchUp = createCatchUp({ config, log, alive: files.alive,
-      places: () => [...channels.keys(), ...files.threads.keys(), ...requests.threads()],
-      fetch: async (at, after) => [...(await (await place(at)).messages.fetch({ after, limit: PAGE, cache: false })).values()].map((m) => ({
-        id: m.id, forMe: forMe(m, config.guildId, client.user.id), user: { id: m.author.id }, roles: rolesOf(m.member, guild.roles.cache),
-        reply: (payload) => m.reply(payload), handle: () => on.message(m) })),
-      post: async (at, payload) => (await place(at)).send(payload) });
+    const catchUp = createCatchUp({ config, log, alive: files.alive, ...catchUpPort({ guild, place, botId: client.user.id, on }),
+      places: () => {
+        const open = requests.threads(); // null while the request file cannot be read: those threads are unknown, not gone
+        return { ids: [...channels.keys(), ...files.threads.keys(), ...(open ?? [])], partial: open === null };
+      } });
     client.on(Events.MessageCreate, (m) => { if (m.guildId === config.guildId) catchUp.live(m.channelId, m.id, () => on.message(m)); });
     let busy = false;
     const turn = async () => {

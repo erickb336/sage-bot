@@ -5,10 +5,10 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAsk } from '../src/ask.js';
-import { alivePathOf, createCatchUp, idAt, loadAlive, OLD, WINDOW } from '../src/catchup.js';
+import { alivePathOf, createCatchUp, idAt, loadAlive, offlineLine, OLD, WINDOW } from '../src/catchup.js';
 import { card, OFFLINE } from '../src/cards.js';
 import { openChannels, withHome } from '../src/channels.js';
-import { forMe, routes, watchGateway } from '../src/discord.js';
+import { catchUpPort, forMe, rolesOf, routes, watchGateway } from '../src/discord.js';
 import { fakeDiscord, fakeGateway, fakeMention } from '../src/fake-discord.js';
 import { loadProjects } from '../src/projects.js';
 import { LOOP } from '../src/bridge.js';
@@ -19,10 +19,10 @@ import { tempFolder } from './temp-folder.js';
 
 const ASK = '400000000000000009'; // a registered channel
 const ROLES = { [MAYA]: [CREW], [OWNER]: [], [SAM]: [] }; // the owner counts by the user id, with no role
-const QUIET = { parse: [], repliedUser: false };
+const AUTHOR_ONLY = { parse: [], repliedUser: true };
 const NONE = { parse: [] };
 const MIN = 60_000;
-const offline = (from, to, n) => `I was offline from <t:${Math.floor(from / 1000)}:t> to <t:${Math.floor(to / 1000)}:t>. I picked up ${n} message${n === 1 ? '' : 's'}.`;
+const offline = (from, to, n) => `I was offline from <t:${Math.floor(from / 1000)}:f> to <t:${Math.floor(to / 1000)}:f>. I picked up ${n} message${n === 1 ? '' : 's'}.`;
 
 /**
  * The bridge's mention path (src/ask.js) on a fake Discord, with a catch-up whose port reads the fake's history as src/discord.js maps
@@ -40,9 +40,9 @@ function world(t) {
   b.handled = [];
   b.extra = [];
   b.make = () => createCatchUp({ config: b.config, now: () => b.now, log: (l) => b.lines.push(l),
-    places: () => [ASK, ...b.extra],
+    places: () => ({ ids: [ASK, ...b.extra], partial: false }), roles: async (user) => ROLES[user] ?? [],
     fetch: async (at, after) => (await b.place.fetchAfter(at, after)).map((m) => ({
-      id: m.id, forMe: !m.bot && !m.webhook && m.mentions, user: { id: m.user }, roles: m.roles,
+      id: m.id, forMe: !m.bot && !m.webhook && m.mentions, user: { id: m.user },
       reply: async (payload) => { b.place.messages.get(m.id).push({ reply: payload }); b.replies.push([m.id, payload]); },
       handle: async () => { b.handled.push(m.id); await b.ask.mention(fakeMention({ id: m.id, user: m.user, roles: m.roles, channelId: at, content: m.content, place: b.place })); } })),
     post: (at, payload) => b.place.post(at, payload) });
@@ -75,20 +75,40 @@ test('T241: a mention sent while sage-bot was offline is answered once after the
   assert.deepEqual([b.handled, b.place.posts.length, b.place.threads.size], [[id], posts, 1]);
 });
 
-test('T241: a missed mention older than 24 hours gets one quiet "please ask again" in place, and no answer', async (t) => {
+test('T241: missed mentions older than 24 hours get no answer and one "please ask again" for each person, which pings only that person', async (t) => {
   const b = world(t);
   b.catchUp.beat();
   const old = b.said(MAYA, '<@1> board', T0 + 60 * MIN);
+  b.said(MAYA, '<@1> board?', T0 + 61 * MIN);
+  b.said(MAYA, '<@1> board!!', T0 + 62 * MIN);
+  const ownerOld = b.said(OWNER, '<@1> gates', T0 + 63 * MIN);
   const fresh = b.said(OWNER, '<@1> board', T0 + 30 * 60 * MIN); // 30 h after T0
   b.now = T0 + 31 * 60 * MIN;
-  assert.ok(b.now - (T0 + 60 * MIN) > WINDOW && b.now - (T0 + 30 * 60 * MIN) < WINDOW);
+  assert.ok(b.now - (T0 + 63 * MIN) > WINDOW && b.now - (T0 + 30 * 60 * MIN) < WINDOW);
   await b.catchUp.run();
-  assert.deepEqual(b.replies, [[old, { content: OLD, allowedMentions: QUIET }]]);
-  assert.equal(OLD, 'This is old, please ask again.');
+  // F-T241-5 and F-T241-3: one OLD for Maya (not 3) and one for the owner, each with repliedUser true and no other ping.
+  assert.deepEqual(b.replies, [[old, { content: 'This is old, please ask again.', allowedMentions: AUTHOR_ONLY }],
+    [ownerOld, { content: 'This is old, please ask again.', allowedMentions: AUTHOR_ONLY }]]);
   assert.deepEqual(b.handled, [fresh]); // only the fresh one goes to the mention path
-  assert.deepEqual(b.in(ASK).filter((c) => c.startsWith('I was offline')), [offline(T0, b.now, 2)]); // both count as picked up
+  // F-T241-1 and F-T241-2: the line has the date (style f), and counts the answered and the old apart.
+  assert.deepEqual(b.in(ASK).filter((c) => c.startsWith('I was offline')),
+    [`I was offline from <t:${T0 / 1000}:f> to <t:${b.now / 1000}:f>. I picked up 1 message; 4 were too old.`]);
   await b.catchUp.run();
-  assert.equal(b.replies.length, 1);
+  assert.equal(b.replies.length, 2);
+});
+
+test('T241: the offline line has the date and time, and counts the answered and the old mentions apart', () => {
+  // 2026-10-04 22:10 UTC to 2026-10-06 05:10 UTC, 31 h: style f shows the date, so the gap does not read as 7 hours (F-T241-1).
+  const [from, to] = [Date.UTC(2026, 9, 4, 22, 10), Date.UTC(2026, 9, 6, 5, 10)];
+  const at = '<t:1791151800:f> to <t:1791263400:f>';
+  assert.deepEqual([offlineLine(from, to, 1, 0), offlineLine(from, to, 2, 0), offlineLine(from, to, 1, 1), offlineLine(from, to, 3, 2),
+    offlineLine(from, to, 0, 1), offlineLine(from, to, 0, 2)], [
+    `I was offline from ${at}. I picked up 1 message.`,
+    `I was offline from ${at}. I picked up 2 messages.`,
+    `I was offline from ${at}. I picked up 1 message; 1 was too old.`,
+    `I was offline from ${at}. I picked up 3 messages; 2 were too old.`,
+    `I was offline from ${at}. 1 message was too old.`,
+    `I was offline from ${at}. 2 messages were too old.`]);
 });
 
 test('T241: a mention of someone outside the crew, of a bot or of a webhook, and a message with no mention, are skipped silently', async (t) => {
@@ -124,10 +144,11 @@ test('T241: forMe, the one rule of both paths, takes no bot, no webhook, no othe
 /** A catch-up on a fake Discord whose `handle` only records, for the cases that need no sage logbook. */
 function light(t, places = [ASK]) {
   const statePath = join(tempFolder('sage-bot-t241-'), 'state', 'gates.json');
-  const b = { now: T0, place: fakeDiscord([]), handled: [], lines: [], statePath, places };
-  b.make = () => createCatchUp({ config: { ...CONFIG, statePath }, now: () => b.now, log: (l) => b.lines.push(l), places: () => b.places,
-    fetch: async (at, after) => (await b.place.fetchAfter(at, after)).map((m) => ({ id: m.id, forMe: m.mentions, user: { id: m.user }, roles: m.roles,
-      reply: async () => {}, handle: async () => { b.handled.push(m.id); } })),
+  const b = { now: T0, place: fakeDiscord([]), handled: [], lines: [], statePath, places, partial: false, replies: [], roles: { ...ROLES } };
+  b.make = () => createCatchUp({ config: { ...CONFIG, statePath }, now: () => b.now, log: (l) => b.lines.push(l),
+    places: () => ({ ids: b.places, partial: b.partial }), roles: async (user) => { if (b.rolesDown) throw new Error('Discord is down'); return user in b.roles ? b.roles[user] : null; },
+    fetch: async (at, after) => (await b.place.fetchAfter(at, after)).map((m) => ({ id: m.id, forMe: m.mentions, user: { id: m.user },
+      reply: async (payload) => { b.replies.push([m.id, payload]); }, handle: async () => { b.handled.push(m.id); } })),
     post: (at, payload) => b.place.post(at, payload) });
   b.catchUp = b.make();
   b.notes = (at) => b.place.in(at).map((id) => b.place.latest(id).content).filter((c) => c?.startsWith('I was offline'));
@@ -264,6 +285,125 @@ test('T241: a place with no mark takes nothing older than the gap; a place that 
   c.place.said(ASK, { at: T0 - MIN, user: OWNER, mentions: true });
   await c.catchUp.run();
   assert.deepEqual(c.handled, []);
+});
+
+test('T241 F-T241-7: a run with nothing new in a place reads it once and logs nothing', async (t) => {
+  const b = light(t);
+  b.catchUp.beat();
+  b.now = T0 + 10 * MIN;
+  await b.catchUp.run();
+  assert.deepEqual([b.place.reads, b.lines, b.handled], [[[ASK, idAt(T0)]], [], []]);
+  // The same with one page that is not full: one read, and nothing logged.
+  const id = b.place.said(ASK, { at: b.now + MIN, user: OWNER, mentions: true });
+  b.now += 2 * MIN;
+  await b.catchUp.run();
+  assert.deepEqual([b.place.reads.length, b.lines, b.handled], [2, [], [id]]);
+});
+
+test('T241 F-T241-6: a place whose read failed keeps its missed mention: no live message and no end of a run moves its mark past it', async (t) => {
+  const b = light(t);
+  b.catchUp.beat();
+  b.catchUp.down();
+  const missed = b.place.said(ASK, { at: T0 + MIN, user: OWNER, mentions: true });
+  b.place.refuseHistory(ASK, 0); // a network error just after the wake
+  b.now = T0 + 10 * MIN;
+  await b.catchUp.run();
+  assert.deepEqual(b.handled, []);
+  b.place.refuseHistory(ASK, null);
+  const chat = b.place.said(ASK, { at: b.now, user: MAYA, roles: [CREW], mentions: false }); // any message, after the run
+  await b.catchUp.live(ASK, chat, async () => {});
+  b.now += MIN;
+  await b.catchUp.run();
+  assert.deepEqual(b.handled, [missed]);
+  assert.equal(loadAlive(alivePathOf(b)).seen.get(ASK), chat);
+});
+
+test('T241 F-T241-6: after a run fails part way, the places that it did not read keep their missed mentions', async (t) => {
+  const THREAD = '600000000000000001';
+  const b = light(t, [ASK, THREAD]);
+  b.catchUp.beat();
+  b.place.said(ASK, { at: T0 + MIN, user: OWNER, mentions: true });
+  const missed = b.place.said(THREAD, { at: T0 + 2 * MIN, user: MAYA, mentions: true });
+  b.rolesDown = true; // Discord fails to give the roles: the run stops in the first place
+  b.now = T0 + 10 * MIN;
+  await b.catchUp.run();
+  assert.match(b.lines.join('\n'), /the catch-up failed; it runs again at the next gateway ready: Discord is down/);
+  const chat = b.place.said(THREAD, { at: b.now, user: MAYA, mentions: false });
+  await b.catchUp.live(THREAD, chat, async () => {});
+  b.rolesDown = false;
+  b.now += MIN;
+  await b.catchUp.run();
+  assert.ok(b.handled.includes(missed));
+});
+
+test('T241 F-T241-8: while the open request threads cannot be known, their marks stay and wait; the next full run reads their gap', async (t) => {
+  const REQ = '600000000000000003';
+  const b = light(t, [ASK, REQ]);
+  b.catchUp.beat();
+  const first = b.place.said(REQ, { at: T0 + MIN, user: MAYA, mentions: false });
+  await b.catchUp.live(REQ, first, async () => {});
+  b.now = T0 + 2 * MIN;
+  await b.catchUp.run();
+  assert.equal(loadAlive(alivePathOf(b)).seen.get(REQ), first);
+  // The request file cannot be read: the places do not include REQ, and say that they are partial.
+  b.catchUp.down();
+  const missed = b.place.said(REQ, { at: b.now + MIN, user: OWNER, mentions: true });
+  [b.places, b.partial] = [[ASK], true];
+  b.now += 5 * MIN;
+  await b.catchUp.run();
+  const chat = b.place.said(REQ, { at: b.now, user: MAYA, mentions: false });
+  await b.catchUp.live(REQ, chat, async () => {});
+  assert.equal(loadAlive(alivePathOf(b)).seen.get(REQ), first); // kept, and not moved past the missed mention
+  [b.places, b.partial] = [[ASK, REQ], false];
+  b.now += MIN;
+  await b.catchUp.run();
+  assert.deepEqual(b.handled, [missed]);
+  assert.equal(loadAlive(alivePathOf(b)).seen.get(REQ), chat);
+});
+
+/**
+ * A guild as discord.js gives it to catchUpPort: `members.fetch` with force reads Discord (`now`) and puts the member in the cache;
+ * `cache` holds the members as the gateway left them before a sleep. Messages resolve `member` from the cache, as Message.member does.
+ */
+function guildOf(cache, now) {
+  const roles = new Map([['r1', { id: 'r1', name: CREW }], ['r2', { id: 'r2', name: 'other' }]]);
+  const member = (id, ids) => ({ id, roles: { cache: new Map(ids.map((r) => [r, roles.get(r)])) } });
+  const guild = { id: CONFIG.guildId, roles: { cache: roles }, fetched: [],
+    members: { cache: new Map(Object.entries(cache).map(([id, ids]) => [id, member(id, ids)])),
+      fetch: async ({ user, force }) => {
+        guild.fetched.push([user, force]);
+        if (!(user in now)) throw Object.assign(new Error('Unknown Member'), { code: 10007, status: 404 });
+        guild.members.cache.set(user, member(user, now[user]));
+        return guild.members.cache.get(user);
+      } } };
+  return guild;
+}
+
+test('T241 F-T241-4: the catch-up reads each author\'s roles fresh from Discord, once in a run: the crew of now counts, not the crew before the sleep', async (t) => {
+  const [GONE, NEW, LEFT] = ['300000000000000101', '300000000000000102', '300000000000000103'];
+  // Before the sleep: GONE and LEFT were crew, NEW was not. During it: GONE lost the role, NEW got it, LEFT left the server.
+  const guild = guildOf({ [GONE]: ['r1'], [NEW]: ['r2'], [LEFT]: ['r1'] }, { [GONE]: ['r2'], [NEW]: ['r1', 'r2'] });
+  const fake = fakeDiscord([]);
+  const said = [];
+  const message = (m) => ({ id: m.id, guildId: CONFIG.guildId, author: { id: m.user, bot: false }, webhookId: null,
+    mentions: { users: new Map(m.mentions ? [['1', {}]] : []) }, get member() { return guild.members.cache.get(m.user); } });
+  const place = async (at) => ({ messages: { fetch: async ({ after }) => new Map((await fake.fetchAfter(at, after)).map((m) => [m.id, message(m)])) },
+    send: (payload) => fake.post(at, payload) });
+  const handled = [];
+  const on = { message: (m) => { handled.push([m.id, rolesOf(m.member, guild.roles.cache)]); } };
+  const statePath = join(tempFolder('sage-bot-t241-'), 'state', 'gates.json');
+  let now = T0;
+  const lines = [];
+  const catchUp = createCatchUp({ config: { ...CONFIG, statePath }, now: () => now, log: (l) => lines.push(l),
+    places: () => ({ ids: [ASK], partial: false }), ...catchUpPort({ guild, place, botId: '1', on }) });
+  catchUp.beat();
+  const ids = [GONE, NEW, LEFT, NEW, GONE].map((user, i) => fake.said(ASK, { at: T0 + (i + 1) * MIN, user, mentions: true }));
+  now = T0 + 10 * MIN;
+  await catchUp.run();
+  // Only NEW's two mentions, and the mention path reads the same fresh roles; GONE and LEFT get nothing, with no word.
+  assert.deepEqual(handled, [[ids[1], [CREW, 'other']], [ids[3], [CREW, 'other']]]);
+  assert.deepEqual(guild.fetched, [[GONE, true], [NEW, true], [LEFT, true]]);
+  assert.deepEqual([fake.in(ASK).map((id) => fake.latest(id).content).filter((c) => c?.startsWith('I was offline')).length, lines], [1, []]);
 });
 
 // The open request card says it too: its footer test is in test/t227-request-cards.test.js.
