@@ -55,7 +55,11 @@ test('the demo page shows the session line, the thread in order with the private
   const request = page.slice(page.indexOf('<section id="request">'), page.indexOf('<section id="answers">'));
   const text = request.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   assert.match(text, /Jon \(sage-crew\) requests a feature: Add CSV export · RQ1 · waiting for Erick edited · 14:47 (?:sb )?.*Jon \(sage-crew\) requests a feature: Add CSV export · RQ1 · approved · sage task T5/);
-  assert.match(text, /Only Jon can see this · Dismiss message Sent to Erick as RQ1\./);
+  // F-T228-2: Jon requests in #ask-sage, the confirm shows his title and text to check, and the "Sent" note names the thread.
+  assert.match(text, /Jon · 14:\d\d · Jon types \/sage request in #ask-sage\. The form opens\./);
+  assert.match(text, /Only Jon can see this · Dismiss message Check your request\..*? Your request · project Title: Add CSV export What and why: Finance copies the monthly report/);
+  assert.match(text, /Only Jon can see this · Dismiss message Sent to Erick as RQ1\. Its thread is #RQ1 · Add CSV export\. You can withdraw it there until Erick decides\./);
+  assert.match(request, /The line in #ask-sage, first as posted/);
   assert.equal((text.match(/@Erick a new request waits for you\./g) ?? []).length, 1);
   assert.match(text, /Only Maya can see this · Dismiss message Only Erick approves or declines a request\. Nothing changed\./);
   assert.match(text, /Only Sam can see this · Dismiss message Only the sage-crew role can use sage-bot\./);

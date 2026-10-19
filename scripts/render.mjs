@@ -22,14 +22,16 @@ const STYLE = { 1: 'primary', 2: 'secondary', 3: 'success', 4: 'danger' };
 const rows = (components) => components.map((r) => `<div class="row">${r.components.map((b) =>
   `<button class="${STYLE[b.style]}"${b.disabled ? ' disabled' : ''} title="${esc(b.custom_id)}">${esc(b.label)}</button>`).join('')}</div>`).join('');
 const head = (now) => `<span class="av">sb</span><div class="body"><div class="meta"><b>sage bridge</b> <span class="app">APP</span> · ${hhmm(now / 1000)}</div>`;
-/** A message of the bridge: its text, its card (an embed) and its buttons, each when it has one. */
-export const message = ({ content, embeds: [e] = [], components = [] }, now) => `<div class="msg">${head(now)}${content ? `<div>${md(content, now)}</div>` : ''}${e ? `
+/** The text, the card (an embed) and the buttons of a message, each when it has one. */
+const parts = ({ content, embeds: [e] = [], components = [] }, now) => `${content ? `<div>${md(content, now)}</div>` : ''}${e ? `
   <div class="embed" style="border-color:#${e.color.toString(16).padStart(6, '0')}"><div class="title">${esc(e.title)}</div><div class="desc">${md(e.description, now)}</div>
   ${(e.fields ?? []).map((f) => `<div class="field"><div class="fname">${esc(f.name)}</div><div class="fvalue">${md(f.value, now)}</div></div>`).join('')}
-  ${e.footer ? `<div class="footer">${esc(e.footer.text)}</div>` : ''}</div>` : ''}${rows(components)}</div></div>`;
-/** A private note: only the person who pressed sees it. */
+  ${e.footer ? `<div class="footer">${esc(e.footer.text)}</div>` : ''}</div>` : ''}${rows(components)}`;
+/** A message of the bridge. */
+export const message = (m, now) => `<div class="msg">${head(now)}${parts(m, now)}</div></div>`;
+/** A private note: only the person who pressed sees it. It can have a card, as the confirm of /sage request has (F-T228-2). */
 export const noteHtml = (n, now) => `<div class="msg eph">${head(now)}
-  <div class="ephnote">Only you can see this · Dismiss message</div><div>${md(n.content, now)}</div>${rows(n.components ?? [])}</div></div>`;
+  <div class="ephnote">Only you can see this · Dismiss message</div>${parts(n, now)}</div></div>`;
 export const modalHtml = (m) => `<div class="modal"><h3>${esc(m.title)}</h3>${m.components.map(({ components: [i] }) =>
   `<label>${esc(i.label)}<textarea placeholder="${esc(i.placeholder)}" maxlength="${i.max_length}"></textarea></label>`).join('')}<div class="mbtns"><span>Cancel</span><button class="primary">Submit</button></div></div>`;
 export const CSS = `
