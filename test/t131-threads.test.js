@@ -713,11 +713,11 @@ test('F-T143-7: the thread map refuses a held mention that the bridge did not wr
   const b = world(t);
   await b.say(MAYA, '<@1> show the board');
   const [thread] = b.threads();
-  // F-T232-2: a role name of 100 emoji (Discord's limit counts code points; 200 UTF-16 units) is held as the bridge saves it.
+  // F-T232-13: a held mention keeps only the crew name, never another role name (here one of 100 emoji).
   await b.say(MAYA, '<@1> the login breaks', { channelId: thread, parentId: ASK, roles: [CREW, '\u{1F600}'.repeat(100)] });
   const path = threadsPathOf(b.config);
   const good = JSON.parse(readFileSync(path, 'utf8'));
-  assert.deepEqual(good.threads[thread].held.map((h) => h.roles), [[CREW], [CREW, '\u{1F600}'.repeat(100)]]);
+  assert.deepEqual(good.threads[thread].held.map((h) => h.roles), [[CREW], [CREW]]);
   b.start(); // the map as the bridge wrote it loads
   const bad = `the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.`;
   const held = good.threads[thread].held[0];

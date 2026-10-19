@@ -12,6 +12,7 @@
 // The bridge sends a tick at `gate.endsAt` so that a batch vote ends on time.
 // A gate is deep-frozen plain JSON of a fixed depth: save it as it is, and check it with parseGate when you load it.
 // Ballot reasons are stored as typed (cut to 500 code points): they are untrusted text for the bridge to clean.
+import { isOwner } from './crew.js';
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -148,7 +149,7 @@ function apply(gate, event, { holders, ownerId }) {
   // An answer or a vote needs the crew, whatever the phase; an end or a tie-break needs the owner's id, with or without the role
   // (C1); a withdraw needs only the asker.
   if (event.type === 'press' && !holders.has(event.by)) return ignore(gate, event, 'not-holder');
-  if ((event.type === 'end' || event.type === 'tiebreak') && event.by !== ownerId) return ignore(gate, event, 'not-owner');
+  if ((event.type === 'end' || event.type === 'tiebreak') && !isOwner(event.by, ownerId)) return ignore(gate, event, 'not-owner');
   if (gate.phase === 'closed') return ignore(gate, event, 'closed');
   if (event.type === 'withdraw') {
     return event.by === gate.askedBy ? withdraw(gate) : ignore(gate, event, 'not-asker');

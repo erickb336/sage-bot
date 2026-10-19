@@ -9,7 +9,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, read
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, ephemeral, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
-import { mayStop, placeOf } from './crew.js';
+import { keptRoles, mayStop, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadProjects, pickProject, TYPES } from './projects.js';
@@ -261,8 +261,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    */
   function record(m, { thread = null, project = null, outcome }) {
     const raw = m.content ?? '';
-    const own = place(m).owner;
-    const line = auditLog.append(entryOf({ at: now(), message: m.id ?? null, author: m.user.id, roles: m.roles ?? [], raw,
+    const p = place(m);
+    const own = p.owner;
+    const line = auditLog.append(entryOf({ at: now(), message: m.id ?? null, author: m.user.id, roles: keptRoles(p), raw,
       text: own ? forLead(raw) : quoted(raw), thread, project, outcome }));
     const copy = [`**Audit log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
       shown(line.text, 1500)].join('\n');
@@ -297,7 +298,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       return { content: off ? LINK_OFF : DRY_RUN };
     }
     if (lead) record(m, { thread, project: t.project, outcome: 'read-ask' });
-    else { t.held.push({ id: m.id, user: m.user.id, roles: m.roles, content: m.content ?? '' }); keep(thread); }
+    else { t.held.push({ id: m.id, user: m.user.id, roles: keptRoles(place(m)), content: m.content ?? '' }); keep(thread); }
     const ask = readAsk(m.content);
     if (ask) return answer({ ...m, ...ask }, t.channel);
     return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : BUILDS}` : POINTER };

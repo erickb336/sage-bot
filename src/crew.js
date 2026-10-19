@@ -11,7 +11,17 @@ export const CREW = 'sage-crew';
  * @param {string} id @param {Iterable<string>} roleNames @param {string} ownerId
  * @returns {{ owner: boolean, crew: boolean }}
  */
-export const placeOf = (id, roleNames, ownerId) => ({ owner: typeof ownerId === 'string' && id === ownerId, crew: [...(roleNames ?? [])].includes(CREW) });
+export const placeOf = (id, roleNames, ownerId) => ({ owner: isOwner(id, ownerId), crew: [...(roleNames ?? [])].includes(CREW) });
+
+/** Whether `id` is the owner's user id (`ownerId`, as ownerOf resolved it). The one owner check: placeOf, the bridge and the vote rules use it. */
+export const isOwner = (id, ownerId) => typeof ownerId === 'string' && id === ownerId;
+
+/**
+ * The roles that a record (the audit log, a held mention) keeps of a person (F-T232-13): [CREW] when they are in the crew, else none.
+ * No other role name, and no text of Discord, goes into a record. Old records with role ids or names still load.
+ * @param {{ crew: boolean }} place  from placeOf
+ */
+export const keptRoles = (place) => (place.crew ? [CREW] : []);
 
 /**
  * Who may use the emergency stop (/sage stop and its confirm): the crew and the owner. It takes effect at once, with no approval of the
