@@ -223,7 +223,7 @@ const CONFIRM = 'Turn off the link from Discord to sage? Then no message from Di
 
 test('the crew\'s emergency stop: a crew member\'s /sage stop and its confirm turn the link off at once, with no approval of the owner', async (t) => {
   const b = asks(t);
-  assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [[CONFIRM, [STOP, STOP_CANCEL]]]);
+  assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [[CONFIRM, [STOP, `${STOP_CANCEL}:${MAYA}`]]]);
   assert.equal(existsSync(b.flag), false); // the command alone sets nothing
   assert.deepEqual(await b.press(MAYA, [CREW]), [`<@${MAYA}> turned off the link from Discord to sage. No message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.`]);
   assert.equal(existsSync(b.flag), true);
@@ -242,7 +242,7 @@ test('the crew\'s emergency stop: a crew member cannot turn the link on again; o
   // A second /sage stop, a press of the old confirm and its Cancel change nothing: the flag stays.
   assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [['The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.', undefined]]);
   assert.deepEqual(await b.press(MAYA, [CREW]), ['The link from Discord to sage is already off. Nothing changed.']);
-  assert.deepEqual(await b.press(MAYA, [CREW], STOP_CANCEL), ['Cancelled. Nothing changed.']);
+  assert.deepEqual(await b.press(MAYA, [CREW], `${STOP_CANCEL}:${MAYA}`), ['Cancelled. Nothing changed.']);
   assert.equal(existsSync(b.flag), true);
   // The terminal turns it on: node scripts/leads.mjs restore.
   const cfg = join(b.root, 'config.json');
@@ -250,6 +250,33 @@ test('the crew\'s emergency stop: a crew member cannot turn the link on again; o
   const restore = spawnSync(process.execPath, [join(ROOT, 'scripts', 'leads.mjs'), '--config', cfg, 'restore'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: join(b.root, 'home') } });
   assert.equal(restore.status, 0, restore.stderr);
   assert.equal(existsSync(b.flag), false);
+});
+
+test('F-T232-11: only the person who typed /sage stop, or the owner, cancels its confirm; any crew member\'s confirm still turns the link off', async (t) => {
+  const b = asks(t);
+  const [[, buttons]] = await b.cmd(MAYA, [CREW], 'stop');
+  const cancel = buttons[1];
+  assert.equal(cancel, `${STOP_CANCEL}:${MAYA}`);
+  const replies = [];
+  const press = (user, roles, customId) => b.ask.press({ user: { id: user, bot: false }, roles, customId, sentAt: T0,
+    update: async (p) => { replies.push(['update', p.content]); }, reply: async (p) => { replies.push(['reply', p.content, p.flags]); } });
+  // Jon's Cancel on Maya's confirm: a private reply, and the confirm stays (no update).
+  await press(JON, [CREW], cancel);
+  assert.deepEqual(replies.splice(0), [['reply', 'Only the person who typed /sage stop, or Erick, can cancel it. Nothing changed.', 64]]);
+  // Jon cannot close Maya's confirm, so he cannot make her type /sage stop again until its burst limit locks her out.
+  await press(JON, [CREW], cancel);
+  await press(JON, [CREW], cancel);
+  replies.length = 0;
+  assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [[CONFIRM, [STOP, cancel]]]);
+  // Maya's own Cancel works; so does the owner's.
+  await press(MAYA, [CREW], cancel);
+  await press(OWNER, [], cancel);
+  assert.deepEqual(replies.splice(0), [['update', 'Cancelled. Nothing changed.'], ['update', 'Cancelled. Nothing changed.']]);
+  assert.equal(existsSync(b.flag), false);
+  // Jon's press of "Turn off the link" on Maya's confirm turns the link off: any crew member may confirm.
+  await press(JON, [CREW], STOP);
+  assert.deepEqual(replies, [['update', `<@${JON}> turned off the link from Discord to sage. No message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.`]]);
+  assert.equal(existsSync(b.flag), true);
 });
 
 test('the crew\'s emergency stop: a member with no sage-crew role cannot stop the link, by the command or by the confirm button', async (t) => {

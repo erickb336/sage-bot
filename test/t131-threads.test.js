@@ -246,7 +246,7 @@ test('T131: the kill switch: /sage stop by the owner (with a confirm) sets it; a
   assert.equal(existsSync(flag), false);
   // A sage-lead: a confirm first; the press sets it and posts the public notice.
   assert.deepEqual(await b.cmd(OWNER, 'stop'), ['Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.']);
-  assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', STOP_CANCEL]]);
+  assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', `${STOP_CANCEL}:${OWNER}`]]);
   assert.equal(existsSync(flag), false);
   assert.deepEqual(await b.press(OWNER), [['update', `<@${OWNER}> turned off the link from Discord to sage. No message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.`, { parse: [] }]]);
   assert.equal(statSync(flag).mode & 0o777, 0o600);
@@ -361,9 +361,10 @@ test('F-T131-2: the /sage stop confirm has a Cancel, and it expires after 10 min
   const flag = killPathOf(b.config);
   const cancelled = [['update', 'Cancelled. Nothing changed.', { parse: [] }]];
   const expired = [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.', { parse: [] }]];
-  assert.deepEqual(await b.press(OWNER, [CREW], { customId: STOP_CANCEL }), cancelled);
-  assert.deepEqual(await b.press(OWNER, [], { customId: STOP_CANCEL }), cancelled);
-  assert.deepEqual(await b.press(MAYA, [CREW], { customId: STOP_CANCEL }), cancelled); // the crew's emergency stop (T232) has the same Cancel
+  assert.deepEqual(await b.press(OWNER, [CREW], { customId: `${STOP_CANCEL}:${MAYA}` }), cancelled); // the owner cancels anyone's confirm
+  assert.deepEqual(await b.press(OWNER, [], { customId: `${STOP_CANCEL}:${MAYA}` }), cancelled);
+  assert.deepEqual(await b.press(OWNER, [], { customId: STOP_CANCEL }), cancelled); // a confirm of before F-T232-11, with no asker
+  assert.deepEqual(await b.press(MAYA, [CREW], { customId: `${STOP_CANCEL}:${MAYA}` }), cancelled); // the crew's emergency stop (T232) has the same Cancel
   assert.deepEqual(await b.press(OWNER, [CREW], { age: 10 * 60_000 + 1 }), expired);
   // Days later, after Erick's restore: the old confirm sets nothing.
   assert.deepEqual(await b.press(OWNER, [CREW], { age: 3 * 24 * HOUR }), expired);
@@ -387,7 +388,7 @@ test('F-T131-3: the /sage stop of the owner (also with no role) and of the crew 
   assert.deepEqual(await b.cmd(OWNER, 'stop'), [confirm]); // over the limit: the kill switch still works
   assert.deepEqual(await b.cmd(OWNER, 'stop', [CREW], NOWHERE), [confirm]); // in a channel that is not registered
   assert.deepEqual(await b.cmd(OWNER, 'stop', [], NOWHERE), [confirm]);
-  assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', STOP_CANCEL]]);
+  assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', `${STOP_CANCEL}:${OWNER}`]]);
   // A crew member (T232: the emergency stop of the crew): the stop does not count, works over the limit and in any channel.
   for (let n = 0; n < 9; n++) await b.cmd(MAYA, 'board');
   assert.deepEqual(await b.cmd(MAYA, 'stop'), [confirm]);
@@ -560,7 +561,7 @@ test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, i
       update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
   };
   const flag = killPathOf(b.config);
-  const cancel = button(STOP_CANCEL);
+  const cancel = button(`${STOP_CANCEL}:${OWNER}`);
   await on.interaction(cancel);
   assert.deepEqual(cancel.calls, [['update', 'Cancelled. Nothing changed.']]);
   const old = button(STOP, { age: 10 * 60_000 + 1 }); // the message time comes from Discord's message

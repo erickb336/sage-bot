@@ -244,11 +244,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         { type: 2, style: 2, label: 'Cancel', custom_id: CANCEL }] }] };
   }
 
-  /** The answer to /sage stop of a crew member or the owner (src/crew.js mayStop): a confirm button. */
-  function stopAsk() {
+  /**
+   * The answer to /sage stop of a crew member or the owner (src/crew.js mayStop): a confirm button. Its Cancel names the person who asked
+   * (`asker`), so that only they or the owner cancel it (F-T232-11).
+   */
+  function stopAsk(asker) {
     if (linkOff(killPath)) return { content: 'The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.' };
     return { content: `Turn off the link from Discord to sage? Then no message from Discord goes to sage until ${OWNER} turns it on again at the terminal. Read asks keep working.`,
-      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: STOP_CANCEL }] }] };
+      components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: `${STOP_CANCEL}:${asker}` }] }] };
   }
 
   /**
@@ -303,12 +306,17 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   /**
    * A press of the /sage stop confirm by a crew member or the owner (press() passes on no one else: src/crew.js mayStop) sets the kill
    * switch at once, with no approval. Cancel, or a confirm older than CONFIRM_FOR (or of no known time), changes nothing and closes the
-   * confirm (F-T131-2), so an old confirm cannot set the flag again after the owner's restore.
+   * confirm (F-T131-2), so an old confirm cannot set the flag again after the owner's restore. Only the person who asked (the id in the
+   * Cancel's custom_id) or the owner cancels: anyone else gets a private reply, and the confirm stays (F-T232-11).
    */
   async function stopPress(b, roles) {
     const fail = (e) => say(`Discord refused the stop reply: code ${e?.code ?? '-'}: ${e?.message}`);
     let content;
-    if (b.customId === STOP_CANCEL) content = 'Cancelled. Nothing changed.';
+    if (b.customId !== STOP && b.customId !== `${STOP_CANCEL}:${b.user.id}` && !place(b).owner) {
+      await b.reply(ephemeral(`Only the person who typed /sage stop, or ${OWNER}, can cancel it. Nothing changed.`)).catch(fail);
+      return;
+    }
+    if (b.customId !== STOP) content = 'Cancelled. Nothing changed.';
     else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.';
     else if (linkOff(killPath)) content = 'The link from Discord to sage is already off. Nothing changed.'; // F-T143-2: no write, no log line
     else try {
@@ -396,7 +404,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         }
         const next = at && spend(i.user.id);
         payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. ${OWNER} can still turn the link off at the terminal.` }
-          : stop ? stopAsk() : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
+          : stop ? stopAsk(i.user.id) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
       } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
@@ -407,7 +415,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     },
     /**
      * A press of a button of the /sage unregister confirm or the /sage stop confirm: `{ user: { id, name, bot }, roles, customId, sentAt,
-     * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL go to the kill switch (stopPress). The owner's press of
+     * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL (with the asker's id) go to the kill switch (stopPress). The owner's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the owner's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. A crew
      * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else, and a custom_id that
@@ -416,7 +424,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     async press(b) {
       const roles = b.roles ?? [];
       if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '') || !(place(b).crew || place(b).owner)) return;
-      if (b.customId === STOP || b.customId === STOP_CANCEL) return stopPress(b, roles);
+      if (b.customId === STOP || String(b.customId).startsWith(STOP_CANCEL)) return stopPress(b, roles);
       const id = String(b.customId).slice(UNREGISTER.length);
       if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
       let content;
