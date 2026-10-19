@@ -8,7 +8,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { Client, ClientApplication, GatewayIntentBits } from 'discord.js';
 import { tempFolder } from './temp-folder.js';
-import { CREW, crewWarning, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
+import { CREW, crewWarning, NOT_CREW, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
 import { appOf, rolesOf, watchCrew } from '../src/discord.js';
 import { createBridge } from '../src/bridge.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
@@ -164,8 +164,9 @@ test('C1 on Discord: a crew member\'s tie-break and End vote now change nothing;
   await b.post();
   assert.equal((await b.press(OWNER, 'press:project/G3:0:0'))[0].content, 'Only a sage-crew member answers or votes here. To vote, give yourself the sage-crew role. Your answer at the terminal is final.');
   assert.equal(b.bridge.entry('project/G3').gate.phase, 'open');
-  // Sam has no crew role and is not the owner: no reply, and nothing changes.
-  assert.deepEqual(await b.press(SAM, 'press:project/G3:0:0'), []);
+  // Sam has no crew role and is not the owner: one private line (T239), and nothing changes.
+  assert.deepEqual((await b.press(SAM, 'press:project/G3:0:0')).map((r) => r.content), [NOT_CREW]);
+  assert.equal(b.bridge.entry('project/G3').gate.phase, 'open');
 });
 
 test('the role keys of before T232: the bridge starts and ignores them, and launchd.mjs warns and still writes the plist', (t) => {
@@ -238,7 +239,7 @@ test('the crew\'s emergency stop: a crew member cannot turn the link on again; o
   await b.press(MAYA, [CREW]);
   assert.equal(existsSync(b.flag), true);
   // Discord has no command that turns the link on: /sage has no such subcommand.
-  assert.deepEqual(askCommand([]).options.map((o) => o.name), ['board', 'task', 'gates', 'files', 'unregister', 'stop']);
+  assert.deepEqual(askCommand([]).options.map((o) => o.name), ['board', 'task', 'gates', 'files', 'request', 'unregister', 'stop']);
   // A second /sage stop, a press of the old confirm and its Cancel change nothing: the flag stays.
   assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [['The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.', undefined]]);
   assert.deepEqual(await b.press(MAYA, [CREW]), ['The link from Discord to sage is already off. Nothing changed.']);
@@ -282,8 +283,10 @@ test('F-T232-11: only the person who typed /sage stop, or the owner, cancels its
 test('the crew\'s emergency stop: a member with no sage-crew role cannot stop the link, by the command or by the confirm button', async (t) => {
   const b = asks(t);
   for (const roles of [[], ['Moderators'], ['Sage-Crew'], ['sage-crew ']]) {
-    assert.deepEqual(await b.cmd(SAM, roles, 'stop'), []); // nothing: no confirm, no reply
-    assert.deepEqual(await b.press(SAM, roles), []);
+    const stop = fakeCommand({ user: SAM, roles, channelId: '400000000000000009', sub: 'stop' });
+    await b.ask.command(stop);
+    assert.deepEqual(stop.replies.map((r) => [r.kind, r.content, r.flags]), [['reply', NOT_CREW, 64]]); // no confirm: the line of T239
+    assert.deepEqual(await b.press(SAM, roles), [NOT_CREW]);
   }
   assert.equal(existsSync(b.flag), false);
   assert.deepEqual(verifyLog(auditPathOf(b.config)).lines, []);

@@ -147,15 +147,22 @@ test('the decline form, the withdraw confirm, the posts after a decision and the
   assert.equal(decidedPost(R.declined).content, '**Declined.** Nothing goes to sage. Jon can send a new request with /sage request.');
   assert.equal(decidedPost(R.withdrawn).content, '**Withdrawn.** Nothing goes to sage. Jon can send a new request with /sage request.');
   const note = (why, r) => requestNote(why, r).content;
-  assert.equal(note('notCrew'), 'Only a sage-crew member can request a feature. Nothing was sent.');
   assert.equal(note('linkOff'), 'The link from Discord to sage is off, so I cannot take a request. Nothing was sent. Only Erick can turn it on again, at the terminal. Read asks still work.');
   assert.equal(note('open', { ...R.pending, thread: '100000000000000009' }), `You have an open request: RQ3 · Add CSV export to the reports page, waiting for Erick since ${t(T0)} in <#100000000000000009>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
   assert.equal(note('sent', { ...R.pending, thread: '100000000000000009' }), 'Sent to Erick as RQ3. Its thread is <#100000000000000009>. You can withdraw it there until Erick decides.');
   assert.equal(note('notOwner'), 'Only Erick approves or declines a request. Nothing changed.');
   assert.equal(note('notRequester', R.pending), 'Only Jon, who sent RQ3, can withdraw it. Nothing changed.');
   assert.equal(note('late', R.approved), `RQ3 was approved at ${t(AT)} meanwhile. Nothing changed.`);
+  // Being approved has no decision time: the time of the claim, never 1 Jan 1970 (R956).
+  assert.equal(note('late', R.approving), `RQ3 is being approved since ${t(CLAIM.at)}. Nothing changed.`);
   assert.equal(note('approved', R.approved), 'You approved RQ3. sage task T74 is added to reports-app.');
   assert.equal(note('cancelled'), 'Cancelled. Nothing was sent.');
+  assert.equal(note('gone'), 'This request form is gone: it expired, or sage-bot restarted. Nothing was sent. Type /sage request again.');
+  assert.equal(note('name', { requesterName: '🙂'.repeat(101) }), 'Your name in this server has 101 characters, and a request takes a name of 1 to 100. Change your server nickname, then try again. Nothing was sent.');
+  assert.equal(note('notCard', R.pending), 'This button is not on the card of RQ3. Nothing changed.');
+  assert.equal(note('declined', R.declined), 'You declined RQ3. Its thread says so. Nothing goes to sage.');
+  assert.equal(note('withdrawn', R.withdrawn), 'You withdrew RQ3. Nothing goes to sage. You can send a new request at once.');
+  assert.equal(note('kept', R.pending), 'RQ3 stays as it is. Nothing changed.');
   for (const why of Object.keys(REQUEST_NOTES)) assert.deepEqual([requestNote(why, R.approved).flags, requestNote(why, R.approved).allowedMentions], [64, { parse: [] }]);
 });
 

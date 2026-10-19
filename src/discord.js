@@ -5,6 +5,8 @@ import { promisify } from 'node:util';
 import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
 import { askCommand, createAsk, openAskFiles, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { parseRequestId } from './requestCards.js';
+import { createRequestFlow } from './requestFlow.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
 import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
@@ -71,13 +73,37 @@ export async function inForum(x, fetch) {
   return channel?.isThread() === true && [ChannelType.GuildForum, ChannelType.GuildMedia].includes(channel.parent?.type);
 }
 
-/** A /sage chat command as src/ask.js reads it. `parentId` is a promise: src/ask.js defers the reply before it waits for anything. */
+/** The name of the person of an interaction, as the server shows it. */
+const nameOf = (i) => i.member?.displayName ?? i.user.globalName ?? i.user.username;
+
+/**
+ * A /sage chat command as src/ask.js reads it. `parentId` is a promise: src/ask.js defers the reply before it waits for anything. `reply`
+ * is a private note (T239) and `showModal` the form of /sage request, each as Discord's first answer.
+ */
 export const commandOf = (i, fetch, guildRoles) => ({
-  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles), channelId: i.channelId, parentId: parentOf(i, fetch),
+  user: { id: i.user.id, bot: i.user.bot === true }, name: nameOf(i), roles: rolesOf(i.member, guildRoles), channelId: i.channelId, parentId: parentOf(i, fetch),
   sub: i.options.getSubcommand(false), options: { project: i.options.getString('project'), id: i.options.getString('id') },
   defer: (payload) => i.deferReply(payload),
   edit: (payload) => i.editReply(payload),
   remove: () => i.deleteReply(),
+  reply: (payload) => i.reply(payload),
+  showModal: (payload) => i.showModal(payload),
+});
+
+/**
+ * A press or a form of a request (a custom_id `rq1:…`) as src/requestFlow.js reads it: the person, the NAMES of their roles, the message
+ * with the button (null for the form of the command), and the answers of Discord.
+ */
+export const requestPressOf = (i, guildRoles) => ({
+  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles), customId: i.customId,
+  message: i.message ? { id: i.message.id, createdTimestamp: i.message.createdTimestamp } : null,
+  fields: i.isModalSubmit() ? i.fields : undefined,
+  reply: (payload) => i.reply(payload),
+  update: (payload) => i.update(payload),
+  showModal: (payload) => i.showModal(payload),
+  deferReply: (payload) => i.deferReply(payload),
+  deferUpdate: () => i.deferUpdate(),
+  editReply: (payload) => i.editReply(payload),
 });
 
 /**
@@ -90,14 +116,17 @@ export async function accepts(i, channelId, fetch) {
 }
 
 /**
- * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js and the bridge's buttons and forms to
- * the bridge; `message` takes a message that mentions the bot (`botId`) and is not from a bot to src/ask.js. Anything from another
- * guild gets nothing. Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf).
+ * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js, the buttons and forms of a request (in any
+ * registered channel and its threads: the request route, T228) to src/requestFlow.js, and the bridge's buttons and forms to the bridge;
+ * `message` takes a message that mentions the bot (`botId`) and is not from a bot to src/ask.js. Anything from another guild gets nothing.
+ * Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf).
  */
-export const routes = ({ config, ask, bridge, fetch, botId, guildRoles }) => ({
+export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch, guildRoles)) : undefined;
+    // The request's own record decides who may press (src/requestFlow.js), so the place of the press does not.
+    if ((i.isButton() || i.isModalSubmit()) && parseRequestId(i.customId)) return requests.interaction(requestPressOf(i, guildRoles));
     if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP || i.customId.startsWith(STOP_CANCEL))) {
       return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles),
         customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
@@ -198,7 +227,16 @@ export async function start(file) {
     const owner = ownerOf(prepared.config.ownerId, appOf(await client.application.fetch()));
     if (owner.warning) log(owner.warning);
     const config = { ...prepared.config, ownerId: owner.ownerId };
-    const ask = createAsk({ config, channels, projects, log, audit, files });
+    const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
+    // The requests (T228): a line in the request's channel, a thread from it, and the card in the thread. Discord archives a quiet
+    // thread after a week; a post opens it again.
+    const requests = createRequestFlow({ config, channels, projects, log, discord: {
+      post: async (target, payload) => (await (await place(target)).send(payload)).id,
+      edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
+      startThread: async (at, lineId, name) => (await (await (await place(at)).messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
+      threadFrom: async (at, lineId) => (await place(lineId)).id, // the thread that a message started has the message's id
+    } });
+    const ask = createAsk({ config, channels, projects, log, audit, files, requests });
     const guild = await enter(client, { config, channels, ask, log });
     const roles = () => guild.roles.cache.values();
     const crewCheck = watchCrew(roles, { log, audit });
@@ -206,7 +244,6 @@ export async function start(file) {
       client.on(event, (...r) => { if (r[0]?.guild?.id === config.guildId) crewCheck(); });
     }
     const channel = await client.channels.fetch(config.channelId);
-    const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
     const bridge = createBridge({
       sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
       own,
@@ -225,14 +262,17 @@ export async function start(file) {
         setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
       },
     });
-    const on = routes({ config, ask, bridge, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
+    const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
     client.on(Events.MessageCreate, (m) => { on.message(m); });
     let busy = false;
     const turn = async () => {
       if (busy) return;
       busy = true;
-      try { await bridge.loop(); } catch (e) { log(`the loop failed: ${e?.message}`); } finally { busy = false; }
+      try {
+        await bridge.loop().catch((e) => log(`the loop failed: ${e?.message}`));
+        await requests.loop(); // never rejects
+      } finally { busy = false; }
     };
     setInterval(turn, LOOP);
     await turn();

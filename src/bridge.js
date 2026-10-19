@@ -5,7 +5,7 @@
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { MessageFlags } from 'discord.js';
 import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp } from './cards.js';
-import { crewPings, isOwner } from './crew.js';
+import { crewPings, isOwner, NOT_CREW } from './crew.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { optionsOf, OTHER } from './sage.js';
@@ -929,13 +929,14 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (checked) lastEnd = now();
       }
     },
-    /** One Discord interaction (a button or the reason form). Anyone but the crew and the owner gets no reply, and nothing changes (G20). Never rejects. */
+    /** One Discord interaction (a button or the reason form). Anyone but the crew and the owner gets NOT_CREW privately, and nothing changes (T239). Never rejects. */
     async interaction(i) {
       const by = i?.user?.id;
       try {
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
-        if (!ppl.holders.has(by) && !isOwner(by, ppl.ownerId)) return;
+        // T239: anyone but the crew and the owner gets one private line, and nothing changes.
+        if (!ppl.holders.has(by) && !isOwner(by, ppl.ownerId)) { await i.reply(ephemeral(NOT_CREW)); return; }
         // The owner's answers at the terminal come first: a press never counts on a part that has one (G10). Only the logbook of the
         // project in the key of the press: a key of a project that the config does not list finds no gate (T132).
         let pressed = parseCustomId(i.customId);

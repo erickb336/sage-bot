@@ -1,6 +1,6 @@
 // The Discord messages of /sage request (T72 PR 2), as the JSON that Discord takes: the form, the private confirm, the line in the
 // channel that starts the request's thread, the request card in its states, the decline form and the private notes. Pure functions of
-// a request record (src/requests.js) or a draft: no Client, no network. The bridge wires them in T72 PR 3.
+// a request record (src/requests.js) or a draft: no Client, no network. src/requestFlow.js wires them into the bridge (T228).
 // Who reads the cleaned text: people only, on Discord. The title, the text, the requester's name and the reason are untrusted, and each
 // one shows as typed through `safe` (an allow-list, then every markdown, link and mention character escaped) and `cut` to Discord's limits.
 // No model reads these messages: sage gets the raw text of the request record, escaped as quoted data by the outbox (a later PR).
@@ -9,7 +9,7 @@ import { ActionRowBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInpu
 import { button, cut, ephemeral, LIMIT, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
 import { forModel } from './clean.js';
 import { CREW } from './crew.js';
-import { LIMITS, REQUEST_ID, STATUS_WORDS } from './requests.js';
+import { LIMITS, MAX_NAME, REQUEST_ID, STATUS_WORDS } from './requests.js';
 import { threadName } from './threads.js';
 
 const COLOR = { open: 0x6b4fd8, approved: 0x2e8b57, declined: 0xb33a3a, withdrawn: 0x8a8a8a };
@@ -173,20 +173,28 @@ export function decidedPost(r) {
 }
 
 /**
- * The private notes of /sage request, each a function of what it names. A refusal before the form opens nothing; the hourly limit
- * is the reply of every ask (src/ask.js), so it is not here.
+ * The private notes of /sage request and its buttons, each a function of what it names. A refusal before the form opens nothing; the
+ * hourly limit is the reply of every ask (src/ask.js), and a person who is not in the crew gets NOT_CREW (src/crew.js), so neither is here.
  */
 export const REQUEST_NOTES = {
-  notCrew: () => `Only a ${CREW} member can request a feature. Nothing was sent.`,
   linkOff: () => `The link from Discord to sage is off, so I cannot take a request. Nothing was sent. Only ${OWNER} can turn it on again, at the terminal. Read asks still work.`,
   open: (r) => `You have an open request: ${r.id} · ${safe(r.title)}, waiting for ${OWNER} since ${stamp(r.createdAt)}${r.thread ? ` in <#${r.thread}>` : ''}. `
     + `A ${CREW} member can have 1 open request at a time. Withdraw it in its thread, or wait for ${OWNER}'s answer.`,
+  name: (r) => `Your name in this server has ${Array.from(r.requesterName).length} characters, and a request takes a name of 1 to ${MAX_NAME}. `
+    + 'Change your server nickname, then try again. Nothing was sent.',
   cancelled: () => 'Cancelled. Nothing was sent.',
+  gone: () => 'This request form is gone: it expired, or sage-bot restarted. Nothing was sent. Type /sage request again.',
   sent: (r) => `Sent to ${OWNER} as ${r.id}.${r.thread ? ` Its thread is <#${r.thread}>.` : ''} You can withdraw it there until ${OWNER} decides.`,
   notOwner: () => `Only ${OWNER} approves or declines a request. Nothing changed.`,
   notRequester: (r) => `Only ${nameOf(r)}, who sent ${r.id}, can withdraw it. Nothing changed.`,
-  late: (r) => `${r.id} was ${STATUS_WORDS[r.status]} at ${stamp(r.decidedAt)} meanwhile. Nothing changed.`,
+  notCard: (r) => `This button is not on the card of ${r.id}. Nothing changed.`,
+  // A request being approved has no decision time yet: the time of its claim (F-T240, R956).
+  late: (r) => (r.status === 'approving' ? `${r.id} is being approved since ${stamp(r.claim.at)}. Nothing changed.`
+    : `${r.id} was ${STATUS_WORDS[r.status]} at ${stamp(r.decidedAt)} meanwhile. Nothing changed.`),
   approved: (r) => `You approved ${r.id}. sage task ${r.task} is added to ${safe(r.project)}.`,
+  declined: (r) => `You declined ${r.id}. Its thread says so. Nothing goes to sage.`,
+  withdrawn: (r) => `You withdrew ${r.id}. Nothing goes to sage. You can send a new request at once.`,
+  kept: (r) => `${r.id} stays as it is. Nothing changed.`,
 };
 /** A private note of REQUEST_NOTES, with no ping. */
 export const requestNote = (why, r) => ephemeral(REQUEST_NOTES[why](r));

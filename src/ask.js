@@ -4,12 +4,12 @@
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
 // columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
 // and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. Anyone but the crew and the owner
-// (src/crew.js placeOf) gets nothing. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
+// (src/crew.js placeOf) gets one private line for a command or a press (NOT_CREW, T239), and nothing for a mention. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, ephemeral, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
-import { keptRoles, mayStop, placeOf } from './crew.js';
+import { CREW, keptRoles, mayStop, NOT_CREW, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadProjects, pickProject, TYPES } from './projects.js';
@@ -34,6 +34,8 @@ export const MAX_BYTES = 8 * 1024 * 1024;
 const TASK_ID = /^T\d{1,9}$/;
 const DONE = new Set(['merged', 'concluded', 'abandoned']);
 const SNOWFLAKE = /^\d{17,20}$/;
+/** The most open requests that /sage board lists one by one: each line has at most about 250 characters, so the head fits in one reply. */
+export const BOARD_REQUESTS = 5;
 /** A reply in place pings nobody, also not the person it answers. */
 const QUIET = { ...NO_MENTIONS, repliedUser: false };
 /** Discord's limit for the text of one message. */
@@ -63,6 +65,7 @@ export function askCommand(projects) {
       .addStringOption(project))
     .addSubcommand((s) => s.setName('gates').setDescription('The open questions with their options').addStringOption(project))
     .addSubcommand((s) => s.setName('files').setDescription('The shared images and PDFs of a project').addStringOption(project))
+    .addSubcommand((s) => s.setName('request').setDescription(`Request a feature: ${OWNER} approves or declines it`).addStringOption(project))
     .addSubcommand((s) => s.setName('unregister').setDescription(`Stop sage-bot in this channel (${OWNER} only)`))
     .addSubcommand((s) => s.setName('stop').setDescription(`Turn off the link from Discord to sage at once (the crew and ${OWNER})`))
     .toJSON();
@@ -164,7 +167,7 @@ export const openAskFiles = (config, projects) => ({ threads: loadThreads(thread
  * `files` are from openAskFiles (default: opened here). Throws for a config that is not safe, and for a thread map or an audit log that is not safe.
  */
 export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit,
-  files = openAskFiles(config, projects) }) {
+  files = openAskFiles(config, projects), requests }) {
   const threadsPath = threadsPathOf(config);
   const { threads, auditLog } = files;
   const killPath = killPathOf(config);
@@ -229,7 +232,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       say(`/sage ${sub}: the logbook of ${p.name} could not be read: ${e?.message}`);
       return { content: `I could not read the records of ${p.name} just now. Nothing is lost. Please ask again in a minute.` };
     }
-    if (sub === 'board') return { content: board(p, data) };
+    if (sub === 'board') return { content: board(p, data, waiting(p)) };
     if (sub === 'gates') return { content: gates(p, data) };
     if (sub === 'task') return { content: task(p, data, String(o.id ?? '').trim().toUpperCase()) };
     return { content: POINTER };
@@ -332,14 +335,47 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     await b.update({ content, components: [], allowedMentions: NO_MENTIONS }).catch(fail);
   }
 
-  function board(p, { tasks, open }) {
+  /**
+   * /sage request of a crew member or the owner (T228): no defer, because the form must be Discord's first answer (src/requestFlow.js).
+   * It counts toward the hourly limit; over it, or outside a registered channel, one private note.
+   */
+  async function requestAsk(i) {
+    const fail = (e) => say(`Discord refused a /sage request reply: code ${e?.code ?? '-'}: ${e?.message}`);
+    try {
+      const at = await registered(i.channelId, i.parentId);
+      if (!at) return await i.reply(ephemeral(`I take requests in ${here()} and the other channels of sage-bot, so please ask there.`)).catch(fail);
+      const next = spend(i.user.id);
+      if (next) return await i.reply(ephemeral(limited(next))).catch(fail);
+      if (!requests) return await i.reply(ephemeral('Requests are not on in this bridge. Nothing was sent.')).catch(fail);
+      await requests.command(i, at);
+    } catch (e) { say(`/sage request: ${e?.message}`); }
+  }
+  /** The open requests of a project for the board (T229), oldest first; null when the requests file cannot be read. */
+  function waiting(p) {
+    if (!requests) return [];
+    try { return requests.waiting(p); } catch (e) { say(`/sage board: the requests file could not be read: ${e?.message}`); return null; }
+  }
+  function board(p, { tasks, open }, asked) {
     const count = new Map();
     for (const t of tasks) count.set(t.state, (count.get(t.state) ?? 0) + 1);
     const left = tasks.filter((t) => !DONE.has(t.state)).length;
     return fitted([`**Board · ${p.name}**`,
       `${tasks.length} task(s)${[...count].map(([s, n]) => ` · ${shown(s, 20)} ${n}`).join('')}`,
       `${left} task(s) left. Time left is not estimated yet: the project's records have no estimate.`,
+      ...requestLines(asked),
       `${open.length} open question(s)${open.length ? ':' : '.'}`], open, (g) => question(g));
+  }
+  /**
+   * The lines of the open requests on the board: a count, then at most BOARD_REQUESTS of them, oldest first, each with its id, title,
+   * requester, status word and thread; "N more" for the rest. Each line is cut, so the head of the board always fits in one reply.
+   */
+  function requestLines(asked) {
+    if (asked === null) return ['The requests could not be read just now.'];
+    if (!asked.length) return [];
+    const line = (r) => `- ${r.id} · ${shown(r.title, 70)} · by ${shown(r.requesterName, 32) || `a ${CREW} member`} · `
+      + `${r.status === 'pending' ? `waiting for ${OWNER}` : 'being approved'}${r.thread ? ` · <#${r.thread}>` : ''}`;
+    return [`${asked.length} open request(s):`, ...asked.slice(0, BOARD_REQUESTS).map(line),
+      ...(asked.length > BOARD_REQUESTS ? [`${asked.length - BOARD_REQUESTS} more open request(s): ${OWNER} sees them all with node scripts/requests.mjs list.`] : [])];
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
@@ -379,12 +415,18 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   return {
     projects,
     /**
-     * One /sage command: `{ user: { id, bot }, roles, channelId, parentId, sub, options: { project, id }, defer, edit }`, with the NAMES of
-     * the member's roles. A bot and anyone but the crew and the owner get nothing, and nothing counts (G20). Every other ask is first deferred in public, before any file
+     * One /sage command: `{ user: { id, bot }, name, roles, channelId, parentId, sub, options: { project, id }, defer, edit, reply, showModal }`,
+     * with the NAMES of the member's roles. A bot gets nothing; anyone but the crew and the owner gets NOT_CREW privately (T239), and nothing
+     * counts. /sage request opens its form with no defer (requestAsk). Every other ask is first deferred in public, before any file
      * or logbook work (F-T71-2), then gets its answer as an edit of that reply, which pings nobody. Never rejects.
      */
     async command(i) {
-      if (i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '') || !(place(i).crew || place(i).owner)) return;
+      if (i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '')) return;
+      if (!(place(i).crew || place(i).owner)) { // T239: one private line, within Discord's 3 s; nothing counts
+        await i.reply(ephemeral(NOT_CREW)).catch((e) => say(`Discord refused the reply to a /sage of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
+        return;
+      }
+      if (i.sub === 'request') return requestAsk(i);
       try { await i.defer({}); } catch (e) {
         say(`Discord refused to defer a /sage reply: code ${e?.code ?? '-'}: ${e?.message}`);
         return;
@@ -419,12 +461,16 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL (with the asker's id) go to the kill switch (stopPress). The owner's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the owner's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. A crew
-     * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else, and a custom_id that
-     * is not STOP, STOP_CANCEL, CANCEL or a channel id, get nothing. Never rejects.
+     * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else gets NOT_CREW privately
+     * (T239); a custom_id that is not STOP, STOP_CANCEL, CANCEL or a channel id gets nothing. Never rejects.
      */
     async press(b) {
       const roles = b.roles ?? [];
-      if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '') || !(place(b).crew || place(b).owner)) return;
+      if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '')) return;
+      if (!(place(b).crew || place(b).owner)) { // T239
+        await b.reply(ephemeral(NOT_CREW)).catch((e) => say(`Discord refused the reply to a press of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
+        return;
+      }
       if (b.customId === STOP || String(b.customId).startsWith(STOP_CANCEL)) return stopPress(b, roles);
       const id = String(b.customId).slice(UNREGISTER.length);
       if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;

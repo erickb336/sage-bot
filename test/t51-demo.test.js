@@ -49,9 +49,18 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /@sage-crew project T1 needs one product answer\. The first answer is final\./);
   assert.match(page, /Answered by Maya at <time>14:02<\/time>: A\. Sign in\. Final\./);
   assert.match(page, /Only Jon can see this · Dismiss message<\/div><div>Already answered by Maya: A/);
-  // Sam has no role: sage-bot ignores the press, so Sam gets no note (G20).
-  assert.match(page, /Sam has no role and presses part 1, A\. sage-bot ignores the press: Sam gets no reply, and the vote does not change\./);
-  assert.doesNotMatch(page, /Only Sam can see this/);
+  // Sam has no role: the press does not count, and Sam gets one private line (T239).
+  assert.match(page, /Sam has no role and presses part 1, A\. The press does not count: Sam gets one private line, and the vote does not change\.<\/div><div class="msg eph">.*?Only Sam can see this · Dismiss message<\/div><div>Only the sage-crew role can use sage-bot\.<\/div>/s);
+  // The request (T228): the form, Jon's private confirm and note, one line and one card that pings Erick once, Maya and Sam refused, Erick's approve.
+  const request = page.slice(page.indexOf('<section id="request">'), page.indexOf('<section id="answers">'));
+  const text = request.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  assert.match(text, /Jon \(sage-crew\) requests a feature: Add CSV export · RQ1 · waiting for Erick edited · 14:47 (?:sb )?.*Jon \(sage-crew\) requests a feature: Add CSV export · RQ1 · approved · sage task T5/);
+  assert.match(text, /Only Jon can see this · Dismiss message Sent to Erick as RQ1\./);
+  assert.equal((text.match(/@Erick a new request waits for you\./g) ?? []).length, 1);
+  assert.match(text, /Only Maya can see this · Dismiss message Only Erick approves or declines a request\. Nothing changed\./);
+  assert.match(text, /Only Sam can see this · Dismiss message Only the sage-crew role can use sage-bot\./);
+  assert.match(text, /Only Erick can see this · Dismiss message You approved RQ1\. sage task T5 is added to project\./);
+  assert.match(text, /Status Approved by Erick at 14:47 \. sage task T5 is in the sage logbook\./);
   // The batch: the tie post in the thread, which pings Erick (the owner) only, then Erick's tie-break.
   assert.match(page, /@Erick project\/G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
   assert.match(page, /<b>Decided: B<\/b> · tie broken by Erick at <time>14:36<\/time>/);

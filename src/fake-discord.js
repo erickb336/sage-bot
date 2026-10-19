@@ -5,19 +5,23 @@ import { MessageFlags, MessageFlagsBitField } from 'discord.js';
 /**
  * An interaction-like object. `replies` records each answer as `{ kind, ...payload }`,
  * with kind 'reply' (a message, private when its flags say so), 'update' (the message with the buttons) or 'modal'.
- * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean, refuse?: Error, message?: string }} o
+ * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean, refuse?: Error, message?: string,
+ *   sentAt?: number, roles?: string[] }} o
  *   `fields` are the modal's inputs by custom_id; a button press has none. `ephemeral` says that the pressed message
  *   was private (the owner's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
  *   reply rejects with that error and records nothing, as Discord does for an unknown interaction (F-T27-20). `message` is the id of
- *   the message with the button, as discord.js shows it in `interaction.message.id`.
+ *   the message with the button, as discord.js shows it in `interaction.message.id`, and `sentAt` its `createdTimestamp`. `roles` are
+ *   the NAMES of the member's roles, as src/discord.js maps them for a request press. The kinds 'defer' (deferReply), 'deferUpdate' and
+ *   'editReply' are the replies of a press that takes long (src/requestFlow.js).
  */
-export function fakeInteraction({ user, customId, fields, ephemeral = false, refuse, message }) {
+export function fakeInteraction({ user, customId, fields, ephemeral = false, refuse, message, sentAt, roles }) {
   const replies = [];
-  const record = (kind) => async (payload) => { if (refuse) throw refuse; replies.push(structuredClone({ kind, ...payload })); };
+  const record = (kind) => async (payload = {}) => { if (refuse) throw refuse; replies.push(structuredClone({ kind, ...payload })); };
   return {
     user: { id: user },
     customId,
-    message: { id: message, flags: new MessageFlagsBitField(ephemeral ? MessageFlags.Ephemeral : 0) },
+    ...(roles && { roles }),
+    message: { id: message, createdTimestamp: sentAt, flags: new MessageFlagsBitField(ephemeral ? MessageFlags.Ephemeral : 0) },
     // Like discord.js: a missing field throws, and a button press has no `fields` at all.
     ...(fields && { fields: { getTextInputValue: (id) => {
       if (!(id in fields)) throw new TypeError(`Required field with custom id "${id}" not found.`);
@@ -27,6 +31,9 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
     reply: record('reply'),
     update: record('update'),
     showModal: record('modal'),
+    deferReply: record('defer'),
+    deferUpdate: record('deferUpdate'),
+    editReply: record('editReply'),
   };
 }
 
@@ -112,18 +119,20 @@ export function fakeDiscord(members, roles = []) {
 /**
  * A fake /sage command, as src/discord.js maps a real one for src/ask.js: `{ user: { id, bot }, roles, channelId, parentId, sub, options,
  * defer, edit }`. `parentId` is the parent channel of a thread, else null. `replies` records each call in order as `{ kind, ...payload }`,
- * kind 'defer', 'edit' (files as their names and sizes) or 'remove'. `onDefer` runs inside the defer, before it resolves: a test changes the
- * project there to see that no work came before it. SAMPLE DATA ONLY.
- * @param {{ user: string, roles?: string[], bot?: boolean, channelId: string, parentId?: string | null, sub: string,
+ * kind 'defer', 'edit' (files as their names and sizes), 'remove', 'reply' (a private reply) or 'modal' (/sage request). `onDefer` runs
+ * inside the defer, before it resolves: a test changes the project there to see that no work came before it. `name` is the member's
+ * display name. SAMPLE DATA ONLY.
+ * @param {{ user: string, name?: string, roles?: string[], bot?: boolean, channelId: string, parentId?: string | null, sub: string,
  *   options?: { project?: string, id?: string }, onDefer?: () => void }} o
  */
-export function fakeCommand({ user, roles = [], bot = false, channelId, parentId = null, sub, options = {}, onDefer }) {
+export function fakeCommand({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, sub, options = {}, onDefer }) {
   const replies = [];
   const record = (kind) => async ({ files, ...payload }) => {
     replies.push({ kind, ...structuredClone(payload), ...(files && { files: files.map((f) => ({ name: f.name, size: f.attachment.length })) }) });
     if (kind === 'defer') await onDefer?.();
   };
-  return { user: { id: user, bot }, roles, channelId, parentId, sub, options, replies, defer: record('defer'), edit: record('edit'), remove: async () => { replies.push({ kind: 'remove' }); } };
+  return { user: { id: user, bot }, name, roles, channelId, parentId, sub, options, replies, defer: record('defer'), edit: record('edit'),
+    remove: async () => { replies.push({ kind: 'remove' }); }, reply: record('reply'), showModal: record('modal') };
 }
 
 /**

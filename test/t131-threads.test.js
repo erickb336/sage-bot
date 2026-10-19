@@ -15,7 +15,7 @@ import { inForum, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { DRY_RUN, LINK_OFF, threadsPathOf } from '../src/threads.js';
 import { CONFIG, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
-import { CREW } from '../src/crew.js';
+import { CREW, NOT_CREW } from '../src/crew.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // a registered channel (the old #ask-sage)
@@ -240,9 +240,11 @@ test('T131: the #sage-audit copy of each lead line pings nobody and shows the te
 test('T131: the kill switch: /sage stop by the owner (with a confirm) sets it; a member with no role cannot; while set, talk gets the fixed reply and is logged', async (t) => {
   const b = world(t);
   const flag = killPathOf(b.config);
-  // A member with no role gets nothing (the crew's stop: test/t232-crew.test.js).
-  assert.deepEqual(await b.cmd(SAM, 'stop'), []);
-  assert.deepEqual(await b.press(SAM), []);
+  // A member with no role gets only the private line of T239 (the crew's stop: test/t232-crew.test.js).
+  const stop = fakeCommand({ user: SAM, roles: [], channelId: ASK, sub: 'stop' });
+  await b.ask.command(stop);
+  assert.deepEqual(stop.replies.map((r) => [r.kind, r.content, r.flags]), [['reply', NOT_CREW, 64]]);
+  assert.deepEqual(await b.press(SAM), [['reply', NOT_CREW]]);
   assert.equal(existsSync(flag), false);
   // A sage-lead: a confirm first; the press sets it and posts the public notice.
   assert.deepEqual(await b.cmd(OWNER, 'stop'), ['Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.']);
@@ -567,9 +569,9 @@ test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, i
   const old = button(STOP, { age: 10 * 60_000 + 1 }); // the message time comes from Discord's message
   await on.interaction(old);
   assert.deepEqual(old.calls, [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.']]);
-  const stranger = button(STOP, { user: SAM, roles: [] }); // roles come from the member: no sage-crew, so nothing
+  const stranger = button(STOP, { user: SAM, roles: [] }); // roles come from the member: no sage-crew, so only the line of T239
   await on.interaction(stranger);
-  assert.deepEqual(stranger.calls, []);
+  assert.deepEqual(stranger.calls, [['reply', NOT_CREW]]);
   assert.equal(existsSync(flag), false);
   const press = button(STOP);
   await on.interaction(press);

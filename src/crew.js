@@ -6,6 +6,12 @@
 export const CREW = 'sage-crew';
 
 /**
+ * The one private line for a person who is neither in the crew nor the owner and uses /sage or presses a button of sage-bot (T239,
+ * owner decision). A mention of theirs gets nothing at all.
+ */
+export const NOT_CREW = `Only the ${CREW} role can use sage-bot.`;
+
+/**
  * Where a person is on this bot, from their user id and the NAMES of their roles: `owner` when the id is the owner's (with or
  * without a role), `crew` when a role is named exactly CREW (also when two roles share the name). Nothing else counts.
  * @param {string} id @param {Iterable<string>} roleNames @param {string} ownerId
