@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
-import { askCommand, createAsk, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, openAskFiles, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
 import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
@@ -117,10 +117,11 @@ export const routes = ({ config, ask, bridge, fetch, botId, guildRoles }) => ({
 /**
  * The start before Discord: checks the config's ids, the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
- * or a bad registry, stops here, before the Keychain. A config with the role keys of before T232 starts, and the log says that they do
+ * or a bad registry, stops here, before the Keychain. Then it opens the thread map and the audit log (src/ask.js openAskFiles): a file
+ * that is not safe stops here too (F-T232-3). A config with the role keys of before T232 starts, and the log says that they do
  * nothing. `fetchChannel(id)` gives a Discord channel after the login: the #sage-audit copy of each audit log line goes through it. The returned
  * config has the registry's home channel as its channelId: the votes and cards go there. `audit` posts to #sage-audit (none: no
- * auditChannelId). The read commands (createAsk) start after the login, when the owner is known (C12).
+ * auditChannelId). The read commands (createAsk, on `files`) start after the login, when the owner is known (C12).
  */
 export function prepare(file, log, fetchChannel) {
   const old = oldRoleKeys(file);
@@ -132,11 +133,12 @@ export function prepare(file, log, fetchChannel) {
   lock(file.statePath);
   const channels = openChannels(file, projects, log);
   const config = withHome(file, channels);
+  const files = openAskFiles(config, projects);
   // #sage-audit (T131): a copy of each audit log line. Without auditChannelId, the audit log only, and the start says so.
   let auditChannel = null;
   const audit = config.auditChannelId ? async (payload) => { auditChannel ??= await fetchChannel(config.auditChannelId); await auditChannel.send(payload); } : undefined;
   if (!audit) log('no auditChannelId in the config: messages to sage go to the audit log only, with no copy in #sage-audit');
-  return { config, channels, projects, own, audit };
+  return { config, channels, projects, own, audit, files };
 }
 
 /**
@@ -179,7 +181,7 @@ export async function enter(client, { config, channels, ask, log }) {
 export async function start(file) {
   const log = (line) => process.stderr.write(`${new Date().toISOString()} ${forTerminal(line)}\n`);
   const prepared = prepare(file, log, (id) => client.channels.fetch(id)); // `client` exists before any audit log line
-  const { channels, projects, own, audit } = prepared;
+  const { channels, projects, own, audit, files } = prepared;
   // Before the token is read: a sage tool that does not take the bridge's `gate answer` form refuses the start with one line (T176).
   for (const sagePath of new Set(projects.map((p) => p.sagePath))) await probeTool(sagePath);
   const token = await readToken();
@@ -187,54 +189,56 @@ export async function start(file) {
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
   client.on(Events.Error, (e) => log(`Discord error: ${apiError(e)}`));
   const ready = new Promise((done) => client.once(Events.ClientReady, done));
-  await client.login(token);
-  await ready;
-  // The owner (C12): the config's ownerId, else the owner of this Discord application. The one read of the owner: every check of the
-  // crew and the owner goes through src/crew.js with this id.
-  let owner;
-  try { owner = ownerOf(prepared.config.ownerId, appOf(await client.application.fetch())); } catch (e) {
+  // Any failure of the start from the login on closes the connection to Discord, so the process ends (F-T232-3).
+  try {
+    await client.login(token);
+    await ready;
+    // The owner (C12): the config's ownerId, else the owner of this Discord application. The one read of the owner: every check of the
+    // crew and the owner goes through src/crew.js with this id.
+    const owner = ownerOf(prepared.config.ownerId, appOf(await client.application.fetch()));
+    if (owner.warning) log(owner.warning);
+    const config = { ...prepared.config, ownerId: owner.ownerId };
+    const ask = createAsk({ config, channels, projects, log, audit, files });
+    const guild = await enter(client, { config, channels, ask, log });
+    const roles = () => guild.roles.cache.values();
+    const crewCheck = watchCrew(roles, { log, audit });
+    for (const event of [Events.GuildRoleCreate, Events.GuildRoleUpdate, Events.GuildRoleDelete]) {
+      client.on(event, (...r) => { if (r[0]?.guild?.id === config.guildId) crewCheck(); });
+    }
+    const channel = await client.channels.fetch(config.channelId);
+    const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
+    const bridge = createBridge({
+      sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
+      own,
+      config,
+      statePath: config.statePath,
+      log,
+      discord: {
+        members: () => guild.members.cache.map(memberOf),
+        roles: () => [...roles()].map((r) => ({ id: r.id, name: r.name })),
+        post: async (target, payload) => (await (await place(target)).send(payload)).id,
+        edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
+        // A thread from the session's line in the parent channel. Discord archives a quiet thread after a week; a post opens it again.
+        startThread: async (lineId, name) => (await (await channel.messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
+        // The thread that a message started has the message's id, so a fetch of that id finds it (code 160004, F-T29-2).
+        threadFrom: async (lineId) => (await place(lineId)).id,
+        setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
+      },
+    });
+    const on = routes({ config, ask, bridge, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
+    client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
+    client.on(Events.MessageCreate, (m) => { on.message(m); });
+    let busy = false;
+    const turn = async () => {
+      if (busy) return;
+      busy = true;
+      try { await bridge.loop(); } catch (e) { log(`the loop failed: ${e?.message}`); } finally { busy = false; }
+    };
+    setInterval(turn, LOOP);
+    await turn();
+  } catch (e) {
     await client.destroy();
     throw e;
   }
-  if (owner.warning) log(owner.warning);
-  const config = { ...prepared.config, ownerId: owner.ownerId };
-  const ask = createAsk({ config, channels, projects, log, audit });
-  const guild = await enter(client, { config, channels, ask, log });
-  const roles = () => guild.roles.cache.values();
-  const crewCheck = watchCrew(roles, { log, audit });
-  for (const event of [Events.GuildRoleCreate, Events.GuildRoleUpdate, Events.GuildRoleDelete]) {
-    client.on(event, (...r) => { if (r[0]?.guild?.id === config.guildId) crewCheck(); });
-  }
-  const channel = await client.channels.fetch(config.channelId);
-  const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
-  const bridge = createBridge({
-    sages: new Map(projects.map((p) => [p.name, sageTool(p)])), // one sage tool per project of the config (T132)
-    own,
-    config,
-    statePath: config.statePath,
-    log,
-    discord: {
-      members: () => guild.members.cache.map(memberOf),
-      roles: () => [...roles()].map((r) => ({ id: r.id, name: r.name })),
-      post: async (target, payload) => (await (await place(target)).send(payload)).id,
-      edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
-      // A thread from the session's line in the parent channel. Discord archives a quiet thread after a week; a post opens it again.
-      startThread: async (lineId, name) => (await (await channel.messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
-      // The thread that a message started has the message's id, so a fetch of that id finds it (code 160004, F-T29-2).
-      threadFrom: async (lineId) => (await place(lineId)).id,
-      setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
-    },
-  });
-  const on = routes({ config, ask, bridge, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache });
-  client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
-  client.on(Events.MessageCreate, (m) => { on.message(m); });
-  let busy = false;
-  const turn = async () => {
-    if (busy) return;
-    busy = true;
-    try { await bridge.loop(); } catch (e) { log(`the loop failed: ${e?.message}`); } finally { busy = false; }
-  };
-  setInterval(turn, LOOP);
-  await turn();
   log('the sage bridge runs');
 }

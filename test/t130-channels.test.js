@@ -312,6 +312,28 @@ test('F-T143-13: the bridge start refuses an auditChannelId (or any Discord id o
   assert.equal(config.auditChannelId, '400000000000000009');
 });
 
+test('F-T232-3: a bad thread map or an unsafe audit log folder stops the start in prepare, before the Keychain and the login; the files that it opens serve createAsk', async (t) => {
+  const b = world(t);
+  const threads = `${b.statePath}.threads`;
+  mkdirSync(dirname(threads), { recursive: true, mode: 0o700 });
+  writeFileSync(threads, 'not json', { mode: 0o600 });
+  assert.throws(() => prepare(b.config, () => {}), { message: `the thread map ${threads} is not a version 1 thread map that the bridge wrote. Nothing was loaded.` });
+  rmSync(`${b.statePath}.lock`); // this test process took the lock in prepare(): the stopped bridge gives it back
+  rmSync(threads);
+  const auditDir = join(b.root, 'audit');
+  mkdirSync(auditDir, { mode: 0o755 });
+  chmodSync(auditDir, 0o755);
+  const unsafe = { ...b.config, auditPath: join(auditDir, 'leads.jsonl') };
+  assert.throws(() => prepare(unsafe, () => {}), { message: `the audit log folder ${auditDir} must be a folder of this user with mode 0700. Nothing was started.` });
+  rmSync(`${b.statePath}.lock`);
+  // A start that passes: createAsk uses the thread map and the audit log that prepare opened.
+  const { config, channels, projects, files } = prepare(b.config, () => {});
+  const ask = createAsk({ config: { ...config, ownerId: OWNER }, channels, projects, files, log: () => {}, env: b.env });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'board' });
+  await ask.command(i);
+  assert.match(i.replies.at(-1).content, /^\*\*Board · project\*\*/);
+});
+
 test('F-T130-9 withHome: the start posts the cards in the registry\'s home channel, not in the config\'s channelId', (t) => {
   const b = world(t);
   mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });

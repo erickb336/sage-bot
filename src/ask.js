@@ -151,16 +151,22 @@ export const STOP_CANCEL = 'leads-stop:cancel';
 const NO_RIGHT = new Set([50001, 50013]);
 
 /**
+ * The files of createAsk, opened and checked: the thread map (thread id → { kind, channel, project, by, at }) and the audit log. Throws for
+ * a thread map or an audit log that is not safe. src/discord.js prepare opens them before the Keychain and the login (F-T232-3).
+ */
+export const openAskFiles = (config, projects) => ({ threads: loadThreads(threadsPathOf(config)), auditLog: openLog(auditPathOf(config), projects) });
+
+/**
  * The read commands and the mention threads for one bridge. `config` is the bridge config (ownerId as src/crew.js ownerOf resolved it,
  * project, sagePath, statePath, projects, and optionally auditPath and killPath). `channels` is the channel registry (src/channels.js
  * openChannels); `projects` are the bridge's (src/projects.js loadProjects). The owner's unregister changes it and saves it. `audit` posts a
  * copy of each audit log line to #sage-audit (none: the log only). `env` goes to the sage state tool (the tests give a scratch HOME).
- * Throws for a config that is not safe, and for a thread map or an audit log that is not safe.
+ * `files` are from openAskFiles (default: opened here). Throws for a config that is not safe, and for a thread map or an audit log that is not safe.
  */
-export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit }) {
+export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit,
+  files = openAskFiles(config, projects) }) {
   const threadsPath = threadsPathOf(config);
-  const threads = loadThreads(threadsPath); // thread id → { kind, channel, project, by, at }
-  const auditLog = openLog(auditPathOf(config), projects);
+  const { threads, auditLog } = files;
   const killPath = killPathOf(config);
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
   const asks = new Map(); // person id → the times of their asks in the last hour; only in memory
