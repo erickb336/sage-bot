@@ -109,7 +109,7 @@ test('the request card in every state: the status, the buttons, the colour, and 
     { name: 'Requested by', value: `Jon (sage-crew) at ${t(T0)} · project reports-app` },
     { name: 'Design questions', value: 'When sage designs it, the crew votes on them (Erick breaks ties).' },
     { name: 'Status', value: 'Waiting for Erick' }]);
-  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. Erick approves or declines, here or at the terminal · the sage-crew member who sent it can withdraw it until then · Anyone in this channel can read this thread; sage does not read it.');
+  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. Erick approves or declines, here or at the terminal · the sage-crew member who sent it can withdraw it until then · Anyone in this channel can read this thread; sage does not read it. If a button does not respond, sage-bot is offline. Press it again later.');
   const buttons = (c) => c.components.flatMap((r) => r.components.map((b) => `${b.label}${b.disabled ? ' (off)' : ''} ${b.custom_id}`));
   assert.deepEqual(buttons(first), ['Approve rq1:approve:RQ3', 'Decline rq1:decline:RQ3', 'Withdraw rq1:withdraw:RQ3']);
   // An edit pings nobody.

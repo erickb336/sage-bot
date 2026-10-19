@@ -16,6 +16,8 @@ const HOLDERS = `${CREW} member`;
 export const OWNER = 'Erick';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
+/** The footer line of a card with buttons (T241, R918 C11): a press while sage-bot is offline gets no answer from Discord. */
+export const OFFLINE = 'If a button does not respond, sage-bot is offline. Press it again later.';
 const COLOR = { open: 0x6b4fd8, tied: 0xc77700, decided: 0x2e8b57, withdrawn: 0x8a8a8a };
 // Not `maskedLink`: it escapes only the first link. `safe` escapes every `[` and `]` itself (F-T27-8).
 const ESCAPE_ALL = Object.fromEntries(['codeBlock', 'inlineCode', 'bold', 'italic', 'underline', 'strikethrough', 'spoiler',
@@ -237,6 +239,7 @@ function single(gate, ask, names, shut) {
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${owner} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
+    ...(!shut && !settled(gate, ask) && { footer: { text: OFFLINE } }),
   });
   const row = new ActionRowBuilder().addComponents(gate.options.map((k, i) => button(customId('press', gate.id, 0, i), `${k}. ${label(p, k)}`,
     k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary, { chosen: o.option === k, disabled: settled(gate, ask) })));
@@ -300,7 +303,7 @@ function batch(gate, ask, holders, names, shut) {
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
   const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for ${OWNER} · ` +
-    `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press` };
+    `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press${done ? '' : ` · ${OFFLINE}`}` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
     title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),

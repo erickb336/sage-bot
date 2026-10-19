@@ -138,9 +138,9 @@ test('F-T27-30: the QA repro (a team of 5, 4 parts, 5 options, long questions, e
     const [e] = c.embeds;
     assert.ok(embedLength(e) <= 6000 && embedLength(e) > 5600, `question ${question}: ${embedLength(e)}`); // 6040 to 6256 on 56e5910
     const reasons = e.fields.slice(4);
-    // The 4 part fields take about 1020 characters each, so only the newest 2 reasons fit (the T232 footer names one role, so a
-    // question of 300 characters keeps both); the oldest went; each shown one keeps its 200 characters.
-    const newest = ['Member number 4!!!!!!!!!!!!!!!!!, part 3', 'Member number 4!!!!!!!!!!!!!!!!!, part 4'];
+    // The 4 part fields take about 1020 characters each, so only the newest reasons fit: 2 for a question of 220 characters, and 1 for
+    // a longer one, since T241 added the offline line to the footer; the oldest went; each shown one keeps its 200 characters.
+    const newest = ['Member number 4!!!!!!!!!!!!!!!!!, part 3', 'Member number 4!!!!!!!!!!!!!!!!!, part 4'].slice(question === 220 ? 0 : 1);
     assert.deepEqual(reasons.map((f) => f.name), newest, `question ${question}`);
     assert.ok(reasons.every((f) => f.value.length === 200));
     // Each part field first went within 1024 on its own: the voter lists end in "and 4 more" and the why is cut at a word; the labels are whole.
