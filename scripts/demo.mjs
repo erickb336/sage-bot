@@ -11,22 +11,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
+import { CREW } from '../src/crew.js';
 import { sagePath, sageTool } from '../src/sage.js';
 import { MINUTE } from '../src/vote.js';
 import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
 
 // ---- Sample data -------------------------------------------------------------------------------------------------------------
-const [APPRENTICE, LEADR, CHANNEL] = ['300000000000000001', '300000000000000002', '400000000000000001'];
+const [CREW_ROLE, CHANNEL] = ['300000000000000001', '400000000000000001'];
 const [ERICK, MAYA, JON, SAM] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004'];
 const MEMBERS = [
-  { id: ERICK, name: 'Erick', roles: [LEADR] },
-  { id: MAYA, name: 'Maya', roles: [APPRENTICE] },
-  { id: JON, name: 'Jon', roles: [LEADR] },
+  { id: ERICK, name: 'Erick', roles: [CREW] },
+  { id: MAYA, name: 'Maya', roles: [CREW] },
+  { id: JON, name: 'Jon', roles: [CREW] },
   { id: SAM, name: 'Sam', roles: [] },
-  { id: '100000000000000005', name: 'sage bridge', roles: [APPRENTICE, LEADR], bot: true },
+  { id: '100000000000000005', name: 'sage bridge', roles: [CREW], bot: true },
 ];
 const NAMES = new Map(MEMBERS.map((m) => [m.id, m.name]));
-const CONFIG = { channelId: CHANNEL, ownerId: ERICK, apprenticeRole: APPRENTICE, leadRole: LEADR };
+const CONFIG = { channelId: CHANNEL, ownerId: ERICK };
 const SESSION = 'aaaaaaaa-0000-4000-8000-000000000051';
 const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
@@ -64,7 +65,7 @@ const steps = [];
 const step = (text) => { steps.push(text); console.log(`${String(steps.length).padStart(2)}. ${text}`); };
 const terminal = (text) => story.push({ kind: 'terminal', at: now, text });
 
-const fake = fakeDiscord(MEMBERS);
+const fake = fakeDiscord(MEMBERS, [{ id: CREW_ROLE, name: CREW }]);
 const postedAt = new Map();
 const editedAt = new Map(); // message id -> the time of each edit, in order: fake.messages has the payloads
 const discord = { ...fake, async post(target, payload) {
@@ -156,8 +157,8 @@ step(`Maya and Jon vote on ${batch} with reasons: part 2 is tied 1-1`);
 await advance(bridge.entry(batch).gate.endsAt - now);
 step(`the vote ends at 30 minutes: part 1 goes to A, part 2 is tied; the tie post goes to the thread`);
 await advance(5 * MINUTE);
-await press(JON, 'Jon, a sage-lead, breaks the tie on part 2: B.', `tiebreak:${batch}:1:1`);
-step('Jon breaks the tie; the bridge gives sage the answers');
+await press(ERICK, 'Erick, the owner, breaks the tie on part 2: B.', `tiebreak:${batch}:1:1`);
+step('Erick breaks the tie; the bridge gives sage the answers');
 
 // The owner answers one part of a second small batch at the terminal: the owner's answer at the terminal is final.
 await advance(MINUTE);
@@ -179,10 +180,10 @@ await press(JON, 'Jon presses part 1, B.', `press:${second}:0:1`);
 await advance(MINUTE);
 await press(MAYA, 'Maya votes A on part 2 and closes the reason form without a reason.', `press:${second}:1:0`);
 await advance(MINUTE);
-await press(JON, 'Jon, a sage-lead, presses End vote now.', `end:${second}`);
-await press(JON, 'Jon confirms in his private note.', `end!:${second}`, { ephemeral: true });
+await press(ERICK, 'Erick, the owner, presses End vote now.', `end:${second}`);
+await press(ERICK, 'Erick confirms in his private note.', `end!:${second}`, { ephemeral: true });
 await loop();
-step(`Jon ends the vote on ${second} early: part 2 goes to A`);
+step(`Erick ends the vote on ${second} early: part 2 goes to A`);
 
 // SessionEnd: the line says "ended", and the thread locks because nothing is open.
 await advance(MINUTE);
@@ -202,7 +203,7 @@ const gates = rowsTsv.map((l) => Object.fromEntries(l.split('\t').map((v, i) => 
 const reasons = [`${g2}+${g3}`, `${g5}+${g6}`].map((id) => [id, node([script('reasons.mjs'), '--config', configPath, id])]);
 
 // ---- The page ------------------------------------------------------------------------------------------------------------------
-const roles = (text) => text.replaceAll(`<@&${APPRENTICE}>`, '@sage-apprentice').replaceAll(`<@&${LEADR}>`, '@sage-lead');
+const roles = (text) => text.replaceAll(`<@&${CREW_ROLE}>`, `@${CREW}`).replaceAll(`<@${ERICK}>`, '@Erick');
 /** A message as Discord shows it: an edit replaces only the fields that it has, so a card keeps the text of its first post. */
 const show = (p) => (p.content ? { ...p, content: roles(p.content) } : p);
 const latest = (id) => show(Object.assign({}, ...fake.messages.get(id)));
@@ -231,8 +232,8 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
   @media (max-width: 600px) { section { padding: 12px 16px; } }
 </style></head><body><div class="banner">Sample data. Fake Discord. No bot, no token.</div>
 <section><h2>The sage-bot demo: one sage session</h2><p class="about">npm run demo played this session with the real sage state tool, the real hook,
-the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: owner and sage-lead;
-Maya: sage-apprentice; Jon: sage-lead; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
+the real team votes command and the real bridge, on the fake Discord layer with a scripted clock. The people (Erick: the owner, in the crew;
+Maya and Jon: sage-crew; Sam: no role), the tasks and the questions are made up. Times are in UTC.</p></section>
 <section id="channel"><p class="chan"># <b>sage</b> · the parent channel. The bridge edits the session's line as the session goes on: first as posted, then each edit.</p>
 ${states(lineId).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span><div>${md(s.p.content, s.at)}</div></div>` : message(s.p, s.at))).join('\n')}
 <p class="about">Thread: <b>${esc(thread.name)}</b><span class="tag">${thread.locked ? 'locked' : 'open'}</span><span class="tag">${thread.archived ? 'archived' : 'active'}</span>

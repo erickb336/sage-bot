@@ -14,24 +14,25 @@ import { peopleOf } from '../src/handle.js';
 import { save } from '../src/state.js';
 import { openGate, step } from '../src/vote.js';
 import { execFileSync } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 const scratch = () => tempFolder('sage-bot-discord-');
-const [OWNER, MAYA, APPRENTICE, LEADR] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
-const CONFIG = { channelId: '400000000000000001', ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
+const [OWNER, MAYA, CREW_ROLE, MODS] = ['100000000000000001', '100000000000000002', '300000000000000001', '300000000000000002'];
+const CONFIG = { channelId: '400000000000000001', ownerId: OWNER };
 
-test('F-T28-20: memberOf maps a real discord.js GuildMember (no login) to { id, name, roles, bot }, which peopleOf reads', () => {
+test('F-T28-20: memberOf maps a real discord.js GuildMember (no login) to { id, name, roles, bot }, with role NAMES, which peopleOf reads', () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
   try {
     const guild = client.guilds._add({ id: '200000000000000001', name: 'sample', members: [], roles: [
       { id: '200000000000000001', name: '@everyone', permissions: '0', position: 0 },
-      { id: APPRENTICE, name: 'sage-apprentice', permissions: '0', position: 1 }, { id: LEADR, name: 'sage-lead', permissions: '0', position: 2 }] });
+      { id: CREW_ROLE, name: CREW, permissions: '0', position: 1 }, { id: MODS, name: 'Moderators', permissions: '0', position: 2 }] });
     const joined = new Date(0).toISOString();
-    const maya = guild.members._add({ user: { id: MAYA, username: 'maya', global_name: 'Maya G', bot: false }, nick: 'Maya', roles: [APPRENTICE], joined_at: joined });
-    const bot = guild.members._add({ user: { id: '100000000000000005', username: 'bridge', bot: true }, roles: [APPRENTICE, LEADR], joined_at: joined });
-    assert.deepEqual(memberOf(maya), { id: MAYA, name: 'Maya', roles: ['200000000000000001', APPRENTICE], bot: false });
-    assert.deepEqual(memberOf(bot), { id: '100000000000000005', name: 'bridge', roles: ['200000000000000001', APPRENTICE, LEADR], bot: true });
-    const people = peopleOf([maya, bot].map(memberOf), { apprenticeRole: APPRENTICE, leadRole: LEADR });
-    assert.deepEqual([[...people.holders], [...people.leads]], [[MAYA], []]);
+    const maya = guild.members._add({ user: { id: MAYA, username: 'maya', global_name: 'Maya G', bot: false }, nick: 'Maya', roles: [CREW_ROLE], joined_at: joined });
+    const bot = guild.members._add({ user: { id: '100000000000000005', username: 'bridge', bot: true }, roles: [CREW_ROLE, MODS], joined_at: joined });
+    assert.deepEqual(memberOf(maya), { id: MAYA, name: 'Maya', roles: ['@everyone', CREW], bot: false });
+    assert.deepEqual(memberOf(bot), { id: '100000000000000005', name: 'bridge', roles: ['@everyone', CREW, 'Moderators'], bot: true });
+    const people = peopleOf([maya, bot].map(memberOf), CONFIG);
+    assert.deepEqual([[...people.holders], people.ownerId], [[MAYA], OWNER]);
   } finally {
     client.destroy();
   }
@@ -80,7 +81,7 @@ test('F-T28-23: a Discord error is logged as its code, status and message only, 
   const gate = openGate({ id: 'project/G1', kind: 'single', options: ['A', 'B'], askedBy: OWNER, at: 1 });
   const ask = { kind: 'single', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
-  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [CREW] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   await bridge.interaction(fakeInteraction({ user: MAYA, customId: 'press:project/G1:0:0', refuse: error }));
   assert.ok(lines.includes('Discord refused a reply: code 10062, status 404: Unknown interaction'), lines.join('\n'));
   assert.equal(lines.join('\n').includes('sample-token'), false);
@@ -94,7 +95,7 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   const ask = { kind: 'batch', task: 'T1', title: '', parts: Array.from({ length: 5 }, () => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
   save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const lines = [];
-  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [] }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [APPRENTICE] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
+  const bridge = createBridge({ sages: new Map([['project', { gates: async () => [] }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [CREW] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
   const i = fakeInteraction({ user: MAYA, customId: 'reason:project/G1+G2+G3+G4+G5:0:0', fields: { reason: 'r' } });
   await bridge.interaction(i);
   assert.deepEqual(i.replies, [{ kind: 'reply', content: 'The bridge could not handle this press. Nothing changed. Please tell the owner.', flags: 64, allowedMentions: { parse: [] } }]);
@@ -102,17 +103,17 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   assert.deepEqual(lines, ['the bridge could not handle a press: card: Discord allows 5 rows of buttons on one message']);
 });
 
-test('F-T28-21: a long display name is made safe, then cut to 32 characters, in the message that names the sage-lead', async () => {
+test('F-T28-21: a long display name is made safe, then cut to 32 characters, in the message that names who broke the tie', async () => {
   const statePath = join(scratch(), 'gates.json');
   const long = `*${'Jonathan'.repeat(40)}`;
-  const people = [{ id: OWNER, name: long, roles: [APPRENTICE, LEADR] }];
-  const tied = step(openGate({ id: 'project/G1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], []).gate;
+  const people = [{ id: OWNER, name: long, roles: [CREW] }];
+  const tied = step(openGate({ id: 'project/G1', kind: 'batch', parts: [['A', 'B']], askedBy: OWNER, at: 1 }), { type: 'tick', at: 1 + 30 * 60_000 }, [OWNER], OWNER).gate;
   const ask = { kind: 'batch', task: 'T1', title: '', parts: [{ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const discord = fakeDiscord(people);
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord, config: CONFIG, statePath, now: () => 2 * 60 * 60_000, log: () => {} });
   await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:project/G1:0:1' }));
-  assert.equal(discord.posts[0].content, `\\*${'Jonathan'.repeat(4).slice(0, 29)}… (sage-lead) broke the tie on part 1 of project/G1: B.`);
+  assert.equal(discord.posts[0].content, `\\*${'Jonathan'.repeat(4).slice(0, 29)}… broke the tie on part 1 of project/G1: B.`);
 });
 
 test('F-T28-24: the texts of a sage gate are cut before safe: a 100,000-character question and label stay short on the card', () => {

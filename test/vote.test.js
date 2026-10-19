@@ -7,10 +7,10 @@ const ERICK = 'sample-erick';
 const MAYA = 'sample-maya';
 const JON = 'sample-jon';
 const SAM = 'sample-sam'; // not on the holder list
-const LEA = 'sample-lea'; // a sage-lead and a holder who does not vote
+const LEA = 'sample-lea'; // the owner (ownerId), a holder who does not vote
 const THREE = [ERICK, MAYA, JON];
 const HOLDERS = [...THREE, LEA];
-const LEADS = [LEA];
+const LEADS = LEA; // the owner's id: only it ends a vote or breaks a tie (T232, C1)
 const T0 = Date.UTC(2026, 9, 4, 12, 0); // sample time
 
 const single = () => openGate({ id: 'g1', kind: 'single', options: ['A', 'B'], askedBy: ERICK, at: T0 });
@@ -129,7 +129,7 @@ const cases = [
     gate: batch, events: [ballot(MAYA, 0, 'X', 0)],
     phase: 'voting', outcome: OPEN, effects: [{ type: 'ignored', by: MAYA, why: 'unknown-option' }],
   },
-  // Batch: leads.
+  // Batch: the owner's end and tie-break.
   {
     rule: 'batch: a sage-lead ends the vote early; parts are decided as at the limit',
     gate: batch, events: [ballot(MAYA, 0, 'A', 0), ballot(JON, 1, 'X', 1), ballot(ERICK, 1, 'Y', 2), end(LEA, 10), ballot(JON, 1, 'Y', 11)],
@@ -140,7 +140,7 @@ const cases = [
   {
     rule: 'batch: a holder who is not a sage-lead cannot end the vote early',
     gate: batch, events: [ballot(MAYA, 0, 'A', 0), end(MAYA, 10)],
-    phase: 'voting', outcome: OPEN, effects: [{ type: 'ignored', by: MAYA, why: 'not-lead' }],
+    phase: 'voting', outcome: OPEN, effects: [{ type: 'ignored', by: MAYA, why: 'not-owner' }],
   },
   {
     rule: 'batch: a sage-lead breaks a tie; when every part is decided the batch closes',
@@ -158,14 +158,14 @@ const cases = [
     rule: 'batch: a sage-lead action from the terminal is refused',
     gate: batch, events: [end(LEA, 1, 'terminal'), tick(30), tiebreak(LEA, 0, 'A', 31, 'terminal')],
     phase: 'tied', outcome: OPEN, parts: [OPEN, OPEN],
-    effects: [{ type: 'ignored', by: LEA, why: 'lead-needs-discord' }, { type: 'vote-ended', by: null },
-      { type: 'ignored', by: LEA, why: 'lead-needs-discord' }],
+    effects: [{ type: 'ignored', by: LEA, why: 'owner-needs-discord' }, { type: 'vote-ended', by: null },
+      { type: 'ignored', by: LEA, why: 'owner-needs-discord' }],
   },
   {
     rule: 'batch: a non-sage-lead cannot break a tie',
     gate: batch, events: [tick(30), tiebreak(MAYA, 0, 'A', 31)],
     phase: 'tied', outcome: OPEN, parts: [OPEN, OPEN],
-    effects: [{ type: 'vote-ended', by: null }, { type: 'ignored', by: MAYA, why: 'not-lead' }],
+    effects: [{ type: 'vote-ended', by: null }, { type: 'ignored', by: MAYA, why: 'not-owner' }],
   },
   {
     rule: 'batch: a tie-break while voting, or on a decided part, is refused',
@@ -235,9 +235,9 @@ const reminders = [
   ['single with no answer: still due after 30 days', single, [], 30 * 24 * 60 + 1, { at: at(30 * 24 * 60 + 120), to: 'holders' }],
   ['no reminder after a single gate is answered', single, [press(MAYA, 'A', 0)], 1, null],
   ['no reminder while a batch is voting', batch, [], 10, null],
-  ['tied batch: first reminder to the sage-leads 2 h after the limit', batch, [tick(30)], 30, { at: at(150), to: 'leads' }],
-  ['tied batch: the next reminder after the first is due', batch, [tick(30)], 150, { at: at(270), to: 'leads' }],
-  ['tied batch ended early by a sage-lead: 2 h after the end', batch, [end(LEA, 10)], 10, { at: at(130), to: 'leads' }],
+  ['tied batch: first reminder to the owner 2 h after the limit', batch, [tick(30)], 30, { at: at(150), to: 'owner' }],
+  ['tied batch: the next reminder after the first is due', batch, [tick(30)], 150, { at: at(270), to: 'owner' }],
+  ['tied batch ended early by the owner: 2 h after the end', batch, [end(LEA, 10)], 10, { at: at(130), to: 'owner' }],
   ['no reminder after a batch is decided', batch, [ballot(MAYA, 0, 'A', 0), ballot(MAYA, 1, 'X', 0), tick(30)], 31, null],
 ];
 for (const [name, gate, events, nowMin, due] of reminders) {

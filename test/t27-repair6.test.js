@@ -7,16 +7,18 @@ import { card, safe } from '../src/cards.js';
 import { handle, peopleOf } from '../src/handle.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { ballotsOf, openGate, step } from '../src/vote.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const T0 = Date.UTC(2026, 9, 4, 14, 31);
-const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
 /** One batch of one part with these members and a reason from each; returns the card's embed. */
 function build(names, reasons) {
-  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, ROLES);
+  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: [{ question: 'Q?', why: 'because', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   let gate = openGate({ id: 'B', kind: 'batch', parts: [['A', 'B']], askedBy: members[0].id, at: T0 });
-  members.forEach((m, k) => { gate = step(gate, { type: 'press', by: m.id, part: 0, option: 'A', at: T0 + (k + 1) * 1000, via: 'discord', ...(reasons[k] !== undefined && { reason: reasons[k] }) }, people.holders, people.leads).gate; });
+  members.forEach((m, k) => { gate = step(gate, { type: 'press', by: m.id, part: 0, option: 'A', at: T0 + (k + 1) * 1000, via: 'discord', ...(reasons[k] !== undefined && { reason: reasons[k] }) }, people.holders, people.ownerId).gate; });
   return card(gate, ask, people).embeds[0];
 }
 
@@ -126,7 +128,7 @@ test('F-T27-47, F-T27-38: the README states the `<` and `>` escape, the kept sym
 });
 
 test('F-T27-38: on a batch of 5 parts (over Discord\'s 5 rows), a press stores the ballot and shows the form; only the reason submit rejects', async () => {
-  const people = peopleOf([{ id: 'h0', name: 'Maya', roles: ['drv', 'ld'] }, { id: 'h1', name: 'Jon', roles: ['drv'] }], ROLES);
+  const people = peopleOf([{ id: 'h0', name: 'Maya', roles: ['sage-crew', 'ld'] }, { id: 'h1', name: 'Jon', roles: ['sage-crew'] }], { ownerId: 'h0' });
   const parts = Array.from({ length: 5 }, () => ['A', 'B']);
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: parts.map(() => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
   const gates = new Map([['B5', { gate: openGate({ id: 'B5', kind: 'batch', parts, askedBy: 'h0', at: T0 }), ask }]]);

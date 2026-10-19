@@ -8,7 +8,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectOf, record } from '../src/sessions.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, JON, LEADR, MAYA, setAt, setup, spawnSync } from './bridge-setup.js';
+import { CHANNEL, CREW_ROLE, JON, MAYA, OWNER, setAt, setup, spawnSync } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 const S1 = 'aaaaaaaa-0000-4000-8000-000000000001';
 const spoolDir = (b) => `${b.statePath}.sessions`;
@@ -48,24 +49,24 @@ test('G17: a deleted session thread: its open single and open batch are posted a
   const [line, ...rest] = shown(b, CHANNEL);
   assert.match(line, /^\*\*Session 1 · project · Sun 4 Oct\*\*/);
   assert.deepEqual(rest.slice(0, 2), ['Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ']);
-  assert.match(rest[2], new RegExp(`^<@&${LEADR}> project/G2\\+G3 is tied after its vote`));
+  assert.match(rest[2], new RegExp(`^<@${OWNER}> project/G2\\+G3 is tied after its vote`));
   const moved = cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ');
   assert.match(moved.embeds[0].fields[0].value, /\*\*A\.\*\* x · Recommended · 1 vote \(\*\*Maya\*\*\)/); // the vote cast in the thread
   assert.match(moved.embeds[0].fields[1].value, /\*\*Tied: A, B\.\*\*/);
   assert.equal(b.discord.messages.get(b.discord.in(CHANNEL)[1])[0].content,
-    `<@&${APPRENTICE}> <@&${LEADR}> project T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
+    `<@&${CREW_ROLE}> project T1 needs one product answer. The first answer is final. Its session thread was deleted, so the card is here now, with the votes so far.`);
   assert.deepEqual(b.lines.filter((l) => /\(G17\)$/.test(l)), [
     'project/G1: its card moves to the parent channel, because the thread of Session 1 · project · Sun 4 Oct is gone (G17)',
     'project/G2+G3: its card moves to the parent channel, because the thread of Session 1 · project · Sun 4 Oct is gone (G17)']);
 
   // A sage-lead breaks the tie on the moved card: the press counts, the card in the parent channel changes, and the sage-lead's post goes there.
-  await b.press(JON, 'tiebreak:project/G2+G3:1:1');
-  assert.match(cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ').embeds[0].fields[1].value, /tie broken by Jon/);
-  assert.equal(shown(b, CHANNEL).at(-1), 'Jon (sage-lead) broke the tie on part 2 of project/G2+G3: B.');
+  await b.press(OWNER, 'tiebreak:project/G2+G3:1:1');
+  assert.match(cardIn(b, CHANNEL, 'Batch vote project/G2+G3 · T2 ').embeds[0].fields[1].value, /tie broken by Erick/);
+  assert.equal(shown(b, CHANNEL).at(-1), 'Erick broke the tie on part 2 of project/G2+G3: B.');
   // The reminder of the open single goes to the parent channel; then a press on it counts there.
   b.now += 2 * HOUR;
   await b.bridge.loop();
-  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${APPRENTICE}> <@&${LEADR}> reminder: project/G1 waits for an answer`));
+  assert.match(shown(b, CHANNEL).at(-1), new RegExp(`^<@&${CREW_ROLE}> reminder: project/G1 waits for an answer`));
   await b.press(MAYA, 'press:project/G1:0:1');
   assert.match(cardIn(b, CHANNEL, 'Question project/G1 · T1 ').embeds[0].description, /Answered by Maya/);
   await b.bridge.loop();
@@ -176,15 +177,15 @@ for (const hangAt of [1, 2]) {
     b.now += 2 * HOUR;
     await b.bridge.loop();
     const after = shown(b, CHANNEL);
-    assert.equal(after.filter((t) => t.startsWith(`<@&${APPRENTICE}> <@&${LEADR}> reminder: project/G1 waits`)).length, 1);
-    assert.equal(after.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of project/G2+G3 still tied`)).length, 1);
+    assert.equal(after.filter((t) => t.startsWith(`<@&${CREW_ROLE}> reminder: project/G1 waits`)).length, 1);
+    assert.equal(after.filter((t) => t.startsWith(`<@${OWNER}> reminder: part 2 of project/G2+G3 still tied`)).length, 1);
     assert.deepEqual(cards(b), ['Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ']);
   });
 }
 
 
 // T65: a moved card that is settled before its new post stays quiet; a moved card's reminders and tie post come after its new post.
-const pings = (b) => shown(b, CHANNEL).filter((t) => t?.startsWith(`<@&${APPRENTICE}>`) || t?.startsWith(`<@&${LEADR}>`));
+const pings = (b) => shown(b, CHANNEL).filter((t) => t?.startsWith(`<@&${CREW_ROLE}>`) || t?.startsWith(`<@${OWNER}>`));
 
 test('F-T65-1: moved cards that are settled before their new post (one at the terminal, one by its vote) are not posted and ping nobody, also after a restart', async () => {
   const b = await movedSetup();
@@ -220,15 +221,15 @@ test('T65: Discord refuses the new posts of moved cards for 3 hours: the tie pos
   b.now += 3 * HOUR; // past the 2-hour reminder of both gates
   await b.bridge.loop();
   assert.deepEqual(shown(b, CHANNEL).slice(1).map((t) => t.split('.')[0]), [
-    'Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ', `<@&${LEADR}> project/G2+G3 is tied after its vote`]);
+    'Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ', `<@${OWNER}> project/G2+G3 is tied after its vote`]);
   b.now += MINUTE;
   await b.bridge.loop();
   assert.equal(pings(b).length, 1); // no reminder right after the new post: only the tie post
   b.now += HOUR; // past the next 2-hour mark of each gate
   await b.bridge.loop();
   const all = shown(b, CHANNEL);
-  assert.equal(all.filter((t) => t.startsWith(`<@&${APPRENTICE}> <@&${LEADR}> reminder: project/G1 waits`)).length, 1);
-  assert.equal(all.filter((t) => t.startsWith(`<@&${LEADR}> reminder: part 2 of project/G2+G3 still tied`)).length, 1);
+  assert.equal(all.filter((t) => t.startsWith(`<@&${CREW_ROLE}> reminder: project/G1 waits`)).length, 1);
+  assert.equal(all.filter((t) => t.startsWith(`<@${OWNER}> reminder: part 2 of project/G2+G3 still tied`)).length, 1);
 });
 
 test('F-T66-1: a moved card posted just before a 2-hour mark gets no reminder a minute later; the next mark reminds', async () => {
@@ -266,7 +267,7 @@ test('T65: the bridge stops before the new post of a moved card whose vote ended
   await b.bridge.loop();
   await b.bridge.loop();
   assert.deepEqual(shown(b, CHANNEL).slice(1).map((t) => t.split('.')[0]), [
-    'Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ', `<@&${LEADR}> project/G2+G3 is tied after its vote`]);
+    'Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ', `<@${OWNER}> project/G2+G3 is tied after its vote`]);
 });
 
 // F-T65-4: messages held for a moved card keep their order, and a settled card drops them: no stale tie alert after the answer.
@@ -279,7 +280,7 @@ function refuseTieAlert(b) {
   return refuse;
 }
 const heldOf = (b, id) => JSON.parse(readFileSync(b.statePath, 'utf8')).entries.find((e) => e.gate.id === id).held;
-const tieAlerts = (b) => shown(b, CHANNEL).filter((t) => t.startsWith(`<@&${LEADR}> project/G2+G3 is tied after its vote`));
+const tieAlerts = (b) => shown(b, CHANNEL).filter((t) => t.startsWith(`<@${OWNER}> project/G2+G3 is tied after its vote`));
 
 test('F-T65-4: the moved card posts, Discord refuses its tie alert, then a sage-lead breaks the tie: the tie-break note posts, the stale alert never does, the held list goes', async () => {
   const b = await movedSetup();
@@ -289,11 +290,11 @@ test('F-T65-4: the moved card posts, Discord refuses its tie alert, then a sage-
   assert.deepEqual(cards(b), ['Question project/G1 · T1 ', 'Batch vote project/G2+G3 · T2 ']);
   assert.equal(heldOf(b, 'project/G2+G3').length, 1);
   refuse.on = false;
-  await b.press(JON, 'tiebreak:project/G2+G3:1:0');
+  await b.press(OWNER, 'tiebreak:project/G2+G3:1:0');
   await b.bridge.loop();
   await b.bridge.loop();
   assert.deepEqual(tieAlerts(b), []);
-  assert.deepEqual(shown(b, CHANNEL).filter((t) => /broke the tie/.test(t)), ['Jon (sage-lead) broke the tie on part 2 of project/G2+G3: A.']);
+  assert.deepEqual(shown(b, CHANNEL).filter((t) => /broke the tie/.test(t)), ['Erick broke the tie on part 2 of project/G2+G3: A.']);
   assert.equal(heldOf(b, 'project/G2+G3'), undefined);
   assert.deepEqual(b.lines.filter((l) => /drops/.test(l)), ['project/G2+G3: it is settled, so the bridge drops the 1 message(s) that waited for its card']);
 });
@@ -324,7 +325,7 @@ test('F-T65-4: a reminder about a card whose tie alert is held goes after the al
   b.now += MINUTE; // past the back-off after the second refusal (F-T68-1)
   await b.bridge.loop();
   assert.deepEqual(pings(b).filter((t) => t.includes('G2+G3')).map((t) => t.split(' of ')[0].split(' is ')[0]), [
-    `<@&${LEADR}> project/G2+G3`, `<@&${LEADR}> reminder: part 2`]);
+    `<@${OWNER}> project/G2+G3`, `<@${OWNER}> reminder: part 2`]);
   assert.deepEqual(heldOf(b, 'project/G2+G3'), []);
 });
 
@@ -336,11 +337,14 @@ test('F-T65-3: a gate file with a held list that the bridge did not write is ref
   const file = JSON.parse(readFileSync(b.statePath, 'utf8'));
   const withHeld = (held) => writeFileSync(b.statePath, JSON.stringify({ ...file, entries: [{ ...file.entries[0], held }] }), { mode: 0o600 });
   for (const held of ['abc', [{ content: 'hi', allowedMentions: { parse: [] } }, 7], [{ content: '@everyone hi' }],
-    [{ content: '@everyone hi', allowedMentions: { parse: ['everyone'] } }], [{ content: 'hi', allowedMentions: { parse: [], roles: [LEADR] }, tts: true }],
+    [{ content: '@everyone hi', allowedMentions: { parse: ['everyone'] } }], [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW_ROLE] }, tts: true }],
+    [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW] } }], [{ content: 'hi', allowedMentions: { parse: [], users: [OWNER, JON] } }],
+    [{ content: 'hi', allowedMentions: { parse: [], roles: [CREW_ROLE, CREW_ROLE] } }],
     [{ content: 'x'.repeat(2001), allowedMentions: { parse: [] } }]]) {
     withHeld(held);
     assert.throws(() => b.make(), { message: `the gate file ${b.statePath} has held messages for project/G1 that the bridge did not write. Nothing was loaded.` }, JSON.stringify(held).slice(0, 80));
   }
-  withHeld([{ content: 'hi', allowedMentions: { parse: [] } }, { content: `<@&${LEADR}> hi`, allowedMentions: { parse: [], roles: [LEADR] } }]);
+  withHeld([{ content: 'hi', allowedMentions: { parse: [] } }, { content: `<@&${CREW_ROLE}> hi`, allowedMentions: { parse: [], roles: [CREW_ROLE, '300000000000000007'] } },
+    { content: `<@${OWNER}> hi`, allowedMentions: { parse: [], users: [OWNER] } }]);
   assert.equal(typeof b.make().loop, 'function');
 });

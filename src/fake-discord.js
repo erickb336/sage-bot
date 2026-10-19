@@ -7,7 +7,7 @@ import { MessageFlags, MessageFlagsBitField } from 'discord.js';
  * with kind 'reply' (a message, private when its flags say so), 'update' (the message with the buttons) or 'modal'.
  * @param {{ user: string, customId: string, fields?: Record<string, string>, ephemeral?: boolean, refuse?: Error, message?: string }} o
  *   `fields` are the modal's inputs by custom_id; a button press has none. `ephemeral` says that the pressed message
- *   was private (the sage-lead's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
+ *   was private (the owner's confirm), as discord.js shows it in `interaction.message.flags`. With `refuse`, every
  *   reply rejects with that error and records nothing, as Discord does for an unknown interaction (F-T27-20). `message` is the id of
  *   the message with the button, as discord.js shows it in `interaction.message.id`.
  */
@@ -31,7 +31,7 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
 }
 
 /**
- * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, setLocked, members }`
+ * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, setLocked, members, roles }`
  * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
  * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
@@ -39,10 +39,12 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
  * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
  * message with code 10008 (Unknown Message). With `{ keepOnLine: true }`, `deleteThread` does what Discord can do: the message keeps
  * the deleted thread, so a new thread from it is refused with code 160004, and a fetch of the thread with code 10003. `members` is the list that `members()` gives, as
- * src/discord.js maps it ({ id, name, roles, bot }). SAMPLE DATA ONLY.
+ * src/discord.js maps it ({ id, name, roles, bot }, with role NAMES), and `roles` the guild's roles that `roles()` gives ({ id, name }).
+ * SAMPLE DATA ONLY.
  * @param {{ id: string, name: string, roles: string[], bot?: boolean }[]} members
+ * @param {{ id: string, name: string }[]} [roles]
  */
-export function fakeDiscord(members) {
+export function fakeDiscord(members, roles = []) {
   const messages = new Map();
   const posts = [];
   const where = new Map();
@@ -58,6 +60,7 @@ export function fakeDiscord(members) {
   };
   return {
     members: () => members,
+    roles: () => roles,
     messages,
     posts,
     where,

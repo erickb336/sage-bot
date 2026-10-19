@@ -215,7 +215,7 @@ test('F-T68-1: a press and the loop at once post a held message once', async () 
   };
   const loop = b.bridge.loop();
   await first; // the loop posts the held note, and Discord has not answered yet
-  const press = b.press(JON, 'tiebreak:project/G1+G2:0:0'); // its note about the tie-break posts the held messages first
+  const press = b.press(OWNER, 'tiebreak:project/G1+G2:0:0'); // its note about the tie-break posts the held messages first
   await Promise.race([press, new Promise((r) => { setTimeout(r, 2000); })]);
   release();
   await Promise.all([loop, press]);

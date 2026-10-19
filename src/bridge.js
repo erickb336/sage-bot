@@ -4,7 +4,8 @@
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { MessageFlags } from 'discord.js';
-import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp, LEAD } from './cards.js';
+import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp } from './cards.js';
+import { crewRoleIds } from './crew.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { optionsOf, OTHER } from './sage.js';
@@ -14,15 +15,6 @@ import { HOUR, MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vot
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
 export const SNOWFLAKE = /^\d{17,20}$/;
-/**
- * Stops a config of the time before T70 (two roles): it has the old role field and no apprenticeRole.
- * The bridge and scripts/launchd.mjs both call it, so the owner reads the same message from each.
- */
-export function refuseOldRoles(config) {
-  if (config?.driverRole !== undefined && config.apprenticeRole === undefined) {
-    throw new Error('the config has driverRole: sage-driver is gone. Rename driverRole to apprenticeRole and give that role id to the sage-apprentice role.');
-  }
-}
 /** The bridge looks at the clock, the logbook and the timers this often. */
 export const LOOP = 15_000;
 /** A gap between two loops longer than this means that the Mac slept. */
@@ -37,16 +29,19 @@ export const ASKED_TOGETHER = 30_000;
  */
 export const MERGE = /merg/i;
 /**
- * T73, G18 item 8: the only question that may be sage-leads only, word for word, with the options Yes|No. A sage-lead's answer to any other gate
- * would close a decision of the owner, so scripts/vote.mjs refuses to mark another gate, and the bridge refuses to post one (F-T73-1).
+ * T73, G18 item 8: the only question that may be a crew recommendation, word for word, with the options Yes|No (the file and the code
+ * keep the name "leads" from before T232). A crew answer to any other gate would close a decision of the owner, so scripts/vote.mjs
+ * refuses to mark another gate, and the bridge refuses to post one (F-T73-1).
  */
 export const LEADS_QUESTION = 'Switch the automatic-merge mode on for this session?';
-/** What the bridge adds to a sage-leads-only answer in sage: the answer is the sage-leads' advice, never the owner's decision (F-T73-1). */
-export const RECOMMENDED = ' (sage-leads recommend; the owner decides)';
-/** Why a sage gate row cannot be sage-leads only, or null when it can. scripts/vote.mjs and the bridge both ask this. */
+/** What the bridge adds to a crew recommendation in sage: the answer is the crew's advice, never the owner's decision (F-T73-1). */
+export const RECOMMENDED = ' (the crew recommends; the owner decides)';
+/** The same mark before T232, in the logbooks of that time: an answer with it is the bridge's too (one release, then it goes). */
+const RECOMMENDED_BEFORE_T232 = ' (sage-leads recommend; the owner decides)';
+/** Why a sage gate row cannot be a crew recommendation, or null when it can. scripts/vote.mjs and the bridge both ask this. */
 export function notLeadsOnly(row) {
-  if (row.question !== LEADS_QUESTION) return `${row.id} cannot be sage-leads only: a sage-leads-only question must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
-  return row.options === 'Yes|No' ? null : `${row.id} cannot be sage-leads only: a sage-leads-only question needs the options Yes|No, exactly`; // F-T94-6
+  if (row.question !== LEADS_QUESTION) return `${row.id} cannot be a crew recommendation: it must be the automatic-merge question, word for word: "${LEADS_QUESTION}"`;
+  return row.options === 'Yes|No' ? null : `${row.id} cannot be a crew recommendation: it needs the options Yes|No, exactly`; // F-T94-6
 }
 const NOT_MARKED = 'sage did not mark it as a team vote';
 /** Why a gate stays at the terminal while the marks files are refused: the bridge cannot tell whether sage marked it (F-T46-1). */
@@ -79,7 +74,7 @@ export function monotonic(now, floor = 0) {
  * The ask and the gate of a group of sage gate rows of one task of `project`: one row is a single question, 2 to 4 rows a batch. The
  * gate id is the key of the group (T132): the project name, a slash and the sage gate ids, for example `sage-bot/G1+G2`.
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
- * With `leads` (T73) the one row is a sage-leads-only question: it must be LEADS_QUESTION with the options Yes and No, so that a sage-lead
+ * With `leads` (T73) the one row is a crew recommendation: it must be LEADS_QUESTION with the options Yes and No, so that the crew
  * never answers another question and every text that the bridge writes about the answer comes from that allow-list.
  */
 export function frame(project, rows, title, ownerId, at, leads = false) {
@@ -112,12 +107,12 @@ const ANSWER_WHYS = new Set(["the user's answer", "the user's own words"]);
 const optionOf = (said, texts) => KEYS[texts.indexOf(said)];
 /**
  * An answer in sage that only the bridge writes, never the owner: the form before T176, "A. text" (with RECOMMENDED after it for a
- * sage-leads-only gate), and a sage-leads-only recommendation of today, "other: A. Yes" with RECOMMENDED after it. The owner picks an option by
+ * crew recommendation), and a crew recommendation of today, "other: A. Yes" with RECOMMENDED (or its form before T232) after it. The owner picks an option by
  * its number or types own words, kept as "other: <words>" (sage never lets an option read as "other:"), so neither is the owner's.
  * Checked only after optionOf found no option: an option may itself read "A. Yes" (F-T176-1).
  */
-const bridgeWrote = (said, texts) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${RECOMMENDED}`)
-  || (said.startsWith(OTHER) && said.endsWith(RECOMMENDED));
+const bridgeWrote = (said, texts) => [RECOMMENDED, RECOMMENDED_BEFORE_T232].some((mark) => texts.some((t, j) => said === `${KEYS[j]}. ${t}` || said === `${KEYS[j]}. ${t}${mark}`)
+  || (said.startsWith(OTHER) && said.endsWith(mark)));
 
 /**
  * The gate rows of one task in groups of the questions that the task asked together: sorted by `at`, a group starts at its first row
@@ -144,13 +139,14 @@ export function askedTogether(rows) {
  *     startThread(lineId: string, name: string): Promise<string>, threadFrom(lineId: string): Promise<string>,
  *     setLocked(thread: string, locked: boolean): Promise<unknown>,
  *     members(): Promise<Iterable<object>> | Iterable<object> },
- *   config: { channelId: string, ownerId: string, apprenticeRole: string, leadRole: string, votesPath?: string, sessionsPath?: string },
+ *     roles(): Iterable<{ id: string, name: string }> },
+ *   config: { channelId: string, ownerId: string, votesPath?: string, sessionsPath?: string },
  *   statePath: string, now?: () => number, log?: (line: string) => void }} o
  *   A `target` is the parent channel or a thread, by its Discord id.
  */
 export function createBridge({ sages, own, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
-  refuseOldRoles(config);
-  for (const key of ['channelId', 'ownerId', 'apprenticeRole', 'leadRole']) {
+  // ownerId is the owner that src/crew.js ownerOf resolved at the start (T232), never a role.
+  for (const key of ['channelId', 'ownerId']) {
     if (!SNOWFLAKE.test(config[key] ?? '')) throw new TypeError(`the config needs ${key} as a Discord id (17 to 20 digits)`);
   }
   if (!sages.has(own)) throw new TypeError(`the bridge's own project ${own} has no sage tool`);
@@ -244,18 +240,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const sageOf = (id) => sages.get(projectOfKey(id));
   /** The entries of `project`, as [id, meta]. */
   const entriesOf = (project) => [...meta].filter(([id]) => projectOfKey(id) === project);
-  const people = async () => { // Sets of ids (F-T28-7)
-    const members = [...await discord.members()];
-    const both = members.filter((m) => !m.bot && m.roles.includes(config.apprenticeRole) && m.roles.includes(config.leadRole));
-    if (both.length) sayOnce(`these members have both sage-apprentice and sage-lead, so each counts as a sage-lead: ${both.map((m) => `${m.name} (${m.id})`).join(', ')}. Give each person one of the two roles.`);
-    return peopleOf(members, config);
-  };
+  const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
   /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
-  /** A message that pings these roles and nobody else; the text is the bridge's own, with untrusted parts made safe. */
-  const alert = (roles, text) => ({ content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } });
-  /** The roles of the holders: a new card and a single gate's reminder ping both (T70), or only sage-lead for a sage-leads-only question (T73). */
-  const holderRoles = (ask) => (ask.leads ? [config.leadRole] : [config.apprenticeRole, config.leadRole]);
+  /** A message that pings the crew roles (every role named sage-crew, read now) and nobody else; the text is the bridge's own, with untrusted parts made safe. */
+  const crewAlert = (text) => {
+    const roles = crewRoleIds(discord.roles());
+    return { content: `${roles.map((r) => `<@&${r}> `).join('')}${text}`, allowedMentions: { parse: [], roles } };
+  };
+  /** A message that pings the owner and nobody else: a tie waits for the owner (C1). */
+  const ownerAlert = (text) => ({ content: `<@${config.ownerId}> ${text}`, allowedMentions: { parse: [], users: [config.ownerId] } });
   /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
   const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
   /** Posts a message; null when Discord refused it. `log` gets the line of a refusal (a lost thread has its own lines). */
@@ -421,11 +415,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
     const task = `${projectOfKey(id)} ${ask.task}`; // the project name, so that a ping says which project asks (T132)
-    const text = (ask.leads ? `${task} asks the ${LEAD}s for a recommendation to ${OWNER}. The first ${LEAD} answer is the recommendation; ${OWNER} decides at the terminal.`
+    const text = (ask.leads ? `${task} asks the crew for a recommendation to ${OWNER}. The first answer is the recommendation; ${OWNER} decides at the terminal.`
       : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
       : `${task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
-    const payload = { ...card(gate, ask, ppl), ...alert(holderRoles(ask), text) };
+    const payload = { ...card(gate, ask, ppl), ...crewAlert(text) };
     let message = await post(at, payload);
     if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
     if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
@@ -481,10 +475,10 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /** Whether the loop may try the redraw of `id` now. A press redraws at once: it changed the card. */
   const redrawDue = (id) => clock() >= (redrawWaits.get(id)?.at ?? 0);
 
-  /** The parts of a batch that wait for a sage-lead: tied after the vote, with no final answer from the terminal. */
+  /** The parts of a batch that wait for the owner: tied after the vote, with no final answer from the terminal. */
   const tiedParts = (gate, ask) => gate.parts.flatMap((part, i) => (part.outcome.status === 'open' && !ask.parts[i].final ? [i] : []));
 
-  /** The tied parts of a batch whose vote ended, with each voter's argument, for the sage-leads (F-T28-13). */
+  /** The tied parts of a batch whose vote ended, with each voter's argument, for the owner (F-T28-13). */
   function tieMessage(gate, ask, { holders, names }) {
     const lines = tiedParts(gate, ask).flatMap((i) => {
       const part = gate.parts[i];
@@ -493,13 +487,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       return [`Part ${i + 1} is tied: ${part.tied.join(', ')}.${args.length ? ' The arguments:' : ' Nobody gave a reason.'}`, ...args];
     });
     const head = `${gate.id} is tied after its vote. ${ask.task} waits: please break the tie with the buttons on the card.`;
-    return alert([config.leadRole], cut([head, ...lines].join('\n'), 1900));
+    return ownerAlert(cut([head, ...lines].join('\n'), 1900));
   }
 
   /**
    * The answers that the bridge gives sage for a settled gate: one per sage gate, as gates.tsv holds it (T176): the option's own text,
-   * never for a part with a final answer. A sage-leads-only answer is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
-   * not an option, so the logbook shows the sage-leads' advice, and readOwner tells it from the owner's own "Yes".
+   * never for a part with a final answer. A crew recommendation is "other: A. Yes" with RECOMMENDED after it, as sage keeps words that are
+   * not an option, so the logbook shows the crew's advice, and readOwner tells it from the owner's own "Yes".
    */
   function answersOf(id) {
     const { gate, ask } = gates.get(id);
@@ -530,7 +524,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (!said || said === m.sent[sageId] || ask.parts[i].final || gate.outcome.status === 'withdrawn' || checking) continue;
         if (said === own.get(sageId)) { m.sent[sageId] = said; persist(); continue; }
         const option = optionOf(said, m.texts[i]);
-        if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a sage-leads' recommendation), never the owner's
+        if (!option && bridgeWrote(said, m.texts[i])) continue; // a write of the bridge (before T176, or a crew recommendation), never the owner's
         const text = option ? shown(`${option}. ${m.texts[i][KEYS.indexOf(option)]}`, 500, option) : shown(said, 500, '(no visible text)');
         const final = { by: config.ownerId, at: clock(), ...(option && { option }), text };
         gates.set(id, { gate, ask: { ...ask, parts: ask.parts.with(i, { ...ask.parts[i], final }) } });
@@ -671,34 +665,34 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     await redraw(id, ppl);
     const { gate, ask } = gates.get(id);
     if (effects.some((e) => e.type === 'vote-ended') && gate.phase === 'tied' && waits(id)) {
-      // The tie post is the sage-leads' ping for this event: the 2-hour reminders count from it, so one loop never pings twice (F-T28-32).
+      // The tie post is the owner's ping for this event: the 2-hour reminders count from it, so one loop never pings twice (F-T28-32).
       meta.get(id).remindedAt = clock();
       persist();
       await postAbout(id, tieMessage(gate, ask, ppl));
     }
     for (const e of effects.filter((x) => x.type === 'decided' && x.how === 'lead-tiebreak')) {
-      // The card cannot name the sage-lead; the message in the thread does (F-T28-16).
-      await postAbout(id, { content: `${nameOf(by, ppl.names)} (${LEAD}) broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
+      // The card cannot name who broke the tie; the message in the thread does (F-T28-16).
+      await postAbout(id, { content: `${nameOf(by, ppl.names)} broke the tie on part ${e.part + 1} of ${gate.id}: ${e.option}.`, allowedMentions: NO_MENTIONS });
     }
     await flush();
     const answered = effects.find((e) => e.type === 'closed' && e.outcome.status === 'answered');
     // The flush reads the owner's answers again just before it writes: an answer typed at the terminal in that window is final, and
     // sage never got the recommendation, so nothing says that it did (F-T94-3).
     if (ask.leads && answered && !gates.get(id).ask.parts[0].final) {
-      // T73: the sage-leads only recommend. sage gets the answer marked as their recommendation, and the owner decides at the terminal (G10). The bridge never
+      // T73: the crew only recommends. sage gets the answer marked as its recommendation, and the owner decides at the terminal (G10). The bridge never
       // switches a mode of sage, and its texts name the switch only in words.
       // The next step follows the advice: only a Yes asks the owner to switch the mode on (F-T73-3).
       const { sage: [sageId], texts: [texts] } = meta.get(id);
       const advice = texts[KEYS.indexOf(answered.outcome.option)];
       await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${OWNER} decides at the terminal.`, allowedMentions: NO_MENTIONS });
-      say(`${keyOf(projectOfKey(id), sageId)}: sage-leads recommend ${advice}. ${advice === 'Yes' ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
+      say(`${keyOf(projectOfKey(id), sageId)}: the crew recommends ${advice}. ${advice === 'Yes' ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
     }
   }
 
   /** Applies one event of the bridge's own (a tick) to the gate of `id`. */
   async function apply(id, event, ppl) {
     const { gate, ask } = gates.get(id);
-    const out = step(gate, event, ppl.holders, ppl.leads);
+    const out = step(gate, event, ppl.holders, ppl.ownerId);
     for (const e of out.effects.filter((x) => x.type === 'ignored')) say(`${id}: the vote rules ignored a ${event.type} (${e.why})`);
     if (out.gate === gate) return;
     gates.set(id, { gate: out.gate, ask });
@@ -706,7 +700,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   }
 
   /**
-   * The gate keys in the team votes file and in the sage-leads-only file (T73). A refused file counts as both empty, so nothing is posted;
+   * The gate keys in the team votes file and in the crew recommendations file (T73). A refused file counts as both empty, so nothing is posted;
    * the log says why once. A mark that moves a gate saves the two files one after the other, so a read across the move can find the
    * gate in both: then it reads both files again, and only a gate still in both is an error (F-T73-12).
    */
@@ -758,8 +752,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const t = clock();
     // The time a gate was first seen counts also before sage marks it: a gate marked later posts at the next loop.
     for (const r of untracked) if (!r.answer && !firstSeen.has(key(r.id))) firstSeen.set(key(r.id), t);
-    // Only the gates that sage marked as team votes or sage-leads only go to Discord (G13, T73); every rule below sees only these.
-    // A sage-leads-only question may be about a merge: the sage-leads only recommend, and the owner decides at the terminal (G18).
+    // Only the gates that sage marked as team votes or crew recommendations go to Discord (G13, T73); every rule below sees only these.
+    // A crew recommendation may be about a merge: the crew only recommends, and the owner decides at the terminal (G18).
     // A gate still in both files after the second read is an error: neither rule holds for it, so it gets no card (F-T73-2, F-T73-12).
     // A mark counts only with the folder of this project: a mark of the same name for another folder is another gate (G45 A).
     const voted = (r) => marks.votes.has(key(r.id)) && serves(key(r.id), marks.votes.get(key(r.id)));
@@ -777,7 +771,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const fresh = untracked.filter((r) => {
       const why = cardOf(r) ? `its card is ${unlisted(cardOf(r))}`
         : marks.refused ? UNREAD
-        : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the sage-leads-only file. Mark it again with scripts/vote.mjs'
+        : voted(r) && leadsOnly(r) ? 'it is in both the team votes file and the crew recommendations file. Mark it again with scripts/vote.mjs'
         : leadsOnly(r) ? null : !voted(r) && markOf(r) ? `it has no mark of ${project}; the mark is ${unlisted(markOf(r))}`
         : !voted(r) && elsewhere(r) !== undefined ? `its mark is of the folder ${elsewhere(r) ?? '(none)'}, not of ${project}'s folder now. Mark it again with scripts/vote.mjs`
         : !voted(r) ? NOT_MARKED
@@ -790,7 +784,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const tasks = new Map();
     const alone = (r) => leadsOnly(r) || !r.task;
     for (const r of fresh.filter((x) => !alone(x))) tasks.set(r.task, [...(tasks.get(r.task) ?? []), r]);
-    // A sage-leads-only question is always one question on its own card, never part of a batch (T73). So is a gate of no task: gates
+    // A crew recommendation is always one question on its own card, never part of a batch (T73). So is a gate of no task: gates
     // of no task are not of one task, so nothing says that sage asked them together (F-T49-1).
     const groups = [...[...tasks.values()].flatMap(askedTogether), ...fresh.filter(alone).map((x) => [x])];
     const open = groups.map((g) => g.filter((r) => !r.answer));
@@ -832,8 +826,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       m.remindedAt = clock();
       persist();
       await postAbout(id, due.to === 'holders'
-        ? alert(holderRoles(ask), `reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
-        : alert([config.leadRole], `reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
+        ? crewAlert(`reminder: ${g.id} waits for an answer since ${stamp(g.openedAt)}. ${ask.task} waits.`)
+        : ownerAlert(`reminder: ${tiedParts(g, ask).map((i) => `part ${i + 1}`).join(', ')} of ${g.id} still tied since ${stamp(g.votingEndedAt)}. ${ask.task} waits.`));
     }
   }
 
@@ -935,13 +929,13 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (checked) lastEnd = now();
       }
     },
-    /** One Discord interaction (a button or the reason form). A member with neither sage role gets no reply, and nothing changes (G20). Never rejects. */
+    /** One Discord interaction (a button or the reason form). Anyone but the crew and the owner gets no reply, and nothing changes (G20). Never rejects. */
     async interaction(i) {
       const by = i?.user?.id;
       try {
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
-        if (!ppl.holders.has(by)) return;
+        if (!ppl.holders.has(by) && by !== ppl.ownerId) return;
         // The owner's answers at the terminal come first: a press never counts on a part that has one (G10). Only the logbook of the
         // project in the key of the press: a key of a project that the config does not list finds no gate (T132).
         let pressed = parseCustomId(i.customId);
@@ -953,7 +947,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         const project = projectOfKey(pressed?.gateId);
         // A card of a project that the config does not serve now: sage never gets an answer from it (F-T132-2). When its key is also the
         // key of a served card (the name now names another folder), only a press on the served card's own message counts there; the
-        // sage-lead's private confirm is not a card (F-T132-21).
+        // owner's private confirm is not a card (F-T132-21).
         const twin = pressed && parked.some((e) => e.gate.id === pressed.gateId);
         const confirm = i.message?.flags?.has(MessageFlags.Ephemeral) === true;
         if (twin && (!gates.has(pressed.gateId) || (!confirm && i.message?.id !== meta.get(pressed.gateId).message))) {

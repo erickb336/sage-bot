@@ -6,11 +6,13 @@ export const LABEL = 'com.sage.bot';
 
 /**
  * The fields of the config that the bridge needs, each a non-empty string (see examples/config.example.json). channelId and askChannelId
- * are optional since T130: the bridge makes the channel registry from them at its first start, when there is no registry yet.
+ * are optional since T130: the bridge makes the channel registry from them at its first start, when there is no registry yet. ownerId is
+ * optional since T232: without it, the owner of the Discord application is the owner (src/crew.js ownerOf). No role is in the config:
+ * the crew is every member with the role named sage-crew.
  */
-export const CONFIG_FIELDS = ['guildId', 'ownerId', 'apprenticeRole', 'leadRole', 'project', 'sagePath', 'statePath'];
+export const CONFIG_FIELDS = ['guildId', 'project', 'sagePath', 'statePath'];
 /** The fields of the config that are Discord ids, when present (and always for a field of CONFIG_FIELDS). */
-export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'auditChannelId', 'ownerId', 'apprenticeRole', 'leadRole'];
+export const DISCORD_IDS = ['guildId', 'channelId', 'askChannelId', 'auditChannelId', 'ownerId'];
 /**
  * The fields of DISCORD_IDS in `config` that are not a Discord id (SNOWFLAKE). The one check of the config's Discord ids (F-T143-13):
  * the bridge start (prepare in discord.js) and scripts/launchd.mjs both refuse a config for which it gives a field.

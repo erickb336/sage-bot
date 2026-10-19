@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { refuseOldRoles } from '../src/bridge.js';
+import { oldRoleKeys } from '../src/crew.js';
 import { loadProjects } from '../src/projects.js';
 import { CONFIG_FIELDS, notDiscordIds, plist, stableNode } from '../src/launchd.js';
 import { forTerminal } from '../src/clean.js';
@@ -35,11 +35,7 @@ try {
 } catch (e) {
   stop(`the config file ${config} is not JSON (${e.message}). ${nothing}`);
 }
-try {
-  refuseOldRoles(fields);
-} catch (e) {
-  stop(`${e.message} ${nothing}`);
-}
+if (oldRoleKeys(fields)) console.error(`sage-bot launchd: warning: ${oldRoleKeys(fields)}`);
 const missing = CONFIG_FIELDS.filter((k) => typeof fields?.[k] !== 'string' || !fields[k]);
 if (missing.length) stop(`the config file ${config} has no ${missing.join(', ')}. ${nothing}`);
 const notIds = notDiscordIds(fields);

@@ -9,8 +9,9 @@ import { accepts } from '../src/discord.js';
 import { readSpools, record } from '../src/sessions.js';
 import { load } from '../src/state.js';
 import { HOUR, MINUTE, openGate } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, execFileSync, JON, LEADR, MAYA, OWNER, SAGE, setAt, setup, spawnSync, T0 } from './bridge-setup.js';
+import { CHANNEL, CREW_ROLE, execFileSync, JON, MAYA, OWNER, SAGE, setAt, setup, spawnSync, T0 } from './bridge-setup.js';
 import { fakeInteraction } from '../src/fake-discord.js';
+import { CREW } from '../src/crew.js';
 
 const HOOK = new URL('../scripts/hook.mjs', import.meta.url).pathname;
 const SESSION = new URL('../scripts/session.mjs', import.meta.url).pathname;
@@ -114,7 +115,7 @@ test('a session whose gates sage did not mark gets no line and no thread; its fi
   assert.equal(b.discord.threads.get(thread).from, line);
   assert.deepEqual(b.discord.messages.get(line)[0], { content: '**Session 1 · project · Sun 4 Oct**\nrunning · 2 tasks · 1 open question', allowedMentions: { parse: [] } });
   assert.deepEqual(cardsIn(b, thread), ['Question project/G2 · T2 ']);
-  assert.equal(b.discord.latest(b.discord.in(thread)[0]).content, `<@&${APPRENTICE}> <@&${LEADR}> project T2 needs one product answer. The first answer is final.`);
+  assert.equal(b.discord.latest(b.discord.in(thread)[0]).content, `<@&${CREW_ROLE}> project T2 needs one product answer. The first answer is final.`);
   assert.equal(b.bridge.threadOf(S1), thread);
 });
 
@@ -219,15 +220,15 @@ test('G15: a session that ends with an open batch keeps its thread open: the lin
   b.now += 30 * MINUTE;
   await b.bridge.loop();
   const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
-  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> project/G1\\+G2 is tied after its vote`));
+  assert.match(contents().at(-1), new RegExp(`^<@${OWNER}> project/G1\\+G2 is tied after its vote`));
   assert.match(lineOf(b, 'Session 1 · project · Sun 4 Oct'), / · 1 open question$/);
   // The reminder to the sage-leads 2 hours later goes to the thread too; the thread is still open.
   b.now += 2 * HOUR;
   await b.bridge.loop();
-  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> reminder: part 1 of project/G1\\+G2 still tied`));
+  assert.match(contents().at(-1), new RegExp(`^<@${OWNER}> reminder: part 1 of project/G1\\+G2 still tied`));
   assert.equal(b.discord.threads.get(thread).locked, false);
   // A sage-lead breaks the tie: the last question settles, and the next loop archives and locks the thread.
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
   assert.equal(b.discord.threads.get(thread).locked, false);
   await b.bridge.loop();
   assert.deepEqual([b.discord.threads.get(thread).archived, b.discord.threads.get(thread).locked], [true, true]);
@@ -302,7 +303,7 @@ test('a version 1 gate file loads: its card stays in the parent channel with its
   b.now += 2 * HOUR;
   await b.bridge.loop();
   assert.equal(b.bridge.threadOf(S1), undefined);
-  assert.deepEqual(b.discord.in(CHANNEL).map((id) => b.discord.latest(id).content).slice(1), [`<@&${APPRENTICE}> <@&${LEADR}> reminder: project/G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
+  assert.deepEqual(b.discord.in(CHANNEL).map((id) => b.discord.latest(id).content).slice(1), [`<@&${CREW_ROLE}> reminder: project/G1 waits for an answer since <t:${T0 / 1000}:t>. T1 waits.`]);
   await b.press(MAYA, 'press:project/G1:0:1');
   assert.match(b.discord.latest(card).embeds[0].description, /Answered by Maya/);
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
@@ -457,10 +458,10 @@ test('F-T29-4: a card in the parent channel keeps its tie post, tie-break note a
   await b.bridge.loop();
   b.now += 2 * HOUR;
   await b.bridge.loop();
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
   // The first text of each message, without the wake notes (the test's clock jumps): the card, S1's line, the tie, the reminder, the note.
   const contents = (at) => b.discord.in(at).map((id) => b.discord.messages.get(id)[0].content).filter((c) => !c.startsWith('The host'));
-  assert.deepEqual(contents(CHANNEL).map((c) => c.replace(/^(<@&\d+> )+/, '').split(' ').slice(0, 2).join(' ')), ['project T7', '**Session 1', 'project/G1+G2 is', 'reminder: part', 'Jon (sage-lead)']);
+  assert.deepEqual(contents(CHANNEL).map((c) => c.replace(/^(<@&?\d+> )+/, '').split(' ').slice(0, 2).join(' ')), ['project T7', '**Session 1', 'project/G1+G2 is', 'reminder: part', 'Erick broke']);
   assert.equal(contents(thread).filter((c) => c.includes('G1+G2')).length, 0);
   assert.match(lineOf(b, 'Session 1 · project · Sun 4 Oct'), / · 1 task · 1 open question$/);
 });
@@ -491,12 +492,12 @@ test('F-T29-6 and F-T29-4: a press that posts while the loop waits for a session
   };
   const loop = b.bridge.loop();
   await waiting;
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
   release();
   await loop;
   await b.bridge.loop();
   assert.deepEqual([b.discord.in(CHANNEL).filter((id) => b.discord.latest(id).content?.startsWith('**Session')).length, threadNames(b)], [1, ['Session 1 · project · Sun 4 Oct']]);
-  assert.ok(b.discord.in(CHANNEL).some((id) => b.discord.latest(id).content === 'Jon (sage-lead) broke the tie on part 1 of project/G1+G2: B.'));
+  assert.ok(b.discord.in(CHANNEL).some((id) => b.discord.latest(id).content === 'Erick broke the tie on part 1 of project/G1+G2: B.'));
   assert.deepEqual(cardsIn(b, b.bridge.threadOf(S1)), ['Question project/G3 · T1 ']);
 });
 
@@ -523,7 +524,7 @@ test('F-T29-5: the hook records from a subfolder, a worktree folder or a link to
   assert.equal(typeof spool(b, S1).endedAt, 'number');
 });
 
-test('T29 with T39: a session thread gets the tie post after a sage-lead ends the vote early; after a restart the tie-break note and the card in the thread name the sage-lead, and the version 2 file keeps the session, endedBy, by and at', async () => {
+test('T29 with T39: a session thread gets the tie post after the owner ends the vote early; after a restart the tie-break note and the card in the thread name the owner, and the version 2 file keeps the session, endedBy, by and at', async () => {
   const b = setup();
   hook(b, S1, 'SessionStart');
   gateAdd(b, S1, 'T1', 'A?');
@@ -537,27 +538,27 @@ test('T29 with T39: a session thread gets the tie post after a sage-lead ends th
   await b.press(MAYA, 'press:project/G1+G2:1:0');
   b.now += MINUTE;
   const endAt = b.now;
-  await b.press(JON, 'end:project/G1+G2'); // asks to confirm
-  await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:project/G1+G2', ephemeral: true }));
+  await b.press(OWNER, 'end:project/G1+G2'); // asks to confirm
+  await b.bridge.interaction(fakeInteraction({ user: OWNER, customId: 'end!:project/G1+G2', ephemeral: true }));
   const contents = () => b.discord.in(thread).map((id) => b.discord.latest(id).content);
-  assert.match(contents().at(-1), new RegExp(`^<@&${LEADR}> project/G1\\+G2 is tied after its vote`));
-  // The file on disk is version 4: the entry has its session and the sage-lead who ended the vote.
+  assert.match(contents().at(-1), new RegExp(`^<@${OWNER}> project/G1\\+G2 is tied after its vote`));
+  // The file on disk is version 4: the entry has its session and the owner who ended the vote.
   const saved = JSON.parse(readFileSync(b.statePath, 'utf8'));
-  assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [4, S1, JON]);
+  assert.deepEqual([saved.version, saved.entries[0].session, saved.entries[0].gate.endedBy], [4, S1, OWNER]);
   // A restart: a new bridge loads the file, keeps the thread of S1, and the tie-break goes to the thread.
   b.bridge = b.make();
   assert.equal(b.bridge.threadOf(S1), thread);
   b.now += MINUTE;
   const breakAt = b.now;
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
-  assert.equal(contents().at(-1), `Jon (sage-lead) broke the tie on part 1 of project/G1+G2: B.`);
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
+  assert.equal(contents().at(-1), `Erick broke the tie on part 1 of project/G1+G2: B.`);
   const s = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
   const drawn = b.discord.latest(cardId).embeds[0];
-  assert.equal(drawn.description, `Ended early by Jon (sage-lead) at ${s(endAt)}, with the votes so far. Closed: every part is decided. T1 goes on.`);
-  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Jon (sage-lead) at ${s(breakAt)}`);
+  assert.equal(drawn.description, `Ended early by Erick at ${s(endAt)}, with the votes so far. Closed: every part is decided. T1 goes on.`);
+  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Erick at ${s(breakAt)}`);
   assert.equal(b.discord.in(CHANNEL).filter((id) => /G1\+G2/.test(b.discord.latest(id).content ?? '')).length, 0);
   const entry = load(b.statePath).entries[0];
-  assert.deepEqual([entry.session, entry.gate.endedBy, entry.gate.parts[0].outcome], [S1, JON, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt }]);
+  assert.deepEqual([entry.session, entry.gate.endedBy, entry.gate.parts[0].outcome], [S1, OWNER, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: OWNER, at: breakAt }]);
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'x']);
 });
 

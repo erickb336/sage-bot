@@ -174,7 +174,7 @@ test('step 3 and a release need the claim of step 1; only the requester withdraw
   for (const type of ['approve', 'release']) {
     assert.throws(() => step(AS.approving, { ...EVENTS[type], claim: other }), { message: 'RQ1 is being approved by another run. Nothing changed.' });
   }
-  assert.throws(() => step(base, { ...EVENTS.withdraw, by: MAYA }), { message: 'only the sage-lead who sent RQ1 can withdraw it. Nothing changed.' });
+  assert.throws(() => step(base, { ...EVENTS.withdraw, by: MAYA }), { message: 'only the person who sent RQ1 can withdraw it. Nothing changed.' });
   assert.equal(step(base, { ...EVENTS.decline, reason: 'x'.repeat(300) }).reason.length, 300);
   assert.throws(() => step(base, { ...EVENTS.decline, reason: 'x'.repeat(301) }), { message: 'a reason has at most 300 characters. Nothing changed.' });
 });

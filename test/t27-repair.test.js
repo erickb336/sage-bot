@@ -9,6 +9,9 @@ import { handle, peopleOf } from '../src/handle.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { openGate, step, ballotsOf, MINUTE } from '../src/vote.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, clock, openAsk } from '../examples/sample.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const PRIVATE = { flags: 64, allowedMentions: { parse: [] } };
@@ -27,7 +30,7 @@ function bridge(ids, at, people = PEOPLE) {
     return { ...out, replies: i.replies, reply: i.replies[0] };
   };
   ctx.gate = (id) => gates.get(id).gate;
-  ctx.send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, people.holders, people.leads).gate, ask: ASKS[id] });
+  ctx.send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, people.holders, people.ownerId).gate, ask: ASKS[id] });
   return ctx;
 }
 
@@ -41,7 +44,7 @@ test('F-T27-8: every masked link is escaped, also the second and the third', () 
 test('F-T27-11: hiding characters (zero-width space, bidi controls and marks, BOM, soft hyphen) are removed from reasons and names', () => {
   assert.equal(safe('Er\u200bick\u202ekcire\u200e\ufeff'), 'Erickkcire'); // zero-width space, right-to-left override, left-to-right mark, BOM
   assert.equal(safe('\u2066A\u2069 \u00adB\u061cC'), 'A BC'); // isolates, soft hyphen, Arabic letter mark; the joiners stay (see t27-repair2)
-  const gate = step(openAsk('B7', T0), ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes​‮ please'), PEOPLE.holders, PEOPLE.leads).gate;
+  const gate = step(openAsk('B7', T0), ballot(MAYA, 0, 'A', T0 + MINUTE, 'yes​‮ please'), PEOPLE.holders, PEOPLE.ownerId).gate;
   const names = new Map([[MAYA, 'Ma​ya']]);
   const c = card(gate, ASKS.B7, { ...PEOPLE, names });
   assert.deepEqual(c.embeds[0].fields[3], { name: 'Maya, part 1', value: 'yes please' });
@@ -49,8 +52,8 @@ test('F-T27-11: hiding characters (zero-width space, bidi controls and marks, BO
 
 /** A batch of `nParts` parts with 3 options, and `nHolders` holders with 15-character names. */
 function team(nHolders, nParts) {
-  const members = Array.from({ length: nHolders }, (_, i) => ({ id: `h${i}`, name: `Holder Number ${i}`, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, { apprenticeRole: 'drv', leadRole: 'ld' });
+  const members = Array.from({ length: nHolders }, (_, i) => ({ id: `h${i}`, name: `Holder Number ${i}`, roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const parts = Array.from({ length: nParts }, () => ['A', 'B', 'C']);
   const ask = { kind: 'batch', task: 'T7', title: 'date formats', parts: parts.map((_, i) => ({ question: `Question ${i + 1}`, why: 'because', recommended: 'A', options: { A: 'alpha', B: 'beta', C: 'gamma' } })) };
   const gates = new Map([['B7', { gate: openGate({ id: 'B7', kind: 'batch', parts, askedBy: 'h0', at: T0 }), ask }]]);
@@ -99,7 +102,7 @@ test('F-T27-13: End vote now on an ended, closed or withdrawn vote, or past the 
   await b.press(ERICK, 'press:B7:0:0'); await b.press(JON, 'press:B7:0:0'); await b.press(MAYA, 'press:B7:0:1');
   // Past the limit by the clock, before any tick: the press settles the vote and the note says when it ended.
   b.now = clock(15, 2);
-  const late = await b.press(JON, 'end:B7');
+  const late = await b.press(ERICK, 'end:B7');
   assert.deepEqual(late.replies, [{ kind: 'reply', content: 'The vote on B7 ended at <t:1791126060:t>. Your press did not count.', ...PRIVATE }]);
   assert.equal(late.gate.phase, 'tied');
   assert.deepEqual(late.effects.map((e) => e.type), ['vote-ended', 'decided', 'ignored']);
@@ -107,10 +110,10 @@ test('F-T27-13: End vote now on an ended, closed or withdrawn vote, or past the 
   assert.equal((await b.press(ERICK, 'end:B7')).reply.content, 'The vote on B7 ended at <t:1791126060:t>. Your press did not count.');
   // Withdrawn.
   b.send('B9', { type: 'withdraw', by: ERICK, at: b.now });
-  assert.deepEqual((await b.press(JON, 'end:B9')).replies, [{ kind: 'reply', content: 'B9 was withdrawn by Erick. Nothing to answer.', ...PRIVATE }]);
+  assert.deepEqual((await b.press(ERICK, 'end:B9')).replies, [{ kind: 'reply', content: 'B9 was withdrawn by Erick. Nothing to answer.', ...PRIVATE }]);
   // Closed by an answer.
   await b.press(MAYA, 'press:G5:0:0');
-  assert.deepEqual((await b.press(JON, 'end:G5')).replies, [{ kind: 'reply', content: 'Already answered by Maya: A', ...PRIVATE }]);
+  assert.deepEqual((await b.press(ERICK, 'end:G5')).replies, [{ kind: 'reply', content: 'Already answered by Maya: A', ...PRIVATE }]);
   for (const r of [late]) assert.doesNotMatch(r.reply.content, /End .* now\?/);
 });
 
@@ -125,23 +128,23 @@ test('F-T27-14: End vote now (confirmed) and Cancel count only from the private 
     assert.deepEqual(r.effects, [], id);
     assert.equal(b.gate('B9'), before, id);
   }
-  const ok = await b.press(JON, 'end!:B9', undefined, true);
+  const ok = await b.press(ERICK, 'end!:B9', undefined, true);
   assert.equal(ok.reply.kind, 'update');
   assert.equal(ok.gate.votingEndedAt, b.now);
 });
 
-test('F-T27-17: batch buttons read "Part 1, A: option" cut to 80 with …; lead buttons say (sage-lead only); no middle dot in a label', () => {
+test('F-T27-17: batch buttons read "Part 1, A: option" cut to 80 with …; lead buttons say (Erick only); no middle dot in a label', () => {
   const long = 'An option whose text runs on and on, far past the eighty characters that Discord allows on a button';
   const ask = { ...ASKS.B9, parts: [{ ...ASKS.B9.parts[0], options: { ...ASKS.B9.parts[0].options, A: long } }, ASKS.B9.parts[1]] };
   const open = card(openAsk('B9', T0), ask, PEOPLE);
   assert.deepEqual(labels(open), [
     'Part 1, A: An option whose text runs on and on, far past the eighty characters …', 'Part 1, B: Only a "Create report" button',
-    'Part 2, A: Yes, under the button', 'Part 2, B: No', 'End vote now (sage-lead only)',
+    'Part 2, A: Yes, under the button', 'Part 2, B: No', 'End vote now (Erick only)',
   ]);
   assert.equal(labels(open)[0].length, 80);
-  const tied = step(openAsk('B9', T0), { type: 'end', by: JON, at: T0 + MINUTE, via: 'discord' }, PEOPLE.holders, PEOPLE.leads).gate;
-  assert.deepEqual(labels(card(tied, ASKS.B9, PEOPLE)), ['Part 1, break the tie: A (sage-lead only)', 'Part 1, break the tie: B (sage-lead only)',
-    'Part 2, break the tie: A (sage-lead only)', 'Part 2, break the tie: B (sage-lead only)']);
+  const tied = step(openAsk('B9', T0), { type: 'end', by: ERICK, at: T0 + MINUTE, via: 'discord' }, PEOPLE.holders, PEOPLE.ownerId).gate;
+  assert.deepEqual(labels(card(tied, ASKS.B9, PEOPLE)), ['Part 1, break the tie: A (Erick only)', 'Part 1, break the tie: B (Erick only)',
+    'Part 2, break the tie: A (Erick only)', 'Part 2, break the tie: B (Erick only)']);
   for (const c of [open, card(tied, ASKS.B9, PEOPLE), confirmEnd(openAsk('B9', T0), PEOPLE)]) for (const l of labels(c)) assert.doesNotMatch(l, /·/, l);
 });
 
@@ -159,9 +162,9 @@ test('F-T27-10: a reason submit with no fields, or without the reason field, get
 });
 
 test('F-T27-16: with every part tied the card does not call the other parts provisional; the confirm counts "2 of 3 votes"', () => {
-  const gate = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.leads).gate;
-  assert.equal(card(gate, ASKS.B9, PEOPLE).embeds[0].description, 'Voting ended at <t:1791126060:t>. 2 parts are tied: they wait for a sage-lead. T9 waits.');
-  const voted = [ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'A', T0 + MINUTE)].reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.leads).gate, openAsk('B9', T0));
+  const gate = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.ownerId).gate;
+  assert.equal(card(gate, ASKS.B9, PEOPLE).embeds[0].description, 'Voting ended at <t:1791126060:t>. 2 parts are tied: they wait for Erick. T9 waits.');
+  const voted = [ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'A', T0 + MINUTE)].reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.ownerId).gate, openAsk('B9', T0));
   assert.match(confirmEnd(voted, PEOPLE).content, /\nPart 1 goes to A: 2 of 3 votes \(\*\*Erick\*\*, \*\*Jon\*\*\)\.\n/);
 });
 
@@ -169,9 +172,9 @@ test('F-T27-18: the form title shows the option within 45 characters; Cancel com
   assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'C. Visible columns, plus an "Include hidden…'); // at a word, without the prefix (F-T27-23, F-T27-29)
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 1).title, 'Your vote counts: B. No');
   assert.deepEqual(confirmEnd(openAsk('B9', T0), PEOPLE).components[0].components.map((c) => c.label), ['Cancel', 'End vote now']);
-  const early = step(openAsk('B9', T0), { type: 'end', by: JON, at: clock(14, 50), via: 'discord' }, PEOPLE.holders, PEOPLE.leads).gate;
-  assert.match(card(early, ASKS.B9, PEOPLE).embeds[0].description, /^Ended early by Jon \(sage-lead\) at <t:1791125400:t>, with the votes so far\. /);
-  const onTime = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.leads).gate;
+  const early = step(openAsk('B9', T0), { type: 'end', by: ERICK, at: clock(14, 50), via: 'discord' }, PEOPLE.holders, PEOPLE.ownerId).gate;
+  assert.match(card(early, ASKS.B9, PEOPLE).embeds[0].description, /^Ended early by Erick at <t:1791125400:t>, with the votes so far\. /);
+  const onTime = step(openAsk('B9', T0), { type: 'tick', at: clock(15, 1) }, PEOPLE.holders, PEOPLE.ownerId).gate;
   assert.match(card(onTime, ASKS.B9, PEOPLE).embeds[0].description, /^Voting ended at <t:1791126060:t>\. /);
 });
 

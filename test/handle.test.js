@@ -21,17 +21,17 @@ function bridge(ids, at) {
     return { ...out, replies: i.replies, reply: i.replies[0] };
   };
   ctx.gate = (id) => gates.get(id).gate;
-  ctx.send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, PEOPLE.holders, PEOPLE.leads).gate, ask: ASKS[id] });
+  ctx.send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, PEOPLE.holders, PEOPLE.ownerId).gate, ask: ASKS[id] });
   return ctx;
 }
 
-test('F-T27-12: holders are exactly the members with the driver role, leads those with the sage-lead role; a bot is neither', () => {
+test('F-T27-12: holders are exactly the members with the sage-crew role; the owner is the config\'s id; a bot is no holder', () => {
   assert.deepEqual([...PEOPLE.holders], [ERICK, MAYA, JON]);
-  assert.deepEqual([...PEOPLE.leads], [ERICK, JON]);
+  assert.equal(PEOPLE.ownerId, ERICK);
   assert.deepEqual([PEOPLE.names.get(SAM), PEOPLE.names.get(BRIDGE)], ['Sam', 'sage bridge']);
-  // The owner (Erick, who asks) is a holder only through the role: without it, nobody is a holder.
+  // The owner (Erick, who asks) is a holder only through the role: without it, nobody is a holder, and Erick is still the owner.
   const noRoles = peopleOf([{ id: ERICK, name: 'Erick', roles: [] }], CONFIG);
-  assert.deepEqual([[...noRoles.holders], [...noRoles.leads]], [[], []]);
+  assert.deepEqual([[...noRoles.holders], noRoles.ownerId], [[], ERICK]);
 });
 
 test('a single question: the first press answers it and updates the card; a later press gets a private note', async () => {
@@ -84,32 +84,33 @@ test('a modal submit after the vote ended gets the vote-ended note, and the time
   assert.equal(late.gate.phase, 'tied');
 });
 
-test('end vote now: a sage-lead gets a confirm, confirms, and the vote ends; a non-sage-lead holder and a cancel change nothing', async () => {
+test('end vote now: the owner gets a confirm, confirms, and the vote ends; a crew member who is not the owner and a cancel change nothing', async () => {
   const b = bridge(['B9'], clock(15, 10));
   b.now = clock(15, 20);
   await b.press(ERICK, 'press:B9:0:0'); await b.press(JON, 'press:B9:0:0'); await b.press(MAYA, 'press:B9:0:1');
   const maya = await b.press(MAYA, 'end:B9');
-  assert.deepEqual(maya.replies, [{ kind: 'reply', content: "Only a sage-lead can do this. Your votes on the parts count like everyone's.", ...PRIVATE }]);
-  const cancel = await b.press(JON, 'cancel:B9', undefined, true);
+  assert.deepEqual(maya.replies, [{ kind: 'reply', content: "Only Erick can do this. Your votes on the parts count like everyone's.", ...PRIVATE }]);
+  const cancel = await b.press(ERICK, 'cancel:B9', undefined, true);
   assert.deepEqual(cancel.replies, [{ kind: 'update', content: 'Cancelled. The vote goes on.', ...PRIVATE, components: [] }]);
   assert.equal(cancel.gate.phase, 'voting');
   b.now = clock(15, 28);
-  const confirm = await b.press(JON, 'end:B9');
+  assert.equal((await b.press(JON, 'end:B9')).reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
+  const confirm = await b.press(ERICK, 'end:B9');
   assert.equal(confirm.reply.kind, 'reply');
   assert.equal(confirm.reply.content, ['**End B9 now?**', 'Part 1 goes to A: 2 of 3 votes (**Erick**, **Jon**).',
-    'Part 2 has no votes. It stays open until a sage-lead breaks the tie.', 'Nobody can vote after this.'].join('\n'));
+    'Part 2 has no votes. It stays open until you break the tie.', 'Nobody can vote after this.'].join('\n'));
   assert.deepEqual(confirm.reply.components[0].components.map((c) => [c.custom_id, c.label, c.style]), [['cancel:B9', 'Cancel', 2], ['end!:B9', 'End vote now', 4]]);
   assert.equal(confirm.gate.phase, 'voting');
-  const ended = await b.press(JON, 'end!:B9', undefined, true);
-  assert.deepEqual(ended.effects, [{ type: 'vote-ended', by: JON }, { type: 'decided', part: 0, option: 'A', how: 'votes' }]);
+  const ended = await b.press(ERICK, 'end!:B9', undefined, true);
+  assert.deepEqual(ended.effects, [{ type: 'vote-ended', by: ERICK }, { type: 'decided', part: 0, option: 'A', how: 'votes' }]);
   assert.deepEqual(ended.replies, [{ kind: 'update', content: 'You ended the vote on B9 at <t:1791127680:t>.', ...PRIVATE, components: [] }]);
   assert.equal(ended.gate.votingEndedAt, clock(15, 28));
   // Maya forges the confirm button on her own private note: the vote rules refuse her.
   const forged = await b.press(MAYA, 'end!:B9', undefined, true);
-  assert.deepEqual(forged.effects, [{ type: 'ignored', by: MAYA, why: 'not-lead' }]);
+  assert.deepEqual(forged.effects, [{ type: 'ignored', by: MAYA, why: 'not-owner' }]);
 });
 
-test('a tie-break: only a sage-lead, only a tied option, only on a tied part; then the batch closes', async () => {
+test('a tie-break: only the owner, only a tied option, only on a tied part; then the batch closes', async () => {
   const b = bridge(['B7'], clock(14, 31));
   b.now = clock(14, 40);
   await b.press(ERICK, 'press:B7:0:0'); await b.press(JON, 'press:B7:0:0');
@@ -117,18 +118,19 @@ test('a tie-break: only a sage-lead, only a tied option, only on a tied part; th
   await b.press(ERICK, 'press:B7:2:0'); await b.press(JON, 'press:B7:2:0');
   b.send('B7', { type: 'tick', at: clock(15, 1) });
   b.now = clock(15, 2);
-  const tiedCard = (await b.press(JON, 'tiebreak:B7:1:2')).replies; // C has no votes: not among the tied
+  const tiedCard = (await b.press(ERICK, 'tiebreak:B7:1:2')).replies; // C has no votes: not among the tied
   assert.deepEqual(tiedCard, [{ kind: 'reply', content: 'Only one of the tied options can break the tie.', ...PRIVATE }]);
-  const notTied = await b.press(JON, 'tiebreak:B7:0:0');
+  const notTied = await b.press(ERICK, 'tiebreak:B7:0:0');
   assert.deepEqual(notTied.replies, [{ kind: 'reply', content: 'This part is not tied, so there is no tie to break.', ...PRIVATE }]);
   const maya = await b.press(MAYA, 'tiebreak:B7:1:0');
-  assert.equal(maya.reply.content, "Only a sage-lead can do this. Your votes on the parts count like everyone's.");
+  assert.equal(maya.reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
+  assert.equal((await b.press(JON, 'tiebreak:B7:1:0')).reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
   b.now = clock(17, 5);
-  const broken = await b.press(JON, 'tiebreak:B7:1:0');
+  const broken = await b.press(ERICK, 'tiebreak:B7:1:0');
   assert.deepEqual(broken.effects, [{ type: 'decided', part: 1, option: 'A', how: 'lead-tiebreak' }, { type: 'closed', outcome: { status: 'decided' } }]);
   assert.equal(broken.reply.kind, 'update');
   assert.equal(broken.reply.embeds[0].description, 'Voting ended at <t:1791126060:t>. Closed: every part is decided. T7 goes on.');
-  assert.match(broken.reply.embeds[0].fields[1].value, /\*\*Decided: A\*\* · tie broken by Jon \(sage-lead\) at <t:1791133500:t>$/);
+  assert.match(broken.reply.embeds[0].fields[1].value, /\*\*Decided: A\*\* · tie broken by Erick at <t:1791133500:t>$/);
   assert.match(broken.reply.embeds[0].fields[0].value, /\*\*Decided: A\*\* · 2 of 3 votes$/);
   assert.ok(broken.reply.components.every((r) => r.components.every((c) => c.disabled)));
 });
@@ -151,9 +153,9 @@ test('a forged custom_id is refused: unknown gate, part, option index, or option
     assert.deepEqual(r.replies, [{ kind: 'reply', content, ...PRIVATE }], customId);
     assert.deepEqual(r.effects, [], customId);
   }
-  const single = await b.press(JON, 'end:G5');
+  const single = await b.press(ERICK, 'end:G5');
   assert.deepEqual(single.replies, [{ kind: 'reply', content: 'This is a single question, not a vote: there is nothing to end and no tie to break.', ...PRIVATE }]);
-  assert.deepEqual(single.effects, [{ type: 'ignored', by: JON, why: 'wrong-kind' }]);
+  assert.deepEqual(single.effects, [{ type: 'ignored', by: ERICK, why: 'wrong-kind' }]);
   assert.equal(b.gate('G5').phase, 'open');
   assert.deepEqual(b.gate('B7').parts.map((p) => p.ballots), [[], [], []]);
 });
@@ -172,9 +174,9 @@ test('F-T42-1: past the time limit, a reason says the vote counts, and a Cancel 
   const b = bridge(['B9'], clock(15, 10));
   b.now = clock(15, 20);
   await b.press(JON, 'press:B9:0:0');
-  assert.equal((await b.press(JON, 'end:B9')).reply.content.split('\n')[0], '**End B9 now?**');
+  assert.equal((await b.press(ERICK, 'end:B9')).reply.content.split('\n')[0], '**End B9 now?**');
   b.now = clock(15, 41); // the limit was 15:40, and no event came since
-  const cancel = await b.press(JON, 'cancel:B9', undefined, true);
+  const cancel = await b.press(ERICK, 'cancel:B9', undefined, true);
   assert.deepEqual(cancel.replies, [{ kind: 'update', content: `The vote on B9 ended at <t:${clock(15, 40) / 1000}:t> meanwhile. Nothing to cancel.`, ...PRIVATE, components: [] }]);
   const late = await b.press(JON, 'reason:B9:0:0', { reason: 'too late' });
   assert.deepEqual(late.replies, [{ kind: 'reply', content: `The vote on B9 ended at <t:${clock(15, 40) / 1000}:t>. Your vote counts; your reason came after the end, so it is not on the card.`, ...PRIVATE }]);
@@ -189,9 +191,9 @@ test('F-T56-1: the end confirm shows the owner\'s final answer from the terminal
   const final = { by: ERICK, at: clock(15, 15), option: 'B', text: 'B. Only a "Create report" button' };
   b.gates.set('B9', { gate: b.gate('B9'), ask: { ...ASKS.B9, parts: ASKS.B9.parts.with(0, { ...ASKS.B9.parts[0], final }) } });
   b.now = clock(15, 20);
-  assert.deepEqual((await b.press(JON, 'end:B9')).reply.content.split('\n'), ['**End B9 now?**',
+  assert.deepEqual((await b.press(ERICK, 'end:B9')).reply.content.split('\n'), ['**End B9 now?**',
     'Part 1 has the final answer from the terminal: B. Only a "Create report" button.',
-    'Part 2 has no votes. It stays open until a sage-lead breaks the tie.', 'Nobody can vote after this.']);
+    'Part 2 has no votes. It stays open until you break the tie.', 'Nobody can vote after this.']);
 });
 
 test('a bad clock gives the bad-time note and a clock that goes back gives the out-of-order note', async () => {
@@ -204,13 +206,13 @@ test('a bad clock gives the bad-time note and a clock that goes back gives the o
 });
 
 test('every why code of the vote rules has its own private note, and so does the unknown-gate case', () => {
-  const codes = ['bad-event', 'bad-time', 'out-of-order', 'leads-only', 'not-lead', 'lead-needs-discord', 'not-asker', 'unknown-option',
+  const codes = ['bad-event', 'bad-time', 'out-of-order', 'not-holder', 'not-owner', 'owner-needs-discord', 'not-asker', 'unknown-option',
     'unknown-part', 'wrong-kind', 'not-tied', 'not-tied-option', 'closed', 'unknown-gate'];
   const gate = openAsk('B7', clock(14, 31));
   const texts = codes.map((why) => note(why, gate, PEOPLE.names).content);
   assert.equal(new Set(texts).size, codes.length);
   for (const n of codes.map((why) => note(why, gate, PEOPLE.names))) assert.deepEqual([n.flags, n.allowedMentions], [64, { parse: [] }]);
   assert.equal(note('not-asker', gate, PEOPLE.names).content, 'Only Erick, who asked B7, can withdraw it.');
-  const withdrawn = step(gate, { type: 'withdraw', by: ERICK, at: clock(14, 32) }, PEOPLE.holders, PEOPLE.leads).gate;
+  const withdrawn = step(gate, { type: 'withdraw', by: ERICK, at: clock(14, 32) }, PEOPLE.holders, PEOPLE.ownerId).gate;
   assert.equal(note('closed', withdrawn, PEOPLE.names).content, 'B7 was withdrawn by Erick. Nothing to answer.');
 });

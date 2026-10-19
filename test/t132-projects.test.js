@@ -1,5 +1,5 @@
 // T132: one bridge posts the cards and takes the votes of every project in the config. sage's gate ids start at G1 in each logbook,
-// so the bridge names each gate by its key, `<project>/<gate id>`, in its gate file, the team votes file, the sage-leads-only file, the
+// so the bridge names each gate by its key, `<project>/<gate id>`, in its gate file, the team votes file, the crew recommendations file, the
 // reasons and the card buttons. SAMPLE DATA ONLY: scratch logbooks, made-up Discord ids, the fake Discord layer.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,8 @@ import { record } from '../src/sessions.js';
 import { sageTool } from '../src/sage.js';
 import { load, loadVotes, saveVotes } from '../src/state.js';
 import { openGate } from '../src/vote.js';
-import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
+import { CHANNEL, CONFIG, CREW_ROLE, execFileSync, JON, MAYA, SAGE, setup, spawnSync, T0, toolOf } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 const UNKNOWN = 'I do not know this button or its question. Nothing changed.';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
@@ -50,8 +51,8 @@ test('T132: two projects with a G1 each get two cards; a press on one records it
   assert.deepEqual(titles(b), ['Question project/G1 · T1 Alpha export', 'Question beta/G1 · T1 Beta colours']);
   // The ping names the project, and the buttons carry the key of the gate.
   assert.deepEqual(b.discord.posts.map((p) => p.content), [
-    `<@&${APPRENTICE}> <@&${LEADR}> project T1 needs one product answer. The first answer is final.`,
-    `<@&${APPRENTICE}> <@&${LEADR}> beta T1 needs one product answer. The first answer is final.`]);
+    `<@&${CREW_ROLE}> project T1 needs one product answer. The first answer is final.`,
+    `<@&${CREW_ROLE}> beta T1 needs one product answer. The first answer is final.`]);
   const beta = cardOf(b, 'Question beta/G1 · T1 Beta colours');
   const alpha = cardOf(b, 'Question project/G1 · T1 Alpha export');
   assert.deepEqual(buttons(b.discord.latest(beta)), ['press:beta/G1:0:0', 'press:beta/G1:0:1']);

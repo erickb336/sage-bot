@@ -45,13 +45,18 @@ test('a refused config with --out leaves the working plist as it was', (t) => {
 });
 
 test('a Discord id field that is not 17 to 20 digits is refused, as the bridge refuses it', (t) => {
-  const r = launchd({ ...SAMPLE, guildId: '2000', ownerId: '1000000000000000001x', leadRole: '3'.repeat(21) }, t);
+  const r = launchd({ ...SAMPLE, guildId: '2000', ownerId: '1000000000000000001x', channelId: '3'.repeat(21) }, t);
   assert.equal(r.status, 1);
-  assert.equal(r.stderr, `sage-bot launchd: in the config file ${r.path}, guildId, ownerId, leadRole must each be a Discord id (17 to 20 digits). No plist written: ${r.out} is unchanged.\n`);
+  assert.equal(r.stderr, `sage-bot launchd: in the config file ${r.path}, guildId, channelId, ownerId must each be a Discord id (17 to 20 digits). No plist written: ${r.out} is unchanged.\n`);
   assert.equal(r.plist, OLD);
   // The edges: 17 and 20 digits pass.
-  const ok = launchd({ ...SAMPLE, guildId: '1'.repeat(17), leadRole: '9'.repeat(20) }, t);
+  const ok = launchd({ ...SAMPLE, guildId: '1'.repeat(17), ownerId: '9'.repeat(20) }, t);
   assert.equal(ok.status, 0, ok.stderr);
+  // T232: ownerId may be left out (the owner of the Discord app is the owner then).
+  const { ownerId, ...noOwner } = SAMPLE;
+  assert.equal(ownerId, '100000000000000001');
+  const none = launchd(noOwner, t);
+  assert.equal(none.status, 0, none.stderr);
   // F-T143-5: the #sage-audit channel id, when present, too.
   const audit = launchd({ ...SAMPLE, auditChannelId: '#sage-audit' }, t);
   assert.equal(audit.status, 1);
