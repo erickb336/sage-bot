@@ -88,13 +88,15 @@ Each person runs their own sage-bot, with their own Discord app and their own Ma
 | Answer a single question, and vote on a batch | Yes | Only with the sage-crew role; the owner's answer at the terminal is final |
 | Break a tie, or end a vote early | No | Yes |
 | Recommend on the autopilot question (the owner decides) | Yes | Only with the sage-crew role |
+| Request a feature (`/sage request`), and withdraw it while it waits | Yes | Yes |
+| Approve or decline a request | No | Yes |
 | Unregister a channel | No | Yes |
 | Turn off the link from Discord to sage (`/sage stop`), at once | Yes | Yes |
 | Turn the link on again (at the terminal) | No | Yes |
 | Talk to sage, write, and start build sessions | Not built: waits on T159 | Not built: waits on T159 |
 | Asks in a rolling hour | 10 | 10 |
 
-Anyone else gets no reply, and nothing they do counts. Only the owner registers a channel, and only the owner turns the link to sage on again, both at the terminal.
+Anyone else gets one private line for a `/sage` command or a button, "Only the sage-crew role can use sage-bot.", and no reply to a mention. Nothing they do counts. Only the owner registers a channel, and only the owner turns the link to sage on again, both at the terminal.
 
 ## What to say
 
@@ -108,6 +110,7 @@ Each answer is public and pings nobody. The answer to a mention goes into its th
 | See one task: its title, size, state and pull request | `@sage-bot T7` or `/sage task T7 [project]` |
 | See the open questions, sage's recommendation and the default | `@sage-bot gates` (or `questions`), or `/sage gates [project]` |
 | Get the project's shared graphics and PDFs | `@sage-bot files` or `/sage files [project]` |
+| Request a feature | `/sage request [project]`, fill in the form, check it, then press Send. The request gets its own thread, and the owner approves or declines it there. You can withdraw it there while it waits. |
 | Answer or vote on a team question | Press an option on its card |
 | Recommend on the autopilot question | Press Yes or No on its card. The owner decides at the terminal. |
 | Stop the link from Discord to sage at once, in an emergency | `/sage stop`, then the confirm button within 10 minutes. No approval is needed. Only the owner turns the link on again, at the terminal. |
@@ -119,6 +122,7 @@ A mention that names none of these words gets a reply that lists them.
 | You want to | Say this |
 | --- | --- |
 | Break a tie | Press a tie-break button on the card |
+| Approve or decline a request | Press Approve or Decline on its card. Approve adds the sage task. You can also do it at the terminal: `node scripts/requests.mjs approve RQ1` |
 | Stop sage-bot in this channel | `/sage unregister`, then the confirm button within 10 minutes |
 | Turn off the link from Discord to sage, as any crew member can | `/sage stop`, then the confirm button within 10 minutes |
 | Talk to sage | `@sage-bot talk …`: recorded in the audit log only, until bridge sessions come with T159 |

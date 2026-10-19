@@ -9,15 +9,20 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { createAsk } from '../src/ask.js';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
-import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
+import { openChannels } from '../src/channels.js';
+import { fakeCommand, fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
+import { loadProjects } from '../src/projects.js';
+import { createRequestFlow } from '../src/requestFlow.js';
+import { loadRequests, requestsPathOf } from '../src/requests.js';
 import { CREW } from '../src/crew.js';
 import { sagePath, sageTool } from '../src/sage.js';
 import { MINUTE } from '../src/vote.js';
 import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
 
 // ---- Sample data -------------------------------------------------------------------------------------------------------------
-const [CREW_ROLE, CHANNEL] = ['300000000000000001', '400000000000000001'];
+const [CREW_ROLE, CHANNEL, ASK] = ['300000000000000001', '400000000000000001', '400000000000000002']; // #sage and #ask-sage
 const [ERICK, MAYA, JON, SAM] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004'];
 const MEMBERS = [
   { id: ERICK, name: 'Erick', roles: [CREW] },
@@ -141,8 +146,8 @@ step(`Maya answers ${single}: final`);
 await advance(20_000);
 await press(JON, 'Jon presses B, 20 seconds later.', `press:${single}:0:1`);
 await advance(MINUTE);
-await press(SAM, 'Sam has no role and presses part 1, A. sage-bot ignores the press: Sam gets no reply, and the vote does not change.', `press:${batch}:0:0`);
-step('Sam presses: no sage role, so the bridge ignores the press and Sam gets no reply');
+await press(SAM, 'Sam has no role and presses part 1, A. The press does not count: Sam gets one private line, and the vote does not change.', `press:${batch}:0:0`);
+step('Sam presses: no sage role, so the press does not count and Sam gets one private line');
 await advance(MINUTE);
 const vote = async (who, name, part, option, reason, form = false) => {
   await press(who, `${name} votes ${'AB'[option]} on part ${part + 1}; the reason form opens.`, `press:${batch}:${part}:${option}`, { form });
@@ -196,6 +201,42 @@ await loop();
 const [threadId, thread] = [...fake.threads][0];
 step(`SessionEnd: the line says ended; the thread is ${thread.locked ? 'locked' : 'NOT locked'}`);
 
+// ---- A request (T228): a crew member asks for a feature in the channel, and the owner approves it -------------------------------
+const split = story.length; // the events of the request come after this one
+const rconfig = { ...CONFIG, askChannelId: ASK, project, sagePath: SAGE, statePath }; // the crew requests in #ask-sage (docs/setup.md)
+const projects = loadProjects(rconfig);
+const channels = openChannels(rconfig, projects);
+let drafts = 0;
+const requests = createRequestFlow({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), tool: () => sageTool({ sagePath: SAGE, project, env }),
+  newKey: () => `D${++drafts}`, // fixed keys, so that two runs give the same page
+  discord: { post: discord.post, edit: discord.edit, startThread: (at, line, name) => discord.startThread(line, name), threadFrom: (at, line) => discord.threadFrom(line), unarchive: discord.unarchive } });
+const ask = createAsk({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), env, requests });
+const roleNames = new Map(MEMBERS.map((m) => [m.id, m.roles]));
+/** One request press (or form) by a sample person, with its private replies, as src/discord.js maps it. */
+async function ask1(who, text, customId, { fields, message: on, form } = {}) {
+  const i = fakeInteraction({ user: who, customId, fields, message: on, sentAt: now, roles: roleNames.get(who) });
+  story.push({ kind: 'press', at: now, who: NAMES.get(who), text, replies: i.replies, form });
+  await requests.interaction(i);
+  return i.replies;
+}
+await advance(MINUTE);
+const typed = fakeCommand({ user: JON, name: 'Jon', roles: roleNames.get(JON), channelId: ASK, sub: 'request' });
+story.push({ kind: 'press', at: now, who: 'Jon', text: 'Jon types /sage request in #ask-sage. The form opens.', replies: typed.replies, form: true });
+await ask.command(typed);
+const key = /^rq1:form:(D\d+)$/.exec(typed.replies[0].custom_id)[1];
+await ask1(JON, 'Jon fills in the form and submits it. Only Jon sees the confirm.', `rq1:form:${key}`,
+  { fields: { title: 'Add CSV export', text: 'Finance copies the monthly report into a spreadsheet by hand. A CSV download saves them an hour each month.' } });
+await ask1(JON, 'Jon presses "Send: the crew votes on design questions".', `rq1:send-team:${key}`);
+const rq = loadRequests(requestsPathOf(rconfig)).requests[0];
+step(`Jon requests a feature: ${rq.id}, one line in #ask-sage, one thread and one card that pings Erick once`);
+await advance(MINUTE);
+await ask1(MAYA, 'Maya presses Approve on the card.', `rq1:approve:${rq.id}`, { message: rq.card });
+await ask1(SAM, 'Sam has no role and presses Approve.', `rq1:approve:${rq.id}`, { message: rq.card });
+await advance(MINUTE);
+await ask1(ERICK, 'Erick, the owner, presses Approve.', `rq1:approve:${rq.id}`, { message: rq.card });
+await advance(LOOP);
+step(`Erick approves ${rq.id}: sage task ${loadRequests(requestsPathOf(rconfig)).requests[0].task} is in the logbook; Maya and Sam cannot approve`);
+
 // ---- The answers in sage and the reasons for sage -------------------------------------------------------------------------
 const [head, ...rowsTsv] = readFileSync(join(sage('logbook'), 'gates.tsv'), 'utf8').split('\n').filter(Boolean);
 const cols = head.split('\t');
@@ -203,7 +244,9 @@ const gates = rowsTsv.map((l) => Object.fromEntries(l.split('\t').map((v, i) => 
 const reasons = [`${g2}+${g3}`, `${g5}+${g6}`].map((id) => [id, node([script('reasons.mjs'), '--config', configPath, id])]);
 
 // ---- The page ------------------------------------------------------------------------------------------------------------------
-const roles = (text) => text.replaceAll(`<@&${CREW_ROLE}>`, `@${CREW}`).replaceAll(`<@${ERICK}>`, '@Erick');
+/** The mentions as Discord shows them: the role, Erick, and a channel or a thread by its name (F-T228-2). */
+const roles = (text) => text.replaceAll(`<@&${CREW_ROLE}>`, `@${CREW}`).replaceAll(`<@${ERICK}>`, '@Erick')
+  .replace(/<#(\d+)>/g, (m, id) => (fake.threads.has(id) ? `#${fake.threads.get(id).name}` : { [CHANNEL]: '#sage', [ASK]: '#ask-sage' }[id] ?? m));
 /** A message as Discord shows it: an edit replaces only the fields that it has, so a card keeps the text of its first post. */
 const show = (p) => (p.content ? { ...p, content: roles(p.content) } : p);
 const latest = (id) => show(Object.assign({}, ...fake.messages.get(id)));
@@ -213,13 +256,21 @@ function states(id) {
   return all.filter((s, i) => !i || message(s.p, s.at) !== message(all[i - 1].p, s.at));
 }
 const lineId = thread.from;
-const shown = story.map((e) => {
-  if (e.kind === 'post') return fake.where.get(e.id) === threadId ? message(latest(e.id), postedAt.get(e.id)) : '';
+/**
+ * The events in one thread, in order: its posts as they are now, the terminal lines and each press with its private replies. A request
+ * press answers privately also by an edit of its deferred reply (editReply) or of its private confirm (update).
+ */
+const render = (events, thread, privateEdits = false) => events.map((e) => {
+  if (e.kind === 'post') return fake.where.get(e.id) !== thread ? '' : !privateEdits ? message(latest(e.id), postedAt.get(e.id))
+    : states(e.id).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span>${message(s.p, s.at)}</div>` : message(s.p, s.at))).join('\n');
   if (e.kind === 'terminal') return `<div class="term"><b>Terminal</b> · ${hhmm(e.at / 1000)} · ${esc(e.text)}</div>`;
   const notes = e.replies.flatMap((r) => (r.kind === 'modal' ? (e.form ? [modalHtml(r)] : [])
-    : r.flags ? [noteHtml(r, e.at).replace('Only you can see this', `Only ${esc(e.who)} can see this`)] : []));
+    : r.kind !== 'defer' && (r.flags || (privateEdits && ['editReply', 'update'].includes(r.kind))) ? [noteHtml(show(r), e.at).replace('Only you can see this', `Only ${esc(e.who)} can see this`)] : []));
   return `<div class="act"><b>${esc(e.who)}</b> · ${hhmm(e.at / 1000)} · ${esc(e.text)}</div>${notes.join('\n')}`;
 }).filter(Boolean);
+const shown = render(story.slice(0, split), threadId);
+const request = loadRequests(requestsPathOf(rconfig)).requests[0];
+const requestThread = fake.threads.get(request.thread);
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sage-bot demo</title><style>${CSS}
   .chan { color: #949ba4; font-size: 13px; font-weight: 600; margin: 0 0 4px; } .chan b { color: #f2f3f5; }
@@ -241,6 +292,11 @@ ${states(lineId).map((s, i) => (i ? `<div class="edited"><span class="when">edit
 <section id="thread"><p class="chan">Thread <b>${esc(thread.name)}</b> · the session thread, in order. Each card shows its final state; the grey lines say what people and the terminal did.</p>
 ${shown.join('\n')}
 <div class="term"><b>Thread</b> · ${thread.locked ? 'locked and archived: the session ended and no question is open' : 'still open'}.</div></section>
+<section id="request"><h2>A request: Jon asks for a feature, and Erick approves it</h2><p class="about">Any sage-crew member can type /sage request. The request gets one line in the channel
+and one thread, and its card pings Erick once. Only Erick approves or declines; only Jon can withdraw it while it waits. The line in #ask-sage, first as posted, then each edit:</p>
+${states(request.line).map((s, i) => (i ? `<div class="edited"><span class="when">edited · ${hhmm(s.at / 1000)}</span><div>${md(s.p.content, s.at)}</div></div>` : message(s.p, s.at))).join('\n')}
+<p class="chan">Thread <b>${esc(requestThread.name)}</b> · the request thread, in order, with the private notes of each press.</p>
+${render(story.slice(split), request.thread, true).join('\n')}</section>
 <section id="answers"><h2>The answers in sage (gates.tsv)</h2><table><tr><th>id</th><th>task</th><th>question</th><th>answer</th></tr>
 ${gates.map((g) => `<tr><td>${esc(g.id)}</td><td>${esc(g.task)}</td><td>${esc(g.question)}</td><td>${esc(g.answer || '(open)')}</td></tr>`).join('\n')}</table>
 <h2 style="margin-top:14px">The reasons for sage (scripts/reasons.mjs)</h2>

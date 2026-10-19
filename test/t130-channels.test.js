@@ -14,7 +14,7 @@ import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } f
 import { enter, prepare, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
 import { CHANNEL, CONFIG, execFileSync, MAYA, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
-import { CREW } from '../src/crew.js';
+import { CREW, NOT_CREW } from '../src/crew.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // the old #ask-sage
@@ -168,17 +168,17 @@ function press(user, roles, customId, age = 0) {
     update: async (p) => { replies.push({ kind: 'update', ...p }); }, reply: async (p) => { replies.push({ kind: 'reply', ...p }); } };
 }
 
-test('T130 unregister: the owner unregisters with a confirm; a crew member is refused; anyone else gets nothing; the home cannot go', async (t) => {
+test('T130 unregister: the owner unregisters with a confirm; a crew member is refused; anyone else gets the one private line of T239; the home cannot go', async (t) => {
   const b = world(t);
   const lines = [];
   const channels = openChannels(b.config, loadProjects(b.config));
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: (l) => lines.push(l) });
   const before = readFileSync(b.registry, 'utf8');
-  // No role: nothing, for the command and for a press.
-  assert.deepEqual(await b.cmd(ask, SAM, [], ASK, 'unregister'), []);
+  // No role: one private line for the command and for a press (T239), and nothing changes.
+  assert.deepEqual((await b.cmd(ask, SAM, [], ASK, 'unregister')).map((r) => [r.kind, r.content, r.flags]), [['reply', NOT_CREW, 64]]);
   const none = press(SAM, [], `${UNREGISTER}${ASK}`);
   await ask.press(none);
-  assert.deepEqual(none.replies, []);
+  assert.deepEqual(none.replies.map((r) => r.content), [NOT_CREW]);
   // An apprentice: refused, also when they press a sage-lead's confirm; the confirm stays and the registry does not change.
   assert.deepEqual((await b.cmd(ask, MAYA, [CREW], ASK, 'unregister'))[1].content, 'Only Erick can unregister a channel. Ask Erick.');
   const apprentice = press(MAYA, [CREW], `${UNREGISTER}${ASK}`);

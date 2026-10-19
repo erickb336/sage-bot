@@ -12,12 +12,14 @@ import { load, saveVotes } from '../src/state.js';
 import { MINUTE } from '../src/vote.js';
 import { SETTLE } from '../src/bridge.js';
 import { CHANNEL, CREW_ROLE, JON, MAYA, MEMBERS, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
-import { CREW } from '../src/crew.js';
+import { CREW, NOT_CREW } from '../src/crew.js';
 
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
 const QUESTION = ['Switch the automatic-merge mode on for this session?', 'Yes|No'];
 /** The note for the owner without the crew role: the owner decides at the terminal, never with a press. */
 const NOTE = { kind: 'reply', content: 'Only a sage-crew member answers or votes here. To vote, give yourself the sage-crew role. Your answer at the terminal is final.', flags: 64, allowedMentions: { parse: [] } };
+/** The one private line for a press of someone who is neither in the crew nor the owner (T239). */
+const NOT_CREW_LINE = { kind: 'reply', content: NOT_CREW, flags: 64, allowedMentions: { parse: [] } };
 
 /**
  * The phrases that switch sage's modes, built from their words so that this file never holds one: no text of the bridge may hold any.
@@ -83,11 +85,11 @@ test('T73: the card of a crew recommendation pings the sage-crew role and is tit
   assert.deepEqual(b.discord.posts.at(-1).allowedMentions.roles, [CREW_ROLE]);
 });
 
-test('T73: the owner\'s press without the crew role gets the note, a press with no role gets no reply (G20), and sage gets nothing', async () => {
+test('T73: the owner\'s press without the crew role gets the note, a press with no role gets the line of T239, and sage gets nothing', async () => {
   const b = await asked({ members: MEMBERS.map((m) => (m.id === OWNER ? { ...m, roles: [] } : m)) });
   b.now += MINUTE;
   assert.deepEqual(await b.press(OWNER, 'press:project/G1:0:0'), [NOTE]);
-  assert.deepEqual(await b.press(SAM, 'press:project/G1:0:0'), []);
+  assert.deepEqual(await b.press(SAM, 'press:project/G1:0:0'), [NOT_CREW_LINE]);
   await b.bridge.loop();
   assert.equal(b.answerOf('G1'), '');
   assert.doesNotMatch(text(b), /Recommended by/);
@@ -226,7 +228,7 @@ test('F-T73-11: a team vote and the crew recommendation of one task, asked toget
     ['Recommend for Erick: Question project/G2 · T1 Ship the export page', [CREW_ROLE]],
   ]);
   b.now += MINUTE;
-  assert.deepEqual(await b.press(SAM, 'press:project/G2:0:0'), []);
+  assert.deepEqual(await b.press(SAM, 'press:project/G2:0:0'), [NOT_CREW_LINE]);
   await b.bridge.loop();
   assert.equal(b.answerOf('G2'), '');
 });
@@ -328,7 +330,7 @@ test('F-T73-6: with the owner missing from the member list, every crew-recommend
   ]]);
   assert.match(text(b), /\*\*Rule:\*\* the first answer is the crew's recommendation to Erick · Erick decides at the terminal ·/);
   b.now += MINUTE;
-  assert.deepEqual(await b.press(SAM, 'press:project/G1:0:0'), []);
+  assert.deepEqual(await b.press(SAM, 'press:project/G1:0:0'), [NOT_CREW_LINE]);
   await b.press(JON, 'press:project/G1:0:1');
   await b.bridge.loop();
   assert.deepEqual(b.discord.posts.at(-1).content, 'Recommendation recorded: Jon recommends No. Erick decides at the terminal.');

@@ -20,6 +20,8 @@ export const requestsPathOf = ({ statePath }) => `${statePath}.requests`;
 export const REQUEST_ID = /^RQ[1-9]\d{0,8}$/;
 /** The lengths in characters, as the Discord form enforces them: title, text, and the reason of a decline. */
 export const LIMITS = { title: [4, 70], text: [10, 500], reason: [0, 300] };
+/** The most characters of a requester's name in the file. */
+export const MAX_NAME = 100;
 /** Each status of the file, and its word for people: at the terminal and on the card. */
 export const STATUS_WORDS = { pending: 'waiting', approving: 'being approved', approved: 'approved', declined: 'declined', withdrawn: 'withdrawn' };
 const STATUSES = Object.keys(STATUS_WORDS);
@@ -76,7 +78,7 @@ function isRequest(r) {
   const decided = DECIDED.includes(r.status);
   const c = r.claim;
   return text(r.id) && REQUEST_ID.test(r.id) && text(r.project) && PROJECT_NAME.test(r.project) && text(r.folder) && r.folder.startsWith('/')
-    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= 100
+    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= MAX_NAME
     && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
     && (r.status === 'approving'
       // `tool`, the state tool of step 2, comes once it starts (T210). The time to approve again is a time of the file too (T223).

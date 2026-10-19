@@ -14,7 +14,7 @@ import { loadProjects, projectsOf } from '../src/projects.js';
 import { enter, rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { BOT, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
-import { CREW } from '../src/crew.js';
+import { CREW, NOT_CREW } from '../src/crew.js';
 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000003'; // a channel that is not registered
@@ -161,7 +161,7 @@ test('F-T95-1: the board shows no advice line, and the same "N more open questio
   isWhole(content);
 });
 
-test('G20: a member with neither sage role gets nothing for a command or a mention, and nothing counts; a bot gets nothing', async (t) => {
+test('G20, T239: a member with neither sage role gets one private line for a command and nothing for a mention, and nothing counts; a bot gets nothing', async (t) => {
   const b = world(t);
   const command = async (user, roles, channelId = ASK) => {
     const i = fakeCommand({ user, roles, channelId, sub: 'board' });
@@ -169,9 +169,10 @@ test('G20: a member with neither sage role gets nothing for a command or a menti
     return i.replies;
   };
   const say = (user, roles, content, channelId = ASK) => b.mention(user, content, channelId, false, null, roles);
-  for (let n = 1; n <= 12; n++) { // past the limit of 10: no note either
-    assert.deepEqual(await command(SAM, []), [], `command ${n}`);
-    assert.deepEqual(await command(SAM, ['300000000000000123'], ELSEWHERE), [], `command elsewhere ${n}`);
+  const line = [{ kind: 'reply', content: NOT_CREW, flags: 64, allowedMentions: { parse: [] } }];
+  for (let n = 1; n <= 12; n++) { // past the limit of 10: the same line, never the limit note
+    assert.deepEqual(await command(SAM, []), line, `command ${n}`);
+    assert.deepEqual(await command(SAM, ['300000000000000123'], ELSEWHERE), line, `command elsewhere ${n}`);
     assert.deepEqual(await say(SAM, [], '<@1> what is new?'), [], `mention ${n}`);
     assert.deepEqual(await say(SAM, [], '<@1> add a dark mode', ELSEWHERE), [], `mention elsewhere ${n}`);
   }
@@ -289,7 +290,7 @@ test('the config is checked at load: a traversal, a type or an absolute file ent
     [{ name: 'site', project: '/p', sagePath: '/o/sage.mjs', files: ['design/b2/shots/*.png'] }]);
 });
 
-test('the /sage command has six subcommands (unregister has no options), guild only, with the listed projects as the only choices', () => {
+test('the /sage command has seven subcommands (unregister and stop have no options), guild only, with the listed projects as the only choices', () => {
   const json = askCommand([{ name: 'sage-bot' }, { name: 'site' }]);
   assert.equal(json.name, 'sage');
   assert.deepEqual(json.contexts, [0]);
@@ -298,6 +299,7 @@ test('the /sage command has six subcommands (unregister has no options), guild o
     ['task', [['id', true, undefined], ['project', false, ['sage-bot', 'site']]]],
     ['gates', [['project', false, ['sage-bot', 'site']]]],
     ['files', [['project', false, ['sage-bot', 'site']]]],
+    ['request', [['project', false, ['sage-bot', 'site']]]],
     ['unregister', []],
     ['stop', []],
   ]);
@@ -493,7 +495,7 @@ function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [CREW_ROLE], channe
   return { calls, guildId, commandName: 'sage', user: { id: user, bot: false }, member: { roles }, channelId, channel,
     isChatInputCommand: () => true, isButton: () => false, isModalSubmit: () => false,
     options: { getSubcommand: () => sub, getString: (name) => strings[name] ?? null },
-    deferReply: async (p) => { calls.push(['defer', p]); }, editReply: async (p) => { calls.push(['edit', p.content]); } };
+    deferReply: async (p) => { calls.push(['defer', p]); }, editReply: async (p) => { calls.push(['edit', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
 }
 /** A message as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
 function message({ guildId = CONFIG_GUILD, author = MAYA, bot = false, roles = [CREW_ROLE], mentions = [BOT_USER], channelId = ASK, channel = null, content = '<@1> hi' } = {}) {
@@ -515,9 +517,9 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER, guildRoles });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
   const defer = ['defer', {}]; // public (G20)
-  // Roles come from the member: an option that names the crew role changes nothing, and a member with no role gets nothing (G20).
-  assert.deepEqual(await run(chat({ roles: [], strings: { role: CREW, roles: CREW } })), []);
-  assert.deepEqual(await run(chat({ roles: [CREW] })), [], 'a role NAME in the raw member is no role id');
+  // Roles come from the member: an option that names the crew role changes nothing, and a member with no role gets only the line of T239.
+  assert.deepEqual(await run(chat({ roles: [], strings: { role: CREW, roles: CREW } })), [['reply', NOT_CREW]]);
+  assert.deepEqual(await run(chat({ roles: [CREW] })), [['reply', NOT_CREW]], 'a role NAME in the raw member is no role id');
   assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE] })), [defer, ['edit', BOARD]]);
   assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE], guildId: '200000000000000002' })), []);
   assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE], channelId: THREAD })), [defer, ['edit', BOARD]]); // a thread of #ask-sage, not in the cache

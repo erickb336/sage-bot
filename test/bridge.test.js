@@ -12,7 +12,7 @@ import { peopleOf } from '../src/handle.js';
 import { sageTool } from '../src/sage.js';
 import { load, save } from '../src/state.js';
 import { ballotsOf, HOUR, MINUTE, openGate, parseGate, MAX_BALLOTS } from '../src/vote.js';
-import { CREW } from '../src/crew.js';
+import { CREW, NOT_CREW } from '../src/crew.js';
 
 const card = (b, id = [...b.discord.messages.keys()][0]) => b.discord.latest(id);
 const text = (payload) => JSON.stringify(payload);
@@ -179,12 +179,12 @@ test('F-T28-7: holders and leads come fresh from the members as Sets: a role tak
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   members[1].roles = [];
-  assert.deepEqual(await b.press(MAYA, 'press:project/G1:0:0'), []); // no sage role: no reply (G20), and the press does not count
+  assert.deepEqual((await b.press(MAYA, 'press:project/G1:0:0')).map((r) => r.content), [NOT_CREW]); // no sage role: one private line (T239), and the press does not count
   assert.equal(b.bridge.entry('project/G1').gate.phase, 'open');
   members[1].roles = [CREW];
   await b.press(MAYA, 'press:project/G1:0:0');
   assert.equal(b.bridge.entry('project/G1').gate.outcome.by, MAYA);
-  assert.deepEqual(await b.press(SAM, 'press:project/G1:0:1'), []); // also no "Already answered" note for a member with no role (G20)
+  assert.deepEqual((await b.press(SAM, 'press:project/G1:0:1')).map((r) => [r.content, r.flags]), [[NOT_CREW, 64]]); // not "Already answered": only the line of T239
 });
 
 test('F-T28-9: no button withdraws; an answer at the terminal is final on the card, also in the owner\'s own words (F-T45-1)', async () => {
