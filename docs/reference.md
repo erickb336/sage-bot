@@ -653,6 +653,28 @@ When step 2 fails, the logbook decides too, because the tool can fail after it w
 
 What this does not cover: when the approver could not write the tool's pid into the claim (for example, the lock was not free), the claim lives only while the approver lives. A tool whose approver was killed can then run on past the 2 minutes and add its task after the release. When that task comes after the next approve, the logbook has two tasks for one request: `list` and `show` warn, and Erick removes one in sage.
 
+### Request messages
+
+`src/requestCards.js` (T72 PR 2, issue 60 PR 2) makes the Discord messages of `/sage request` as JSON, from a request record or a draft. They are pure functions: no Client and no network. T72 PR 3 wires them into the bridge.
+
+**Who reads what.** People read every one of these messages, and no model does. So the title, the text, the requester's name and the reason show as the requester typed them, through `safe` (an allow-list, then every markdown, link and mention character escaped) and `cut` to Discord's limits. There are no marks. sage gets the raw text of the request record, exactly, as quoted data: the outbox (a later PR of issue 60) escapes it into a data block. The task title in sage is the title's letters and digits (`titleForSage`, made by `forModel`).
+
+| Function | The message |
+| --- | --- |
+| `requestModal(key, draft?)` | The form "Request a feature": Title (4 to 70 characters) and What and why (10 to 500). Discord enforces the lengths. Edit opens it again with the draft's words. |
+| `confirmMessage(key, draft)` | The private confirm. It shows the title and the text as typed, made safe, and says "sage gets this text exactly, as quoted data." The buttons are "Send: the crew votes on design questions", "Send: Erick decides design questions", Edit and Cancel, so the choice travels in the custom_id. When the title or the text has no letter or digit, the message is the refusal of `newRequest` with Edit and Cancel. |
+| `requestLine(r, { linkOff })` | The line in the channel that starts the thread: "Jon (sage-crew) requests a feature: {title} · RQ3 · waiting for Erick". Its end changes with the status. |
+| `requestCard(r, { ownerId, linkOff, ping })` | The card, the first post of the thread, with the text as typed, made safe. Waiting: Approve, Decline and Withdraw, and the footer says what sage gets. With the link off, Approve is greyed and a field says why; Decline and Withdraw still work. Being approved: all three are greyed. Approved, declined (with the reason, or "No reason given.") and withdrawn: no buttons. |
+| `declineModal(r)` | The decline form: one optional reason of at most 300 characters. |
+| `withdrawConfirm(r)`, `decidedPost(r)`, `requestNote(why, r)`, `expired(key)` | The withdraw confirm, the post in the thread after a decision, the private notes (not in the crew, link off, an open request, cancelled, sent, not Erick, not the requester, a late press, approved) and the expired confirm. |
+| `requestThreadName(r)` | The thread's name: `RQ3 · {title}`, printable, at most 80 characters. |
+
+**Pings.** Only the first post of the card pings, and only Erick, by his user id: `allowedMentions: { parse: [], users: [ownerId] }`. An edit of the card, and every other message, has `allowedMentions: { parse: [] }`. So "@everyone", "@here" and a role or user mention in a request never ping, and `safe` escapes each `<` and `>` of them too. The hourly limit is the reply of every ask in `src/ask.js`, so it is not here.
+
+**The custom_id.** `rq1:<action>:<id>`; `rq1` is the version of the format. The draft actions (`form`, `send-team`, `send-owner`, `edit`, `cancel`) take the draft's key, `D` and up to 20 digits, which the bridge keeps with the draft. The request actions (`approve`, `decline`, `decline!`, `withdraw`, `withdraw!`, `keep`) take the request id. `parseRequestId` gives back `{ action, id }`, or null for anything else. The longest custom_id has 36 characters (Discord allows 100).
+
+**The tests.** `test/t227-request-cards.test.js` puts every Unicode code point, between two letters, into the title and the text, and checks that the confirm, the line and the card show only the allow-list of `safe`, with no unescaped markdown, mention or link character. It checks every message in every state for its `allowedMentions`, with a request full of mentions. It also builds every message in every state with the longest text that `safe` escapes most, and with a record longer than the form allows, and checks each Discord limit.
+
 ## Sage sessions and their threads
 
 The parent channel (for example `#sage`) is read only for people. It has one line for each sage session that has a team vote, and the bridge edits that line in place. Each line starts a thread, and the session's cards go to that thread. The tie posts, reminders, tie-break notes and wake notes of a card go where the card is. There is no "New session" button: a session starts at the owner's terminal.
