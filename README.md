@@ -236,4 +236,4 @@ The check runs every test with sample data and a fake Discord. No test connects 
 
 ## Licence
 
-Private, not licensed for use by others (`UNLICENSED` in `package.json`).
+sage-bot is open source under the MIT licence: see [LICENSE](LICENSE).
