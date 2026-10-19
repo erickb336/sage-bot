@@ -481,3 +481,12 @@ test('F-T228-3: when Discord refuses the line at Send, the "Sent" note names the
   const sent = await b.press(JON, `rq1:send-team:${(await b.draft(JON)).key}`);
   assert.equal(sent[1].content, `Sent to Erick as RQ1. Its thread opens soon from its line in <#${ASK}>. You can withdraw it there until Erick decides.`);
 });
+
+test('T241 F-T241-8: the open request threads are unknown (null), not none, while the request file cannot be read', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  await b.flow.loop();
+  assert.deepEqual(b.flow.threads(), [b.r().thread]);
+  writeFileSync(b.path, 'not a request file');
+  assert.equal(b.flow.threads(), null);
+});

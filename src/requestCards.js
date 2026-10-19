@@ -6,7 +6,7 @@
 // No model reads these messages: sage gets the raw text of the request record, escaped as quoted data by the outbox (a later PR).
 // Every message has allowedMentions { parse: [] }, except the first post of the request card, which pings Erick (ownerId) once.
 import { ActionRowBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
-import { button, cut, ephemeral, LIMIT, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
+import { button, cut, ephemeral, LIMIT, NO_MENTIONS, OFFLINE, OWNER, safe, stamp } from './cards.js';
 import { forModel } from './clean.js';
 import { CREW } from './crew.js';
 import { LIMITS, MAX_NAME, REQUEST_ID, STATUS_WORDS } from './requests.js';
@@ -130,7 +130,7 @@ export function requestCard(r, { ownerId, linkOff = false, ping = false }) {
       ...(off ? [{ name: 'The link from Discord to sage is off', value: `Approve waits until ${OWNER} turns the link on again at the terminal. ${OWNER} can still decline, and the ${CREW} member who sent it can still withdraw.` }] : []),
     ],
     ...(open && { footer: { text: `${SAGE_GETS} ${OWNER} approves or declines, here or at the terminal · the ${CREW} member who sent it can withdraw it until then · `
-      + 'Anyone in this channel can read this thread; sage does not read it.' } }),
+      + `Anyone in this channel can read this thread; sage does not read it. ${OFFLINE}` } }),
     color: open ? COLOR.open : COLOR[r.status],
   };
   const busy = r.status === 'approving';
