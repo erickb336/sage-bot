@@ -91,7 +91,7 @@ test('F-T132-20: a closed card\'s body says the vote is closed, as its note does
   const [id] = b.discord.messages.keys();
   const description = () => b.discord.latest(id).embeds[0].description;
   const rules = (text) => text.split('\n').filter((l) => /^\*\*(Rule|Who can answer|Closed):\*\*/.test(l));
-  const normal = ['**Rule:** the first answer is final · reminder every 2 h until answered', '**Who can answer:** every sage-apprentice or sage-lead'];
+  const normal = ['**Rule:** the first answer is final · reminder every 2 h until answered', '**Who can answer:** every sage-crew member'];
   assert.deepEqual(rules(description()), normal);
   b.bridge = bridge('project'); // beta leaves the config
   await b.bridge.loop();

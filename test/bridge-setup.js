@@ -15,6 +15,7 @@ import { createBridge, SETTLE } from '../src/bridge.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { answerArgs, optionsOf, OTHER, sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
+import { CREW } from '../src/crew.js';
 
 const KEYS = ['A', 'B', 'C', 'D', 'E'];
 
@@ -61,19 +62,21 @@ const withEnv = (start) => (file, args = [], options = {}) => start(file, args, 
 export const spawn = withEnv(cp.spawn);
 export const spawnSync = withEnv(cp.spawnSync);
 export const execFileSync = withEnv(cp.execFileSync);
-export const APPRENTICE = '300000000000000001';
-export const LEADR = '300000000000000002';
+/** The id of the guild's role named sage-crew (T232: the crew is found by the role's name; the id is only for its ping). */
+export const CREW_ROLE = '300000000000000001';
+export const ROLES = [{ id: CREW_ROLE, name: CREW }, { id: '300000000000000009', name: 'Moderators' }];
 export const CHANNEL = '400000000000000001';
 export const [OWNER, MAYA, JON, SAM, BOT] = ['100000000000000001', '100000000000000002', '100000000000000003', '100000000000000004', '100000000000000005'];
+/** Members with their role NAMES, as src/discord.js memberOf maps them. Erick is the owner (by id) and in the crew; Jon and Maya are crew. */
 export const MEMBERS = [
-  { id: OWNER, name: 'Erick', roles: [LEADR] },
-  { id: MAYA, name: 'Maya', roles: [APPRENTICE] },
-  { id: JON, name: 'Jon', roles: [LEADR] },
+  { id: OWNER, name: 'Erick', roles: [CREW] },
+  { id: MAYA, name: 'Maya', roles: [CREW] },
+  { id: JON, name: 'Jon', roles: [CREW, 'Moderators'] },
   { id: SAM, name: 'Sam', roles: [] },
-  { id: BOT, name: 'sage bridge', roles: [APPRENTICE, LEADR], bot: true },
+  { id: BOT, name: 'sage bridge', roles: [CREW], bot: true },
 ];
 export const GUILD = '500000000000000001';
-export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER, apprenticeRole: APPRENTICE, leadRole: LEADR };
+export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 /** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
 export const NAME = 'project';
@@ -85,13 +88,13 @@ export const key = (id) => `${NAME}/${id}`;
  * With `markAll` (the default, for the tests of the rules before G13) each `gate add` also marks the new gate as a team vote;
  * the G13 tests pass `markAll: false` and mark gates with `b.mark`. `tool` is the sage state tool (default SAGE), for a test on a changed copy.
  */
-export function setup({ members = MEMBERS, markAll = true, tool = SAGE } = {}) {
+export function setup({ members = MEMBERS, roles = ROLES, markAll = true, tool = SAGE } = {}) {
   const root = realpathSync.native(tempFolder('sage-bot-b3-')); // the folder as the disk spells it, as loadProjects resolves it
   const project = join(root, 'project');
   mkdirSync(project);
   const env = { PATH: process.env.PATH, HOME: join(root, 'home'), SAGE_HOME: join(root, 'home', 'sage') };
   const statePath = join(root, 'state', 'gates.json');
-  const discord = fakeDiscord(members);
+  const discord = fakeDiscord(members, roles);
   const lines = [];
   const b = { root, project, env, discord, lines, now: T0, statePath, sagePath: tool };
   const run = toolOf(b, project);

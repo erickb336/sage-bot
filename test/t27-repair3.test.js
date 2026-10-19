@@ -9,11 +9,14 @@ import { handle, peopleOf } from '../src/handle.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { openGate, step, MINUTE } from '../src/vote.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, clock, openAsk } from '../examples/sample.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const T0 = clock(14, 31);
 const ballot = (by, part, option, at, reason) => ({ type: 'press', by, part, option, at, via: 'discord', ...(reason !== undefined && { reason }) });
-const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.leads).gate, gate);
+const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.ownerId).gate, gate);
 /** `text` as tag characters (U+E0000 + the ASCII code): invisible, and a model reads it as ASCII ("ASCII smuggling"). */
 const tag = (s) => [...s].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 const FAMILY = '👨\u200d👩\u200d👧';
@@ -36,8 +39,8 @@ function bridge(ids, at, refuse, people = PEOPLE) {
 
 /** A team of `n` holders with 32-character names (Discord's longest display name) and one lead, on an ask with these labels and why. */
 function team(n, labelLength, whyLength, options = ['A', 'B', 'C']) {
-  const members = Array.from({ length: n }, (_, i) => ({ id: `${i}`.padStart(18, '7'), name: `Member number ${i}`.padEnd(32, '!'), roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, { apprenticeRole: 'drv', leadRole: 'ld' });
+  const members = Array.from({ length: n }, (_, i) => ({ id: `${i}`.padStart(18, '7'), name: `Member number ${i}`.padEnd(32, '!'), roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: [{ question: 'q'.repeat(300), why: 'why '.repeat(whyLength / 4), recommended: 'A',
     options: Object.fromEntries(options.map((o) => [o, `${o.toLowerCase()} `.repeat(labelLength / 2).trim()])) }] };
   let gate = openGate({ id: 'H', kind: 'batch', parts: [options], askedBy: members[0].id, at: T0 });
@@ -129,12 +132,12 @@ test('F-T27-28: handle never rejects for a refused reply, also when nothing was 
   b.now += MINUTE;
   const cases = [
     ['unknown gate', MAYA, 'press:B77:0:0', undefined, false, null],
-    ['cancel on the confirm', JON, 'cancel:B9', undefined, true, b.gate('B9')],
-    ['the end confirm', JON, 'end:B9', undefined, false, b.gate('B9')],
+    ['cancel on the confirm', ERICK, 'cancel:B9', undefined, true, b.gate('B9')],
+    ['the end confirm', ERICK, 'end:B9', undefined, false, b.gate('B9')],
     ['a forged option', MAYA, 'press:B9:0:9', undefined, false, b.gate('B9')],
     ['a forged part', MAYA, 'press:B9:7:0', undefined, false, b.gate('B9')],
     ['a reason with no fields', MAYA, 'reason:B9:0:0', undefined, false, b.gate('B9')],
-    ['a cancel from the card, not the confirm', JON, 'cancel:B9', undefined, false, b.gate('B9')],
+    ['a cancel from the card, not the confirm', ERICK, 'cancel:B9', undefined, false, b.gate('B9')],
   ];
   for (const [label, user, customId, fields, ephemeral, gate] of cases) {
     const { replies, ...out } = await b.press(user, customId, fields, ephemeral);
@@ -156,7 +159,7 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
   const b = bridge(['B9'], T0);
   b.send('B9', { type: 'tick', at: clock(15, 1) });
   b.now = clock(15, 2);
-  const { replies } = await b.press(JON, 'cancel:B9', undefined, true);
+  const { replies } = await b.press(ERICK, 'cancel:B9', undefined, true);
   assert.equal(replies[0].content, 'The vote on B9 ended at <t:1791126060:t> meanwhile. Nothing to cancel.');
   const ask = { ...ASKS.B7, parts: [{ ...ASKS.B7.parts[2], options: { A: 'reports-2026-10-04-quarterly-summary.csv', B: 'The report title and the date' } }] };
   const gate = openGate({ id: 'B7', kind: 'batch', parts: [['A', 'B']], askedBy: ERICK, at: T0 });
@@ -165,7 +168,7 @@ test('F-T27-29: Cancel after the vote ended says so; the form title drops its pr
   assert.equal(reasonModal(openAsk('B7', T0), ASKS.B7, 0, 2).title, 'C. Visible columns, plus an "Include hidden…');
   // A member with a visibly empty name shows as "member …6789" everywhere; the raw id shows nowhere.
   const id = '123456789012346789';
-  const members = [{ id, name: '\u200d', roles: [CONFIG.apprenticeRole, CONFIG.leadRole] }, ...MEMBERS.filter((m) => m.id !== ERICK)];
+  const members = [{ id, name: '\u200d', roles: ['sage-crew', 'ld'] }, ...MEMBERS.filter((m) => m.id !== ERICK)];
   const people = peopleOf(members, CONFIG);
   const b9 = apply(openGate({ id: 'B9', kind: 'batch', parts: [['A', 'B'], ['A', 'B']], askedBy: id, at: T0 }), people,
     ballot(id, 0, 'A', T0 + MINUTE, 'yes'), ballot(MAYA, 0, 'A', T0 + MINUTE));

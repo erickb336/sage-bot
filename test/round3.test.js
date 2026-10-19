@@ -13,7 +13,7 @@ const tick = (min) => ({ type: 'tick', at: T0 + min * MINUTE });
 const tiebreak = (by, option, min, part = 0) => ({ type: 'tiebreak', by, part, option, at: T0 + min * MINUTE, via: 'discord' });
 
 /** Apply events in order; return the last gate and all effects. */
-function play(gate, events, holders, leads = [LEA]) {
+function play(gate, events, holders, leads = LEA) {
   const effects = [];
   for (const event of events) {
     const out = step(gate, event, holders, leads);
@@ -23,15 +23,15 @@ function play(gate, events, holders, leads = [LEA]) {
   return { gate, effects };
 }
 
-test('F-T1-41: holders and leads may be a Set or a Map\'s keys; a string or a number counts as empty', () => {
+test('F-T1-41: holders may be a Set or a Map\'s keys; a string or a number counts as empty', () => {
   const answer = press(MAYA, 'A', 0);
   assert.equal(step(single(), answer, new Set([MAYA]), new Set()).gate.outcome.status, 'answered');
   assert.equal(step(single(), answer, new Map([[MAYA, 'role']]).keys(), []).gate.outcome.status, 'answered');
   for (const odd of [MAYA, 42, { [MAYA]: true }, undefined]) {
     assert.deepEqual(step(single(), answer, odd, []).effects, [{ type: 'ignored', by: MAYA, why: 'not-holder' }], String(odd));
   }
-  // Leads as a Set: a sage-lead who is a holder ends the vote.
-  const out = step(batch(), { type: 'end', by: LEA, at: T0, via: 'discord' }, new Set([MAYA, LEA]), new Set([LEA]));
+  // The owner's id ends the vote (T232: an id, not a set of ids).
+  const out = step(batch(), { type: 'end', by: LEA, at: T0, via: 'discord' }, new Set([MAYA, LEA]), LEA);
   assert.equal(out.gate.phase, 'tied');
 });
 
@@ -53,13 +53,13 @@ test('F-T1-43: 10,000 voters on one part (holders as a Set) finish without error
   let gate = batch([['A', 'B']]);
   const first = gate;
   const snapshot = JSON.stringify(first);
-  voters.forEach((by, i) => { gate = step(gate, ballot(by, i % 3 ? 'A' : 'B', i / 1000), holders, [LEA]).gate; });
-  const out = step(gate, tick(30), holders, [LEA]);
+  voters.forEach((by, i) => { gate = step(gate, ballot(by, i % 3 ? 'A' : 'B', i / 1000), holders, LEA).gate; });
+  const out = step(gate, tick(30), holders, LEA);
   assert.deepEqual(out.effects.slice(1), [{ type: 'decided', part: 0, option: 'A', how: 'votes' }, { type: 'closed', outcome: { status: 'decided' } }]);
   assert.equal(JSON.stringify(first), snapshot);
   // An earlier gate still gives its own result: with only the first voter (B), B wins.
-  const early = step(batch([['A', 'B']]), ballot(voters[0], 'B', 0), holders, [LEA]).gate;
-  assert.equal(step(early, tick(30), holders, [LEA]).gate.parts[0].outcome.option, 'B');
+  const early = step(batch([['A', 'B']]), ballot(voters[0], 'B', 0), holders, LEA).gate;
+  assert.equal(step(early, tick(30), holders, LEA).gate.parts[0].outcome.option, 'B');
 });
 
 test('F-T1-44: while a part is tied the batch stays open; it closes only when every part is decided', () => {
@@ -76,10 +76,10 @@ test('F-T1-47: a tie-break may choose only a tied leader of the part', () => {
   const votes = [ballot(MAYA, 'A', 0), ballot(JON, 'A', 1), ballot(ANA, 'B', 2), ballot(SAM, 'B', 3), ballot(ERICK, 'C', 4), tick(30)];
   const tied = play(batch(), votes, holders).gate;
   assert.deepEqual(tied.parts[0].tied, ['A', 'B']);
-  const refused = step(tied, tiebreak(LEA, 'C', 31), holders, [LEA]);
+  const refused = step(tied, tiebreak(LEA, 'C', 31), holders, LEA);
   assert.deepEqual(refused.effects, [{ type: 'ignored', by: LEA, why: 'not-tied-option' }]);
   assert.equal(refused.gate, tied);
-  assert.deepEqual(step(tied, tiebreak(LEA, 'B', 31), holders, [LEA]).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 31).at });
+  assert.deepEqual(step(tied, tiebreak(LEA, 'B', 31), holders, LEA).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 31).at });
   // With 0 votes, every option is tied.
   const empty = play(batch(), [tick(30), tiebreak(LEA, 'C', 31)], holders).gate;
   assert.deepEqual(empty.parts[0].outcome, { status: 'decided', option: 'C', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'C', 31).at });

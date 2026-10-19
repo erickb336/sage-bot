@@ -6,15 +6,22 @@
 
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
-**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [The sage-lead log and the kill switch](#the-sage-lead-log-and-the-kill-switch)
+**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [Who is who](#who-is-who) · [The audit log and the kill switch](#the-audit-log-and-the-kill-switch)
 
 ## The checklist
 
-- [ ] **1. Make a Discord app only for sage-bot.** In the Discord Developer Portal, make a new application with a bot user. Turn on the **Server Members** intent. Leave the **Message Content** intent off. Invite it to your server with the `bot` and `applications.commands` scopes. On the Bot page, choose **Reset Token**, and keep the token only for step 5.
-  *Why:* the bridge reads the members' roles to know who may vote, and it adds the `/sage` command to your server at each start. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
-- [ ] **2. Make two roles: `sage-apprentice` and `sage-lead`.** Make both roles **mentionable**. Give each person who votes exactly one of them: sage-lead to the people who also break ties, sage-apprentice to everyone else.
-  *Why:* a new card pings @sage-apprentice and @sage-lead, and a tie pings @sage-lead. If a role is not mentionable, its ping notifies nobody. A sage-lead has every right of an apprentice, so a sage-lead needs no second role.
-- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the 6 Discord ids: the server (`guildId`), the parent channel (`channelId`), the #ask-sage channel (`askChannelId`), the owner (`ownerId`) and the two roles (`apprenticeRole`, `leadRole`). At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. You can also leave both ids out and register the home channel with the script (see [Channels](#channels)). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
+- [ ] **1. Make a Discord app only for sage-bot, with your own Discord account.** In the Discord Developer Portal, make a new application with a bot user. Make it with your own account, not in a Developer Team, so that sage-bot knows you as its owner (step 3).
+  - On the **Installation** page, keep only **Guild Install**: turn off **User Install**.
+  - On the **Bot** page, turn off **Public Bot**, so that only you can add it to a server.
+  - Turn on the **Server Members** intent. Leave the **Message Content** intent off.
+  - Invite it to your server with the `bot` and `applications.commands` scopes.
+  - On the Bot page, choose **Reset Token**, and keep the token only for step 5.
+
+  *Why:* the bridge reads the members' roles to know who is in the crew, and it adds the `/sage` command to your server at each start. Each person runs their own sage-bot, with their own app, on their own Mac. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
+- [ ] **2. Make one role named exactly `sage-crew`.** Make it **mentionable**. Give it to each person who asks sage-bot and votes. If the server already has a `sage-crew` role (another person's sage-bot uses it), use that role: every sage-bot in a server shares it. You, the owner, need no role: sage-bot knows you by your user id (see [Who is who](#who-is-who)). To answer and vote on the cards in Discord, give yourself the role too.
+  *Why:* sage-bot finds the crew by the role's name, at each start and each time a role changes, so the config holds no role id. A new card pings @sage-crew; a tie pings only you. If the role is not mentionable, its ping notifies nobody.
+  **Warning:** anyone with the **Manage Roles** permission can give the role, or make another role with the same name. Give that permission only to people you trust. When two roles have the name, both count, and sage-bot posts one warning in #sage-audit.
+- [ ] **3. Fill in the config.** Make a text channel `#ask-sage`. Copy the example, then put in the Discord ids: the server (`guildId`), the parent channel (`channelId`) and the #ask-sage channel (`askChannelId`). The example has no `ownerId`: the owner of the Discord app is the owner. Add `ownerId` with your own Discord user id only when a Developer Team owns the app (see [Who is who](#who-is-who)). The config has no role id. At its first start the bridge makes the [channel registry](#channels) from `channelId` (the home channel of the votes) and `askChannelId`; after that, register more channels with `scripts/channels.mjs`. You can also leave both ids out and register the home channel with the script (see [Channels](#channels)). Also set `project` (the sage project folder), `sagePath` (the sage plugin's `sage.mjs`) and `statePath` (the bridge's gate file).
   Then set `projects`, every project of the bridge: it posts the cards of each one, and `/sage` reads each one. Put the folder of `project` in it too, with a name. Each one has a `name` (lower-case letters, digits and dashes), its `project` folder, and optionally its own `sagePath`, its `files` and its `repo`. `files` lists the images and PDFs that `/sage files` may attach, as paths in the project such as `docs/*.svg` (`*` only in the file name; .png, .jpg, .svg or .pdf only). `repo` (`https://github.com/<owner>/<name>`) makes the pull request of a task a link. Without `projects`, the bridge works only for `project`, with no files. Remove the example's sample entry, or fill it in.
   Keep the folder of `statePath` at mode 0700 (only you can read and write it).
   *Why:* the bridge reads only this file. It refuses a gate file, team votes file or session file in a folder that other users can write, unless the folder is sticky. To copy an id, turn on Developer Mode in Discord, then right-click the item.
@@ -30,23 +37,22 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | Who | Permissions in the parent channel |
   | --- | --- |
   | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads, Create Private Threads and Use Application Commands. |
-  | sage-apprentice | Deny the same five permissions. |
-  | sage-lead | Deny the same five permissions. |
+  | sage-crew | Deny the same five permissions. |
   | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
 
   **Do not let the Discord plugin watch the parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type and use `/sage` in the parent channel and every session thread, so they must not.
-  *Why:* a session thread holds the votes and sage-bot's posts only, so nobody types in it; the buttons and the reason forms work without send permissions. `/sage` is blocked in the parent channel on purpose: a `/sage board` there would put a public answer between the vote cards. Threads take their permissions from the parent channel, so this one deny covers every session thread. The team asks in #ask-sage (step 4b). A sage-lead types `/sage stop` in #ask-sage or in any other channel where they can use slash commands. In the parent channel the deny hides it, as it hides every `/sage`. The "End vote now" button is not a slash command, so the deny does not affect it. A mention cannot open a thread, because nobody can send a message. The bridge needs Manage Threads to lock and unlock the threads.
+  *Why:* a session thread holds the votes and sage-bot's posts only, so nobody types in it; the buttons and the reason forms work without send permissions. `/sage` is blocked in the parent channel on purpose: a `/sage board` there would put a public answer between the vote cards. Threads take their permissions from the parent channel, so this one deny covers every session thread. The team asks in #ask-sage (step 4b). You type `/sage stop` in #ask-sage or in any other channel where you can use slash commands. In the parent channel the deny hides it, as it hides every `/sage`. The "End vote now" button is not a slash command, so the deny does not affect it. A mention cannot open a thread, because nobody can send a message. The bridge needs Manage Threads to lock and unlock the threads.
 - [ ] **4b. Set the permissions of #ask-sage**, and of each channel that you register later.
 
   | Who | Permissions in #ask-sage |
   | --- | --- |
   | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
-  | sage-apprentice and sage-lead | Allow Send Messages and Use Application Commands. |
+  | sage-crew | Allow Send Messages and Use Application Commands. |
   | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
 
   **Do not let the Discord plugin watch #ask-sage.** If it does, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts.
-  *Why:* the team asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. A sage-lead or the owner types `/sage stop` here. A sage-apprentice cannot stop the link. sage-bot ignores a member with neither role.
+  *Why:* the crew asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. You and the crew type `/sage stop` here: it turns the link off at once. Only you turn it on again, at the terminal. sage-bot ignores everyone else. If you do not hold sage-crew, allow yourself Send Messages and Use Application Commands here too.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
@@ -75,6 +81,12 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   ```sh
   node scripts/bridge.mjs ~/.config/sage-bot/config.json
   ```
+
+  Three lines of the log at the start need a fix from you; the bridge runs with each of them:
+
+  - "no role of the server is named sage-crew": make a role named exactly `sage-crew` (the case counts) in the server, and give it to each crew member.
+  - "the config has apprenticeRole" (or `leadRole`, `driverRole`): remove those keys from the config. They do nothing now (see [Who is who](#who-is-who)).
+  - "the config's ownerId … is not the owner of the Discord application": check that `ownerId` is your own Discord user id. sage-bot takes the config's id as the owner.
 
   When it works, stop it with Ctrl+C. Then write its launchd agent, so that it starts at each login and again after it stops:
 
@@ -112,7 +124,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 
   While it changes the list, `scripts/vote.mjs` holds a lock file next to the team votes file. If it says that another sage-bot run holds the lock, wait and run it again. If no sage-bot run is running, remove the lock file that the message names.
 
-  Within a minute, a card appears in the session thread. Press an option. The card shows your answer, and sage gets it in the logbook.
+  Within a minute, a card appears in the session thread. Ask a crew member to press an option. To press it yourself, first give your own account the `sage-crew` role: without it, sage-bot answers that only a sage-crew member answers or votes, and the press does not count. The card shows the answer, and sage gets it in the logbook.
 
 ## What the first live trial checks first
 
@@ -159,15 +171,34 @@ node scripts/channels.mjs list                                       # print the
 - When the registry file is broken (for example bad JSON, a wrong mode or a symlink), the bridge and the script stop, and the message gives the command that repairs it. For a wrong mode, it is `chmod 600 <file>`. For everything else, move the file aside with `mv <file> <file>.bad`, then register the home channel again with `register <channel id> <project> --home`, and then each other channel.
 - Then start the bridge again. At start it checks its permissions in each registered channel and logs each missing one, by name, in `~/Library/Logs/sage-bot.log`.
 
-**A sage-lead can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". A sage-lead's press of the first removes the channel, and the terminal log gives the sage-lead's name and id. The confirm works for 10 minutes. A sage-apprentice cannot unregister a channel. Nobody can register a channel from Discord.
+**You can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". Your press of the first removes the channel, and the terminal log gives your name and id. The confirm works for 10 minutes. The crew cannot unregister a channel. Nobody can register a channel from Discord.
 
-sage-bot ignores a member with neither sage role: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the two roles.
+sage-bot ignores everyone who is neither in the crew nor you: a `/sage` command, a mention or a button press gets no reply. For a `/sage` command or a button, Discord itself then shows that person "The application did not respond" or "This interaction failed", only to them. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the sage-crew role and you.
 
-## The sage-lead log and the kill switch
+## Who is who
 
-**#sage-audit.** Make a text channel `#sage-audit` that only the sage-leads and you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each line of the sage-lead log there, which pings nobody. Without `auditChannelId`, the bridge keeps the log only and says so at start.
+sage-bot knows two kinds of people. It reads both at each start, in one place (`src/crew.js`).
 
-The sage-lead log is `<statePath>.leads.jsonl`, or `auditPath` in the config. Its folder must be 0700 and outside every project, and the file is 0600. The kill switch is the flag file `<statePath>.leads-off`, or `killPath` in the config; a flag that the bridge cannot check counts as set. The [reference](reference.md#mention-threads) tells what the hash chain shows and what it does not.
+| Who | How sage-bot knows them | What they can do |
+| --- | --- | --- |
+| The owner (you) | Your Discord user id: `ownerId` in the config, else the owner of the Discord app of step 1. Never a role. | Answer at the terminal (final), end a vote early, break a tie, `/sage stop`, `/sage unregister`, turn the link on again at the terminal, read with `/sage`. |
+| The crew | Every member with a role named exactly `sage-crew` (the case counts). | Answer a single question, vote, read with `/sage` and mentions, `/sage stop` (the emergency stop: at once, with no approval). |
+
+**How sage-bot finds the owner at start:**
+
+1. When the config has `ownerId`, that id is the owner. When the Discord app has another owner, the log says so in one warning line, and sage-bot keeps the config's id.
+2. Else, when the app belongs to your own account, your account is the owner.
+3. Else, the app belongs to a Developer Team, and sage-bot cannot tell which member is the owner. It refuses to start with this line in `~/Library/Logs/sage-bot.log`:
+
+   > the Discord application of sage-bot belongs to a Developer Team, so sage-bot cannot tell who its owner is. Add "ownerId" with your Discord user id to the config, then start sage-bot again. Nothing was started.
+
+**A config from before.** A config with `apprenticeRole`, `leadRole` or the older `driverRole` still starts. The log says that sage-bot no longer reads them, and they do nothing. Remove them, and delete the old `sage-apprentice` and `sage-lead` roles when no other sage-bot uses them. This warning goes away in the next release, and then the keys are only unknown keys.
+
+## The audit log and the kill switch
+
+**#sage-audit.** Make a text channel `#sage-audit` that only you can see, where only sage-bot can post. Put its id in the config as `auditChannelId`. sage-bot posts a copy of each line of the audit log there, which pings nobody, and the warning when two roles are named `sage-crew`. Without `auditChannelId`, the bridge keeps the log only and says so at start.
+
+The audit log is `<statePath>.leads.jsonl`, or `auditPath` in the config. (The file names keep the word "leads" from before.) Its folder must be 0700 and outside every project, and the file is 0600. The kill switch is the flag file `<statePath>.leads-off`, or `killPath` in the config; a flag that the bridge cannot check counts as set. The [reference](reference.md#mention-threads) tells what the hash chain shows and what it does not.
 
 Check and change the link from Discord to sage at the terminal:
 
@@ -176,6 +207,6 @@ Check and change the link from Discord to sage at the terminal:
 node scripts/leads.mjs status    # is the link on or off?
 node scripts/leads.mjs stop      # turn the link off at the terminal
 node scripts/leads.mjs restore   # turn the link on again (only the owner, at the terminal)
-node scripts/leads.mjs verify    # check the hash chain of the sage-lead log; exits 1 at a break
-node scripts/leads.mjs read 20   # print the last 20 lines of the sage-lead log; a line from a break on starts with UNVERIFIED
+node scripts/leads.mjs verify    # check the hash chain of the audit log; exits 1 at a break
+node scripts/leads.mjs read 20   # print the last 20 lines of the audit log; a line from a break on starts with UNVERIFIED
 ```

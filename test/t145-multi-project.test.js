@@ -80,7 +80,7 @@ test('F-T145-1, F-T145-L2: a returned card whose message is gone (10008) logs on
   assert.equal(shutOf(b), undefined);
   assert.deepEqual(b.lines.filter((l) => l.startsWith('Discord refused the edit of beta/G1')),
     ['Discord refused the edit of beta/G1: code 10008, status 404: Unknown Message. Discord can never take this edit, so the bridge stops trying it']);
-  assert.equal(b.discord.posts.slice(posts).filter((p) => /^<@&\d+> <@&\d+> reminder: beta\/G1 waits/.test(p.content ?? '')).length, 1);
+  assert.equal(b.discord.posts.slice(posts).filter((p) => /^<@&\d+> reminder: beta\/G1 waits/.test(p.content ?? '')).length, 1);
 });
 
 test('F-T145-1: a redraw that Discord refuses with 50001 logs once and backs off (the back-off of F-T45-3); a 10008 logs once and is not tried again', async () => {
@@ -93,7 +93,7 @@ test('F-T145-1: a redraw that Discord refuses with 50001 logs once and backs off
     const real = b.discord.edit;
     let n = 0;
     b.discord.edit = (target, m, payload) => (m === id ? (n++, refuse(code, message)) : real(target, m, payload));
-    members[1].roles = []; // Maya loses the sage-apprentice role: each open card is redrawn
+    members[1].roles = []; // Maya loses the sage-crew role: each open card is redrawn
     for (let i = 0; i < 10; i++) { await b.bridge.loop(); b.now += LOOP; }
     assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the edit of project/G1')).length, 1, `${code}: ${b.lines.join('\n')}`);
     assert.equal(n, tries, String(code));
@@ -229,7 +229,7 @@ test('F-T145-L3: a sage-lead log folder inside a project folder, written in anot
   const b = setup({ markAll: false });
   const projects = loadProjects({ project: b.project, sagePath: SAGE, projects: [{ name: 'project', project: b.project }] });
   const upper = join(b.root, 'PROJECT', 'logs'); // the same folder on this Mac's file system, which ignores letter case
-  assert.throws(() => openLog(join(upper, 'leads.jsonl'), projects), { message: `the sage-lead log folder ${upper} is in the project folder of project: a session there could change it. Put auditPath outside every project. Nothing was started.` });
+  assert.throws(() => openLog(join(upper, 'leads.jsonl'), projects), { message: `the audit log folder ${upper} is in the project folder of project: a session there could change it. Put auditPath outside every project. Nothing was started.` });
   const outside = join(b.root, 'logs');
   assert.equal(openLog(join(outside, 'leads.jsonl'), projects).broken, null);
 });

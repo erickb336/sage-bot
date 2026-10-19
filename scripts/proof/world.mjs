@@ -96,8 +96,8 @@ function fill(root, tag, tempRoot) {
   for (const d of [sessionFolder, w.sessionTmp, w.other.folder, w.other.tmp]) mkdirSync(d, { recursive: true, mode: 0o700 });
   file(join(w.other.folder, 'README.md'), 'sample folder of the other session\n');
   file(w.transcript, `${JSON.stringify({ type: 'user', text: sample('transcript', tag) })}\n`);
-  // The bridge's files (F-T134-2): sample config, gate file, sage-lead log, kill flag, spool and votes.
-  file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001', apprenticeRole: '300000000000000001', leadRole: '300000000000000002' }, null, 2)}\n`);
+  // The bridge's files (F-T134-2): sample config, gate file, audit log, kill flag, spool and votes.
+  file(w.config, `${JSON.stringify({ statePath, channelId: '400000000000000001', ownerId: '100000000000000001' }, null, 2)}\n`);
   file(statePath, `${JSON.stringify({ gates: [], sample: sample('gates', tag) })}\n`); // a sample value: a Read that works shows it (F-T165-22)
   file(`${statePath}.leads.jsonl`, '{"at":0,"event":"sample"}\n');
   file(`${statePath}.leads-off`, 'off\n');

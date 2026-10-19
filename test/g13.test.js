@@ -97,7 +97,7 @@ test('G13, G45 A: the team votes file round-trips with folders, is 0600, and a f
   assert.deepEqual([...loadVotes(path)], [['beta/G2', '/b'], ['project/G2', '/p'], ['project/G9', null], ['project/G10', '/p']]);
   assert.equal(readFileSync(path, 'utf8'), '{"beta/G2":"/b","project/G2":"/p","project/G9":null,"project/G10":"/p"}');
   // A list is the file before G45 A: bare gate ids (before T132) and keys. A read refuses it; migrateMarks writes it once as an object,
-  // under the lock of vote.mjs, also the sage-leads-only file: a bare id is of the own project, and each key takes the folder that its name
+  // under the lock of vote.mjs, also the crew recommendations file: a bare id is of the own project, and each key takes the folder that its name
   // names now, or null for a name that is not listed (F-T132-1, F-T132-21).
   writeFileSync(path, '["G2","beta/G9","gone/G3"]', { mode: 0o600 });
   writeFileSync(`${path}.leads`, '["G4"]', { mode: 0o600 });

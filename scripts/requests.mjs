@@ -1,4 +1,4 @@
-// Erick's side of the sage-leads' requests at the terminal (T72):
+// The owner's side of the crew's requests at the terminal (T72):
 //   node scripts/requests.mjs [--config <config.json>] list                                  the requests, waiting first
 //   node scripts/requests.mjs [--config <config.json>] show <RQ id>                          every field of one request
 //   node scripts/requests.mjs [--config <config.json>] approve <RQ id> [--size small|large]  adds its sage task (large by default)

@@ -8,10 +8,12 @@ import { handle, peopleOf } from '../src/handle.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { openGate, step, MINUTE } from '../src/vote.js';
 import { ASKS, MAYA, clock, openAsk } from '../examples/sample.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const T0 = clock(14, 31);
-const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
-const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.leads).gate, gate);
+const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.ownerId).gate, gate);
 const tag = (s) => [...s].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 const flag = (code) => `\u{1F3F4}${tag(code)}\u{E007F}`;
 const unescaped = (s) => s.replaceAll('\\', '');
@@ -20,8 +22,8 @@ const WHOLE = ['👨\u200d👩\u200d👧', 'می\u200cخواهم', flag('gbsct')
   'José Müller-Łukasz', 'محمد عبدالله', 'हिन्दी क्\u200dष सिंह', 'ภาษาไทย ที่', '김민준 한국어', '山田太郎 ひらがな が゙', '张伟 中文'];
 /** One batch of one part with these members (32-character names at most) and a reason from each; returns the card's embed. */
 function build(names, reasons, { parts = 1 } = {}) {
-  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, ROLES);
+  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const part = { question: 'Q?', why: 'because', recommended: 'A', options: { A: 'a', B: 'b' } };
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: Array.from({ length: parts }, () => part) };
   let gate = openGate({ id: 'B', kind: 'batch', parts: Array.from({ length: parts }, () => ['A', 'B']), askedBy: members[0].id, at: T0 });
@@ -160,7 +162,7 @@ test('F-T27-36: a tag sequence that is not one of the three flags leaves the bla
 });
 
 test('F-T27-37: handle returns stored: true only when the event changed the gate, also beside replyError', async () => {
-  const people = peopleOf([{ id: MAYA, name: 'Maya', roles: ['drv', 'ld'] }, { id: 'sample-sam', name: 'Sam', roles: [] }], ROLES);
+  const people = peopleOf([{ id: MAYA, name: 'Maya', roles: ['sage-crew', 'ld'] }, { id: 'sample-sam', name: 'Sam', roles: [] }], { ownerId: MAYA });
   const gate = openAsk('B9', T0);
   const gates = new Map([['B9', { gate, ask: ASKS.B9 }]]);
   const ctx = { gates, people, clock: () => T0 + MINUTE };

@@ -8,11 +8,11 @@ import {
   TextInputBuilder, TextInputStyle, embedLength, escapeMarkdown,
 } from 'discord.js';
 import { ballotsOf, REASON_MAX } from './vote.js';
+import { CREW } from './crew.js';
 
-/** The people who may answer and vote: a member with either role (T70). */
-const HOLDERS = 'sage-apprentice or sage-lead';
-export const LEAD = 'sage-lead';
-/** The owner who decides a sage-leads-only question (T73). The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
+/** The people who may answer and vote: the crew (T232). */
+const HOLDERS = `${CREW} member`;
+/** The owner, who ends a vote, breaks a tie and decides at the terminal. The copy rule of G18 names the owner "Erick", never a member name or a fallback. */
 export const OWNER = 'Erick';
 /** On every message: no mention pings anyone, whatever a reason or a name holds. */
 export const NO_MENTIONS = { parse: [] };
@@ -110,8 +110,8 @@ const who = (id, names) => safe(names.get(id) ?? '') || (/^\d{4,}$/.test(id) ? `
 /** A name in a list of people, in bold: `safe` escapes every `*`, so a name such as "Maya, Erick, Jon" stays one bold name (F-T37-1). */
 const bold = (id, names) => `**${who(id, names)}**`;
 const label = (p, key) => p.options[key] ?? key;
-/** The sage-lead who acted, "Jon (sage-lead)", or "a sage-lead" when the gate does not know (a gate saved before T39). */
-const lead = (id, names) => id ? `${who(id, names)} (${LEAD})` : `a ${LEAD}`;
+/** The person who ended a vote or broke a tie, or the owner when the gate does not know (a gate saved before T39). */
+const actor = (id, names) => (id ? who(id, names) : OWNER);
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** `items` joined with ', ' within `cap` characters, the rest as "and N more"; the first item always shows. */
 function list(items, cap) {
@@ -220,7 +220,7 @@ const optionLine = (p, key, extra, cap) => `**${key}.** ${cutAtWord(label(p, key
 function single(gate, ask, names, shut) {
   const [p] = ask.parts;
   const o = p.final ? { status: 'final', option: p.final.option } : gate.outcome;
-  // A sage-leads-only question (T73): the sage-leads recommend, and the owner decides at the terminal (G10).
+  // A crew-recommendation question (T73): the crew recommends, and the owner decides at the terminal (G10).
   const owner = ask.leads ? OWNER : who(gate.askedBy, names);
   const build = ({ why, label: cap, question }) => ({
     title: cut(`${ask.leads ? `Recommend for ${owner}: ` : ''}Question ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
@@ -229,11 +229,11 @@ function single(gate, ask, names, shut) {
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first ${LEAD} answer is the sage-leads' recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
-        `**Who can answer:** every ${LEAD}`]
+      ...(shut ? [SHUT] : ask.leads ? [`**Rule:** the first answer is the crew's recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+        `**Who can answer:** every ${HOLDERS}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
-        : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${lead(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${owner} decides at the terminal.**`]
+        : o.status === 'answered' && ask.leads ? ['', `**Recommended by ${who(o.by, names)} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. ${owner} decides at the terminal.**`]
         : o.status === 'answered' ? ['', `**Answered by ${who(o.by, names)}${o.via === 'terminal' ? ' (terminal)' : ''} at ${stamp(gate.lastAt)}: ${o.option}. ${cutAtWord(label(p, o.option), cap)}. Final.**`]
         : o.status === 'withdrawn' ? ['', `**Withdrawn by ${owner} at ${stamp(gate.lastAt)}.** Nothing to answer.`] : []),
     ].join('\n'),
@@ -267,12 +267,12 @@ function batch(gate, ask, holders, names, shut) {
     const o = part.outcome;
     const state = withdrawn ? ''
       : p.final ? finalLine(p.final, who(p.final.by, names))
-      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${lead(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
-      : !voting ? `**Tied: ${part.tied.join(', ')}.**${shut ? '' : ` A ${LEAD} breaks the tie. sage-bot reminds @${LEAD} every 2 h.`}`
+      : o.status === 'decided' ? `**${tiedParts ? 'Provisional' : 'Decided'}: ${o.option}** · ${o.how === 'votes' ? `${counts.get(o.option).length} of ${plural(holders.size, 'vote')}` : `tie broken by ${actor(o.by, names)}${o.at === undefined ? '' : ` at ${stamp(o.at)}`}`}`
+      : !voting ? `**Tied: ${part.tied.join(', ')}.**${shut ? '' : ` ${OWNER} breaks the tie. sage-bot reminds ${OWNER} every 2 h.`}`
       : top === 0 ? 'No votes yet' : tied.length === 1 ? `Ahead: ${tied[0]}` : 'Even so far';
     const breakable = !voting && !withdrawn && !p.final && o.status === 'open';
     rows.push(new ActionRowBuilder().addComponents(part.options.map((k, j) => breakable
-      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${LEAD} only)`, ButtonStyle.Danger) : null)
+      ? (part.tied.includes(k) ? button(customId('tiebreak', gate.id, i, j), `Part ${n}, break the tie: ${k} (${OWNER} only)`, ButtonStyle.Danger) : null)
       : button(customId('press', gate.id, i, j), `Part ${n}, ${k}: ${label(p, k)}`, k === p.recommended ? ButtonStyle.Primary : ButtonStyle.Secondary,
         { chosen: p.final ? p.final.option === k : o.status === 'decided' && o.option === k, disabled: !voting || Boolean(p.final) })).filter(Boolean)));
     /** The field of the part under the caps of a plan: the voter lists, the why, the labels and the question shrink; the keys and the counts never. */
@@ -289,17 +289,17 @@ function batch(gate, ask, holders, names, shut) {
       };
     };
   });
-  if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${LEAD} only)`, ButtonStyle.Danger)));
+  if (voting) rows.push(new ActionRowBuilder().addComponents(button(customId('end', gate.id), `End vote now (${OWNER} only)`, ButtonStyle.Danger)));
   const ended = gate.votingEndedAt === null ? ''
-    : gate.votingEndedAt < gate.endsAt ? `Ended early by ${lead(gate.endedBy, names)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
+    : gate.votingEndedAt < gate.endsAt ? `Ended early by ${actor(gate.endedBy, names)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
     : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
   const description = shut && !withdrawn ? SHUT : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
     : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote on each part; change your vote until the vote ends. The work on the task goes on. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
-    : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for a ${LEAD}. ` +
+    : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for ${OWNER}. ` +
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
-  const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for a ${LEAD} · ` +
+  const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for ${OWNER} · ` +
     `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
@@ -328,7 +328,7 @@ export function reasonModal(gate, ask, part, index) {
 }
 
 /**
- * The private confirm before a sage-lead ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters.
+ * The private confirm before the owner ends a batch vote: what each part gets with the votes so far, in Discord's 2000 characters.
  * A part with the owner's final answer from the terminal (`ask.parts[i].final`) shows that answer: the end does not change it (F-T56-1),
  * cut to FINAL_IN_CONFIRM characters, so that 4 long answers still fit (F-T206-1).
  */
@@ -338,9 +338,9 @@ export function confirmEnd(gate, { holders, names }, ask) {
     const { top, tied } = leaders(counts);
     const final = ask?.parts[i].final;
     return final ? `Part ${i + 1} has the final answer from the terminal: ${cut(final.text, FINAL_IN_CONFIRM)}.`
-      : top === 0 ? `Part ${i + 1} has no votes. It stays open until a ${LEAD} breaks the tie.`
+      : top === 0 ? `Part ${i + 1} has no votes. It stays open until you break the tie.`
       : tied.length === 1 ? `Part ${i + 1} goes to ${tied[0]}: ${top} of ${plural(holders.size, 'vote')} (${list(counts.get(tied[0]).map((id) => bold(id, names)), cap)}).`
-      : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until a ${LEAD} breaks the tie.`;
+      : `Part ${i + 1} is tied ${tied.join(', ')} at ${plural(top, 'vote')} each. It stays open until you break the tie.`;
   }), 'Nobody can vote after this.'].join('\n');
   // A team of 2 to 5 always fits whole; for a far larger team the voter lists shrink to "and N more", the overshoot spread over the parts (F-T27-36).
   let content = text(Infinity);
@@ -362,9 +362,10 @@ const NOTES = {
   'bad-event': () => 'This press is not one I understand. Nothing changed.',
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
-  'leads-only': () => `Only a ${LEAD} can answer this. ${OWNER} decides.`,
-  'not-lead': () => `Only a ${LEAD} can do this. Your votes on the parts count like everyone's.`,
-  'lead-needs-discord': () => `A ${LEAD} action works only here in Discord, not at the terminal.`,
+  // The owner without the crew role: the crew answers and votes, the owner decides at the terminal or with the owner's buttons.
+  'not-holder': () => `Only a ${HOLDERS} answers or votes here. To vote, give yourself the ${CREW} role. Your answer at the terminal is final.`,
+  'not-owner': () => `Only ${OWNER} can do this: ask ${OWNER}. Your votes on the parts count like everyone's.`,
+  'owner-needs-discord': () => 'Ending a vote or breaking a tie works only here in Discord, not at the terminal.',
   'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,
   'unknown-option': () => 'This option is not on the card. Nothing changed.',
   'unknown-part': () => 'This part is not on the card. Nothing changed.',
@@ -374,8 +375,8 @@ const NOTES = {
   // A reason form sent after the vote ended: the press before it counts, only the reason is too late (F-T42-1).
   'late-reason': (g) => `The vote on ${g.id} ended at ${stamp(g.votingEndedAt)}. Your vote counts; your reason came after the end, so it is not on the card.`,
   full: () => 'This part already has the most voters it can count. Your press did not count.',
-  // On a sage-leads-only card (T73) every press is a recommendation, also the owner's own: the owner decides only at the terminal.
-  closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${lead(g.outcome.by, names)}: ${g.outcome.option}. `
+  // On a crew-recommendation card (T73) every press is a recommendation: the owner decides only at the terminal.
+  closed: (g, names, ask) => g.outcome.status === 'answered' && ask?.leads ? `Already recommended by ${who(g.outcome.by, names)}: ${g.outcome.option}. `
       + `${label(ask.parts[0], g.outcome.option)}. A recommendation only; ${OWNER} decides at the terminal. Your press did not count.`
     : g.outcome.status === 'answered' ? `Already answered by ${who(g.outcome.by, names)}: ${g.outcome.option}`
     : g.outcome.status === 'withdrawn' ? `${g.id} was withdrawn by ${ask?.leads ? OWNER : who(g.askedBy, names)}. Nothing to answer.`

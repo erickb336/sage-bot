@@ -6,17 +6,19 @@ import { readFileSync } from 'node:fs';
 import { card, safe } from '../src/cards.js';
 import { peopleOf } from '../src/handle.js';
 import { openGate, step } from '../src/vote.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const T0 = Date.UTC(2026, 9, 4, 14, 31);
-const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
 const STEM = '\u{1D165}'; // MUSICAL SYMBOL COMBINING STEM, a spacing mark (Mc)
 /** One batch of one part with these members and a reason from each; returns the card's embed. */
 function build(names, reasons) {
-  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, ROLES);
+  const members = names.map((name, i) => ({ id: `${i}`.padStart(18, '0'), name, roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: [{ question: 'Q?', why: 'because', recommended: 'A', options: { A: 'a', B: 'b' } }] };
   let gate = openGate({ id: 'B', kind: 'batch', parts: [['A', 'B']], askedBy: members[0].id, at: T0 });
-  members.forEach((m, k) => { gate = step(gate, { type: 'press', by: m.id, part: 0, option: 'A', at: T0 + (k + 1) * 1000, via: 'discord', ...(reasons[k] !== undefined && { reason: reasons[k] }) }, people.holders, people.leads).gate; });
+  members.forEach((m, k) => { gate = step(gate, { type: 'press', by: m.id, part: 0, option: 'A', at: T0 + (k + 1) * 1000, via: 'discord', ...(reasons[k] !== undefined && { reason: reasons[k] }) }, people.holders, people.ownerId).gate; });
   return card(gate, ask, people).embeds[0];
 }
 

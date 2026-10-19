@@ -19,7 +19,7 @@ const json = (gate) => JSON.parse(JSON.stringify(gate));
 function play(gate, events, holders = HOLDERS) {
   const effects = [];
   for (const event of events) {
-    const out = step(gate, event, holders, [LEA]);
+    const out = step(gate, event, holders, LEA);
     gate = out.gate;
     effects.push(...out.effects);
   }
@@ -30,13 +30,13 @@ function play(gate, events, holders = HOLDERS) {
 function reloadAndEnd(gate, holders) {
   const loaded = parseGate(JSON.parse(JSON.stringify(gate)));
   assert.deepEqual(structuredClone(gate), loaded);
-  return step(loaded, { type: 'tick', at: END }, holders, [LEA]);
+  return step(loaded, { type: 'tick', at: END }, holders, LEA);
 }
 
 test('F-T1-50: one voter who presses 10,000 times on one part saves, reloads and decides; the gate stays small', () => {
   let gate = batch([['A', 'B']]);
-  for (let i = 0; i < 10_000; i++) gate = step(gate, ballot(MAYA, i % 2 ? 'A' : 'B', T0 + i), HOLDERS, [LEA]).gate;
-  const once = step(batch([['A', 'B']]), ballot(MAYA, 'A', T0 + 9_999), HOLDERS, [LEA]).gate;
+  for (let i = 0; i < 10_000; i++) gate = step(gate, ballot(MAYA, i % 2 ? 'A' : 'B', T0 + i), HOLDERS, LEA).gate;
+  const once = step(batch([['A', 'B']]), ballot(MAYA, 'A', T0 + 9_999), HOLDERS, LEA).gate;
   assert.equal(JSON.stringify(gate).length, JSON.stringify(once).length);
   assert.deepEqual([...ballotsOf(gate.parts[0])], [[MAYA, { option: 'A', at: T0 + 9_999, via: 'discord' }]]);
   assert.deepEqual(reloadAndEnd(gate, HOLDERS).gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'votes' });
@@ -59,7 +59,7 @@ test('F-T1-51: a tied part without its tied options is refused with a clear Type
   delete tied.parts[1].tied;
   assert.throws(() => parseGate(tied), { name: 'TypeError', message: /^parseGate: the first argument must be a gate from openGate or step: the phase and the outcomes do not match$/ });
   const tiebreak = { type: 'tiebreak', by: LEA, part: 1, option: 'X', at: END + MINUTE, via: 'discord' };
-  assert.throws(() => step(tied, tiebreak, HOLDERS, [LEA]), { name: 'TypeError', message: /^step: the first argument must be a gate from openGate or step/ });
+  assert.throws(() => step(tied, tiebreak, HOLDERS, LEA), { name: 'TypeError', message: /^step: the first argument must be a gate from openGate or step/ });
 });
 
 test('F-T1-52: a withdraw at or after the time limit, with no tick, has no effect when the vote decided every part', () => {
@@ -98,8 +98,8 @@ test('F-T1-54: open outcomes and ballots are frozen, so a change to one gate can
   assert.throws(() => { a.outcome.status = 'answered'; }, TypeError);
   assert.throws(() => { b.parts[0].outcome.status = 'decided'; }, TypeError);
   assert.deepEqual([single().outcome, b.outcome, b.parts[1].outcome], [{ status: 'open' }, { status: 'open' }, { status: 'open' }]);
-  const first = step(b, ballot(MAYA, 'A', T0), HOLDERS, [LEA]).gate;
-  const second = step(first, ballot(JON, 'B', T0 + 1), HOLDERS, [LEA]).gate;
+  const first = step(b, ballot(MAYA, 'A', T0), HOLDERS, LEA).gate;
+  const second = step(first, ballot(JON, 'B', T0 + 1), HOLDERS, LEA).gate;
   assert.throws(() => { ballotsOf(second.parts[0]).get(MAYA).option = 'B'; }, TypeError);
   assert.equal(ballotsOf(first.parts[0]).get(MAYA).option, 'A');
 });
@@ -109,7 +109,7 @@ test('F-T1-55: parseGate returns every gate that openGate and step make, also af
   const gates = [
     single(), step(single(), ballot(MAYA, 'B', T0), HOLDERS, []).gate, step(single(), withdraw(T0), HOLDERS, []).gate,
     batch(), play(batch(), [{ ...ballot(MAYA, 'A', T0), reason: 'cheaper <b>' }]).gate, tied,
-    step(tied, { type: 'tiebreak', by: LEA, part: 1, option: 'Y', at: END, via: 'discord' }, HOLDERS, [LEA]).gate,
+    step(tied, { type: 'tiebreak', by: LEA, part: 1, option: 'Y', at: END, via: 'discord' }, HOLDERS, LEA).gate,
     step(tied, withdraw(END), HOLDERS, []).gate,
   ];
   assert.deepEqual(gates.map((g) => g.phase), ['open', 'closed', 'closed', 'voting', 'voting', 'tied', 'closed', 'closed']);
@@ -147,6 +147,6 @@ test('F-T1-55: parseGate and step refuse a forged gate with a TypeError', () => 
   };
   for (const [what, gate] of Object.entries(forgeries)) {
     assert.throws(() => parseGate(gate), { name: 'TypeError', message: /^parseGate: the first argument must be a gate from openGate or step: / }, what);
-    assert.throws(() => step(gate, { type: 'tick', at: END + MINUTE }, HOLDERS, [LEA]), { name: 'TypeError', message: /^step: the first argument must be a gate/ }, what);
+    assert.throws(() => step(gate, { type: 'tick', at: END + MINUTE }, HOLDERS, LEA), { name: 'TypeError', message: /^step: the first argument must be a gate/ }, what);
   }
 });

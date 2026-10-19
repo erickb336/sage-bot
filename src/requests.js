@@ -1,4 +1,4 @@
-// The requests of the sage-leads (T72): a sage-lead asks for a feature, and Erick approves or declines it. An approved request
+// The requests of the crew (T72): a crew member asks for a feature, and Erick approves or declines it. An approved request
 // becomes one sage task through the state tool (`addTask`), never by a write to the logbook. This file has the record and its
 // transitions (pure: no I/O), and the I/O layer on the requests file that the terminal (scripts/requests.mjs) and the bridge (T72
 // PR 3) both call: add, approve, decline, withdraw, the Discord fields, and the reconcile step. Each I/O function takes the config.
@@ -141,7 +141,7 @@ export function step(r, e) {
     refuse(`${r.id} is not being approved. Nothing changed.`);
   }
   if (from === 'approving' && !sameClaim(r.claim, e.claim)) refuse(`${r.id} is being approved by another run. Nothing changed.`);
-  if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the sage-lead who sent ${r.id} can withdraw it. Nothing changed.`);
+  if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the person who sent ${r.id} can withdraw it. Nothing changed.`);
   if (e.type === 'claim') return checked({ ...r, status: to, claim: { ...e.claim } });
   if (e.type === 'release') return checked({ ...r, status: to, claim: null });
   if (e.type === 'approve') return checked({ ...r, status: to, claim: null, task: e.task, decidedAt: e.at, decidedBy: r.claim.by, via: r.claim.via });
