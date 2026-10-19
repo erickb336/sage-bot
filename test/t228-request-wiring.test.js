@@ -331,6 +331,7 @@ test('/sage request refuses before the form: the link off, an open request, an u
   assert.equal(only(await b.cmd(JON, 'request', { name: '' })),
     'Your name in this server has 0 characters, and a request takes a name of 1 to 100. Change your server nickname, then try again. Nothing was sent.');
   assert.equal(only(await b.cmd(JON, 'request', { options: { project: 'payroll' } })), 'I do not know a shared project called "payroll". Nothing was sent.');
+  assert.equal(only(await b.cmd(JON, 'request', { options: { project: '**x** <@&1>' } })), 'I do not know a shared project called "\\*\\*x\\*\\* \\<@&1\\>". Nothing was sent.');
   assert.equal(only(await b.cmd(JON, 'request', { channelId: '400000000000000003' })), `I take requests in <#${ASK}> and the other channels of sage-bot, so please ask there.`);
   await b.request(JON);
   assert.equal(only(await b.cmd(JON)), `You have an open request: RQ1 · ${TITLE}, waiting for Erick since ${t(b.now)} in <#${b.r().thread}>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);

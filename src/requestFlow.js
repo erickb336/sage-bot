@@ -9,7 +9,7 @@
 import { randomInt } from 'node:crypto';
 import { MessageFlags } from 'discord.js';
 import { apiError } from './bridge.js';
-import { cut, ephemeral, LIMIT } from './cards.js';
+import { cut, ephemeral, LIMIT, safe } from './cards.js';
 import { NOT_CREW, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { killPathOf, linkOff } from './audit.js';
@@ -193,7 +193,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const project = i.options?.project ?? channels.get(at)?.project;
       const open = (() => { try { return mine(i.user.id); } catch (e) { say(`the requests file: ${e?.message}`); return null; } })();
       const note = linkOff(killPath) ? requestNote('linkOff')
-        : !projects.some((p) => p.name === project) ? ephemeral(`I do not know a shared project called "${cut(String(project), 40)}". Nothing was sent.`)
+        : !projects.some((p) => p.name === project) ? ephemeral(`I do not know a shared project called "${safe(cut(String(project), 40))}". Nothing was sent.`)
         : open ? requestNote('open', open)
         : tooLong(i.name ?? '') ? requestNote('name', { requesterName: i.name ?? '' }) : null;
       if (note) return answer(i, note);
