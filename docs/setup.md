@@ -6,7 +6,7 @@
 
 The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
-**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [Who is who](#who-is-who) · [The audit log and the kill switch](#the-audit-log-and-the-kill-switch)
+**Contents:** [The checklist](#the-checklist) · [What the first live trial checks first](#what-the-first-live-trial-checks-first) · [Channels](#channels) · [Who is who](#who-is-who) · [A second owner joins the server](#a-second-owner-joins-the-server) · [The audit log and the kill switch](#the-audit-log-and-the-kill-switch)
 
 ## The checklist
 
@@ -17,7 +17,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   - Invite it to your server with the `bot` and `applications.commands` scopes and the permission integer `326417632256`. It includes Read Message History: after the Mac sleeps, sage-bot reads back the mentions that it missed (see [the catch-up](reference.md#the-catch-up)).
   - On the Bot page, choose **Reset Token**, and keep the token only for step 5.
 
-  *Why:* the bridge reads the members' roles to know who is in the crew, and it adds the `/sage` command to your server at each start. Each person runs their own sage-bot, with their own app, on their own Mac. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat.
+  *Why:* the bridge reads the members' roles to know who is in the crew, and it adds the `/sage` command to your server at each start. Each person runs their own sage-bot, with their own app, on their own Mac. Do not reuse the Discord plugin's bot: then one token could do both jobs, and a press could reach sage's chat. sage-bot serves only the server of `guildId` in its config: at each start, and each time someone adds it to another server, it leaves that other server and logs one line. Public Bot off stops others from adding it at all; the leave is the second layer.
 - [ ] **2. Make one role named exactly `sage-crew`.** Make it **mentionable**. Give it to each person who asks sage-bot and votes. If the server already has a `sage-crew` role (another person's sage-bot uses it), use that role: every sage-bot in a server shares it. You, the owner, need no role: sage-bot knows you by your user id (see [Who is who](#who-is-who)). To answer and vote on the cards in Discord, give yourself the role too.
   *Why:* sage-bot finds the crew by the role's name, at each start and each time a role changes, so the config holds no role id. A new card pings @sage-crew; a tie pings only you. If the role is not mentionable, its ping notifies nobody.
   **Warning:** anyone with the **Manage Roles** permission can give the role, or make another role with the same name. Give that permission only to people you trust. When two roles have the name, both count, and sage-bot posts one warning in #sage-audit.
@@ -173,7 +173,7 @@ node scripts/channels.mjs list                                       # print the
 
 **You can unregister a channel from Discord.** `/sage unregister` shows a confirm with two buttons, "Unregister this channel" and "Cancel". Your press of the first removes the channel, and the terminal log gives your name and id. The confirm works for 10 minutes. The crew cannot unregister a channel. Nobody can register a channel from Discord.
 
-sage-bot does nothing for everyone who is neither in the crew nor you. A `/sage` command or a button press of theirs gets one private line, "Only the sage-crew role can use sage-bot.", that only they see. A mention of theirs gets no reply at all. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the sage-crew role and you.
+sage-bot does nothing for everyone who is neither in the crew nor you. A `/sage` command or a button press of theirs gets one private line, "Only the sage-crew role can use sage-bot." (with your bot's name), that only they see. A mention of theirs gets no reply at all. To hide `/sage` from these members, open Server Settings, Integrations, sage-bot, and allow `/sage` only for the sage-crew role and you.
 
 ## Who is who
 
@@ -192,7 +192,33 @@ sage-bot knows two kinds of people. It reads both at each start, in one place (`
 
    > the Discord application of sage-bot belongs to a Developer Team, so sage-bot cannot tell who its owner is. Add "ownerId" with your Discord user id to the config, then start sage-bot again. Nothing was started.
 
+**Names in the messages.** The cards, buttons, notes and `/sage` descriptions name you by your display name in the server, and name the bot by its own name, for example "Waiting for Maya" and "If a button does not respond, Maya's sage is offline". sage-bot reads both names at each start. It keeps only letters, digits, marks on a letter, spaces and `. ' -`, at most 32 characters. When Discord gives no name, or nothing is left of it, the messages say "the owner" and "sage-bot". A new display name shows after the next start.
+
 **A config from before.** A config with `apprenticeRole`, `leadRole` or the older `driverRole` still starts. The log says that sage-bot no longer reads them, and they do nothing. Remove them, and delete the old `sage-apprentice` and `sage-lead` roles when no other sage-bot uses them. This warning goes away in the next release, and then the keys are only unknown keys.
+
+## A second owner joins the server
+
+Several owners can each run their own sage-bot in one server. Each bot has its own owner, its own projects, its own cards and its own requests. One shared `sage-crew` role is the crew of every bot: a crew member can request a feature on each bot, and each owner approves the requests on their own bot only.
+
+The second owner, for example Maya, does these steps:
+
+1. Make her own Discord app and bot, as in [step 1](#the-checklist). Give the bot a name that says whose it is, for example "Maya's sage": the cards and notes show that name.
+2. Invite it with the same permission integer `326417632256`. Keep **Guild Install** only and **Public Bot** off.
+3. Use the `sage-crew` role that the server has already. Do not make a second one: sage-bot warns when two roles have that name.
+4. Set her own channels in her own config, as in [Channels](#channels). Two bots can share a channel, but each card, thread and request belongs to the bot that posted it.
+5. Run her own bridge on her own Mac, or under her own macOS user. Run one sage-bot for each macOS user: the launchd label `com.sage.bot`, the Keychain item `sage-bot` and the config folder `~/.config/sage-bot` are fixed names.
+
+**How the bots stay apart.**
+
+| What | Why it reaches only its own bot |
+| --- | --- |
+| A button or a form | Discord sends a press only to the app that posted the message. The request buttons also check the message id that the bot keeps for each card. |
+| A mention | Discord tells each bot which users a message mentions. A bot answers only a mention of itself, so a mention of Maya's bot in Erick's thread is not Erick's bot's. |
+| `/sage` | Each bot sets its own `/sage` in the server. Discord shows the bot's name beside each one, and the descriptions name its owner. |
+| A thread | Each bot keeps its own thread map. In a thread of another bot, a bot only points to its own channel. |
+| The files | Each bridge keeps its requests, thread map, audit log and votes beside its own `statePath`, on its own Mac. |
+
+A mention of one bot in a thread of another bot gets only that pointer for now. A later pull request (PR 7) adds a move of the mention to the bot's own thread.
 
 ## The audit log and the kill switch
 
