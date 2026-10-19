@@ -4,17 +4,22 @@
 // SAMPLE DATA ONLY: every id and name is made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, ClientApplication, GatewayIntentBits } from 'discord.js';
 import { tempFolder } from './temp-folder.js';
 import { CREW, crewWarning, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
 import { appOf, rolesOf, watchCrew } from '../src/discord.js';
 import { createBridge } from '../src/bridge.js';
-import { fakeDiscord } from '../src/fake-discord.js';
+import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
+import { askCommand, createAsk, STOP, STOP_CANCEL } from '../src/ask.js';
+import { auditPathOf, killPathOf, verifyLog } from '../src/audit.js';
+import { openChannels, withHome } from '../src/channels.js';
+import { loadProjects } from '../src/projects.js';
+import { LINK_OFF } from '../src/threads.js';
 import { peopleOf } from '../src/handle.js';
 import { MINUTE, openGate, step } from '../src/vote.js';
-import { CHANNEL, CREW_ROLE, JON, MAYA, OWNER, SAM, setup, spawnSync } from './bridge-setup.js';
+import { CHANNEL, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const GUILD = '200000000000000001';
@@ -184,4 +189,78 @@ test('the role keys of before T232: the bridge starts and ignores them, and laun
   assert.equal(r.stderr.split('\n')[0], `sage-bot launchd: warning: ${warning}`);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /<key>Label<\/key>/);
+});
+
+/** The read commands of one bridge on the fake Discord layer, with a scratch logbook: a command, a press of the stop confirm, a mention. */
+function asks(t) {
+  const b = setup({ markAll: false });
+  t.after(() => rmSync(b.root, { recursive: true, force: true }));
+  const ASK = '400000000000000009';
+  b.config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
+  const env = { PATH: process.env.PATH, HOME: join(b.root, 'home'), SAGE_HOME: join(b.root, 'home', 'sage') };
+  const channels = openChannels(b.config, loadProjects(b.config));
+  b.ask = createAsk({ config: withHome(b.config, channels), channels, env, now: () => T0, log: () => {}, audit: async () => {} });
+  b.cmd = async (user, roles, sub) => {
+    const i = fakeCommand({ user, roles, channelId: ASK, sub });
+    await b.ask.command(i);
+    return i.replies.slice(1).map((r) => [r.content, r.components?.[0]?.components.map((c) => c.custom_id)]);
+  };
+  b.press = async (user, roles, customId = STOP) => {
+    const replies = [];
+    await b.ask.press({ user: { id: user, bot: false }, roles, customId, sentAt: T0,
+      update: async (p) => { replies.push(p.content); }, reply: async (p) => { replies.push(p.content); } });
+    return replies;
+  };
+  b.talk = async (user, roles) => {
+    const place = fakeDiscord([]);
+    await b.ask.mention(fakeMention({ user, roles, channelId: ASK, content: '<@1> talk: the login', place }));
+    return [...place.where.keys()].map((id) => place.latest(id)?.content).filter(Boolean);
+  };
+  b.flag = killPathOf(b.config);
+  return b;
+}
+const CONFIRM = 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.';
+
+test('the crew\'s emergency stop: a crew member\'s /sage stop and its confirm turn the link off at once, with no approval of the owner', async (t) => {
+  const b = asks(t);
+  assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [[CONFIRM, [STOP, STOP_CANCEL]]]);
+  assert.equal(existsSync(b.flag), false); // the command alone sets nothing
+  assert.deepEqual(await b.press(MAYA, [CREW]), [`<@${MAYA}> turned off the link from Discord to sage. No message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.`]);
+  assert.equal(existsSync(b.flag), true);
+  assert.match(readFileSync(b.flag, 'utf8'), new RegExp(MAYA)); // the flag says who
+  assert.deepEqual(verifyLog(auditPathOf(b.config)).lines.map((l) => [l.author, l.outcome]), [[MAYA, 'link-off-set']]);
+  // The owner's talk now gets the fixed reply: the link is off, with no step of the owner.
+  assert.deepEqual(await b.talk(OWNER, [CREW]), ['<@1> talk: the login', LINK_OFF]); // the message, then the reply in its thread
+});
+
+test('the crew\'s emergency stop: a crew member cannot turn the link on again; only the terminal (the owner) can', async (t) => {
+  const b = asks(t);
+  await b.press(MAYA, [CREW]);
+  assert.equal(existsSync(b.flag), true);
+  // Discord has no command that turns the link on: /sage has no such subcommand.
+  assert.deepEqual(askCommand([]).options.map((o) => o.name), ['board', 'task', 'gates', 'files', 'unregister', 'stop']);
+  // A second /sage stop, a press of the old confirm and its Cancel change nothing: the flag stays.
+  assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [['The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.', undefined]]);
+  assert.deepEqual(await b.press(MAYA, [CREW]), ['The link from Discord to sage is already off. Nothing changed.']);
+  assert.deepEqual(await b.press(MAYA, [CREW], STOP_CANCEL), ['Cancelled. Nothing changed.']);
+  assert.equal(existsSync(b.flag), true);
+  // The terminal turns it on: node scripts/leads.mjs restore.
+  const cfg = join(b.root, 'config.json');
+  writeFileSync(cfg, JSON.stringify(b.config));
+  const restore = spawnSync(process.execPath, [join(ROOT, 'scripts', 'leads.mjs'), '--config', cfg, 'restore'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: join(b.root, 'home') } });
+  assert.equal(restore.status, 0, restore.stderr);
+  assert.equal(existsSync(b.flag), false);
+});
+
+test('the crew\'s emergency stop: a member with no sage-crew role cannot stop the link, by the command or by the confirm button', async (t) => {
+  const b = asks(t);
+  for (const roles of [[], ['Moderators'], ['Sage-Crew'], ['sage-crew ']]) {
+    assert.deepEqual(await b.cmd(SAM, roles, 'stop'), []); // nothing: no confirm, no reply
+    assert.deepEqual(await b.press(SAM, roles), []);
+  }
+  assert.equal(existsSync(b.flag), false);
+  assert.deepEqual(verifyLog(auditPathOf(b.config)).lines, []);
+  // The same press by a crew member sets it: the refusal above is the role, not the button.
+  await b.press(MAYA, [CREW]);
+  assert.equal(existsSync(b.flag), true);
 });

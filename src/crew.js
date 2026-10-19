@@ -13,6 +13,13 @@ export const CREW = 'sage-crew';
  */
 export const placeOf = (id, roleNames, ownerId) => ({ owner: typeof ownerId === 'string' && id === ownerId, crew: [...(roleNames ?? [])].includes(CREW) });
 
+/**
+ * Who may use the emergency stop (/sage stop and its confirm): the crew and the owner. It takes effect at once, with no approval of the
+ * owner; only the owner turns the link on again, at the terminal. Every other right on this bot is the owner's alone.
+ * @param {{ owner: boolean, crew: boolean }} place  from placeOf
+ */
+export const mayStop = (place) => place.owner || place.crew;
+
 /** The ids of the guild's roles named exactly CREW, from `[{ id, name }]`: the roles that a new card pings. */
 export const crewRoleIds = (roles) => [...roles].filter((r) => r.name === CREW).map((r) => r.id);
 

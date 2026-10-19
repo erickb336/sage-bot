@@ -52,7 +52,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
 
   **Do not let the Discord plugin watch #ask-sage.** If it does, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts.
-  *Why:* the crew asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. You type `/sage stop` here. The crew cannot stop the link. sage-bot ignores everyone else. If you do not hold sage-crew, allow yourself Send Messages and Use Application Commands here too.
+  *Why:* the crew asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. You and the crew type `/sage stop` here: it turns the link off at once. Only you turn it on again, at the terminal. sage-bot ignores everyone else. If you do not hold sage-crew, allow yourself Send Messages and Use Application Commands here too.
 - [ ] **5. Put the token in the Keychain.** Open Keychain Access, choose File, New Password Item. Set the name to `sage-bot` and paste the token from step 1 as the password. Never type the token in a shell.
   *Why:* the shell history keeps what you type. The bridge reads the item at start and never writes the token to a file or a log.
 - [ ] **6. Add the hook lines.** Put these lines in `.claude/settings.local.json` in the folder you set as `project` in step 3, and in the folder of each other project in `projects`. Use the absolute path of your sage-bot folder.
@@ -175,8 +175,8 @@ sage-bot knows two kinds of people. It reads both at each start, in one place (`
 
 | Who | How sage-bot knows them | What they can do |
 | --- | --- | --- |
-| The owner (you) | Your Discord user id: `ownerId` in the config, else the owner of the Discord app of step 1. Never a role. | Answer at the terminal (final), end a vote early, break a tie, `/sage stop`, `/sage unregister`, read with `/sage`. |
-| The crew | Every member with a role named exactly `sage-crew` (the case counts). | Answer a single question, vote, read with `/sage` and mentions. |
+| The owner (you) | Your Discord user id: `ownerId` in the config, else the owner of the Discord app of step 1. Never a role. | Answer at the terminal (final), end a vote early, break a tie, `/sage stop`, `/sage unregister`, turn the link on again at the terminal, read with `/sage`. |
+| The crew | Every member with a role named exactly `sage-crew` (the case counts). | Answer a single question, vote, read with `/sage` and mentions, `/sage stop` (the emergency stop: at once, with no approval). |
 
 **How sage-bot finds the owner at start:**
 

@@ -1,6 +1,6 @@
-// The read commands of the registered channels (T71, G18 option A; T130): /sage board, task, gates and files, /sage unregister and
-// /sage stop (the kill switch, T131) for the owner, and the threads of @sage-bot mentions (T131, src/threads.js): a mention in a
-// registered channel opens a thread, and a read ask gets its answer there.
+// The read commands of the registered channels (T71, G18 option A; T130): /sage board, task, gates and files,
+// /sage unregister for the owner, /sage stop (the kill switch, T131; the emergency stop of the crew and the owner, T232), and the threads of
+// @sage-bot mentions (T131, src/threads.js): a mention in a registered channel opens a thread, and a read ask gets its answer there.
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
 // columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
 // and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. Anyone but the crew and the owner
@@ -9,7 +9,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, read
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
 import { cut, ephemeral, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
-import { placeOf } from './crew.js';
+import { mayStop, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadProjects, pickProject, TYPES } from './projects.js';
@@ -19,10 +19,10 @@ import { auditPathOf, entryOf, forLead, killPathOf, linkOff, openLog, quoted, se
 import { DRY_RUN, foreign, isTalk, LINK_OFF, loadThreads, noRight, readAsk, saveThreads, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of the crew counts,
- * also a refused one; a mention that opens a thread counts once. The owner's /sage stop does not count: the kill switch always works. */
+ * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
 export const ASK_LIMIT = 10;
 export const HOUR = 3_600_000;
-/** A burst limit per person, apart from ASK_LIMIT (F-T143-2, F-T143-5): at most BURST of the owner's /sage stop, and at most
+/** A burst limit per person, apart from ASK_LIMIT (F-T143-2, F-T143-5): at most BURST /sage stop of one person, and at most
  * BURST log lines of a crew member's mentions over ASK_LIMIT in an owner thread, in BURST_FOR. So neither floods #sage-audit or a channel. */
 export const BURST = 3;
 export const BURST_FOR = 10 * 60_000;
@@ -64,7 +64,7 @@ export function askCommand(projects) {
     .addSubcommand((s) => s.setName('gates').setDescription('The open questions with their options').addStringOption(project))
     .addSubcommand((s) => s.setName('files').setDescription('The shared images and PDFs of a project').addStringOption(project))
     .addSubcommand((s) => s.setName('unregister').setDescription(`Stop sage-bot in this channel (${OWNER} only)`))
-    .addSubcommand((s) => s.setName('stop').setDescription(`Turn off the link from Discord to sage (${OWNER} only)`))
+    .addSubcommand((s) => s.setName('stop').setDescription(`Turn off the link from Discord to sage at once (the crew and ${OWNER})`))
     .toJSON();
 }
 
@@ -165,7 +165,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
   const asks = new Map(); // person id → the times of their asks in the last hour; only in memory
   const warned = new Map(); // person id → until when a mention over the limit gets no second note
-  const stops = new Map(); // the owner's id → the times of the owner's /sage stop in the last BURST_FOR
+  const stops = new Map(); // person id → the times of their /sage stop in the last BURST_FOR
   const stopWarned = new Map(); // person id → until when a /sage stop over BURST gets no second note
   const overLines = new Map(); // person id → the times of a crew member's over-limit log lines in an owner thread
   const daily = new Map(); // person id → the UTC day of their last pointer in a channel that is not registered
@@ -209,7 +209,6 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   async function answer(i, at) {
     const { sub, options: o } = i;
     if (sub === 'unregister') return unregisterAsk(place(i), at);
-    if (sub === 'stop') return stopAsk(place(i));
     const p = o.project ? byName.get(o.project) : byName.get(channels.get(at).project);
     if (!p) return { content: `I do not know a shared project called "${shown(o.project, 40)}".` };
     if (sub === 'files') {
@@ -239,11 +238,10 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         { type: 2, style: 2, label: 'Cancel', custom_id: CANCEL }] }] };
   }
 
-  /** The answer to /sage stop: a confirm button for the owner, a refusal for anyone else (C1: the owner's id, never a role). */
-  function stopAsk(p) {
-    if (!p.owner) return { content: `Only ${OWNER} can turn off the link from Discord to sage. Ask ${OWNER}.` };
+  /** The answer to /sage stop of a crew member or the owner (src/crew.js mayStop): a confirm button. */
+  function stopAsk() {
     if (linkOff(killPath)) return { content: 'The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.' };
-    return { content: 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until you turn it on again at the terminal. Read asks keep working.',
+    return { content: `Turn off the link from Discord to sage? Then no message from Discord goes to sage until ${OWNER} turns it on again at the terminal. Read asks keep working.`,
       components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: STOP_CANCEL }] }] };
   }
 
@@ -297,16 +295,12 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   }
 
   /**
-   * A press of the /sage stop confirm: the owner sets the kill switch; Cancel, or a confirm older than CONFIRM_FOR (or of no
-   * known time), changes nothing and closes the confirm (F-T131-2), so an old confirm cannot set the flag again after the owner's restore.
-   * Anyone else changes nothing.
+   * A press of the /sage stop confirm by a crew member or the owner (press() passes on no one else: src/crew.js mayStop) sets the kill
+   * switch at once, with no approval. Cancel, or a confirm older than CONFIRM_FOR (or of no known time), changes nothing and closes the
+   * confirm (F-T131-2), so an old confirm cannot set the flag again after the owner's restore.
    */
   async function stopPress(b, roles) {
     const fail = (e) => say(`Discord refused the stop reply: code ${e?.code ?? '-'}: ${e?.message}`);
-    if (!place(b).owner) {
-      await b.reply({ content: `Only ${OWNER} can turn off the link from Discord to sage. Nothing changed.`, allowedMentions: NO_MENTIONS }).catch(fail);
-      return;
-    }
     let content;
     if (b.customId === STOP_CANCEL) content = 'Cancelled. Nothing changed.';
     else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.';
@@ -382,9 +376,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       }
       let payload;
       try {
-        // The kill switch always works (F-T131-3): the owner's /sage stop skips the limit and works in any channel. It has
+        // The kill switch always works (F-T131-3, T232): a /sage stop of the crew or the owner skips the limit and works in any channel. It has
         // its own burst limit (F-T143-2): over BURST in BURST_FOR, one note, then nothing until the burst frees up.
-        const stop = i.sub === 'stop' && place(i).owner;
+        const stop = i.sub === 'stop' && mayStop(place(i));
         const burst = stop && spend(i.user.id, stops, BURST, BURST_FOR);
         const quiet = burst && (stopWarned.get(i.user.id) ?? 0) > now();
         if (burst && !quiet) stopWarned.set(i.user.id, burst);
@@ -395,8 +389,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
           return;
         }
         const next = at && spend(i.user.id);
-        payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. You can still turn the link off at the terminal.` }
-          : stop ? stopAsk(place(i)) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
+        payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. ${OWNER} can still turn the link off at the terminal.` }
+          : stop ? stopAsk() : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
       } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
         payload = { content: 'I could not answer just now. Nothing changed. Please ask again in a minute.' };
@@ -410,7 +404,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL go to the kill switch (stopPress). The owner's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the owner's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. A crew
-     * member's press changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else, and a custom_id that
+     * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else, and a custom_id that
      * is not STOP, STOP_CANCEL, CANCEL or a channel id, get nothing. Never rejects.
      */
     async press(b) {

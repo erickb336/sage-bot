@@ -89,7 +89,8 @@ Each person runs their own sage-bot, with their own Discord app and their own Ma
 | Break a tie, or end a vote early | No | Yes |
 | Recommend on the autopilot question (the owner decides) | Yes | Only with the sage-crew role |
 | Unregister a channel | No | Yes |
-| Turn off the link from Discord to sage (`/sage stop`) | No: ask the owner | Yes |
+| Turn off the link from Discord to sage (`/sage stop`), at once | Yes | Yes |
+| Turn the link on again (at the terminal) | No | Yes |
 | Talk to sage, write, and start build sessions | Not built: waits on T159 | Not built: waits on T159 |
 | Asks in a rolling hour | 10 | 10 |
 
@@ -142,7 +143,7 @@ Time left is not estimated yet: the board shows the count of tasks left. The [se
 - **No AI reads Discord text.** Code answers each read ask. A vote gives sage only the option's letter and sage's own option text. sage reads a reason only through `scripts/reasons.mjs`, cleaned by an allow-list.
 - **The answer shows little.** It shows a task's id, title, size, state and pull request, and the open questions. It never reads findings, briefs, reports or `decisions.tsv`.
 - **The audit log.** Each message of the owner to sage-bot, and each message of a crew member in an owner thread, goes into an append-only log before sage-bot replies, with a hash chain, and a copy goes to #sage-audit. Over the hourly limit, a crew member's messages in an owner thread go into the log at most 3 times in 10 minutes.
-- **The kill switch.** The owner types `/sage stop` and confirms. No message from Discord then goes to sage until the owner turns the link on again at the terminal. Read asks keep working.
+- **The kill switch.** Any crew member or the owner types `/sage stop` and confirms. The link goes off at once, with no approval. No message from Discord then goes to sage until the owner turns the link on again at the terminal. Read asks keep working.
 
 **For bridge sessions, not on yet (T159):**
 

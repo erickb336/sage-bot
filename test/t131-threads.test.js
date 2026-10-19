@@ -237,16 +237,15 @@ test('T131: the #sage-audit copy of each lead line pings nobody and shows the te
   assert.equal(b.copies.length, 1);
 });
 
-test('T131: the kill switch: /sage stop by a sage-lead (with a confirm) or Erick sets it; an apprentice cannot; while set, talk gets the fixed reply and is logged', async (t) => {
+test('T131: the kill switch: /sage stop by the owner (with a confirm) sets it; a member with no role cannot; while set, talk gets the fixed reply and is logged', async (t) => {
   const b = world(t);
   const flag = killPathOf(b.config);
-  // An apprentice: refused, also at the confirm button; a member with no role gets nothing.
-  assert.deepEqual(await b.cmd(MAYA, 'stop'), ['Only Erick can turn off the link from Discord to sage. Ask Erick.']);
-  assert.deepEqual(await b.press(MAYA), [['reply', 'Only Erick can turn off the link from Discord to sage. Nothing changed.']]);
+  // A member with no role gets nothing (the crew's stop: test/t232-crew.test.js).
+  assert.deepEqual(await b.cmd(SAM, 'stop'), []);
   assert.deepEqual(await b.press(SAM), []);
   assert.equal(existsSync(flag), false);
   // A sage-lead: a confirm first; the press sets it and posts the public notice.
-  assert.deepEqual(await b.cmd(OWNER, 'stop'), ['Turn off the link from Discord to sage? Then no message from Discord goes to sage until you turn it on again at the terminal. Read asks keep working.']);
+  assert.deepEqual(await b.cmd(OWNER, 'stop'), ['Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.']);
   assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', STOP_CANCEL]]);
   assert.equal(existsSync(flag), false);
   assert.deepEqual(await b.press(OWNER), [['update', `<@${OWNER}> turned off the link from Discord to sage. No message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.`, { parse: [] }]]);
@@ -364,7 +363,7 @@ test('F-T131-2: the /sage stop confirm has a Cancel, and it expires after 10 min
   const expired = [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.', { parse: [] }]];
   assert.deepEqual(await b.press(OWNER, [CREW], { customId: STOP_CANCEL }), cancelled);
   assert.deepEqual(await b.press(OWNER, [], { customId: STOP_CANCEL }), cancelled);
-  assert.deepEqual(await b.press(MAYA, [CREW], { customId: STOP_CANCEL }), [['reply', 'Only Erick can turn off the link from Discord to sage. Nothing changed.']]);
+  assert.deepEqual(await b.press(MAYA, [CREW], { customId: STOP_CANCEL }), cancelled); // the crew's emergency stop (T232) has the same Cancel
   assert.deepEqual(await b.press(OWNER, [CREW], { age: 10 * 60_000 + 1 }), expired);
   // Days later, after Erick's restore: the old confirm sets nothing.
   assert.deepEqual(await b.press(OWNER, [CREW], { age: 3 * 24 * HOUR }), expired);
@@ -379,26 +378,23 @@ test('F-T131-2: the /sage stop confirm has a Cancel, and it expires after 10 min
   assert.equal(existsSync(flag), true);
 });
 
-test('F-T131-3: the owner\'s /sage stop skips the hourly limit and works in any channel, also with no role; a crew member\'s still counts and is refused', async (t) => {
+test('F-T131-3: the /sage stop of the owner (also with no role) and of the crew skips the hourly limit and works in any channel', async (t) => {
   const b = world(t);
   const NOWHERE = '400000000000000077'; // a channel that is not registered
-  const confirm = 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until you turn it on again at the terminal. Read asks keep working.';
+  const confirm = 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.';
   for (let n = 0; n < 10; n++) await b.cmd(OWNER, 'board');
   assert.match((await b.cmd(OWNER, 'board'))[0], /^You asked 10 times in the last hour/);
   assert.deepEqual(await b.cmd(OWNER, 'stop'), [confirm]); // over the limit: the kill switch still works
   assert.deepEqual(await b.cmd(OWNER, 'stop', [CREW], NOWHERE), [confirm]); // in a channel that is not registered
   assert.deepEqual(await b.cmd(OWNER, 'stop', [], NOWHERE), [confirm]);
   assert.deepEqual(b.buttons, [['Turn off the link', STOP], ['Cancel', STOP_CANCEL]]);
-  // A crew member who is not the owner (C1: a role never makes the owner): the stop is refused and counts like any ask.
-  const CREW2 = '100000000000000006';
-  for (let n = 0; n < 9; n++) await b.cmd(CREW2, 'board', [CREW]);
-  assert.deepEqual(await b.cmd(CREW2, 'stop', [CREW]), ['Only Erick can turn off the link from Discord to sage. Ask Erick.']);
-  assert.match((await b.cmd(CREW2, 'board', [CREW]))[0], /^You asked 10 times in the last hour/);
-  // Maya, also crew: the normal path. Refused in a registered channel (and it counts), only the daily pointer elsewhere.
+  // A crew member (T232: the emergency stop of the crew): the stop does not count, works over the limit and in any channel.
   for (let n = 0; n < 9; n++) await b.cmd(MAYA, 'board');
-  assert.deepEqual(await b.cmd(MAYA, 'stop'), ['Only Erick can turn off the link from Discord to sage. Ask Erick.']);
-  assert.match((await b.cmd(MAYA, 'stop'))[0], /^You asked 10 times in the last hour/);
-  assert.deepEqual(await b.cmd(MAYA, 'stop', [CREW], NOWHERE), [`I answer /sage in <#${ASK}>, so please ask there.`]);
+  assert.deepEqual(await b.cmd(MAYA, 'stop'), [confirm]);
+  assert.match((await b.cmd(MAYA, 'board'))[0], /^\*\*Board · project\*\*/); // the stop did not count: this is the 10th ask
+  assert.match((await b.cmd(MAYA, 'board'))[0], /^You asked 10 times in the last hour/);
+  assert.deepEqual(await b.cmd(MAYA, 'stop'), [confirm]);
+  assert.deepEqual(await b.cmd(MAYA, 'stop', [CREW], NOWHERE), [confirm]);
 });
 
 test('F-T131-4: the terminal turns the link off with `leads.mjs stop`; the failure reply of /sage stop names that command', async (t) => {
@@ -570,9 +566,9 @@ test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, i
   const old = button(STOP, { age: 10 * 60_000 + 1 }); // the message time comes from Discord's message
   await on.interaction(old);
   assert.deepEqual(old.calls, [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage stop again.']]);
-  const apprentice = button(STOP, { user: MAYA, roles: [CREW] }); // roles come from the member
-  await on.interaction(apprentice);
-  assert.deepEqual(apprentice.calls, [['reply', 'Only Erick can turn off the link from Discord to sage. Nothing changed.']]);
+  const stranger = button(STOP, { user: SAM, roles: [] }); // roles come from the member: no sage-crew, so nothing
+  await on.interaction(stranger);
+  assert.deepEqual(stranger.calls, []);
   assert.equal(existsSync(flag), false);
   const press = button(STOP);
   await on.interaction(press);
@@ -614,12 +610,12 @@ test('F-T143-2: a press while the link is already off writes nothing and logs no
 
 test('F-T143-2: /sage stop has a burst limit of 3 per person in 10 minutes: one note, then nothing, until it frees up', async (t) => {
   const b = world(t);
-  const confirm = 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until you turn it on again at the terminal. Read asks keep working.';
+  const confirm = 'Turn off the link from Discord to sage? Then no message from Discord goes to sage until Erick turns it on again at the terminal. Read asks keep working.';
   for (let n = 0; n < 3; n++) { assert.deepEqual(await b.cmd(OWNER, 'stop'), [confirm]); b.now += 1000; }
-  assert.deepEqual(await b.cmd(OWNER, 'stop'), [`You used /sage stop 3 times in the last 10 minutes; that is the limit. Your next /sage stop works at <t:${Math.floor((T0 + 10 * 60_000) / 1000)}:t>. You can still turn the link off at the terminal.`]);
+  assert.deepEqual(await b.cmd(OWNER, 'stop'), [`You used /sage stop 3 times in the last 10 minutes; that is the limit. Your next /sage stop works at <t:${Math.floor((T0 + 10 * 60_000) / 1000)}:t>. Erick can still turn the link off at the terminal.`]);
   assert.deepEqual(await b.cmd(OWNER, 'stop'), [undefined]); // the deferred reply goes again: nothing stays in the channel
   assert.equal(b.buttons, undefined);
-  assert.deepEqual(await b.cmd(MAYA, 'stop'), ['Only Erick can turn off the link from Discord to sage. Ask Erick.']); // the crew: refused, no burst note
+  assert.deepEqual(await b.cmd(MAYA, 'stop'), [confirm]); // the burst limit is per person
   b.now = T0 + 10 * 60_000 + 1;
   assert.deepEqual(await b.cmd(OWNER, 'stop'), [confirm]);
   assert.deepEqual(b.log().lines, []); // a /sage stop that is not pressed logs nothing
