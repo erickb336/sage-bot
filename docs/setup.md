@@ -82,6 +82,12 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   node scripts/bridge.mjs ~/.config/sage-bot/config.json
   ```
 
+  Three lines of the log at the start need a fix from you; the bridge runs with each of them:
+
+  - "no role of the server is named sage-crew": make a role named exactly `sage-crew` (the case counts) in the server, and give it to each crew member.
+  - "the config has apprenticeRole" (or `leadRole`, `driverRole`): remove those keys from the config. They do nothing now (see [Who is who](#who-is-who)).
+  - "the config's ownerId … is not the owner of the Discord application": check that `ownerId` is your own Discord user id. sage-bot takes the config's id as the owner.
+
   When it works, stop it with Ctrl+C. Then write its launchd agent, so that it starts at each login and again after it stops:
 
   <!-- check: run, prints "wrote " -->

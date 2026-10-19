@@ -110,6 +110,7 @@ Each answer is public and pings nobody. The answer to a mention goes into its th
 | Get the project's shared graphics and PDFs | `@sage-bot files` or `/sage files [project]` |
 | Answer or vote on a team question | Press an option on its card |
 | Recommend on the autopilot question | Press Yes or No on its card. The owner decides at the terminal. |
+| Stop the link from Discord to sage at once, in an emergency | `/sage stop`, then the confirm button within 10 minutes. No approval is needed. Only the owner turns the link on again, at the terminal. |
 
 A mention that names none of these words gets a reply that lists them.
 
@@ -119,7 +120,7 @@ A mention that names none of these words gets a reply that lists them.
 | --- | --- |
 | Break a tie | Press a tie-break button on the card |
 | Stop sage-bot in this channel | `/sage unregister`, then the confirm button within 10 minutes |
-| Turn off the link from Discord to sage | `/sage stop`, then the confirm button within 10 minutes |
+| Turn off the link from Discord to sage, as any crew member can | `/sage stop`, then the confirm button within 10 minutes |
 | Talk to sage | `@sage-bot talk …`: recorded in the audit log only, until bridge sessions come with T159 |
 
 **As the owner, at the terminal** (in the sage-bot folder). These commands read the bridge's config, `~/.config/sage-bot/config.json`: make it first with the [setup guide](docs/setup.md#the-checklist), step 3.
@@ -179,7 +180,7 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 | **sage** | The Claude Code plugin whose session frames the work and asks the questions. |
 | **The owner** | The person who runs sage at the terminal and this sage-bot, known by Discord user id. The owner's answer is always final. Only the owner breaks ties, ends votes early and turns the link on again; the crew and the owner can stop it. |
 | **The bridge** | sage-bot's service on the owner's Mac: `scripts/bridge.mjs`. |
-| **The crew** | Every member with the Discord role named `sage-crew`: they read and ask, and answer and vote. |
+| **The crew** | Every member with the Discord role named `sage-crew`: they read and ask, answer and vote, and can stop the link from Discord to sage at once. |
 | **Registered channel** | A channel where sage-bot works, for one project. Only the owner registers one. |
 | **Answer thread** | A thread that a mention opens. sage-bot answers read asks there. |
 | **Owner thread** | A thread that the owner's "talk" opens. Each message there goes into the audit log. |

@@ -89,7 +89,7 @@ test('watchCrew: one warning line in the log and #sage-audit when two roles shar
   assert.equal(posts.length, 2);
   const none = [];
   watchCrew(() => [{ id: MODS, name: 'Moderators' }], { log: (l) => none.push(l) });
-  assert.deepEqual(none, [`no role of the server is named ${CREW}: only the owner can use sage-bot until a role has that name`]);
+  assert.deepEqual(none, [`no role of the server is named ${CREW}: only the owner can use sage-bot until a role has that name. Make a role named exactly ${CREW} (the case counts) and give it to each crew member.`]);
 });
 
 test('ownerOf with a fake Discord application: user-owned, team-owned with and without ownerId, and a warning when they differ', () => {

@@ -155,7 +155,7 @@ export function watchCrew(roles, { log, audit }) {
     }
     last = warning;
   };
-  if (!crewRoleIds(roles()).length) log(`no role of the server is named ${CREW}: only the owner can use sage-bot until a role has that name`);
+  if (!crewRoleIds(roles()).length) log(`no role of the server is named ${CREW}: only the owner can use sage-bot until a role has that name. Make a role named exactly ${CREW} (the case counts) and give it to each crew member.`);
   check();
   return check;
 }
