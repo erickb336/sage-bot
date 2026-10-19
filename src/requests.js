@@ -5,8 +5,9 @@
 // The requests file is <statePath>.requests, beside the thread map and safe like it: 0600, written whole, read with no symlink, and
 // every read-modify-write under withLock. `next` counts the ids up, and an id is never reused: no request ever leaves the file.
 // Each new or changed record is checked as the loader checks it before it is saved (F-T72-20), so no write makes the file unreadable.
-// The text of a request comes from Discord and is untrusted. sage reads only titleForSage and textForSage (forModel, made once at
-// create); people read the title and the text through forTerminal at the terminal, and through the card cleaner on Discord.
+// The text of a request comes from Discord and is untrusted. The task title in sage is titleForSage (forModel, made once at create).
+// The record keeps the raw title and text: the outbox (a later PR of issue 60) gives them to sage escaped, as quoted data (F1 of R917).
+// People read the title and the text through forTerminal at the terminal, and through `safe` on Discord (src/requestCards.js).
 import { killPathOf, linkOff } from './audit.js';
 import { forModel, forTerminal } from './clean.js';
 import { loadProjects } from './projects.js';

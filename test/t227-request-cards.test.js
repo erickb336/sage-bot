@@ -1,12 +1,13 @@
-// T72 PR 2: the Discord messages of /sage request (src/requestCards.js) and the marks of the confirm (sageMarks in src/clean.js).
-// Pure functions: no Discord, no network, no file. SAMPLE DATA ONLY: every id, name and project is made up.
+// T72 PR 2 (issue 60 PR 2): the Discord messages of /sage request (src/requestCards.js). People read them: they show the requester's
+// raw text, made safe, with no marks. Pure functions: no Discord, no network, no file. SAMPLE DATA ONLY: every id, name and project is made up.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { embedLength } from 'discord.js';
-import { forModel, sageMarks } from '../src/clean.js';
+import { safe } from '../src/cards.js';
+import { forModel } from '../src/clean.js';
 import { newRequest, step } from '../src/requests.js';
 import {
-  confirmMessage, decidedPost, declineModal, expired, marked, parseRequestId, requestCard, requestId, requestLine, requestModal,
+  confirmMessage, decidedPost, declineModal, expired, parseRequestId, requestCard, requestId, requestLine, requestModal,
   requestNote, REQUEST_NOTES, requestThreadName, withdrawConfirm,
 } from '../src/requestCards.js';
 
@@ -32,61 +33,6 @@ function states(fields = FIELDS, reason = 'We plan the export for the January re
 const R = states();
 const t = (ms) => `<t:${ms / 1000}:t>`;
 
-/** Every code point, as a string; a surrogate code point is a lone surrogate. */
-const ALL = Array.from({ length: 0x110000 }, (_, cp) => (cp >= 0xd800 && cp <= 0xdfff ? String.fromCharCode(cp) : String.fromCodePoint(cp)));
-/** The property of sageMarks for one text: the parts are the text, their `sage` is forModel's text, and a part that is not kept reads at most a space. */
-function agrees(text) {
-  const { parts } = sageMarks(text);
-  if (parts.map((p) => p.text).join('') !== String(text).toWellFormed()) return 'the parts are not the text';
-  if (parts.map((p) => p.sage).join('') !== forModel(text)) return 'the parts do not read as forModel';
-  if (parts.some((p) => p.kind !== 'kept' && !['', ' '].includes(p.sage))) return 'a part that is not kept reads more than a space';
-  if (parts.some((p) => p.kind === 'hidden' && /[\p{L}\p{N}\p{P}\p{S}]/u.test(p.text.replace(/\p{Default_Ignorable_Code_Point}/gu, '')))) return 'a hidden part has a visible character';
-  return null;
-}
-
-test('standing order 12: the sweep over every Unicode code point: the marks of sageMarks read exactly as forModel', () => {
-  // In context too: after a letter, four in a row (marks past the third), after a control, and after a Hangul syllable and a
-  // leading jamo, where NFKC of a compatibility jamo joins the cluster before it (가 + ㄳ is 갃).
-  for (const make of [(c) => c, (c) => `a${c}b`, (c) => `a${c}${c}${c}${c}b`, (c) => `\n${c}\u0301 e`, (c) => `\uAC00${c}\u1100${c}`]) {
-    const bad = ALL.find((c) => agrees(make(c)));
-    assert.equal(bad, undefined, `U+${bad?.codePointAt(0).toString(16)}: ${bad && agrees(make(bad))}`);
-  }
-});
-
-test('the marks agree with forModel on random mixes of the hard cases: marks, jamo, controls, emoji, look-alikes, NFKC growth and the 500 cut', () => {
-  const pool = ['a', 'é', 'e', '\u0301', '\u0316', '\u0345', ' ', '  ', '\n', '\r\n', '\t', '\u00A0', '\u200B', '\u200C', '\u200D', '\u202E', '\u{E0041}', '\uFE0F',
-    '\u1100', '\u1161', '\u11A8', '\uAC00', '\u0B47', '\u0B3E', '\u0915', '\u094D', '\u0937', 'ﷺ', 'ﬁ', '①', '½', '\u02BC', '\u05F2', '"', "'", '(', '*', '-', '.', ':',
-    '7', '٣', '😀', '👨‍👩‍👧', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', '\uD800', '\uDC00', '\u0000', '\x1b', '\u2028', 'ㄱ', '\u3099', 'か', '\u3133', '\u314F', '\uFFA3', '\u0F73', '\u0F71', '\u0F72'];
-  let seed = 227;
-  const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31);
-  for (let i = 0; i < 20_000; i++) {
-    const n = i % 50 === 0 ? 400 + (next() % 300) : next() % 40;
-    const text = Array.from({ length: n }, () => pool[next() % pool.length]).join('');
-    assert.equal(agrees(text), null, JSON.stringify(text));
-  }
-});
-
-test('the marks: kept, dropped and hidden parts, and the count of hidden characters', () => {
-  const kinds = (text) => sageMarks(text).parts.map((p) => `${p.kind[0]}:${p.text}`).join('|');
-  assert.equal(kinds("it's (ok)"), "k:i|k:t|d:'|k:s|k: |d:(|k:o|k:k|d:)");
-  assert.equal(kinds('a\u200Bb'), 'k:a|h:\u200B|k:b');
-  assert.deepEqual(sageMarks('a\u200Bb\u202Ec\u{E0041}').hidden, 3);
-  // An emoji's joiners and its tag characters are part of what a person sees: no hidden character.
-  assert.deepEqual([sageMarks('👨‍👩‍👧 🏴󠁧󠁢󠁥󠁮󠁧󠁿 ok').hidden, kinds('👨‍👩‍👧 ok')], [0, 'd:👨‍👩‍👧|k: |k:o|k:k']);
-  // A ligature reads as its letters; past 500 characters nothing is read.
-  assert.deepEqual(sageMarks('ﬁx').parts.map((p) => p.sage), ['fi', 'x']);
-  // NFKC joins two clusters here: the syllable and the jamo after it are one part, which sage reads as one syllable.
-  assert.deepEqual(sageMarks('가ㄳ a').parts, [{ text: '가ㄳ', kind: 'kept', sage: '갃' }, { text: ' ', kind: 'kept', sage: ' ' }, { text: 'a', kind: 'kept', sage: 'a' }]);
-  assert.deepEqual(sageMarks(`${'a'.repeat(500)}b`).parts.at(-1), { text: 'b', kind: 'dropped', sage: '' });
-});
-
-test('marked: the text as typed, with what sage does not read struck through, made safe; a hidden character shows nothing', () => {
-  assert.equal(marked("Add CSV export (for Excel) — it's *urgent*!"), "Add CSV export ~~(~~for Excel~~)~~ ~~—~~ it~~'~~s ~~\\*~~urgent~~\\*!~~");
-  assert.equal(marked('a\u200Bb <@123> https://x.test'), 'ab ~~\\<@~~123~~\\>~~ https:~~//~~x.test');
-  // sage never reads a '/', so ':' and '//' are always in two runs: Discord sees no "://" in the source, and no link.
-  assert.equal(marked('plain words only'), 'plain words only');
-});
-
 test('custom_id: a round trip for every action, the version prefix, the id kinds and Discord\'s 100 characters', () => {
   for (const [action, id] of [['form', 'D1'], ['send-team', `D${'9'.repeat(20)}`], ['send-owner', 'D5'], ['edit', 'D5'], ['cancel', 'D5'],
     ['approve', 'RQ3'], ['decline', 'RQ3'], ['decline!', 'RQ999999999'], ['withdraw', 'RQ3'], ['withdraw!', 'RQ3'], ['keep', 'RQ3']]) {
@@ -95,6 +41,10 @@ test('custom_id: a round trip for every action, the version prefix, the id kinds
     assert.deepEqual(parseRequestId(custom), { action, id });
   }
   assert.equal(requestId('withdraw!', 'RQ999999999'), 'rq1:withdraw!:RQ999999999');
+  // The longest custom_id of all: the longest draft action with the longest draft key. Discord allows 100.
+  const longest = requestId('send-owner', `D${'9'.repeat(20)}`);
+  assert.deepEqual([longest, longest.length], [`rq1:send-owner:D${'9'.repeat(20)}`, 36]);
+  // The custom_ids of the form inputs, the decline input and every button of every payload are in Discord's limit (the worst-case test checks each one too).
   for (const bad of [['approve', 'D1'], ['send-team', 'RQ1'], ['merge', 'RQ1'], ['approve', 'RQ0'], ['edit', `D${'1'.repeat(21)}`]]) {
     assert.throws(() => requestId(...bad), TypeError);
   }
@@ -109,34 +59,21 @@ test('the form: title 4 to 70, text 10 to 500, both required; Edit opens it with
   assert.deepEqual(requestModal('D7', { title: 'Add CSV', text: 'Some words here' }).components.map(({ components: [i] }) => i.value), ['Add CSV', 'Some words here']);
 });
 
-test('the confirm: the text as typed with the marks, what sage reads, the hidden count, and the two Send buttons', () => {
-  const c = confirmMessage('D7', { project: 'reports-app', title: 'Add CSV export', text: 'Users need it (for Excel)\u200B now.' });
+test('the confirm: the title and the text as typed, made safe, with no marks; what sage gets; the two Send buttons', () => {
+  const c = confirmMessage('D7', { project: 'reports-app', title: 'Add CSV export', text: "Users need it (for Excel)\u200B now — it's *urgent*! See https://x.test" });
   assert.equal(c.flags, 64);
   assert.deepEqual(c.allowedMentions, { parse: [] });
-  assert.match(c.content, /^\*\*Check your request\.\*\* It goes to Erick for approval\. sage reads only letters, digits and \. , : - so/);
+  assert.equal(c.content, '**Check your request.** It goes to Erick for approval. sage gets this text exactly, as quoted data. Pick who decides the design questions when sage designs it, then send.');
   const [e] = c.embeds;
   assert.equal(e.title, 'Your request · reports-app');
-  assert.equal(e.description, '**Title:** Add CSV export\n\n**What and why:** Users need it ~~(~~for Excel~~)~~ now.');
-  assert.deepEqual(e.fields, [{ name: 'sage reads', value: 'Add CSV export\nUsers need it for Excel now.' }, { name: 'sage does not get', value: '( )' }]);
-  assert.equal(e.footer.text, '1 hidden character in your request: nobody sees them, and sage does not read them. This confirm expires after 10 minutes. You can have 1 open request at a time.');
+  // The hidden character shows nothing; the brackets, the dash and the apostrophe stay; the markdown and the link are escaped. No ~~.
+  assert.equal(e.description, "**Title:** Add CSV export\n\n**What and why:** Users need it (for Excel) now — it's \\*urgent\\*! See https:// x.test");
+  assert.equal(e.fields, undefined);
+  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. This confirm expires after 10 minutes. You can have 1 open request at a time.');
   assert.deepEqual(c.components[0].components.map((b) => [b.custom_id, b.label, b.style]), [
-    ['rq1:send-team:D7', 'Send: the team votes on design questions', 3], ['rq1:send-owner:D7', 'Send: Erick decides design questions', 1],
+    ['rq1:send-team:D7', 'Send: the crew votes on design questions', 3], ['rq1:send-owner:D7', 'Send: Erick decides design questions', 1],
     ['rq1:edit:D7', 'Edit', 2], ['rq1:cancel:D7', 'Cancel', 2]]);
-  // With no hidden character, the footer says only the rules; with nothing dropped, there is no list.
-  const plain = confirmMessage('D7', { project: 'p', title: 'Add CSV', text: 'Some words here' }).embeds[0];
-  assert.deepEqual([plain.footer.text, plain.fields.map((f) => f.name)], ['This confirm expires after 10 minutes. You can have 1 open request at a time.', ['sage reads']]);
-});
-
-test('the confirm lists each character that sage drops once, in first-seen order, made safe, and cut with "…" when long', () => {
-  const list = (title, text) => confirmMessage('D7', { project: 'p', title, text }).embeds[0].fields[1]?.value;
-  assert.equal(list("Add CSV (it's)", "Export it! (now) 😀 <@123> see https://x.test *ok*"), "( ' ) ! 😀 \\< @ \\> / \\*");
-  // A hidden character is counted in the footer, not listed; white space is never listed.
-  assert.equal(list('Add CSV', 'a​b   c\n\td e'), undefined);
-  // 500 distinct emoji: the list stops after the last whole one that fits in 1024, then " …".
-  const many = Array.from({ length: 499 }, (_, i) => String.fromCodePoint(0x1f400 + i)).join('');
-  const long = list('Add CSV', `a${many}`);
-  assert.ok(long.length <= 1024 && long.endsWith(' …'), `${long.length}`);
-  assert.equal(long.slice(0, -2), Array.from(many).slice(0, Array.from(long.slice(0, -2).split(' ')).length).join(' '));
+  assert.doesNotMatch(JSON.stringify(c), /~~|sage drops|sage reads|does not get/);
 });
 
 test('the confirm refuses a title or a text with nothing that sage can read, and keeps Edit', () => {
@@ -151,8 +88,8 @@ test('the confirm refuses a title or a text with nothing that sage can read, and
 
 test('the channel line in every state, with no ping', () => {
   const line = (s, o) => requestLine(R[s], o).content;
-  assert.equal(line('pending'), '**Jon (sage-lead) requests a feature:** Add CSV export to the reports page · RQ3 · waiting for Erick');
-  assert.equal(line('pending', { linkOff: true }), '**Jon (sage-lead) requests a feature:** Add CSV export to the reports page · RQ3 · waiting for Erick · the link to sage is off');
+  assert.equal(line('pending'), '**Jon (sage-crew) requests a feature:** Add CSV export to the reports page · RQ3 · waiting for Erick');
+  assert.equal(line('pending', { linkOff: true }), '**Jon (sage-crew) requests a feature:** Add CSV export to the reports page · RQ3 · waiting for Erick · the link to sage is off');
   assert.match(line('approving'), / · RQ3 · being approved$/);
   assert.match(line('approved'), / · RQ3 · approved · sage task T74$/);
   assert.match(line('declined'), / · RQ3 · declined by Erick$/);
@@ -169,10 +106,10 @@ test('the request card in every state: the status, the buttons, the colour, and 
   const [e] = first.embeds;
   assert.deepEqual([e.title, e.description, e.color], ['Request RQ3 · Add CSV export to the reports page', 'Users need the monthly report as a CSV file (for Excel). Finance copies it by hand today.', 0x6b4fd8]);
   assert.deepEqual(e.fields, [
-    { name: 'Requested by', value: `Jon (sage-lead) at ${t(T0)} · project reports-app` },
-    { name: 'Design questions', value: 'When sage designs it, the team votes on them (sage-leads break ties).' },
+    { name: 'Requested by', value: `Jon (sage-crew) at ${t(T0)} · project reports-app` },
+    { name: 'Design questions', value: 'When sage designs it, the crew votes on them (Erick breaks ties).' },
     { name: 'Status', value: 'Waiting for Erick' }]);
-  assert.equal(e.footer.text, 'Erick approves or declines, here or at the terminal · the sage-lead who sent it can withdraw it until then · Talk here goes to nobody but the people in this thread: sage does not read it.');
+  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. Erick approves or declines, here or at the terminal · the sage-crew member who sent it can withdraw it until then · Talk here goes to nobody but the people in this thread: sage does not read it.');
   const buttons = (c) => c.components.flatMap((r) => r.components.map((b) => `${b.label}${b.disabled ? ' (off)' : ''} ${b.custom_id}`));
   assert.deepEqual(buttons(first), ['Approve rq1:approve:RQ3', 'Decline rq1:decline:RQ3', 'Withdraw rq1:withdraw:RQ3']);
   // An edit pings nobody.
@@ -181,7 +118,7 @@ test('the request card in every state: the status, the buttons, the colour, and 
   const off = card('pending', { linkOff: true, ping: true });
   assert.deepEqual([off.content, off.allowedMentions, buttons(off)], ['', { parse: [] }, ['Approve (off) rq1:approve:RQ3', 'Decline rq1:decline:RQ3', 'Withdraw rq1:withdraw:RQ3']]);
   assert.deepEqual(off.embeds[0].fields.at(-1), { name: 'The link from Discord to sage is off',
-    value: 'Approve waits until Erick turns the link on again at the terminal. Erick can still decline, and the sage-lead who sent it can still withdraw.' });
+    value: 'Approve waits until Erick turns the link on again at the terminal. Erick can still decline, and the sage-crew member who sent it can still withdraw.' });
   assert.deepEqual(buttons(card('approving')), ['Approve (off) rq1:approve:RQ3', 'Decline (off) rq1:decline:RQ3', 'Withdraw (off) rq1:withdraw:RQ3']);
   assert.equal(card('approving').embeds[0].fields[2].value, 'Being approved by Erick');
   // Decided: the status, the colour, no buttons, no footer.
@@ -210,9 +147,9 @@ test('the decline form, the withdraw confirm, the posts after a decision and the
   assert.equal(decidedPost(R.declined).content, '**Declined.** Nothing goes to sage. Jon can send a new request with /sage request.');
   assert.equal(decidedPost(R.withdrawn).content, '**Withdrawn.** Nothing goes to sage. Jon can send a new request with /sage request.');
   const note = (why, r) => requestNote(why, r).content;
-  assert.equal(note('apprentice'), 'Only a sage-lead can request a feature. Ask a sage-lead.');
+  assert.equal(note('notCrew'), 'Only a sage-crew member can request a feature. Nothing was sent.');
   assert.equal(note('linkOff'), 'The link from Discord to sage is off, so I cannot take a request. Nothing was sent. Only Erick can turn it on again, at the terminal. Read asks still work.');
-  assert.equal(note('open', { ...R.pending, thread: '100000000000000009' }), `You have an open request: RQ3 · Add CSV export to the reports page, waiting for Erick since ${t(T0)} in <#100000000000000009>. A sage-lead can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
+  assert.equal(note('open', { ...R.pending, thread: '100000000000000009' }), `You have an open request: RQ3 · Add CSV export to the reports page, waiting for Erick since ${t(T0)} in <#100000000000000009>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
   assert.equal(note('sent', { ...R.pending, thread: '100000000000000009' }), 'Sent to Erick as RQ3. Its thread is <#100000000000000009>. You can withdraw it there until Erick decides.');
   assert.equal(note('notOwner'), 'Only Erick approves or declines a request. Nothing changed.');
   assert.equal(note('notRequester', R.pending), 'Only Jon, who sent RQ3, can withdraw it. Nothing changed.');
@@ -249,7 +186,7 @@ function overLimits(p) {
 test('worst cases: every payload in every state stays in Discord\'s limits with the longest text that safe escapes most', () => {
   const words = (unit, n) => Array.from({ length: n }, (_, i) => unit[i % unit.length]).join('');
   const worst = ['*', '[', 'a(', 'a😀', '://a', '\\', 'a\u0301\u0301\u0301\u0301', '-#', '~|_`', '@everyone ',
-    // 500 distinct symbols that safe escapes or that take two UTF-16 units: the longest list of what sage does not get.
+    // 500 distinct symbols that safe escapes or that take two UTF-16 units.
     `a${Array.from({ length: 250 }, (_, i) => String.fromCodePoint(0x1f400 + i)).join('')}${'*[]<>_~|\\#'.repeat(25)}`];
   for (const unit of worst) {
     const title = words(Array.from(unit), 70);
@@ -264,8 +201,65 @@ test('worst cases: every payload in every state stays in Discord\'s limits with 
     }
     for (const p of payloads) assert.deepEqual(overLimits(p), [], `${JSON.stringify(unit)}: ${JSON.stringify(p).slice(0, 200)}`);
   }
-  // The mention text of a name or a title never pings: every payload but the first card post has no user to ping.
-  const r = states({ ...FIELDS, title: '@everyone <@100000000000000002>', requesterName: '@here' }).pending;
-  assert.match(requestLine(r).content, /^\*\*@here \(sage-lead\) requests a feature:\*\* @everyone \\<@100000000000000002\\>/);
-  assert.deepEqual(requestCard(r, { ownerId: OWNER_ID, ping: true }).allowedMentions, { parse: [], users: [OWNER_ID] });
+  // A record longer than the form allows (a hand-edited requests file) is cut to Discord's limits too.
+  const long = { ...R.pending, title: '*'.repeat(5000), text: '['.repeat(5000) };
+  for (const p of [requestLine(long), requestCard(long, { ownerId: OWNER_ID, ping: true }), confirmMessage('D1', { project: 'p', title: `a${long.title}`, text: `a${long.text}` })]) {
+    assert.deepEqual(overLimits(p), [], JSON.stringify(p).slice(0, 200));
+  }
+});
+
+/** Every message payload of a request in every state, with `fields` as the requester's words. */
+function allPayloads(fields, reason) {
+  const S = states(fields, reason);
+  const out = [['confirm', confirmMessage('D7', { project: 'reports-app', ...fields })], ['expired', expired('D7')]];
+  for (const [s, r] of Object.entries(S)) {
+    out.push([`line ${s}`, requestLine(r)], [`line ${s} off`, requestLine(r, { linkOff: true })], [`card ${s} ping`, requestCard(r, { ownerId: OWNER_ID, ping: true })],
+      [`card ${s}`, requestCard(r, { ownerId: OWNER_ID })], [`card ${s} off`, requestCard(r, { ownerId: OWNER_ID, linkOff: true })],
+      [`withdraw ${s}`, withdrawConfirm(r)], [`posted ${s}`, decidedPost(r)], ...Object.keys(REQUEST_NOTES).map((why) => [`note ${why} ${s}`, requestNote(why, { ...r, thread: '100000000000000009' })]));
+  }
+  return out;
+}
+
+test('@everyone, @here, role, user and channel mentions in a request never ping: parse [] on every message, and the text is escaped', () => {
+  const MENTIONS = '@everyone @here <@100000000000000002> <@!100000000000000002> <@&100000000000000003> <#100000000000000004> </sage stop:1> <t:1:R>';
+  const fields = { ...FIELDS, title: `Ping ${MENTIONS}`.slice(0, 70), text: `Please ${MENTIONS}`, requesterName: '@everyone <@&100000000000000003>' };
+  const payloads = allPayloads(fields, MENTIONS);
+  for (const [name, p] of payloads) {
+    // Only the first post of a waiting card pings, and only Erick's user id; never a role, @everyone or @here.
+    const expected = name === 'card pending ping' ? { parse: [], users: [OWNER_ID] } : { parse: [] };
+    assert.deepEqual(p.allowedMentions, expected, name);
+    // No mention syntax of the requester's words is left unescaped: every `<` they typed shows as `\<`.
+    const shown = JSON.stringify([p.content, p.embeds]).replace(/<@100000000000000001>|<#100000000000000009>|<t:\d+:[tR]>/g, '');
+    assert.doesNotMatch(shown.replace(/\\\\</g, ''), /</, name);
+  }
+  const card = requestCard(states(fields).pending, { ownerId: OWNER_ID });
+  assert.equal(card.embeds[0].description, 'Please @everyone @here \\<@100000000000000002\\> \\<@!100000000000000002\\> \\<@&100000000000000003\\> \\<#100000000000000004\\> \\</sage stop:1\\> \\<t:1:R\\>');
+  assert.equal(card.embeds[0].fields[0].value, `@everyone \\<@&100000000000000003\\> (sage-crew) at ${t(T0)} · project reports-app`);
+});
+
+test('standing order 12: the sweep over every Unicode code point: in the confirm, the line and the card, the requester\'s words are inert and fit', () => {
+  // The allow-list of safe (src/cards.js; its own sweep is in test/t27-repair5.test.js), as the output may hold it: an RGI emoji, a
+  // letter, number, punctuation, joiner, space, mark or symbol, never a backtick, a control, a format or an unassigned code point.
+  const ALLOWED = /^(?:\p{RGI_Emoji}|[[\p{L}--[\u115F\u1160\u3164\uFFA0]][\p{N}\p{P}\u200c\u200d \n][\p{M}--\p{Variation_Selector}][\p{S}--[\x60\u2800\u{1D159}]]])*$/v;
+  // With the escape pairs gone, no markdown, mention or link character of the requester's words is left.
+  const inert = (s) => !/[<>[\]*_~|`]|:\/\/\S/.test(s.replace(/\\[\s\S]/g, ''));
+  const words = (s) => s.replace(/^\*\*Title:\*\* |\n\n\*\*What and why:\*\* /g, ' ');
+  let checked = 0;
+  for (let from = 0; from <= 0x10ffff; from += 100) {
+    // 100 code points, each between two letters: "a<c>b a<c>b …" (at most 500 characters, as the form allows).
+    const chars = Array.from({ length: Math.min(100, 0x110000 - from) }, (_, i) => from + i);
+    const text = chars.map((cp) => `a${cp >= 0xd800 && cp <= 0xdfff ? String.fromCharCode(cp) : String.fromCodePoint(cp)}b`).join(' ');
+    const title = text.slice(0, 70);
+    const r = { ...R.pending, title, text };
+    const card = requestCard(r, { ownerId: OWNER_ID, ping: true });
+    const line = requestLine(r).content.replace(/^\*\*Jon \(sage-crew\) requests a feature:\*\* /, '');
+    const confirm = confirmMessage('D7', { project: 'p', title, text }).embeds[0].description;
+    for (const [what, shown] of [['card', card.embeds[0].description], ['card title', card.embeds[0].title], ['line', line], ['confirm', words(confirm)]]) {
+      assert.ok(ALLOWED.test(shown) && inert(shown), `U+${from.toString(16)}..: ${what}: ${JSON.stringify(shown).slice(0, 300)}`);
+    }
+    assert.equal(card.embeds[0].description, safe(text));
+    assert.deepEqual([overLimits(card), card.allowedMentions], [[], { parse: [], users: [OWNER_ID] }]);
+    checked += chars.length;
+  }
+  assert.equal(checked, 0x110000);
 });
