@@ -9,10 +9,12 @@ import { handle, peopleOf } from '../src/handle.js';
 import { fakeInteraction } from '../src/fake-discord.js';
 import { openGate, step, MINUTE } from '../src/vote.js';
 import { ASKS, MAYA, clock, openAsk } from '../examples/sample.js';
+/** The owner of these sample members: the one with the role 'ld' (the sage-lead of before T232). */
+const asOwner = (members) => ({ ownerId: members.find((m) => m.roles.includes('ld'))?.id });
+
 
 const T0 = clock(14, 31);
-const ROLES = { apprenticeRole: 'drv', leadRole: 'ld' };
-const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.leads).gate, gate);
+const apply = (gate, people, ...events) => events.reduce((g, e) => step(g, e, people.holders, people.ownerId).gate, gate);
 /** `text` as tag characters (U+E0000 + the ASCII code): invisible, and a model reads it as ASCII. */
 const tag = (s) => [...s].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join('');
 const flag = (code) => `\u{1F3F4}${tag(code)}\u{E007F}`;
@@ -62,8 +64,8 @@ test('F-T27-30: property test: every card of a team of 2 to 5 with 1 to 4 parts 
   let largest = 0;
   for (let i = 0; i < 2000; i++) {
     const n = 2 + rand(4);
-    const members = Array.from({ length: n }, (_, k) => ({ id: `${k}`.padStart(18, '9'), name: rand(10) ? text(1, 32) : pick(['', '\u200d', ' ']), roles: ['drv', ...(k === 0 ? ['ld'] : [])] }));
-    const people = peopleOf(members, ROLES);
+    const members = Array.from({ length: n }, (_, k) => ({ id: `${k}`.padStart(18, '9'), name: rand(10) ? text(1, 32) : pick(['', '\u200d', ' ']), roles: ['sage-crew', ...(k === 0 ? ['ld'] : [])] }));
+    const people = peopleOf(members, asOwner(members));
     const keys = ['A', 'B', 'C', 'D', 'E'].slice(0, 2 + rand(4));
     const part = () => ({ question: text(1, 1000), why: text(0, 4000), recommended: pick(keys), options: Object.fromEntries(keys.map((k) => [k, text(1, 500)])) });
     let at = T0;
@@ -120,8 +122,8 @@ test('F-T27-30: property test: every card of a team of 2 to 5 with 1 to 4 parts 
 
 /** A team of `n` holders with 32-character names and one lead, on `parts` parts of these options, with these text lengths; everyone votes with a reason of `reason` characters. */
 function team({ n = 5, parts = 4, options = ['A', 'B', 'C', 'D', 'E'], question = 300, label = 100, why = 300, reason = 400 }) {
-  const members = Array.from({ length: n }, (_, i) => ({ id: `${i}`.padStart(18, '7'), name: `Member number ${i}`.padEnd(32, '!'), roles: ['drv', ...(i === 0 ? ['ld'] : [])] }));
-  const people = peopleOf(members, ROLES);
+  const members = Array.from({ length: n }, (_, i) => ({ id: `${i}`.padStart(18, '7'), name: `Member number ${i}`.padEnd(32, '!'), roles: ['sage-crew', ...(i === 0 ? ['ld'] : [])] }));
+  const people = peopleOf(members, asOwner(members));
   const part = { question: 'q '.repeat(question / 2).trim(), why: 'why '.repeat(why / 4).trim(), recommended: 'A', options: Object.fromEntries(options.map((o) => [o, `${o.toLowerCase()} `.repeat(label / 2).trim()])) };
   const ask = { kind: 'batch', task: 'T1', title: 'x', parts: Array.from({ length: parts }, () => part) };
   let gate = openGate({ id: 'H', kind: 'batch', parts: Array.from({ length: parts }, () => options), askedBy: members[0].id, at: T0 });
@@ -136,10 +138,10 @@ test('F-T27-30: the QA repro (a team of 5, 4 parts, 5 options, long questions, e
     const [e] = c.embeds;
     assert.ok(embedLength(e) <= 6000 && embedLength(e) > 5600, `question ${question}: ${embedLength(e)}`); // 6040 to 6256 on 56e5910
     const reasons = e.fields.slice(4);
-    // The 4 part fields take about 1020 characters each, so only the newest reasons fit: 2 up to a question of 240 characters, then 1
-    // (the T70 footer names two roles); the oldest went; each shown one keeps its 200 characters.
+    // The 4 part fields take about 1020 characters each, so only the newest 2 reasons fit (the T232 footer names one role, so a
+    // question of 300 characters keeps both); the oldest went; each shown one keeps its 200 characters.
     const newest = ['Member number 4!!!!!!!!!!!!!!!!!, part 3', 'Member number 4!!!!!!!!!!!!!!!!!, part 4'];
-    assert.deepEqual(reasons.map((f) => f.name), question <= 240 ? newest : newest.slice(1), `question ${question}`);
+    assert.deepEqual(reasons.map((f) => f.name), newest, `question ${question}`);
     assert.ok(reasons.every((f) => f.value.length === 200));
     // Each part field first went within 1024 on its own: the voter lists end in "and 4 more" and the why is cut at a word; the labels are whole.
     e.fields.slice(0, 4).forEach((f, idx) => {
@@ -242,8 +244,8 @@ test('F-T27-32: the selectors stay only inside an RGI emoji (a red heart, a keyc
 test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and to "member" alone for any other id, never to the raw id', () => {
   const digits = '123456789012346789';
   const odd = 'sample-maya';
-  const members = [{ id: digits, name: '\u200d', roles: ['drv', 'ld'] }, { id: odd, name: '', roles: ['drv'] }, { id: 'x', name: 'Ana', roles: ['drv'] }];
-  const people = peopleOf(members, ROLES);
+  const members = [{ id: digits, name: '\u200d', roles: ['sage-crew', 'ld'] }, { id: odd, name: '', roles: ['sage-crew'] }, { id: 'x', name: 'Ana', roles: ['sage-crew'] }];
+  const people = peopleOf(members, asOwner(members));
   const gate = apply(openGate({ id: 'B', kind: 'batch', parts: [['A', 'B']], askedBy: odd, at: T0 }), people,
     { type: 'press', by: digits, part: 0, option: 'A', at: T0 + 1, via: 'discord', reason: 'yes' },
     { type: 'press', by: odd, part: 0, option: 'A', at: T0 + 2, via: 'discord', reason: 'also yes' });
@@ -256,7 +258,7 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
   const text = JSON.stringify([e, confirmEnd(gate, people), note('not-asker', gate, people.names)]);
   assert.doesNotMatch(text, /maya|123456789012346789/);
   // On 56e5910 the fallback showed the last 4 characters of any id ("member …maya").
-  const maya = peopleOf([{ id: MAYA, name: '', roles: ['drv'] }], ROLES);
+  const maya = peopleOf([{ id: MAYA, name: '', roles: ['sage-crew'] }], { ownerId: digits });
   const b9 = apply(openAsk('B9', T0), maya, { type: 'press', by: MAYA, part: 0, option: 'A', at: T0 + 1, via: 'discord' });
   assert.match(card(b9, ASKS.B9, maya).embeds[0].fields[0].value, /1 vote \(\*\*member\*\*\)\n/);
 });

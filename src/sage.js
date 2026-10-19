@@ -47,6 +47,10 @@ async function probe(sagePath, env) {
 }
 const firstLine = (e) => String(e?.stderr || e?.message || e).split('\n').find(Boolean) ?? '';
 
+/** A failure of the state tool, for a person: the first line of its stderr, or a fixed text with its exit code or signal; never Node's
+ * "Command failed" line with the argv and its paths (F-T72-3, T209). */
+const failure = (e) => new Error(String(e.stderr ?? '').split('\n').find((l) => l.trim()) || `the sage state tool stopped with ${e.signal ? `signal ${e.signal}` : `exit code ${e.code}`}`);
+
 /** A TSV table of the logbook as rows of { column: value }, by its header line, as sage reads it. */
 function rows(text) {
   const [head, ...lines] = text.replace(/^﻿/, '').split(/\r?\n/).filter(Boolean);
@@ -85,11 +89,12 @@ const TOOL_ENV = ['PATH', 'HOME', 'SAGE_HOME', 'SAGE_WORKTREES', 'SAGE_BOARD_ROO
  */
 export function sageTool({ sagePath, project, env = process.env }) {
   // The one caller of the state tool for this project: a fixed argv, no shell, `--project` last. `signal` kills the tool with SIGKILL
-  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). An error has the exit code as `code` and the
-  // tool's refusal as `stderr`.
-  const exec = (args, childEnv, { signal } = {}) => new Promise((resolve, reject) => {
+  // (execFile's own `signal` option sends SIGTERM, which a hung tool can ignore: T189). `onStart` gets the tool's pid as soon as it
+  // starts. An error has the exit code as `code` and the tool's refusal as `stderr`.
+  const exec = (args, childEnv, { signal, onStart } = {}) => new Promise((resolve, reject) => {
     const child = execFile(process.execPath, [sagePath, ...args, '--project', project], { env: childEnv, encoding: 'utf8' }, (e, out, err) => (e ? reject(Object.assign(e, { stderr: err })) : resolve(out.trim())));
     signal?.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
+    if (child.pid) onStart?.(child.pid);
   });
   // The broker's logbook verbs get only the names that the state tool reads (an allow-list, F-T195-2): never the bridge's token or
   // any other secret of its environment. CLAUDE_CONFIG_DIR is in it because the tool's default logbook root is under it.
@@ -99,7 +104,7 @@ export function sageTool({ sagePath, project, env = process.env }) {
   // One lookup of the logbook folder, kept as one promise, so that tables read at the same time share it (F-T71-2). A lookup that
   // fails is not kept: the next read tries again.
   let dir;
-  const logbook = () => (dir ??= sage('logbook').catch((e) => { dir = undefined; throw e; }));
+  const logbook = () => (dir ??= sage('logbook').catch((e) => { dir = undefined; throw failure(e); }));
   const table = async (name) => rows(await readFile(join(await logbook(), `${name}.tsv`), 'utf8'));
   return {
     /** The folder of the project (loadProjects): the identity that the bridge saves with each card and mark (G45 A). */
@@ -116,17 +121,17 @@ export function sageTool({ sagePath, project, env = process.env }) {
     /**
      * Adds one task (T72): a fixed argv with the title as one `--title=` argument, the allow-listed environment, no shell. `size` is
      * small or large. A title with a control character is refused: sage keeps it in a TSV row. The tool is killed (SIGKILL) after
-     * `ms` (ADD_TASK_MS). Returns the new task id, as `task add` prints it ("T74 framed · …"); throws for any other output, and for a
-     * failure with the first line of the tool's stderr, or a fixed text with the exit code (never Node's line with the argv: F-T72-3).
+     * `ms` (ADD_TASK_MS); `onStart` gets its pid as soon as it starts. Returns the new task id, as `task add` prints it ("T74 framed · …");
+     * throws for any other output, and for a failure with `failure`.
      */
-    addTask: async ({ title, size }, { ms = ADD_TASK_MS } = {}) => {
+    addTask: async ({ title, size }, { ms = ADD_TASK_MS, onStart } = {}) => {
       if (!['small', 'large'].includes(size)) throw new TypeError(`a task from a request is small or large, not ${JSON.stringify(size)}`);
       if (typeof title !== 'string' || !title.trim() || /\p{Cc}/u.test(title)) throw new TypeError('a task title is one line of text');
       const signal = AbortSignal.timeout(ms);
       let said;
-      try { said = await command(['task', 'add', `--title=${title}`, `--size=${size}`], { signal }); } catch (e) {
+      try { said = await command(['task', 'add', `--title=${title}`, `--size=${size}`], { signal, onStart }); } catch (e) {
         if (signal.aborted) throw new Error(`the sage state tool took longer than ${ms / 1000} seconds and was stopped`);
-        throw new Error(String(e.stderr ?? '').split('\n').find((l) => l.trim()) || `the sage state tool stopped with ${e.signal ? `signal ${e.signal}` : `exit code ${e.code}`}`);
+        throw failure(e);
       }
       return /^(T\d{1,9}) framed\b/.exec(said)?.[1] ?? (() => { throw new Error(`the sage state tool added no task: ${JSON.stringify(said.slice(0, 200))}`); })();
     },
@@ -198,10 +203,11 @@ export const sageToolIn = (cache, version) => join(cache, 'sage', version, 'skil
  * 1. SAGE_TOOL, when it is set;
  * 2. the newest sage.mjs (by modification time) in the sage plugin's cache, <cache>/sage/<version>/skills/sage/, in claudeDirOf;
  * 3. else an error that names SAGE_TOOL.
- * HOME is the real home folder from the user database (os.userInfo), not $HOME: the demo and the tests run with HOME set to a scratch folder.
+ * The home folder is `env.HOME`, as for every other tool that the run starts, so a run with HOME in a scratch folder (npm run demo) finds
+ * the sage plugin there; with no HOME, the owner's home folder from the user database (F-T145-L9).
  * @param {{ env?: NodeJS.ProcessEnv, home?: string }} [o] @returns {string} the path of sage.mjs
  */
-export function sagePath({ env = process.env, home = ownerHome() } = {}) {
+export function sagePath({ env = process.env, home = env.HOME || ownerHome() } = {}) {
   if (env.SAGE_TOOL) {
     if (existsSync(env.SAGE_TOOL)) return env.SAGE_TOOL;
     throw new Error(`SAGE_TOOL is set to ${env.SAGE_TOOL}, but there is no file there. Set SAGE_TOOL to the sage plugin's sage.mjs.`);

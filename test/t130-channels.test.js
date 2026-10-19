@@ -13,7 +13,8 @@ import { createBridge } from '../src/bridge.js';
 import { channelsPathOf, checkChannels, loadChannels, openChannels, withHome } from '../src/channels.js';
 import { enter, prepare, routes } from '../src/discord.js';
 import { fakeCommand, fakeMention } from '../src/fake-discord.js';
-import { APPRENTICE, CHANNEL, CONFIG, execFileSync, JON, LEADR, MAYA, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
+import { CHANNEL, CONFIG, execFileSync, MAYA, OWNER, SAGE, SAM, setup, spawnSync } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // the old #ask-sage
@@ -85,7 +86,7 @@ test('T130 migration: an old config with channelId and askChannelId makes the re
   assert.deepEqual(lines, [`made the channel registry ${b.registry} from the config: ${ASK} -> project, ${CHANNEL} -> project (home)`]);
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   b.sh('task', 'add', '--title', 'Pick a name', '--size', 'tiny');
-  assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'task', { id: 'T1' }))[1].content, '**T1 · Pick a name**\ntiny · framed · no pull request');
+  assert.deepEqual((await b.cmd(ask, MAYA, [CREW], ASK, 'task', { id: 'T1' }))[1].content, '**T1 · Pick a name**\ntiny · framed · no pull request');
   // The cards: the bridge on the home channel of the registry posts the session line and its thread there.
   b.sh('gate', 'add', 'T1', '--question', 'Which name?', '--options', 'Ada|Bo', '--recommend', 'Ada');
   b.bridge = createBridge({ sages: new Map([['project', b.sage]]), own: 'project', discord: b.discord, config: withHome(CONFIG, channels), statePath: b.statePath, now: () => b.now, log: () => {} });
@@ -167,7 +168,7 @@ function press(user, roles, customId, age = 0) {
     update: async (p) => { replies.push({ kind: 'update', ...p }); }, reply: async (p) => { replies.push({ kind: 'reply', ...p }); } };
 }
 
-test('T130 unregister: a sage-lead unregisters with a confirm; an apprentice is refused; a member with no role gets nothing; the home cannot go', async (t) => {
+test('T130 unregister: the owner unregisters with a confirm; a crew member is refused; anyone else gets nothing; the home cannot go', async (t) => {
   const b = world(t);
   const lines = [];
   const channels = openChannels(b.config, loadProjects(b.config));
@@ -179,27 +180,27 @@ test('T130 unregister: a sage-lead unregisters with a confirm; an apprentice is 
   await ask.press(none);
   assert.deepEqual(none.replies, []);
   // An apprentice: refused, also when they press a sage-lead's confirm; the confirm stays and the registry does not change.
-  assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'unregister'))[1].content, 'Only a sage-lead can unregister a channel. Ask a sage-lead.');
-  const apprentice = press(MAYA, [APPRENTICE], `${UNREGISTER}${ASK}`);
+  assert.deepEqual((await b.cmd(ask, MAYA, [CREW], ASK, 'unregister'))[1].content, 'Only Erick can unregister a channel. Ask Erick.');
+  const apprentice = press(MAYA, [CREW], `${UNREGISTER}${ASK}`);
   await ask.press(apprentice);
-  assert.deepEqual(apprentice.replies, [{ kind: 'reply', content: 'Only a sage-lead can unregister a channel. Nothing changed.', flags: 64, allowedMentions: { parse: [] } }]); // 64: ephemeral (F-T136-9)
+  assert.deepEqual(apprentice.replies, [{ kind: 'reply', content: 'Only Erick can unregister a channel. Nothing changed.', flags: 64, allowedMentions: { parse: [] } }]); // 64: ephemeral (F-T136-9)
   // The home channel: refused for a sage-lead too.
-  assert.equal((await b.cmd(ask, JON, [LEADR], CHANNEL, 'unregister'))[1].content, `<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`);
+  assert.equal((await b.cmd(ask, OWNER, [CREW], CHANNEL, 'unregister'))[1].content, `<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
   // A sage-lead, in a thread of the channel: the confirm names the channel and has one button for it.
-  const confirm = (await b.cmd(ask, JON, [LEADR], THREAD, 'unregister', {}, ASK))[1];
+  const confirm = (await b.cmd(ask, OWNER, [CREW], THREAD, 'unregister', {}, ASK))[1];
   assert.equal(confirm.content, `Unregister <#${ASK}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`);
   assert.deepEqual(confirm.components, [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${ASK}` },
     { type: 2, style: 2, label: 'Cancel', custom_id: 'channel-unregister:cancel' }] }]);
   assert.equal(readFileSync(b.registry, 'utf8'), before); // nothing changes before the press
-  const lead = press(JON, [LEADR], confirm.components[0].components[0].custom_id);
+  const lead = press(OWNER, [CREW], confirm.components[0].components[0].custom_id);
   await ask.press(lead);
   assert.deepEqual(lead.replies, [{ kind: 'update', content: `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`, components: [], allowedMentions: { parse: [] } }]);
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
-  assert.deepEqual(lines, [`the sage-lead name-03 (${JON}) unregistered the channel ${ASK} (it was for the project project)`]); // F-T130-6
+  assert.deepEqual(lines, [`the owner name-01 (${OWNER}) unregistered the channel ${ASK} (it was for the project project)`]); // F-T130-6
   // After it, the channel is like any other that is not registered: one pointer a day, then nothing.
-  assert.deepEqual((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'))[1].content, `I answer /sage in <#${CHANNEL}>, so please ask there.`);
-  assert.deepEqual(await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'), [{ kind: 'defer' }, { kind: 'remove' }]);
+  assert.deepEqual((await b.cmd(ask, MAYA, [CREW], ASK, 'board'))[1].content, `I answer /sage in <#${CHANNEL}>, so please ask there.`);
+  assert.deepEqual(await b.cmd(ask, MAYA, [CREW], ASK, 'board'), [{ kind: 'defer' }, { kind: 'remove' }]);
 });
 
 test('T130: /sage works in two registered channels for two projects, each with its own default project, and in their threads', async (t) => {
@@ -216,7 +217,7 @@ test('T130: /sage works in two registered channels for two projects, each with i
   writeFileSync(b.registry, JSON.stringify({ version: 1, channels: { [ASK]: { project: 'alpha', home: true }, [OTHER]: { project: 'beta' } } }), { mode: 0o600 });
   const channels = loadChannels(b.registry);
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
-  const board = async (channelId, parentId = null, options = {}) => (await b.cmd(ask, MAYA, [APPRENTICE], channelId, 'board', options, parentId))[1].content.split('\n').slice(0, 2).join('\n');
+  const board = async (channelId, parentId = null, options = {}) => (await b.cmd(ask, MAYA, [CREW], channelId, 'board', options, parentId))[1].content.split('\n').slice(0, 2).join('\n');
   assert.equal(await board(ASK), '**Board · alpha**\n1 task(s) · framed 1');
   assert.equal(await board(OTHER), '**Board · beta**\n2 task(s) · framed 2');
   assert.equal(await board(THREAD, ASK), '**Board · alpha**\n1 task(s) · framed 1');
@@ -224,7 +225,7 @@ test('T130: /sage works in two registered channels for two projects, each with i
   assert.equal(await board(OTHER, null, { project: 'alpha' }), '**Board · alpha**\n1 task(s) · framed 1'); // the option may name any listed project
   // A mention: answered in a registered channel and its thread; elsewhere one pointer a day.
   const mention = async (channelId, parentId = null) => {
-    const m = fakeMention({ user: JON, roles: [LEADR], channelId, parentId, content: '<@1> hi' });
+    const m = fakeMention({ user: OWNER, roles: [CREW], channelId, parentId, content: '<@1> hi' });
     await ask.mention(m);
     return m.replies.map((r) => r.content);
   };
@@ -311,6 +312,28 @@ test('F-T143-13: the bridge start refuses an auditChannelId (or any Discord id o
   assert.equal(config.auditChannelId, '400000000000000009');
 });
 
+test('F-T232-3: a bad thread map or an unsafe audit log folder stops the start in prepare, before the Keychain and the login; the files that it opens serve createAsk', async (t) => {
+  const b = world(t);
+  const threads = `${b.statePath}.threads`;
+  mkdirSync(dirname(threads), { recursive: true, mode: 0o700 });
+  writeFileSync(threads, 'not json', { mode: 0o600 });
+  assert.throws(() => prepare(b.config, () => {}), { message: `the thread map ${threads} is not a version 1 thread map that the bridge wrote. Nothing was loaded.` });
+  rmSync(`${b.statePath}.lock`); // this test process took the lock in prepare(): the stopped bridge gives it back
+  rmSync(threads);
+  const auditDir = join(b.root, 'audit');
+  mkdirSync(auditDir, { mode: 0o755 });
+  chmodSync(auditDir, 0o755);
+  const unsafe = { ...b.config, auditPath: join(auditDir, 'leads.jsonl') };
+  assert.throws(() => prepare(unsafe, () => {}), { message: `the audit log folder ${auditDir} must be a folder of this user with mode 0700. Nothing was started.` });
+  rmSync(`${b.statePath}.lock`);
+  // A start that passes: createAsk uses the thread map and the audit log that prepare opened.
+  const { config, channels, projects, files } = prepare(b.config, () => {});
+  const ask = createAsk({ config: { ...config, ownerId: OWNER }, channels, projects, files, log: () => {}, env: b.env });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'board' });
+  await ask.command(i);
+  assert.match(i.replies.at(-1).content, /^\*\*Board · project\*\*/);
+});
+
 test('F-T130-9 withHome: the start posts the cards in the registry\'s home channel, not in the config\'s channelId', (t) => {
   const b = world(t);
   mkdirSync(dirname(b.registry), { recursive: true, mode: 0o700 });
@@ -340,10 +363,10 @@ test('F-T130-9 permission check: after the login, the start logs each permission
 
 const BOT_USER = '100000000000000099';
 /** A press of a button of the unregister confirm as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
-const button = ({ user = JON, roles = [LEADR], channelId = ASK, customId, age = 0 }) => {
+const button = ({ user = OWNER, roles = [CREW], channelId = ASK, customId, age = 0 }) => {
   const calls = [];
   return { calls, guildId: GUILD, channelId, channel: null, customId, user: { id: user, bot: false, username: 'jon_l' },
-    member: { roles: { cache: new Map(roles.map((r) => [r, {}])) }, displayName: 'Jon <Lead>' }, message: { createdTimestamp: Date.now() - age },
+    member: { roles: { cache: new Map(roles.map((r) => [r, { name: r }])) }, displayName: 'Erick <Owner>' }, message: { createdTimestamp: Date.now() - age },
     isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false,
     update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
 };
@@ -360,7 +383,7 @@ test('F-T130-9 and F-T130-6: routes take an unregister press in any registered c
   await on.interaction(i);
   assert.deepEqual(i.calls, [['update', `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`]]);
   assert.deepEqual(file(b).channels, { [CHANNEL]: { project: 'project', home: true } });
-  assert.deepEqual(lines, [`the sage-lead Jon <Lead> (${JON}) unregistered the channel ${ASK} (it was for the project project)`]);
+  assert.deepEqual(lines, [`the owner Erick <Owner> (${OWNER}) unregistered the channel ${ASK} (it was for the project project)`]);
   assert.deepEqual(pressed, []);
 });
 
@@ -370,12 +393,12 @@ test('F-T130-7: the confirm has a Cancel button, and it expires after 10 minutes
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   const before = readFileSync(b.registry, 'utf8');
   const run = async (p) => { await ask.press(p); return p.replies.map((x) => [x.kind, x.content]); };
-  assert.deepEqual(await run(press(JON, [LEADR], CANCEL)), [['update', 'Cancelled. Nothing changed.']]);
-  assert.deepEqual(await run(press(MAYA, [APPRENTICE], CANCEL)), [['reply', 'Only a sage-lead can unregister a channel. Nothing changed.']]);
-  assert.deepEqual(await run(press(JON, [LEADR], `${UNREGISTER}${ASK}`, 10 * 60_000 + 1)), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
-  assert.deepEqual(await run({ ...press(JON, [LEADR], `${UNREGISTER}${ASK}`), sentAt: undefined }), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
+  assert.deepEqual(await run(press(OWNER, [CREW], CANCEL)), [['update', 'Cancelled. Nothing changed.']]);
+  assert.deepEqual(await run(press(MAYA, [CREW], CANCEL)), [['reply', 'Only Erick can unregister a channel. Nothing changed.']]);
+  assert.deepEqual(await run(press(OWNER, [CREW], `${UNREGISTER}${ASK}`, 10 * 60_000 + 1)), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
+  assert.deepEqual(await run({ ...press(OWNER, [CREW], `${UNREGISTER}${ASK}`), sentAt: undefined }), [['update', 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.']]);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
-  assert.deepEqual(await run(press(JON, [LEADR], `${UNREGISTER}${ASK}`, 10 * 60_000 - 1000)), [['update', `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`]]);
+  assert.deepEqual(await run(press(OWNER, [CREW], `${UNREGISTER}${ASK}`, 10 * 60_000 - 1000)), [['update', `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`]]);
 });
 
 test('F-T130-1: a press whose custom_id has no Discord id after the prefix gets nothing, and nothing is echoed', async (t) => {
@@ -383,11 +406,11 @@ test('F-T130-1: a press whose custom_id has no Discord id after the prefix gets 
   const channels = openChannels(b.config, loadProjects(b.config));
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: () => {} });
   for (const id of ['@everyone', `${ASK}x`, '', '<@&300000000000000002>', `${ASK} `]) {
-    const p = press(JON, [LEADR], `${UNREGISTER}${id}`);
+    const p = press(OWNER, [CREW], `${UNREGISTER}${id}`);
     await ask.press(p);
     assert.deepEqual(p.replies, [], id);
   }
-  const p = press(JON, [LEADR], `${UNREGISTER}${NOWHERE}`); // a Discord id still gets its answer
+  const p = press(OWNER, [CREW], `${UNREGISTER}${NOWHERE}`); // a Discord id still gets its answer
   await ask.press(p);
   assert.deepEqual(p.replies.map((x) => x.content), [`<#${NOWHERE}> is not registered. Nothing changed.`]);
 });
@@ -398,18 +421,18 @@ test('F-T130-10: a lead\'s press for the home channel is refused; a save that fa
   const lines = [];
   const ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, log: (l) => lines.push(l) });
   const before = readFileSync(b.registry, 'utf8');
-  let p = press(JON, [LEADR], `${UNREGISTER}${CHANNEL}`);
+  let p = press(OWNER, [CREW], `${UNREGISTER}${CHANNEL}`);
   await ask.press(p);
   assert.deepEqual(p.replies.map((x) => x.content), [`<#${CHANNEL}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`]);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
-  p = press(JON, [LEADR], `${UNREGISTER}${ASK}`);
+  p = press(OWNER, [CREW], `${UNREGISTER}${ASK}`);
   chmodSync(dirname(b.registry), 0o500); // the save cannot write its temp file
   try { await ask.press(p); } finally { chmodSync(dirname(b.registry), 0o700); }
   assert.deepEqual(p.replies.map((x) => x.content), ['I could not unregister this channel just now. Nothing changed. Please try again in a minute.']);
   assert.deepEqual([...channels], [[ASK, { project: 'project' }], [CHANNEL, { project: 'project', home: true }]]);
   assert.equal(readFileSync(b.registry, 'utf8'), before);
   assert.match(lines[0], new RegExp(`^the channel registry could not be saved, so ${ASK} stays registered: EACCES`));
-  assert.equal((await b.cmd(ask, MAYA, [APPRENTICE], ASK, 'board'))[1].content.split('\n')[0], '**Board · project**'); // /sage still works there
+  assert.equal((await b.cmd(ask, MAYA, [CREW], ASK, 'board'))[1].content.split('\n')[0], '**Board · project**'); // /sage still works there
 });
 
 test('F-T130-10: the migration gives the home channel the bridge\'s own project, also when it is not the first project', (t) => {

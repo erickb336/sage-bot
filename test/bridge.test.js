@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createBridge, frame, monotonic, SETTLE } from '../src/bridge.js';
-import { APPRENTICE, BOT, CONFIG, execFileSync, JON, LEADR, MAYA, MEMBERS, OWNER, SAM, setup, T0 } from './bridge-setup.js';
+import { BOT, CONFIG, CREW_ROLE, execFileSync, JON, MAYA, MEMBERS, OWNER, SAM, setup, T0 } from './bridge-setup.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { card as cardOf } from '../src/cards.js';
 import { peopleOf } from '../src/handle.js';
 import { sageTool } from '../src/sage.js';
 import { load, save } from '../src/state.js';
 import { ballotsOf, HOUR, MINUTE, openGate, parseGate, MAX_BALLOTS } from '../src/vote.js';
+import { CREW } from '../src/crew.js';
 
 const card = (b, id = [...b.discord.messages.keys()][0]) => b.discord.latest(id);
 const text = (payload) => JSON.stringify(payload);
@@ -23,8 +24,8 @@ test('end to end: a scratch logbook gets a gate, the bridge posts its card, two 
   await b.post();
   assert.equal(b.discord.posts.length, 1);
   const posted = b.discord.posts[0];
-  assert.equal(posted.content, `<@&${APPRENTICE}> <@&${LEADR}> project T1 needs one product answer. The first answer is final.`);
-  assert.deepEqual(posted.allowedMentions, { parse: [], roles: [APPRENTICE, LEADR] });
+  assert.equal(posted.content, `<@&${CREW_ROLE}> project T1 needs one product answer. The first answer is final.`);
+  assert.deepEqual(posted.allowedMentions, { parse: [], roles: [CREW_ROLE] });
   assert.equal(posted.embeds[0].title, 'Question project/G1 · T1 Fix login timeout');
   b.now += MINUTE;
   await b.press(MAYA, 'press:project/G1:0:1');
@@ -42,7 +43,7 @@ test('end to end: a task with two open gates is one batch vote; two holders vote
   b.sh('gate', 'add', 'T7', '--question', 'Which date format?', '--options', 'ISO|Locale|Both', '--recommend', 'ISO');
   await b.post();
   const [id] = b.discord.messages.keys();
-  assert.equal(b.discord.posts[0].content, `<@&${APPRENTICE}> <@&${LEADR}> project T7 has 2 product questions. Vote on each part within 30 minutes.`);
+  assert.equal(b.discord.posts[0].content, `<@&${CREW_ROLE}> project T7 has 2 product questions. Vote on each part within 30 minutes.`);
   assert.equal(b.discord.posts[0].embeds[0].title, 'Batch vote project/G1+G2 · T7 ');
   b.now += MINUTE;
   assert.equal((await b.press(MAYA, 'press:project/G1+G2:0:0'))[0].kind, 'modal');
@@ -162,7 +163,7 @@ test('F-T28-10, F-T28-12, F-T28-15: the gate file is 0600, written whole, and lo
 });
 
 test('F-T28-6: only a Discord id goes into an event: another user id gets a note and changes nothing, and the config needs ids', async () => {
-  const b = setup({ members: [...MEMBERS, { id: 'sample-maya', name: 'Fake', roles: [APPRENTICE] }] });
+  const b = setup({ members: [...MEMBERS, { id: 'sample-maya', name: 'Fake', roles: [CREW] }] });
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   const replies = await b.press('sample-maya', 'press:project/G1:0:0');
@@ -180,7 +181,7 @@ test('F-T28-7: holders and leads come fresh from the members as Sets: a role tak
   members[1].roles = [];
   assert.deepEqual(await b.press(MAYA, 'press:project/G1:0:0'), []); // no sage role: no reply (G20), and the press does not count
   assert.equal(b.bridge.entry('project/G1').gate.phase, 'open');
-  members[1].roles = [APPRENTICE];
+  members[1].roles = [CREW];
   await b.press(MAYA, 'press:project/G1:0:0');
   assert.equal(b.bridge.entry('project/G1').gate.outcome.by, MAYA);
   assert.deepEqual(await b.press(SAM, 'press:project/G1:0:1'), []); // also no "Already answered" note for a member with no role (G20)
@@ -228,22 +229,22 @@ test('F-T28-13, F-T28-16, F-T28-17: a tie posts its arguments to the sage-leads,
   await b.bridge.loop();
   const tie = b.discord.posts.at(-1);
   assert.equal(tie.content, [
-    `<@&${LEADR}> project/G1+G2 is tied after its vote. T7 waits: please break the tie with the buttons on the card.`,
+    `<@${OWNER}> project/G1+G2 is tied after its vote. T7 waits: please break the tie with the buttons on the card.`,
     'Part 1 is tied: A, B. The arguments:',
     '- Maya, for A: x is \\*cheaper\\* \\<@&1\\> https:// evil.example',
     '- Jon, for B: y is safer',
   ].join('\n'));
-  assert.deepEqual(tie.allowedMentions, { parse: [], roles: [LEADR] });
+  assert.deepEqual(tie.allowedMentions, { parse: [], users: [OWNER] });
   assert.match(card(b, id).embeds[0].description, /1 part is tied/);
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
-  assert.deepEqual(b.discord.posts.at(-1), { content: 'Jon (sage-lead) broke the tie on part 1 of project/G1+G2: B.', allowedMentions: { parse: [] } });
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
+  assert.deepEqual(b.discord.posts.at(-1), { content: 'Erick broke the tie on part 1 of project/G1+G2: B.', allowedMentions: { parse: [] } });
   assert.match(card(b, id).embeds[0].description, /Closed: every part is decided/);
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'p']);
   // The card was edited after each of the 5 changes: 3 ballots, the end, the tie-break.
   assert.equal(b.discord.messages.get(id).length, 1 + 5);
 });
 
-test('T39 with B3: after an early end and a sage-lead tie-break, the bridge redraws the card with the sage-lead name and time, and the gate file round trip keeps them', async () => {
+test('T39 with B3: after the owner\'s early end and tie-break, the bridge redraws the card with the owner\'s name and time, and the gate file round trip keeps them', async () => {
   const b = setup();
   b.sh('gate', 'add', 'T7', '--question', 'A?', '--options', 'x|y', '--recommend', 'x');
   b.sh('gate', 'add', 'T7', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
@@ -254,19 +255,19 @@ test('T39 with B3: after an early end and a sage-lead tie-break, the bridge redr
   await b.press(MAYA, 'press:project/G1+G2:1:0');
   b.now += 5 * MINUTE;
   const endAt = b.now;
-  await b.press(JON, 'end:project/G1+G2'); // asks to confirm; nothing ends yet
-  await b.bridge.interaction(fakeInteraction({ user: JON, customId: 'end!:project/G1+G2', ephemeral: true })); // the press on the private confirmation
+  await b.press(OWNER, 'end:project/G1+G2'); // asks to confirm; nothing ends yet
+  await b.bridge.interaction(fakeInteraction({ user: OWNER, customId: 'end!:project/G1+G2', ephemeral: true })); // the press on the private confirmation
   b.now += MINUTE;
   const breakAt = b.now;
-  await b.press(JON, 'tiebreak:project/G1+G2:0:1');
+  await b.press(OWNER, 'tiebreak:project/G1+G2:0:1');
   const drawn = card(b, id).embeds[0];
   const s = (ms) => `<t:${Math.floor(ms / 1000)}:t>`;
-  assert.equal(drawn.description, `Ended early by Jon (sage-lead) at ${s(endAt)}, with the votes so far. Closed: every part is decided. T7 goes on.`);
-  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Jon (sage-lead) at ${s(breakAt)}`);
+  assert.equal(drawn.description, `Ended early by Erick at ${s(endAt)}, with the votes so far. Closed: every part is decided. T7 goes on.`);
+  assert.equal(drawn.fields[0].value.split('\n').at(-1), `**Decided: B** · tie broken by Erick at ${s(breakAt)}`);
   // A restart loads the gate through parseGate with endedBy, by and at, and draws the same card.
   const again = b.make().entry('project/G1+G2');
-  assert.equal(again.gate.endedBy, JON);
-  assert.deepEqual(again.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: JON, at: breakAt });
+  assert.equal(again.gate.endedBy, OWNER);
+  assert.deepEqual(again.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: OWNER, at: breakAt });
   assert.equal(text(cardOf(again.gate, again.ask, peopleOf(MEMBERS, CONFIG))), text(card(b, id)));
 });
 
@@ -277,15 +278,15 @@ test('reminders: an open single gate pings the holders every 2 hours from its op
   b.sh('gate', 'add', 'T2', '--question', 'B?', '--options', 'p|q', '--recommend', 'p');
   await b.post();
   const opened = b.now;
-  const reminders = () => b.discord.posts.filter((p) => p.content?.includes('reminder')).map((p) => [p.content, p.allowedMentions.roles]);
+  const reminders = () => b.discord.posts.filter((p) => p.content?.includes('reminder')).map((p) => [p.content, p.allowedMentions]);
   for (const at of [30 * MINUTE, 2 * HOUR - 1000, 2 * HOUR, 2 * HOUR + 15_000, 2.5 * HOUR, 4 * HOUR]) {
     b.now = opened + at;
     await b.bridge.loop();
   }
-  const single = `<@&${APPRENTICE}> <@&${LEADR}> reminder: project/G1 waits for an answer since <t:${opened / 1000}:t>. T1 waits.`;
+  const single = `<@&${CREW_ROLE}> reminder: project/G1 waits for an answer since <t:${opened / 1000}:t>. T1 waits.`;
   assert.deepEqual(reminders(), [
-    [single, [APPRENTICE, LEADR]],
-    [`<@&${LEADR}> reminder: part 1, part 2 of project/G2+G3 still tied since <t:${(opened + 30 * MINUTE) / 1000}:t>. T2 waits.`, [LEADR]],
-    [single, [APPRENTICE, LEADR]],
+    [single, { parse: [], roles: [CREW_ROLE] }],
+    [`<@${OWNER}> reminder: part 1, part 2 of project/G2+G3 still tied since <t:${(opened + 30 * MINUTE) / 1000}:t>. T2 waits.`, { parse: [], users: [OWNER] }],
+    [single, { parse: [], roles: [CREW_ROLE] }],
   ]);
 });

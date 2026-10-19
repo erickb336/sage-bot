@@ -13,7 +13,8 @@ import { askCommand, attachmentName, BUILDS, createAsk as rawAsk, HOUR, MAX_BYTE
 import { loadProjects, projectsOf } from '../src/projects.js';
 import { enter, rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
-import { APPRENTICE, BOT, CONFIG, JON, LEADR, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
+import { BOT, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 const ASK = '400000000000000009';
 const ELSEWHERE = '400000000000000003'; // a channel that is not registered
@@ -25,7 +26,7 @@ const createAsk = (o) => {
 };
 const SECRET = 'ZZSECRET';
 const PUBLIC = { allowedMentions: { parse: [] } }; // on the edit; the defer before it is public too (checked in `answers`), G20
-const ROLES = { [MAYA]: [APPRENTICE], [JON]: [LEADR] };
+const ROLES = { [MAYA]: [CREW], [JON]: [CREW] };
 
 /** The edits of a fake command's reply, after a check that its first call is one public defer: no flags, so not Ephemeral (64). */
 function answers(i) {
@@ -176,18 +177,18 @@ test('G20: a member with neither sage role gets nothing for a command or a menti
   }
   assert.deepEqual(b.lines, []);
   // Nothing counted: with a role, Sam gets his daily pointer elsewhere, 9 pointers and a 10th answer here, then the limit note.
-  assert.deepEqual(await say(SAM, [APPRENTICE], '<@1> board?', ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: { parse: [], repliedUser: false } }]);
-  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [APPRENTICE], 'hi'), [{ content: POINTER, allowedMentions: { parse: [] } }], `ask ${n}`);
-  assert.deepEqual(await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }), [{ content: BOARD, ...PUBLIC }]);
-  assert.match((await b.cmd(SAM, 'board', {}, { roles: [APPRENTICE] }))[0].content, /^You asked 10 times in the last hour/);
-  assert.deepEqual(await b.cmd(BOT, 'board', {}, { roles: [APPRENTICE, LEADR], bot: true }), []);
+  assert.deepEqual(await say(SAM, [CREW], '<@1> board?', ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: { parse: [], repliedUser: false } }]);
+  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [CREW], 'hi'), [{ content: POINTER, allowedMentions: { parse: [] } }], `ask ${n}`);
+  assert.deepEqual(await b.cmd(SAM, 'board', {}, { roles: [CREW] }), [{ content: BOARD, ...PUBLIC }]);
+  assert.match((await b.cmd(SAM, 'board', {}, { roles: [CREW] }))[0].content, /^You asked 10 times in the last hour/);
+  assert.deepEqual(await b.cmd(BOT, 'board', {}, { roles: [CREW], bot: true }), []);
   assert.deepEqual(await b.mention(BOT, 'hello', ASK, true), []);
 });
 
 test('a command in a channel that is not registered gets one public pointer per person per day, then its reply goes again', async (t) => {
   const b = world(t);
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
-  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ELSEWHERE, sub: 'board' });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ELSEWHERE, sub: 'board' });
   await b.ask.command(i);
   assert.deepEqual(i.replies, [{ kind: 'defer' }, { kind: 'remove' }]);
   assert.deepEqual(await b.mention(MAYA, 'board?', ELSEWHERE), []); // the pointer of the day is shared with mentions
@@ -260,16 +261,16 @@ test('/sage files attaches only allow-listed files: regular, inside the project,
   const project = filesProject(t);
   const ask = createAsk({ config: { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath,
     projects: [{ name: 'site', project, files: ['docs/*.svg', 'docs/up/*.png', 'design/shots/*.png'] }] }, now: () => b.now, log: () => {} });
-  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files', options: {} });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'files', options: {} });
   const got = (await ask.command(i), answers(i));
   const names = ['design/shots/01.png', 'design/shots/02.png', 'design/shots/03.png', 'design/shots/04.png', 'design/shots/05.png',
     'design/shots/06.png', 'design/shots/07.png', 'design/shots/08.png', 'design/shots/09.png', 'design/shots/10.png'];
   assert.deepEqual(got, [{
     content: [`10 shared file(s) of site:`, ...names.map((n) => `- ${n}`), // F-T93-2: the files past the 10th are counted and named
-      '2 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask a sage-lead for them.', '- design/shots/11.png', '- docs/flow.svg'].join('\n'),
+      '2 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask Erick for them.', '- design/shots/11.png', '- docs/flow.svg'].join('\n'),
     files: names.map((n, k) => ({ name: n.split('/').at(-1), size: k + 1 })), ...PUBLIC }]);
   const one = createAsk({ config: { ...CONFIG, askChannelId: ASK, sagePath: SAGE, statePath: b.statePath, projects: [{ name: 'site', project, files: ['docs/*.svg', 'docs/up/*.png', 'design/shots/big.png', 'design/shots/link.png'] }] }, log: () => {} });
-  const j = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files' });
+  const j = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'files' });
   await one.command(j);
   assert.deepEqual(answers(j)[0].files, [{ name: 'flow.svg', size: 6 }]); // not .hidden.svg, notes.md, outside.png through docs/up, the 8 MB + 1 big.png or the symlink link.png
 });
@@ -302,14 +303,15 @@ test('the /sage command has six subcommands (unregister has no options), guild o
   ]);
 });
 
-test('rolesOf reads the roles from Discord data: a GuildMember or the raw API member', () => {
+test('rolesOf reads the role NAMES from Discord data: a GuildMember, or the raw API member with the guild\'s roles', () => {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   try {
     const guild = client.guilds._add({ id: '200000000000000001', name: 'sample', members: [], roles: [
-      { id: '200000000000000001', name: '@everyone', permissions: '0', position: 0 }, { id: APPRENTICE, name: 'sage-apprentice', permissions: '0', position: 1 }] });
-    const maya = guild.members._add({ user: { id: MAYA, username: 'maya' }, roles: [APPRENTICE], joined_at: new Date(0).toISOString() });
-    assert.deepEqual(rolesOf(maya), ['200000000000000001', APPRENTICE]);
-    assert.deepEqual(rolesOf({ roles: [LEADR] }), [LEADR]);
+      { id: '200000000000000001', name: '@everyone', permissions: '0', position: 0 }, { id: CREW_ROLE, name: CREW, permissions: '0', position: 1 }] });
+    const maya = guild.members._add({ user: { id: MAYA, username: 'maya' }, roles: [CREW_ROLE], joined_at: new Date(0).toISOString() });
+    assert.deepEqual(rolesOf(maya), ['@everyone', CREW]);
+    assert.deepEqual(rolesOf({ roles: [CREW_ROLE] }, guild.roles.cache), [CREW]);
+    assert.deepEqual(rolesOf({ roles: [CREW_ROLE] }), [], 'a raw member with no role list of the guild has no names');
     assert.deepEqual(rolesOf(null), []);
   } finally {
     client.destroy();
@@ -345,7 +347,7 @@ function site(t, b, contents, files) {
   return { root, project, config, ask: createAsk({ config, now: () => b.now, log: (l) => b.lines.push(l) }) };
 }
 const files = async (ask, o = {}) => {
-  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'files', ...o });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'files', ...o });
   await ask.command(i);
   return answers(i);
 };
@@ -359,7 +361,7 @@ test('F-T71-2: every /sage command defers in public before any file or logbook w
   assert.deepEqual(await files(s.ask, { onDefer: () => writeFileSync(join(s.project, 'shots', 'b.svg'), '<svg>b</svg>') }),
     [{ content: '2 shared file(s) of site:\n- shots/a.svg\n- shots/b.svg', files: [{ name: 'a.svg', size: 6 }, { name: 'b.svg', size: 12 }], ...PUBLIC }]);
   // A defer that Discord refuses (the interaction is gone) ends the command: no edit, one log line.
-  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: ASK, sub: 'board' });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: ASK, sub: 'board' });
   i.defer = async () => { throw Object.assign(new Error('Unknown interaction'), { code: 10062 }); };
   await b.ask.command(i);
   assert.deepEqual(i.replies, []);
@@ -396,12 +398,12 @@ test('F-T71-1: /sage files sends at most 8 MB in one reply; the files that do no
   const s = site(t, b, Object.fromEntries(names.map((n) => [n, big])), ['shots/*.png']);
   const [got] = await files(s.ask);
   assert.deepEqual(got.files, [{ name: 'a01.png', size: 8 * 1024 * 1024 }]);
-  assert.equal(got.content, ['1 shared file(s) of site:', '- shots/a01.png', '9 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask a sage-lead for them.',
+  assert.equal(got.content, ['1 shared file(s) of site:', '- shots/a01.png', '9 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask Erick for them.',
     ...names.slice(1).map((n) => `- shots/${n}`)].join('\n'));
   // A smaller file after one that does not fit still comes: 5 + 3 MB fit, 4 MB does not.
   const mb = (n) => Buffer.alloc(n * 1024 * 1024);
   const mix = site(t, b, { 'b1.png': mb(5), 'b2.png': mb(4), 'b3.png': mb(3) }, ['shots/*.png']);
-  assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask a sage-lead for them.\n- shots/b2.png',
+  assert.deepEqual(await files(mix.ask), [{ content: '2 shared file(s) of site:\n- shots/b1.png\n- shots/b3.png\n1 more file(s) not attached: one reply holds at most 10 files and 8 MB. Ask Erick for them.\n- shots/b2.png',
     files: [{ name: 'b1.png', size: 5 * 1024 * 1024 }, { name: 'b3.png', size: 3 * 1024 * 1024 }], ...PUBLIC }]);
 });
 
@@ -462,15 +464,16 @@ test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #
   assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
 });
 
-test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: a sage-lead, an apprentice, a build verb that starts a sentence', async (t) => {
+test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: the owner, a crew member, a build verb that starts a sentence', async (t) => {
   const b = world(t);
   const say = async (who, text) => (await b.mention(who, text))[0]?.content;
   assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
-  assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
+  assert.equal(await say(OWNER, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
+  assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds are for Erick: ask Erick.`);
   for (const text of ['<@1> any update?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
   b.now += HOUR; // a new hour, so that the limit does not end the list
   for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
-    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for sage-leads: ask a sage-lead.`, text);
+    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for Erick: ask Erick.`, text);
   }
 });
 
@@ -484,8 +487,8 @@ test('F-T71Q-5: with no projects, a folder name that makes no valid name gets a 
   assert.deepEqual(projectsOf({ ...base, project: '/Users/x/My Site' }), [{ name: 'my-site', project: '/Users/x/My Site', sagePath: '/s/sage.mjs', files: [] }]);
 });
 
-/** A chat command as discord.js gives it, for `routes`: roles only on `member`; every string option answers `strings[name]`. SAMPLE DATA ONLY. */
-function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [APPRENTICE], channelId = ASK, channel = null, sub = 'board', strings = {} } = {}) {
+/** A chat command as discord.js gives it, for `routes`: role ids only on the raw `member`; every string option answers `strings[name]`. SAMPLE DATA ONLY. */
+function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [CREW_ROLE], channelId = ASK, channel = null, sub = 'board', strings = {} } = {}) {
   const calls = [];
   return { calls, guildId, commandName: 'sage', user: { id: user, bot: false }, member: { roles }, channelId, channel,
     isChatInputCommand: () => true, isButton: () => false, isModalSubmit: () => false,
@@ -493,7 +496,7 @@ function chat({ guildId = CONFIG_GUILD, user = MAYA, roles = [APPRENTICE], chann
     deferReply: async (p) => { calls.push(['defer', p]); }, editReply: async (p) => { calls.push(['edit', p.content]); } };
 }
 /** A message as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
-function message({ guildId = CONFIG_GUILD, author = MAYA, bot = false, roles = [APPRENTICE], mentions = [BOT_USER], channelId = ASK, channel = null, content = '<@1> hi' } = {}) {
+function message({ guildId = CONFIG_GUILD, author = MAYA, bot = false, roles = [CREW_ROLE], mentions = [BOT_USER], channelId = ASK, channel = null, content = '<@1> hi' } = {}) {
   const calls = [];
   return { calls, id: '700000000000000001', guildId, author: { id: author, bot }, member: { roles }, mentions: { users: new Map(mentions.map((id) => [id, {}])) }, channelId, channel, content,
     reply: async (p) => { calls.push(p.content); },
@@ -508,22 +511,25 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const pressed = [];
   const sent = [];
   const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
-  const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER });
+  const guildRoles = new Map([[CREW_ROLE, { name: CREW }]]); // the guild's roles, as discord.js keeps them
+  const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER, guildRoles });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
   const defer = ['defer', {}]; // public (G20)
-  // Roles come from the member: an option that names the sage-lead role changes nothing, and a member with no role gets nothing (G20).
-  assert.deepEqual(await run(chat({ roles: [], strings: { role: LEADR, roles: LEADR } })), []);
-  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR] })), [defer, ['edit', BOARD]]);
-  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], guildId: '200000000000000002' })), []);
-  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], channelId: THREAD })), [defer, ['edit', BOARD]]); // a thread of #ask-sage, not in the cache
-  assert.deepEqual(await run(chat({ user: JON, roles: [LEADR], channelId: THREAD, channel: { isThread: () => true, parentId: ELSEWHERE } })),
+  // Roles come from the member: an option that names the crew role changes nothing, and a member with no role gets nothing (G20).
+  assert.deepEqual(await run(chat({ roles: [], strings: { role: CREW, roles: CREW } })), []);
+  assert.deepEqual(await run(chat({ roles: [CREW] })), [], 'a role NAME in the raw member is no role id');
+  assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE] })), [defer, ['edit', BOARD]]);
+  assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE], guildId: '200000000000000002' })), []);
+  assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE], channelId: THREAD })), [defer, ['edit', BOARD]]); // a thread of #ask-sage, not in the cache
+  assert.deepEqual(await run(chat({ user: JON, roles: [CREW_ROLE], channelId: THREAD, channel: { isThread: () => true, parentId: ELSEWHERE } })),
     [defer, ['edit', `I answer /sage in <#${ASK}>, so please ask there.`]]);
   // Messages: only this guild, only people, only a mention of the bot.
   assert.deepEqual(await run(message({ guildId: '200000000000000002' }), 'message'), []);
   assert.deepEqual(await run(message({ bot: true }), 'message'), []);
   assert.deepEqual(await run(message({ mentions: [JON] }), 'message'), []);
   // T131: a mention in the channel opens a thread named from the request, and the answer goes there.
-  assert.deepEqual(await run(message({ author: JON, roles: [LEADR], content: '<@1> fix the login' }), 'message'), ['thread: fix the login']);
+  // The owner, by id and with no role, is answered too.
+  assert.deepEqual(await run(message({ author: OWNER, roles: [], content: '<@1> fix the login' }), 'message'), ['thread: fix the login']);
   assert.deepEqual(sent, [`${POINTER_TEXT} Builds from Discord are not ready yet.`]);
   assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [`I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`]);
   assert.deepEqual(pressed, []);
@@ -587,10 +593,10 @@ test('F-T71-13: the team vote label comes only from the bridge\'s own project, n
 test('F-T71-13: a mention or a command from a user id that is not a Discord id gets nothing', async (t) => {
   const b = world(t);
   for (const id of ['', 'abc', '1234', `${MAYA}x`]) {
-    const m = fakeMention({ user: id, roles: [APPRENTICE], channelId: ASK, content: '<@1> hi' });
+    const m = fakeMention({ user: id, roles: [CREW], channelId: ASK, content: '<@1> hi' });
     await b.ask.mention(m);
     assert.deepEqual(m.replies, [], id);
-    const i = fakeCommand({ user: id, roles: [APPRENTICE], channelId: ASK, sub: 'board' });
+    const i = fakeCommand({ user: id, roles: [CREW], channelId: ASK, sub: 'board' });
     await b.ask.command(i);
     assert.deepEqual(i.replies, [], id);
   }
@@ -676,7 +682,7 @@ process.stdout.write(JSON.stringify(readShared(JSON.parse(process.argv[1]))));`;
 
 test('F-T93-3: a /sage command in a thread is deferred before the lookup of the thread\'s parent', async (t) => {
   const b = world(t);
-  const i = fakeCommand({ user: MAYA, roles: [APPRENTICE], channelId: THREAD, sub: 'board' });
+  const i = fakeCommand({ user: MAYA, roles: [CREW], channelId: THREAD, sub: 'board' });
   const seen = []; // what Discord had got at each lookup
   i.parentId = { then: (done) => { seen.push(i.replies.map((r) => r.kind)); done(ASK); } }; // Discord's lookup, which can take a while
   await b.ask.command(i);

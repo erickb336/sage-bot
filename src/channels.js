@@ -2,7 +2,7 @@
 // mentions work in a registered channel and its threads. One entry is the home channel: the votes and cards post there (T29).
 // The file is <statePath>.channels, beside the gate file, and it is safe like the gate file: 0600, replaced whole by a rename
 // (writeWhole), read through readOwn (no symlink, this user's own file). Only the holder of the bridge lock writes it: the bridge
-// (a sage-lead's unregister) or scripts/channels.mjs (Erick, while the bridge is stopped). A bad file stops the bridge at start.
+// (the owner's unregister) or scripts/channels.mjs (Erick, while the bridge is stopped). A bad file stops the bridge at start.
 import { lstatSync } from 'node:fs';
 import { PermissionFlagsBits } from 'discord.js';
 import { pickProject } from './projects.js';

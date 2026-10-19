@@ -1,17 +1,18 @@
-// SAMPLE DATA ONLY for the tests and the preview: made-up people, role ids, tasks and questions
+// SAMPLE DATA ONLY for the tests and the preview: made-up people, roles, tasks and questions
 // from the approved T1 design. No real Discord ids, no real accounts.
 import { openGate } from '../src/vote.js';
+import { CREW } from '../src/crew.js';
 
-export const CONFIG = { apprenticeRole: 'role-sample-apprentice', leadRole: 'role-sample-lead' };
-const { apprenticeRole, leadRole } = CONFIG;
+/** The owner of the sample bot (T232: the owner is a user id, never a role). */
+export const CONFIG = { ownerId: 'sample-erick' };
 
-/** The guild members as the bridge sees them: id, display name, role ids and whether the account is a bot. */
+/** The guild members as the bridge sees them: id, display name, role NAMES and whether the account is a bot. */
 export const MEMBERS = [
-  { id: 'sample-erick', name: 'Erick', roles: [leadRole] },
-  { id: 'sample-maya', name: 'Maya', roles: [apprenticeRole] },
-  { id: 'sample-jon', name: 'Jon', roles: [leadRole] },
+  { id: 'sample-erick', name: 'Erick', roles: [CREW] },
+  { id: 'sample-maya', name: 'Maya', roles: [CREW] },
+  { id: 'sample-jon', name: 'Jon', roles: [CREW] },
   { id: 'sample-sam', name: 'Sam', roles: [] },
-  { id: 'sample-bridge', name: 'sage bridge', roles: [apprenticeRole, leadRole], bot: true },
+  { id: 'sample-bridge', name: 'sage bridge', roles: [CREW], bot: true },
 ];
 export const [ERICK, MAYA, JON, SAM, BRIDGE] = MEMBERS.map((m) => m.id);
 

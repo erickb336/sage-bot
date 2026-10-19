@@ -13,7 +13,7 @@ const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const PRIVATE = { flags: 64, allowedMentions: { parse: [] } };
 const T0 = clock(14, 31);
 const ballot = (by, part, option, at, reason) => ({ type: 'press', by, part, option, at, via: 'discord', ...(reason !== undefined && { reason }) });
-const apply = (gate, ...events) => events.reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.leads).gate, gate);
+const apply = (gate, ...events) => events.reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.ownerId).gate, gate);
 
 /** A bridge with these open gates and a clock that the test moves; `refuse` makes every reply reject. */
 function bridge(ids, at, refuse) {
@@ -87,7 +87,7 @@ test('F-T27-20: when Discord refuses the reply after the store, handle resolves 
   // A confirmed end: the vote ended.
   b.send('B9', ballot(ERICK, 0, 'A', b.now), ballot(JON, 0, 'A', b.now), ballot(ERICK, 1, 'A', b.now));
   b.now += MINUTE;
-  const end = await b.press(JON, 'end!:B9', undefined, true);
+  const end = await b.press(ERICK, 'end!:B9', undefined, true);
   assert.equal(end.replyError, refused);
   assert.deepEqual(end.effects.map((e) => e.type), ['vote-ended', 'decided', 'decided', 'closed']);
   assert.equal(b.gate('B9').phase, 'closed');
@@ -95,7 +95,7 @@ test('F-T27-20: when Discord refuses the reply after the store, handle resolves 
   b = bridge(['B9'], T0, refused);
   b.send('B9', ballot(ERICK, 0, 'A', T0 + MINUTE), ballot(JON, 0, 'B', T0 + MINUTE), ballot(ERICK, 1, 'A', T0 + MINUTE), { type: 'tick', at: clock(15, 1) });
   b.now = clock(15, 2);
-  const broken = await b.press(JON, 'tiebreak:B9:0:0');
+  const broken = await b.press(ERICK, 'tiebreak:B9:0:0');
   assert.equal(broken.replyError, refused);
   assert.deepEqual(broken.effects.map((e) => e.type), ['decided', 'closed']);
   assert.equal(b.gate('B9').phase, 'closed');
@@ -122,15 +122,15 @@ test('F-T27-21, F-T27-29: Cancel on a gate that no longer votes says that the vo
   const b = bridge(['B9', 'B7'], T0);
   b.send('B9', { type: 'tick', at: clock(15, 1) });
   b.now = clock(15, 2);
-  const tied = await b.press(JON, 'cancel:B9', undefined, true);
+  const tied = await b.press(ERICK, 'cancel:B9', undefined, true);
   assert.deepEqual(tied.replies, [{ kind: 'update', content: 'The vote on B9 ended at <t:1791126060:t> meanwhile. Nothing to cancel.', ...PRIVATE, components: [] }]);
   assert.deepEqual(tied.effects, []);
   b.send('B7', { type: 'withdraw', by: ERICK, at: b.now });
-  const withdrawn = await b.press(JON, 'cancel:B7', undefined, true);
+  const withdrawn = await b.press(ERICK, 'cancel:B7', undefined, true);
   assert.equal(withdrawn.reply.content, 'B7 was withdrawn by Erick. Nothing to answer.');
-  const open = await bridge(['B9'], T0).press(JON, 'cancel:B9', undefined, true);
+  const open = await bridge(['B9'], T0).press(ERICK, 'cancel:B9', undefined, true);
   assert.equal(open.reply.content, 'Cancelled. The vote goes on.');
-  const single = await bridge(['G5'], T0).press(JON, 'cancel:G5', undefined, true); // a forged cancel on a single question
+  const single = await bridge(['G5'], T0).press(ERICK, 'cancel:G5', undefined, true); // a forged cancel on a single question
   assert.equal(single.reply.content, 'This is a single question, not a vote: there is nothing to end and no tie to break.');
 });
 
@@ -146,7 +146,7 @@ test('F-T27-23, F-T27-29: the form title drops its prefix first, then cuts at th
 test('F-T27-20, F-T27-22: the README tells B3 about replyError, the full not-lead note, the 4-part limit and the cancel button', () => {
   const readme = readFileSync(new URL('../docs/reference.md', import.meta.url), 'utf8');
   assert.ok(readme.includes('`replyError`'));
-  assert.ok(readme.includes('"Only a sage-lead can do this. Your votes on the parts count like everyone\'s."'));
+  assert.ok(readme.includes('"Only Erick can do this: ask Erick. Your votes on the parts count like everyone\'s."'));
   assert.ok(readme.includes('B3 refuses an ask with more than 4 parts'));
   assert.ok(readme.includes('A `cancel:` press from any private message only answers'));
 });

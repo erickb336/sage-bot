@@ -64,7 +64,7 @@ function node(t, id, kind, x, y, w, name, sub) {
 }
 
 const ALT = {
-  hero: 'sage-bot bridges Discord and Claude Code running sage: a sage-lead requests a feature, sage designs, the team votes, sage builds and shows the results on request.',
+  hero: 'sage-bot bridges Discord and Claude Code running sage: a crew member requests a feature, sage designs, the crew votes, sage builds and shows the results on request.',
   'tip-mention': "The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on.",
 };
 
@@ -72,11 +72,11 @@ const ALT = {
  * now: true for a step that works today (a solid ember edge), false for one that comes with bridge sessions (a dashed edge).
  * The first line is the step's title; the next lines say what happens. */
 const LOOP = [
-  { lane: 'L', now: false, lines: ['1 · sage-lead', 'requests a new feature', '“add CSV export”'] },
+  { lane: 'L', now: false, lines: ['1 · the crew', 'requests a new feature', '“add CSV export”'] },
   { lane: 'R', now: false, lines: ['2 · sage designs', 'options and', 'a recommendation'] },
   { lane: 'L', now: true, lines: ['3 · design question', 'posted as a card'] },
   { lane: 'L', now: true, lines: ['4 · the team weighs in', 'asks and votes'] },
-  { lane: 'L', now: true, lines: ['5 · the choice', 'a sage-lead breaks ties'] },
+  { lane: 'L', now: true, lines: ['5 · the choice', 'the owner breaks ties'] },
   { lane: 'R', now: false, lines: ['6 · sage builds', 'reviews, tests, a PR'] },
   { lane: 'L', now: true, lines: ['7 · progress, results', 'board, screenshots,', 'the PR link, on request'] },
   { lane: 'L', now: true, lines: ['8 · the team sees it', 'the owner merges'] },

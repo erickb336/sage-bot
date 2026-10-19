@@ -14,6 +14,7 @@ import { step } from '../src/vote.js';
 import { embedLength } from 'discord.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, clock, openAsk } from '../examples/sample.js';
 import { openGate } from '../src/vote.js';
+import { CREW } from '../src/crew.js';
 import { CSS, esc, message, modalHtml, noteHtml } from './render.mjs';
 
 const at = process.argv.indexOf('--out');
@@ -23,7 +24,7 @@ const people = peopleOf(MEMBERS, CONFIG);
 const gates = new Map();
 const ctx = { gates, people, clock: () => ctx.now, now: 0 };
 const open = (id, at) => gates.set(id, { gate: openAsk(id, at), ask: ASKS[id] });
-const send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, people.holders, people.leads).gate, ask: ASKS[id] });
+const send = (id, event) => gates.set(id, { gate: step(gates.get(id).gate, event, people.holders, people.ownerId).gate, ask: ASKS[id] });
 async function press(user, customId, at, fields, ephemeral) {
   ctx.now = at;
   const i = fakeInteraction({ user, customId, fields, ephemeral });
@@ -36,11 +37,11 @@ const moment = (file, title, about, id, extra = {}) => moments.push({ file, titl
 
 // 1 to 2: a single question, answered first by Maya; Jon presses one second later.
 open('G5', clock(14, 20)); ctx.now = clock(14, 21);
-moment('01-single-open', 'A single question', 'The first answer of a sage-apprentice or sage-lead is final.', 'G5');
+moment('01-single-open', 'A single question', 'The first answer of a sage-crew member is final.', 'G5');
 await press(MAYA, 'press:G5:0:0', clock(14, 22));
 const late = await press(JON, 'press:G5:0:1', clock(14, 22, 1));
 moment('02-already-answered', 'Maya answered first; Jon presses one second later', 'Only Jon sees the private note.', 'G5', { note: late });
-// 3 to 6: the batch vote of T7, with reasons, the time limit, a tie and the sage-lead's tie-break.
+// 3 to 6: the batch vote of T7, with reasons, the time limit, a tie and the owner's tie-break.
 open('B7', clock(14, 31));
 send('B7', { type: 'press', by: ERICK, part: 0, option: 'A', at: clock(14, 33), via: 'terminal' });
 await press(JON, 'press:B7:0:0', clock(14, 35)); // Jon dismisses the reason modal: the vote still counts
@@ -57,24 +58,24 @@ await press(MAYA, 'reason:B7:1:2', clock(14, 44, 30), { reason: 'Finance imports
 await press(MAYA, 'press:B7:0:0', clock(14, 45)); await press(MAYA, 'press:B7:2:0', clock(14, 46));
 send('B7', { type: 'tick', at: clock(15, 1) }); ctx.now = clock(15, 1);
 moment('05-tie-at-limit', 'At 30 minutes the vote ends; part 2 is tied 1-1-1', 'Parts 1 and 3 are provisional; the tie-break buttons show the tied options only.', 'B7');
-await press(JON, 'tiebreak:B7:1:0', clock(17, 5));
-moment('06-lead-tie-break', 'Jon, a sage-lead, breaks the tie: the batch is decided', 'Every part is decided; T7 goes on.', 'B7');
-// 7 to 10: the batch vote of T9: a sage-lead ends it early; a non-sage-lead presses End vote now; then a withdraw.
+await press(ERICK, 'tiebreak:B7:1:0', clock(17, 5));
+moment('06-owner-tie-break', 'Erick, the owner, breaks the tie: the batch is decided', 'Every part is decided; T7 goes on.', 'B7');
+// 7 to 10: the batch vote of T9: the owner ends it early; a crew member presses End vote now; then a withdraw.
 open('B9', clock(15, 10));
 for (const [who, option] of [[ERICK, 0], [JON, 0], [MAYA, 1]]) await press(who, `press:B9:0:${option}`, clock(15, 15));
-const confirm = await press(JON, 'end:B9', clock(15, 28));
-moment('07-end-early-confirm', 'Jon, a sage-lead, presses End vote now', 'The private confirm says what each part gets with the votes so far.', 'B9', { confirm });
-const notLead = await press(MAYA, 'end:B9', clock(15, 28, 10));
-moment('08-not-a-lead', 'Maya is not a sage-lead and presses End vote now', 'Discord shows every button to everyone; only a sage-lead can end the vote.', 'B9', { note: notLead });
-const ended = await press(JON, 'end!:B9', clock(15, 28, 20), undefined, true); // from the private confirm
-moment('09-ended-early', 'Jon confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for a sage-lead.', 'B9', { note: ended });
+const confirm = await press(ERICK, 'end:B9', clock(15, 28));
+moment('07-end-early-confirm', 'Erick, the owner, presses End vote now', 'The private confirm says what each part gets with the votes so far.', 'B9', { confirm });
+const notOwner = await press(MAYA, 'end:B9', clock(15, 28, 10));
+moment('08-not-the-owner', 'Maya is in the crew, not the owner, and presses End vote now', 'Discord shows every button to everyone; only the owner can end the vote.', 'B9', { note: notOwner });
+const ended = await press(ERICK, 'end!:B9', clock(15, 28, 20), undefined, true); // from the private confirm
+moment('09-ended-early', 'Erick confirms: the vote ended early', 'Part 1 is provisional; part 2 had no votes and waits for the owner.', 'B9', { note: ended });
 send('B9', { type: 'withdraw', by: ERICK, at: clock(15, 30) }); ctx.now = clock(15, 30);
 moment('10-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button is off.', 'B9');
 // 11: the largest card of a team of 5: 4 parts, every holder with a 500-character reason on each part (F-T27-9), and display names
 // at Discord's 32-character limit, so that the budget drops the oldest reasons and the description counts them (F-T27-35).
 {
   const names = ['Erick Alexander Benitez-Castillo', 'Maya Lindqvist-Oyelaran Nkemelu', 'Jon Kristoffer Vandenbroucke Jr', 'Ana Lucía Fernández de la Vega', 'Lea Marguerite Schönberg-Dubois'];
-  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: names[i], roles: [CONFIG.apprenticeRole] }));
+  const members = Array.from({ length: 5 }, (_, i) => ({ id: `sample-h${i}`, name: names[i], roles: [CREW] }));
   const parts = Array.from({ length: 4 }, () => ['A', 'B', 'C']);
   const ask = { kind: 'batch', task: 'T12', title: 'Four questions, every reason at 500 characters', parts: parts.map((_, i) => ({
     question: `Question ${i + 1} of the batch?`, why: 'A is the smallest change.', recommended: 'A', options: { A: 'Option A', B: 'Option B', C: 'Option C' } })) };

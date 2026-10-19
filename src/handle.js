@@ -4,27 +4,24 @@
 import { MessageFlags } from 'discord.js';
 import { ballotsOf, step } from './vote.js';
 import { card, confirmEnd, ephemeral, note, parseCustomId, reasonModal, stamp } from './cards.js';
+import { placeOf } from './crew.js';
 
 /**
- * Who may answer and vote, from the guild members and the role ids of the config. A holder has the sage-apprentice or the
- * sage-lead role, and a sage-lead the sage-lead role, so a sage-lead is always a holder (T70). Nobody else counts, also not the owner
- * (F-T27-12). A bot (discord.js `member.user.bot`) is neither.
+ * Who may answer and vote, from the guild members (their role NAMES, src/discord.js memberOf) and the owner's id (T232): a holder is
+ * in the crew (src/crew.js placeOf). The owner without the crew role does not vote (F-T27-12), but ends a vote and breaks a tie.
+ * A bot (discord.js `member.user.bot`) is never a holder.
  * @param {Iterable<{ id: string, name: string, roles: string[], bot?: boolean }>} members
- * @param {{ apprenticeRole: string, leadRole: string }} config
- * @returns {{ holders: Set<string>, leads: Set<string>, names: Map<string, string> }}
+ * @param {{ ownerId: string }} config  the owner as src/crew.js ownerOf resolved it
+ * @returns {{ holders: Set<string>, ownerId: string, names: Map<string, string> }}
  */
-export function peopleOf(members, { apprenticeRole, leadRole }) {
+export function peopleOf(members, { ownerId }) {
   const holders = new Set();
-  const leads = new Set();
   const names = new Map();
   for (const m of members) {
     names.set(m.id, m.name);
-    if (m.bot) continue;
-    const lead = m.roles.includes(leadRole);
-    if (lead) leads.add(m.id);
-    if (lead || m.roles.includes(apprenticeRole)) holders.add(m.id);
+    if (!m.bot && placeOf(m.id, m.roles, ownerId).crew) holders.add(m.id);
   }
-  return { holders, leads, names };
+  return { holders, ownerId, names };
 }
 
 /** The text of a modal field, or undefined when the interaction has no fields or no such field (discord.js throws then). */
@@ -62,7 +59,7 @@ function decide(interaction, { gates, people, clock }) {
   const id = parseCustomId(interaction.customId);
   const entry = id && gates.get(id.gateId);
   const { action, part, index } = id ?? {};
-  // "End vote now" and "Cancel" exist only on the sage-lead's private confirm: a press from any other message is unknown (F-T27-14).
+  // "End vote now" and "Cancel" exist only on the owner's private confirm: a press from any other message is unknown (F-T27-14).
   const fromConfirm = interaction.message?.flags.has(MessageFlags.Ephemeral) === true;
   if (!entry || ((action === 'end!' || action === 'cancel') && !fromConfirm)) return reply(note('unknown-gate'), entry?.gate ?? null);
   const { gate, ask } = entry;
@@ -85,16 +82,15 @@ function decide(interaction, { gates, people, clock }) {
   const event = action === 'end' || action === 'end!' ? { type: 'end', ...base }
     : action === 'tiebreak' ? { type: 'tiebreak', ...base, part, option }
     : { type: 'press', ...base, option, ...(gate.kind === 'batch' && { part }), ...(reason !== undefined && { reason }) };
-  // A sage-leads-only question (T73) has the sage-leads as its only holders: anyone else gets the leads-only note. The bridge passes on
-  // only the presses of members with a sage role (G20), so not-holder comes only from a sage-leads-only question.
-  const out = step(gate, event, ask.leads ? people.leads : people.holders, people.leads);
+  // The bridge passes on only the presses of the crew and the owner (G20), so not-holder comes only from the owner without the crew role.
+  const out = step(gate, event, people.holders, people.ownerId);
   const refused = out.effects.find((e) => e.type === 'ignored');
-  // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not a sage-lead, ended, closed, withdrawn,
+  // "End vote now" asks first: the end runs through the vote rules only to find a refusal (not the owner, ended, closed, withdrawn,
   // or past the time limit by the clock), and the confirm shows only when the end would count (F-T27-13).
   if (action === 'end' && !refused) return reply(confirmEnd(gate, people, ask), gate);
   // A reason after the vote ended: the press before the form counted, so the note says that only the reason is late (F-T42-1).
   const late = refused?.why === 'closed' && action === 'reason' && out.gate.votingEndedAt !== null && out.gate.outcome.status !== 'withdrawn' && ballotsOf(out.gate.parts[part]).has(by);
-  const why = refused?.why === 'not-holder' ? 'leads-only' : late ? 'late-reason' : refused?.why;
+  const why = late ? 'late-reason' : refused?.why;
   const result = refused ? reply(note(why, out.gate, people.names, ask), out.gate, out.effects)
     : action === 'end!' ? update({ ...ephemeral(`You ended the vote on ${gate.id} at ${stamp(base.at)}.`), components: [] }, out.gate, out.effects)
     : action === 'press' && gate.kind === 'batch' ? { send: interaction.showModal, payload: reasonModal(out.gate, ask, part, index), gate: out.gate, effects: out.effects } // the vote counts already

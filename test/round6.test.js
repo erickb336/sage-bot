@@ -17,7 +17,7 @@ test('F-T1-66: a part with no counted votes is tied, with one option or two, and
   for (const options of [['only'], ['A', 'B']]) {
     for (const holders of [[], HOLDERS]) {
       const gate = openGate({ id: 'g', kind: 'batch', parts: [options], askedBy: ERICK, at: T0 });
-      const r = step(gate, { type: 'tick', at: END }, holders, [LEA]);
+      const r = step(gate, { type: 'tick', at: END }, holders, LEA);
       assert.deepEqual(r.effects, [{ type: 'vote-ended', by: null }]);
       assert.equal(r.gate.phase, 'tied');
       assert.deepEqual(r.gate.parts[0].outcome, { status: 'open' });
@@ -28,10 +28,10 @@ test('F-T1-66: a part with no counted votes is tied, with one option or two, and
 
 test('F-T1-66: a one-option part with one vote is decided by votes; with no votes a sage-lead decides it', () => {
   const gate = openGate({ id: 'g', kind: 'batch', parts: [['only'], ['only']], askedBy: ERICK, at: T0 });
-  const voted = step(gate, { type: 'press', by: MAYA, part: 0, option: 'only', at: T0, via: 'discord' }, HOLDERS, [LEA]).gate;
-  const ended = step(voted, { type: 'tick', at: END }, HOLDERS, [LEA]).gate;
+  const voted = step(gate, { type: 'press', by: MAYA, part: 0, option: 'only', at: T0, via: 'discord' }, HOLDERS, LEA).gate;
+  const ended = step(voted, { type: 'tick', at: END }, HOLDERS, LEA).gate;
   assert.deepEqual(ended.parts.map((p) => p.outcome.status), ['decided', 'open']);
-  const r = step(ended, { type: 'tiebreak', by: LEA, part: 1, option: 'only', at: END + 1, via: 'discord' }, HOLDERS, [LEA]);
+  const r = step(ended, { type: 'tiebreak', by: LEA, part: 1, option: 'only', at: END + 1, via: 'discord' }, HOLDERS, LEA);
   assert.deepEqual(r.gate.parts[1].outcome, { status: 'decided', option: 'only', how: 'lead-tiebreak', by: LEA, at: END + 1 });
   assert.deepEqual(r.gate.outcome, { status: 'decided' });
 });
@@ -46,12 +46,12 @@ test('F-T1-67: parseGate refuses a voting gate whose lastAt or a ballot is at or
   assert.throws(() => parseGate(lateBallot), TypeError);
 });
 
-test('F-T1-68: a non-holder gets not-holder on an open or a closed gate, single or batch', () => {
+test('F-T1-68: a non-holder gets not-holder for a press, and not-owner for an end or a tie-break, on an open or a closed gate', () => {
   const single = openGate({ id: 'g1', kind: 'single', options: ['A'], askedBy: ERICK, at: T0 });
   const answered = step(single, { type: 'press', by: MAYA, option: 'A', at: T0, via: 'discord' }, HOLDERS, []).gate;
   const batch = openGate({ id: 'g2', kind: 'batch', parts: [['A', 'B']], askedBy: ERICK, at: T0 });
-  const tied = step(batch, { type: 'tick', at: END }, HOLDERS, [LEA]).gate;
-  const decided = step(tied, { type: 'tiebreak', by: LEA, part: 0, option: 'A', at: END, via: 'discord' }, HOLDERS, [LEA]).gate;
+  const tied = step(batch, { type: 'tick', at: END }, HOLDERS, LEA).gate;
+  const decided = step(tied, { type: 'tiebreak', by: LEA, part: 0, option: 'A', at: END, via: 'discord' }, HOLDERS, LEA).gate;
   assert.deepEqual([answered.phase, tied.phase, decided.phase], ['closed', 'tied', 'closed']);
   const events = [
     { type: 'press', by: SAM, option: 'A', part: 0, at: END + 1, via: 'discord' },
@@ -61,7 +61,7 @@ test('F-T1-68: a non-holder gets not-holder on an open or a closed gate, single 
   for (const gate of [single, answered, batch, tied, decided]) {
     for (const event of events) {
       if (gate.kind === 'single' && event.type !== 'press') continue;
-      assert.deepEqual(step(gate, event, HOLDERS, [LEA, SAM]).effects.at(-1), { type: 'ignored', by: SAM, why: 'not-holder' });
+      assert.deepEqual(step(gate, event, HOLDERS, LEA).effects.at(-1), { type: 'ignored', by: SAM, why: event.type === 'press' ? 'not-holder' : 'not-owner' });
     }
   }
   // A holder still gets closed on a closed gate.

@@ -10,7 +10,7 @@ const PEOPLE = peopleOf(MEMBERS, CONFIG);
 const T0 = clock(14, 31);
 const END = clock(15, 1);
 const ts = (ms) => Math.floor(ms / 1000);
-const run = (gate, events) => events.reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.leads).gate, gate);
+const run = (gate, events) => events.reduce((g, e) => step(g, e, PEOPLE.holders, PEOPLE.ownerId).gate, gate);
 const ballot = (by, part, option, at, reason) => ({ type: 'press', by, part, option, at, via: 'discord', ...(reason !== undefined && { reason }) });
 const buttons = (c) => c.components.map((r) => r.components.map((b) => `${b.custom_id} ${b.label} s${b.style}${b.disabled ? ' off' : ''}`));
 
@@ -41,7 +41,7 @@ test('an open batch card: a live countdown, the tally per part with voters and n
       'press:B7:0:2 Part 1, C: Visible columns, plus an "Include hidden fields" box s2'],
     ['press:B7:1:0 Part 2, A: 2026-10-04 (ISO) s1', "press:B7:1:1 Part 2, B: 04/10/2026 (the user's locale) s2", 'press:B7:1:2 Part 2, C: Both, in two columns s2'],
     ['press:B7:2:0 Part 3, A: reports-2026-10-04.csv s1', 'press:B7:2:1 Part 3, B: The report title and the date s2'],
-    ['end:B7 End vote now (sage-lead only) s4'],
+    ['end:B7 End vote now (Erick only) s4'],
   ]);
   assert.deepEqual(c.allowedMentions, { parse: [] });
 });
@@ -69,22 +69,22 @@ test('at the limit a tied part shows tie-break buttons for the tied options only
     { type: 'tick', at: END },
   ]);
   const c = card(gate, ASKS.B7, PEOPLE);
-  assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T7 waits.`);
+  assert.equal(c.embeds[0].description, `Voting ended at <t:${ts(END)}:t>. 1 part is tied: it waits for Erick. The other parts are provisional, and T7 waits.`);
   assert.match(c.embeds[0].fields[0].value, /\n\*\*Provisional: A\*\* · 3 of 3 votes$/);
-  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
+  assert.match(c.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* Erick breaks the tie\. sage-bot reminds Erick every 2 h\.$/);
   assert.match(c.embeds[0].fields[2].value, /\n\*\*Provisional: A\*\* · 2 of 3 votes$/);
   assert.deepEqual(buttons(c), [
     ['press:B7:0:0 Part 1, A: Only the columns visible in the table s3 off', 'press:B7:0:1 Part 1, B: All fields, also the hidden ones s2 off',
       'press:B7:0:2 Part 1, C: Visible columns, plus an "Include hidden fields" box s2 off'],
-    ['tiebreak:B7:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B7:1:1 Part 2, break the tie: B (sage-lead only) s4'],
+    ['tiebreak:B7:1:0 Part 2, break the tie: A (Erick only) s4', 'tiebreak:B7:1:1 Part 2, break the tie: B (Erick only) s4'],
     ['press:B7:2:0 Part 3, A: reports-2026-10-04.csv s3 off', 'press:B7:2:1 Part 3, B: The report title and the date s2 off'],
   ]);
   // A part with no votes offers every option to the sage-lead, and the sage-lead's early end says so (F-T27-18), not "closed".
-  const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: JON, at: T0 + 2 * MINUTE, via: 'discord' }]);
+  const early = run(openAsk('B9', T0), [ballot(ERICK, 0, 'A', T0 + MINUTE), { type: 'end', by: ERICK, at: T0 + 2 * MINUTE, via: 'discord' }]);
   const e = card(early, ASKS.B9, PEOPLE);
-  assert.equal(e.embeds[0].description, `Ended early by Jon (sage-lead) at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for a sage-lead. The other parts are provisional, and T9 waits.`);
-  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\. sage-bot reminds @sage-lead every 2 h\.$/);
-  assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (sage-lead only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (sage-lead only) s4']);
+  assert.equal(e.embeds[0].description, `Ended early by Erick at <t:${ts(T0 + 2 * MINUTE)}:t>, with the votes so far. 1 part is tied: it waits for Erick. The other parts are provisional, and T9 waits.`);
+  assert.match(e.embeds[0].fields[1].value, /\n\*\*Tied: A, B\.\*\* Erick breaks the tie\. sage-bot reminds Erick every 2 h\.$/);
+  assert.deepEqual(buttons(e)[1], ['tiebreak:B9:1:0 Part 2, break the tie: A (Erick only) s4', 'tiebreak:B9:1:1 Part 2, break the tie: B (Erick only) s4']);
 });
 
 test('a withdrawn batch says who withdrew it and when, decides nothing and disables every button', () => {
@@ -113,7 +113,7 @@ test('a single question card: options with Recommended and Default, the rule, an
     '**Why recommended:** A keeps the user in flow; the token refresh exists.',
     '**Default:** Sign in again silently and keep the page, but no time-out applies it',
     '**Rule:** the first answer is final · reminder every 2 h until answered',
-    '**Who can answer:** every sage-apprentice or sage-lead',
+    '**Who can answer:** every sage-crew member',
   ].join('\n'));
   assert.deepEqual(buttons(c), [['press:G5:0:0 A. Sign in again silently and keep the page s1',
     'press:G5:0:1 B. Show a "Session ended" screen with a Sign-in button s2', 'press:G5:0:2 C. Ask first if the page has unsaved work s2']]);
@@ -129,9 +129,9 @@ test('the reason modal and the end confirm carry the limits and the custom ids; 
   assert.equal(reasonModal(openAsk('B9', T0), ASKS.B9, 1, 0).title, 'Your vote counts: A. Yes, under the button');
   assert.equal(modal.components[0].components[0].max_length, 500);
   const confirm = confirmEnd(run(gate, [ballot(ERICK, 1, 'A', T0 + MINUTE), ballot(JON, 1, 'B', T0 + MINUTE)]), PEOPLE);
-  assert.equal(confirm.content, ['**End B7 now?**', 'Part 1 has no votes. It stays open until a sage-lead breaks the tie.',
-    'Part 2 is tied A, B at 1 vote each. It stays open until a sage-lead breaks the tie.',
-    'Part 3 has no votes. It stays open until a sage-lead breaks the tie.', 'Nobody can vote after this.'].join('\n'));
+  assert.equal(confirm.content, ['**End B7 now?**', 'Part 1 has no votes. It stays open until you break the tie.',
+    'Part 2 is tied A, B at 1 vote each. It stays open until you break the tie.',
+    'Part 3 has no votes. It stays open until you break the tie.', 'Nobody can vote after this.'].join('\n'));
   assert.deepEqual([confirm.flags, confirm.allowedMentions], [64, { parse: [] }]);
   const wide = openGate({ id: 'g', kind: 'batch', parts: [['a'], ['a'], ['a'], ['a'], ['a']], askedBy: ERICK, at: T0 });
   const ask = { kind: 'batch', task: 'T', title: 't', parts: wide.parts.map(() => ({ question: 'q', why: 'w', recommended: 'a', options: { a: 'a' } })) };
@@ -144,7 +144,7 @@ test('F-T36-1: after a voter loses the role, the tied line names the tied option
   const noJon = peopleOf(MEMBERS.map((m) => (m.id === JON ? { ...m, roles: [] } : m)), CONFIG);
   const value = card(gate, ASKS.B9, noJon).embeds[0].fields[1].value;
   assert.match(value, /\*\*B\.\*\* No · 0 votes\n/);
-  assert.match(value, /\n\*\*Tied: A, B\.\*\* A sage-lead breaks the tie\./);
+  assert.match(value, /\n\*\*Tied: A, B\.\*\* Erick breaks the tie\./);
 });
 
 test('F-T37-1: each voter name is bold, so a name such as "Maya, Erick, Jon" reads as one voter; the count stays 1', () => {

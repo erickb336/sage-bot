@@ -1,9 +1,9 @@
 // Sage sessions (T29). A session is one Claude Code session id. scripts/hook.mjs writes one spool file per session from three
 // hooks (SessionStart, PostToolUse on Bash, SessionEnd); the bridge reads the spool folder at each loop. The rest of this file is
 // pure functions that turn spool files and gate rows into sessions, the title of a thread and the line in the parent channel.
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pickProject, projectAt } from './projects.js';
+import { logbookOf, pickProject, projectAt } from './projects.js';
 import { GATE_ID, PROJECT_NAME, readOwn, SESSION_ID, writeWhole } from './state.js';
 import { stamp } from './cards.js';
 
@@ -150,7 +150,8 @@ function locked(file, work) {
  * A spool file that is there but cannot be read or checked is refused (a throw), and nothing is written over it (F-T132-23).
  * A session keeps the project it started in (G43 A): its first event takes the listed project whose folder holds its cwd (T132), and once
  * its spool exists, each later event is of the spool's project, whatever its cwd. A first event in a folder outside every listed project,
- * and a `gate add` with `--project` outside the session's project, are not refused: they are not a listed project's.
+ * and a `gate add` in another project's logbook (by its `--project`, or else by its cwd: F-T145-L7), are not refused: they are not
+ * the session's.
  * - SessionStart: { id, cwd, startedAt, pid }; a resume or a compaction keeps the gates and tasks and takes away the end.
  * - PostToolUse on Bash: for a command that runs the sage state tool with `gate add`, the gate id of its output line and its task.
  *   A `--project` whose folder only the shell knows (a variable other than HOME, a command) is ignored (F-T29-11).
@@ -184,8 +185,12 @@ export function record(input, { projects, dir, pid, now, home }) {
   } else if (event !== 'SessionStart' && event !== 'SessionEnd') {
     throw new TypeError('not a hook event of the sage bridge');
   }
+  // The cwd as sage sees it: its real path, links resolved, as process.cwd() gives it to the state tool (F-T145-10). A cwd that does not
+  // exist (gone since the event) keeps its path as given.
+  let cwd;
+  try { cwd = realpathSync.native(input.cwd); } catch { cwd = resolve(input.cwd); }
   const file = spoolPath(dir, id);
-  const here = projectAt(input.cwd, projects);
+  const here = projectAt(cwd, projects);
   if (!existsSync(file)) {
     if (event === 'SessionEnd') return 'no session';
     if (!here) return 'outside the projects';
@@ -199,7 +204,10 @@ export function record(input, { projects, dir, pid, now, home }) {
     if (event === 'SessionEnd' && !old) return 'no session';
     if (!old && !here) return 'outside the projects';
     const folder = old?.cwd ?? here.project;
-    if (named !== undefined && projectAt(resolve(input.cwd, named), projects)?.project !== folder) return 'another project';
+    // A gate add counts only in the logbook of the session's folder: the logbook of the folder that `--project` names (from the real
+    // cwd), else of the real cwd, by the state tool's own rule (logbookOf), so a linked worktree outside the project's folder counts too
+    // (F-T145-L7, F-T145-6, F-T145-10).
+    if (gate && logbookOf(resolve(cwd, named ?? '.')) !== logbookOf(folder)) return 'another project';
     const s = old ?? { id, project: here.name, cwd: folder, startedAt: now, pid, gates: [], tasks: [] };
     if (event === 'SessionStart') { s.pid = pid; delete s.endedAt; }
     if (event === 'SessionEnd') s.endedAt = now;

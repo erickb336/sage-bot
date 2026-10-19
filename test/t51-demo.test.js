@@ -5,10 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tempFolder } from './temp-folder.js';
 import { execFileSync, SAGE, spawnSync } from './bridge-setup.js';
 
-const DEMO = new URL('../scripts/demo.mjs', import.meta.url).pathname;
+const DEMO = fileURLToPath(new URL('../scripts/demo.mjs', import.meta.url)); // not .pathname: it percent-encodes a space (F-T145-L10)
 function demo() {
   const root = tempFolder('sage-bot-t51-');
   const out = join(root, 'demo.html');
@@ -45,23 +46,23 @@ test('the demo page shows the session line, the thread in order with the private
   ]);
   assert.match(page, /<span class="tag">locked<\/span><span class="tag">archived<\/span>/);
   // The single question: Maya's first answer is final; Jon's late press gets a private note.
-  assert.match(page, /@sage-apprentice @sage-lead project T1 needs one product answer\. The first answer is final\./);
+  assert.match(page, /@sage-crew project T1 needs one product answer\. The first answer is final\./);
   assert.match(page, /Answered by Maya at <time>14:02<\/time>: A\. Sign in\. Final\./);
   assert.match(page, /Only Jon can see this · Dismiss message<\/div><div>Already answered by Maya: A/);
   // Sam has no role: sage-bot ignores the press, so Sam gets no note (G20).
   assert.match(page, /Sam has no role and presses part 1, A\. sage-bot ignores the press: Sam gets no reply, and the vote does not change\./);
   assert.doesNotMatch(page, /Only Sam can see this/);
-  // The batch: the tie post in the thread, then Jon's tie-break.
-  assert.match(page, /@sage-lead project\/G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
-  assert.match(page, /<b>Decided: B<\/b> · tie broken by Jon \(sage-lead\) at <time>14:36<\/time>/);
-  assert.match(page, /Jon \(sage-lead\) broke the tie on part 2 of project\/G2\+G3: B\./);
+  // The batch: the tie post in the thread, which pings Erick (the owner) only, then Erick's tie-break.
+  assert.match(page, /@Erick project\/G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
+  assert.match(page, /<b>Decided: B<\/b> · tie broken by Erick at <time>14:36<\/time>/);
+  assert.match(page, /Erick broke the tie on part 2 of project\/G2\+G3: B\./);
   // The owner's answer at the terminal is final on the card, and a later press on that part does not count.
   // The rule in plain words, and no rule code that the page does not explain (F-T51-5).
   assert.match(page, /Erick, the owner, answers G5 at the terminal: option 1\. The owner's answer at the terminal is final\./);
   assert.equal(/\bG10\b/.test(page), false);
   assert.match(page, /Answered by Erick \(terminal\) at <time>14:39<\/time>: A\. An example report and a Create button\. Final\./);
   assert.match(page, /Already answered by Erick at the terminal: A\. An example report and a Create button\. Your press did not count\./);
-  assert.match(page, /Ended early by Jon \(sage-lead\) at <time>14:42<\/time>/);
+  assert.match(page, /Ended early by Erick at <time>14:42<\/time>/);
   // The answers in sage's gates.tsv (the option's own text, as sage keeps a `gate answer --option <n>`: T176), and the reasons line for sage.
   const rows = [...page.matchAll(/<tr><td>(G\d)<\/td><td>T\d<\/td><td>[^<]*<\/td><td>([^<]*)<\/td><\/tr>/g)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(rows, ['G1 Sign in', 'G2 Only the visible columns', 'G3 04/10/2026 (the user locale)', 'G4 1.4.0', 'G5 An example report and a Create button', 'G6 Yes, under the button']);

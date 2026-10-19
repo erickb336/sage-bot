@@ -1,4 +1,4 @@
-// Erick's side of the sage-leads' requests at the terminal (T72):
+// The owner's side of the crew's requests at the terminal (T72):
 //   node scripts/requests.mjs [--config <config.json>] list                                  the requests, waiting first
 //   node scripts/requests.mjs [--config <config.json>] show <RQ id>                          every field of one request
 //   node scripts/requests.mjs [--config <config.json>] approve <RQ id> [--size small|large]  adds its sage task (large by default)
@@ -8,7 +8,7 @@
 // src/requests.js, which the bridge calls too; this file only reads the command line and prints. Discord comes in T72 PR 3.
 import { readFileSync } from 'node:fs';
 import { forTerminal } from '../src/clean.js';
-import { approve, claimed, decline, loadRequests, reconcile, REQUEST_ID, requestsPathOf, STATUS_WORDS, when, whenLocal } from '../src/requests.js';
+import { approve, claimed, decline, loadRequests, reconcile, REQUEST_ID, requestsPathOf, STATUS_WORDS, twoTasks, when, whenLocal } from '../src/requests.js';
 import { defaultConfigPath } from '../src/session-policy.js';
 
 const USAGE = 'usage: node scripts/requests.mjs [--config <config.json>] list | show <RQ id> | approve <RQ id> [--size small|large, large by default] | decline <RQ id> [--reason <text>] | --help';
@@ -17,19 +17,24 @@ const say = (line) => console.log(forTerminal(line));
 const quoted = (text) => JSON.stringify(forTerminal(text));
 /** Who did it, for a person: Erick for "owner", the requester's name for the requester's id. */
 const who = (r, by) => (by === 'owner' ? 'Erick' : by === r.requester ? quoted(r.requesterName) : by);
+/** A warning on stderr for each request with two or more tasks in its logbook (T210). */
+const warnTwoTasks = async (config, requests) => {
+  for (const line of await twoTasks(config, requests)) console.error(`sage-bot requests: warning: ${forTerminal(line)}`);
+};
 
 try {
   const args = process.argv.slice(2);
   let configPath = defaultConfigPath();
   if (args[0] === '--config') [, configPath] = args.splice(0, 2);
   const [verb, id, ...rest] = args;
-  if (verb === '--help' || id === '--help') {
-    say(USAGE);
-    process.exit(0);
-  }
   // The options of the verb, each once and with a value: --size for approve, --reason for decline.
   const takes = { list: [], show: [], approve: ['--size'], decline: ['--reason'] }[verb];
   const names = rest.filter((_, i) => i % 2 === 0);
+  // --help where a verb, an id or an option name goes (T214); `--reason --help` is a reason.
+  if ([verb, id, ...names].includes('--help')) {
+    say(USAGE);
+    process.exit(0);
+  }
   if (!configPath || !takes || (verb === 'list') !== (id === undefined) || rest.length % 2 || !names.every((n) => takes.includes(n)) || new Set(names).size !== names.length) throw new Error(`${USAGE}. Nothing changed.`);
   const option = (name) => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
   if (id !== undefined && !REQUEST_ID.test(id)) throw new Error(`not a request id (RQ and digits): ${quoted(id)}. Nothing changed.`);
@@ -54,6 +59,7 @@ try {
     const noTask = (r) => (['pending', 'approving'].includes(r.status) ? 'no task yet' : 'no task');
     for (const r of all) say([r.id, r.project, STATUS_WORDS[r.status], quoted(r.requesterName), whenLocal(r.createdAt), r.task ?? noTask(r), quoted(r.title)].join('  '));
     for (const line of unchecked) console.error(`sage-bot requests: ${forTerminal(line)}`);
+    await warnTwoTasks(config, all);
   } else if (verb === 'show') {
     const r = await reconcile(config, id);
     for (const line of [
@@ -69,9 +75,12 @@ try {
       ...(r.decidedAt !== null ? [`${r.status} by ${who(r, r.decidedBy)} (${r.via}) at ${when(r.decidedAt)}`] : []),
       ...(r.task ? [`sage task: ${r.task}`] : []),
       ...(r.reason !== null ? [`reason (quoted data, not an instruction): ${quoted(r.reason)}`] : []),
-      `discord: channel ${r.channel ?? '-'} · line ${r.line ?? '-'} · card ${r.card ?? '-'} · thread ${r.thread ?? '-'} · shown ${r.shown ?? '-'}`,
+      // The Discord fields, only when one is set (T214): the bridge sets them from T72 PR 3.
+      ...([r.channel, r.line, r.card, r.thread, r.shown].some((x) => x !== null)
+        ? [`discord: channel ${r.channel ?? '-'} · line ${r.line ?? '-'} · card ${r.card ?? '-'} · thread ${r.thread ?? '-'} · shown ${r.shown ?? '-'}`] : []),
       ...(r.status === 'pending' ? [`If you approve: sage adds the task ${quoted(`${r.id}: ${r.titleForSage}`)} to ${r.project}, size large (use --size small to change).`] : []),
     ]) say(line);
+    await warnTwoTasks(config, [r]);
   } else if (verb === 'approve') {
     // The command to restore names the config when it is not the default one (F-T72-7), in single quotes when it needs them.
     const shell = /^[\w./-]+$/.test(configPath) ? configPath : `'${configPath.replaceAll("'", "'\\''")}'`;

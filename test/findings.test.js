@@ -11,7 +11,7 @@ const SAM = 'sample-sam';
 const LEA = 'sample-lea';
 const THREE = [ERICK, MAYA, JON];
 const FOUR = [ERICK, MAYA, JON, SAM];
-const LEADS = [LEA];
+const LEADS = LEA; // the owner's id (T232): only it ends a vote or breaks a tie
 const T0 = Date.UTC(2026, 9, 4, 12, 0); // sample time
 
 const single = () => openGate({ id: 'g1', kind: 'single', options: ['A', 'B'], askedBy: ERICK, at: T0 });
@@ -100,7 +100,7 @@ test('F-T1-21: step ignores odd events with a reason and never throws', () => {
   }
   assert.deepEqual(step(single(), press(MAYA, 'A', 0), 'not-a-list', LEADS).effects, [{ type: 'ignored', by: MAYA, why: 'not-holder' }]);
   const out = step(batch(), { type: 'end', by: LEA, at: T0, via: 'discord' }, [...THREE, LEA], 'not-a-list');
-  assert.deepEqual(out.effects, [{ type: 'ignored', by: LEA, why: 'not-lead' }]);
+  assert.deepEqual(out.effects, [{ type: 'ignored', by: LEA, why: 'not-owner' }]);
 });
 
 // F-T1-24: never decide anything with an empty holder set.
@@ -118,10 +118,13 @@ test('F-T1-24: a batch decides no part when the holder list is empty at the limi
 });
 
 // Since F-T1-32 a sage-lead must also be a holder, so with no holders the reason is not-holder.
-test('F-T1-24: a sage-lead cannot break a tie while the holder list is empty', () => {
-  const r = run(batch(), [[tick(30), THREE], [{ type: 'tiebreak', by: LEA, part: 0, option: 'A', at: T0 + 31 * MINUTE, via: 'discord' }, []]]);
-  assert.equal(r.gate.phase, 'tied');
-  assert.deepEqual(r.effects.at(-1), { type: 'ignored', by: LEA, why: 'not-holder' });
+test('F-T1-24, changed by T232 (C1): the owner breaks a tie also while the holder list is empty; nobody else can', () => {
+  const tiebreak = (by) => ({ type: 'tiebreak', by, part: 0, option: 'A', at: T0 + 31 * MINUTE, via: 'discord' });
+  const refused = run(batch(), [[tick(30), THREE], [tiebreak(MAYA), []]]);
+  assert.equal(refused.gate.phase, 'tied');
+  assert.deepEqual(refused.effects.at(-1), { type: 'ignored', by: MAYA, why: 'not-owner' });
+  const r = run(batch(), [[tick(30), THREE], [tiebreak(LEA), []]]);
+  assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'A', how: 'lead-tiebreak', by: LEA, at: T0 + 31 * MINUTE });
 });
 
 // F-T1-17, rewritten by F-T1-56: B1 stores a reason as typed, cut to 500 code points; the bridge cleans it.
@@ -208,29 +211,30 @@ test('F-T1-27: an option named like an Object property can win a part', () => {
 
 // Round 2 of the review of 4d581c4.
 
-// F-T1-32: a sage-lead action needs the actor in leads and in holders.
+// F-T1-32, changed by T232 (C1): an end or a tie-break needs the owner's id, never a role; the holder list does not matter.
 
 const end = (by, min) => ({ type: 'end', by, at: T0 + min * MINUTE, via: 'discord' });
 const tiebreak = (by, option, min) => ({ type: 'tiebreak', by, part: 0, option, at: T0 + min * MINUTE, via: 'discord' });
 
-test('F-T1-32: a sage-lead who is not a holder cannot end the vote or break a tie', () => {
-  const r = run(batch(), [[ballot(MAYA, 'A', 0), THREE], [end(LEA, 1), THREE], [tick(30), THREE]]);
+test('F-T1-32: a holder who is not the owner cannot end the vote or break a tie', () => {
+  const r = run(batch(), [[ballot(MAYA, 'A', 0), THREE], [end(MAYA, 1), THREE], [tick(30), THREE]]);
   assert.deepEqual(r.effects, [
-    { type: 'ignored', by: LEA, why: 'not-holder' },
+    { type: 'ignored', by: MAYA, why: 'not-owner' },
     { type: 'vote-ended', by: null },
     { type: 'decided', part: 0, option: 'A', how: 'votes' },
     { type: 'closed', outcome: { status: 'decided' } },
   ]);
-  const tied = run(batch(), [[tick(30), THREE], [tiebreak(LEA, 'B', 31), THREE]]);
-  assert.deepEqual(tied.effects.at(-1), { type: 'ignored', by: LEA, why: 'not-holder' });
+  const tied = run(batch(), [[tick(30), THREE], [tiebreak(MAYA, 'B', 31), THREE]]);
+  assert.deepEqual(tied.effects.at(-1), { type: 'ignored', by: MAYA, why: 'not-owner' });
   assert.equal(tied.gate.phase, 'tied');
 });
 
-test('F-T1-32: the same lead, as a holder, ends the vote and breaks the tie', () => {
-  const holders = [...THREE, LEA];
-  const r = run(batch(), [[end(LEA, 1), holders], [tiebreak(LEA, 'B', 2), holders]]);
-  assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 2).at });
-  assert.equal(r.gate.phase, 'closed');
+test('F-T1-32: the owner ends the vote and breaks the tie, as a holder or not', () => {
+  for (const holders of [THREE, [...THREE, LEA]]) {
+    const r = run(batch(), [[end(LEA, 1), holders], [tiebreak(LEA, 'B', 2), holders]]);
+    assert.deepEqual(r.gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: LEA, at: tiebreak(LEA, 'B', 2).at });
+    assert.equal(r.gate.phase, 'closed');
+  }
 });
 
 // F-T1-33: a refused event does not move the gate's time.

@@ -8,13 +8,15 @@ import { tempFolder } from './temp-folder.js';
 import { askedTogether, MERGE } from '../src/bridge.js';
 import { lock, load, save } from '../src/state.js';
 import { HOUR, MINUTE } from '../src/vote.js';
-import { APPRENTICE, execFileSync, JON, LEADR, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
+import { CREW_ROLE, execFileSync, JON, MAYA, MEMBERS, OWNER, setAt, setup, table } from './bridge-setup.js';
+import { CREW } from '../src/crew.js';
 
 /** The members with the owner in no role: the owner's terminal answer must count all the same (G10). */
 const noRoles = () => MEMBERS.map((m) => (m.id === OWNER ? { ...m, roles: [] } : { ...m }));
 const lastCard = (b, n = 0) => b.discord.latest([...b.discord.messages.keys()][n]);
 const decisionsOf = (b, question) => table(b, 'decisions').filter((d) => d.decision.startsWith(`${question} →`)).map((d) => d.decision);
 /** The posts that ping exactly these roles. */
+const ownerPings = (b) => b.discord.posts.filter((p) => JSON.stringify(p.allowedMentions?.users) === JSON.stringify([OWNER])).map((p) => p.content);
 const pings = (b, ...roles) => b.discord.posts.filter((p) => JSON.stringify(p.allowedMentions?.roles) === JSON.stringify(roles)).map((p) => p.content);
 
 test('acceptance, F-T28-26, G10 a: the owner (no roles) answers G1 at the terminal, a holder presses after: sage keeps the owner\'s answer', async () => {
@@ -90,7 +92,7 @@ test('F-T28-27, G10 a: in a batch the owner\'s terminal answer closes its part, 
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['y', 'q']);
   assert.match(lastCard(b).embeds[0].description, /Closed: every part is decided or answered at the terminal\. T7 goes on\./);
   // Part 1 had no votes, which the vote rules call a tie, but it has the owner's answer: the sage-leads get no ping.
-  assert.deepEqual(pings(b, LEADR), []);
+  assert.deepEqual(ownerPings(b), []);
 });
 
 test('G10 a: a batch whose parts the owner all answers at the terminal closes at once, and the tick then changes nothing', async () => {
@@ -107,7 +109,7 @@ test('G10 a: a batch whose parts the owner all answers at the terminal closes at
   b.now += 31 * MINUTE;
   await b.bridge.loop();
   assert.deepEqual([b.answerOf('G1'), b.answerOf('G2')], ['x', 'other: skip this: the task changed']);
-  assert.deepEqual(pings(b, LEADR), []);
+  assert.deepEqual(ownerPings(b), []);
 });
 
 test('the bridge\'s own answer in sage, without its save (a crash in between), stays the bridge\'s: it is not taken as the owner\'s', async () => {
@@ -219,15 +221,15 @@ test('F-T28-32: after a sleep past the limit and 2 hours, one loop pings the sag
   const opened = b.now;
   b.now = opened + 30 * MINUTE + 2 * HOUR + MINUTE;
   await b.bridge.loop();
-  assert.equal(pings(b, LEADR).length, 1);
-  assert.match(pings(b, LEADR)[0], /is tied after its vote/);
+  assert.equal(ownerPings(b).length, 1);
+  assert.match(ownerPings(b)[0], /is tied after its vote/);
   b.now = opened + 30 * MINUTE + 4 * HOUR - MINUTE;
   await b.bridge.loop();
-  assert.equal(pings(b, LEADR).length, 1);
+  assert.equal(ownerPings(b).length, 1);
   b.now = opened + 30 * MINUTE + 4 * HOUR;
   await b.bridge.loop();
-  assert.deepEqual(pings(b, LEADR).slice(1).map((p) => p.replace(/<t:\d+:t>/, 'T')), [`<@&${LEADR}> reminder: part 1, part 2 of project/G1+G2 still tied since T. T6 waits.`]);
-  assert.equal(pings(b, APPRENTICE, LEADR).length, 1); // only the card's own alert
+  assert.deepEqual(ownerPings(b).slice(1).map((p) => p.replace(/<t:\d+:t>/, 'T')), [`<@${OWNER}> reminder: part 1, part 2 of project/G1+G2 still tied since T. T6 waits.`]);
+  assert.equal(pings(b, CREW_ROLE).length, 1); // only the card's own alert
 });
 
 test('F-T28-30: one bridge per gate file: a second lock stops with a clear message; a lock of a gone process is replaced; exit frees it', () => {

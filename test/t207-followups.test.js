@@ -17,7 +17,7 @@ const refused = (value, why) => assert.throws(() => parseGate(value), { name: 'T
 const add = (b, task, question) => b.sh('gate', 'add', task, '--question', question, '--options', 'x|y', '--recommend', 'x');
 const card = (b, id = [...b.discord.messages.keys()][0]) => b.discord.latest(id);
 
-/** A batch whose vote a sage-lead ended at minute 5: part 1 is tied A, B; part 2 went to X by votes. */
+/** A batch whose vote the owner ended at minute 5: part 1 is tied A, B; part 2 went to X by votes. */
 function ended() {
   let gate = openGate({ id: 'g2', kind: 'batch', parts: [['A', 'B'], ['X', 'Y', 'Z']], askedBy: ERICK, at: T0 });
   for (const event of [
@@ -25,7 +25,7 @@ function ended() {
     { type: 'press', by: 'sample-jon', option: 'B', part: 0, at: at(2), via: 'discord' },
     { type: 'press', by: 'sample-maya', option: 'X', part: 1, at: at(3), via: 'discord' },
     { type: 'end', by: LEA, at: at(5), via: 'discord' },
-  ]) ({ gate } = step(gate, event, HOLDERS, [LEA]));
+  ]) ({ gate } = step(gate, event, HOLDERS, LEA));
   assert.equal(gate.phase, 'tied');
   return json(gate);
 }
@@ -51,7 +51,7 @@ test('F-T35-1: parseGate refuses one tied option of several; the one option of a
   g.parts[0].tied = ['A'];
   refused(g, 'a part has one tied option of several');
   let solo = openGate({ id: 'g3', kind: 'batch', parts: [['A', 'B'], ['only']], askedBy: ERICK, at: T0 });
-  ({ gate: solo } = step(solo, { type: 'tick', at: at(30) }, HOLDERS, [LEA]));
+  ({ gate: solo } = step(solo, { type: 'tick', at: at(30) }, HOLDERS, LEA));
   assert.deepEqual(parseGate(json(solo)).parts.map((p) => p.tied), [['A', 'B'], ['only']]);
 });
 

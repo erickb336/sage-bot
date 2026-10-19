@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { parseGate } from './vote.js';
+import { PINGED_ROLES } from './crew.js';
 
 const isText = (x) => typeof x === 'string';
 const isTime = (x) => Number.isSafeInteger(x);
@@ -15,15 +16,18 @@ const isFinal = (f, part) => f === undefined || (f && isText(f.by) && isTime(f.a
 
 /** The keys of an object, sorted and joined, to compare its shape with the one the bridge writes. */
 const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().join() : null);
+/** A list of `min` to `max` different Discord ids. */
+const ids = (x, min, max) => Array.isArray(x) && x.length >= min && x.length <= max && new Set(x).size === x.length && x.every((id) => /^\d{17,20}$/.test(id));
 /**
- * A message held for a moved card (T65), exactly as the bridge makes it: a text in Discord's 2,000 characters that pings nobody, or one
- * role (F-T65-3). Discord would ping @everyone for a payload with no allowedMentions. A text with nothing but spaces is not one: Discord
+ * A message held for a moved card (T65), exactly as the bridge makes it: a text in Discord's 2,000 characters that pings nobody, the
+ * crew roles (F-T65-3; since T232 the roles named sage-crew: none when no role has the name, at most PINGED_ROLES, F-T232-1), or the
+ * owner alone (a tie, T232). Discord would ping @everyone for a payload with no allowedMentions. A text with nothing but spaces is not one: Discord
  * refuses it, so it would hold up every message after it (F-T68-1).
  */
 const isHeld = (p) => shape(p) === 'allowedMentions,content' && isText(p.content) && p.content.trim() !== '' && p.content.length <= 2000
   && Array.isArray(p.allowedMentions.parse) && p.allowedMentions.parse.length === 0
-  && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && Array.isArray(p.allowedMentions.roles)
-    && p.allowedMentions.roles.length === 1 && /^\d{17,20}$/.test(p.allowedMentions.roles[0])));
+  && (shape(p.allowedMentions) === 'parse' || (shape(p.allowedMentions) === 'parse,roles' && ids(p.allowedMentions.roles, 0, PINGED_ROLES))
+    || (shape(p.allowedMentions) === 'parse,users' && ids(p.allowedMentions.users, 1, 1)));
 
 /**
  * One entry as the bridge keeps it, checked: a refused entry throws, so the bridge never acts on a gate that it did not make.
@@ -33,11 +37,13 @@ function entryOf(e, path) {
   const ok = e && Array.isArray(e.sage) && e.sage.every((id) => GATE_ID.test(id)) && e.gate?.id === keyOf(projectOfKey(e.gate?.id), e.sage.join('+')) && e.ask && Array.isArray(e.ask.parts) && e.ask.parts.length === e.sage.length
     && e.ask.parts.every((p) => p && isFinal(p.final, p))
     && Array.isArray(e.texts) && e.texts.length === e.sage.length && e.texts.every((t) => Array.isArray(t) && t.every(isText))
+    // F-T145-8: each part's question as the logbook wrote it; absent in an entry saved before it.
+    && (e.questions === undefined || (Array.isArray(e.questions) && e.questions.length === e.sage.length && e.questions.every(isText)))
     && (e.message === null || isText(e.message)) && isTime(e.remindedAt)
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
     // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
-    // T73: a sage-leads-only question (a single Yes or No question for the sage-leads) has `ask.leads: true`.
+    // T73: a crew recommendation (a single Yes or No question for the crew) has `ask.leads: true`.
     && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'))
     // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).
     && (e.oldButtons === undefined || e.oldButtons === true)
@@ -129,7 +135,7 @@ export const projectOfKey = (key) => {
   const name = /^([^/]*)\//.exec(String(key))?.[1];
   return PROJECT_NAME.test(name ?? '') ? name : undefined;
 };
-/** The key of one sage gate, as the team votes file and the sage-leads-only file hold it. */
+/** The key of one sage gate, as the team votes file and the crew recommendations file hold it. */
 const GATE_KEY = /^[a-z0-9][a-z0-9-]{0,31}\/G\d{1,9}$/;
 /** A Claude Code session id: a UUID, in lower case as Claude Code writes it. */
 export const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -145,12 +151,12 @@ export function votesPathOf({ votesPath, statePath }) {
 }
 
 /**
- * The sage-leads-only file (T73): the sage gates that sage marked with `--leads`. Each is a single Yes or No question that only the
- * sage-leads answer, as a recommendation to the owner. It has the format of the team votes file, beside it.
+ * The crew recommendations file (T73): the sage gates that sage marked with `--leads`. Each is a single Yes or No question that the
+ * crew answers, as a recommendation to the owner. It has the format of the team votes file, beside it.
  */
 export const leadsPathOf = (config) => `${votesPathOf(config)}.leads`;
-/** The marks in the sage-leads-only file, checked like the team votes file. */
-export const loadLeads = (path) => loadVotes(path, 'sage-leads-only file');
+/** The marks in the crew recommendations file, checked like the team votes file. */
+export const loadLeads = (path) => loadVotes(path, 'crew recommendations file');
 
 /**
  * The marks, as a Map of gate key → the folder of its project (null: no listed project had the name at the update); an empty Map
@@ -181,7 +187,7 @@ export function migrateMarks(config, own, folders) {
   const path = votesPathOf(config);
   let changed = false;
   withLock(path, () => {
-    for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'sage-leads-only file']]) {
+    for (const [file, what] of [[path, 'team votes file'], [leadsPathOf(config), 'crew recommendations file']]) {
       const text = readOwn(file, what);
       let ids;
       try { ids = JSON.parse(text ?? 'null'); } catch { ids = null; }

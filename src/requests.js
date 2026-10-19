@@ -1,4 +1,4 @@
-// The requests of the sage-leads (T72): a sage-lead asks for a feature, and Erick approves or declines it. An approved request
+// The requests of the crew (T72): a crew member asks for a feature, and Erick approves or declines it. An approved request
 // becomes one sage task through the state tool (`addTask`), never by a write to the logbook. This file has the record and its
 // transitions (pure: no I/O), and the I/O layer on the requests file that the terminal (scripts/requests.mjs) and the bridge (T72
 // PR 3) both call: add, approve, decline, withdraw, the Discord fields, and the reconcile step. Each I/O function takes the config.
@@ -60,13 +60,17 @@ export const RETRY_AFTER = ADD_TASK_MS + 60_000;
 /** Since when a claim runs, and when a person can approve again if its run crashed. */
 export const claimed = (c) => `since ${when(c.at)}. If it crashed, run approve again after ${when(c.at + RETRY_AFTER)}.`;
 
+/** The first and the last millisecond of the years 0 to 9999 (UTC), the times of the file: `when` prints a year of 4 digits (T222). */
+const TIMES = [Date.parse('0000-01-01T00:00:00Z'), Date.parse('9999-12-31T23:59:59.999Z')];
+
 /** Whether a record is one that this module writes: its keys, their types, and the fields that its status sets. */
 function isRequest(r) {
   const text = (x) => typeof x === 'string';
-  const time = (x) => Number.isSafeInteger(x) && Math.abs(x) <= 8.64e15; // the range of a Date
+  const time = (x) => Number.isSafeInteger(x) && x >= TIMES[0] && x <= TIMES[1];
   const opt = (x, ok) => x === null || ok(x);
   const id = (x) => text(x) && SNOWFLAKE.test(x);
   const by = (x) => x === 'owner' || id(x); // Erick, or a Discord id
+  const proc = (p) => Number.isSafeInteger(p?.pid) && text(p.start); // a process: its pid and start time (startOf)
   if (!r || typeof r !== 'object' || Object.keys(r).join() !== KEYS.join()) return false;
   const decided = DECIDED.includes(r.status);
   const c = r.claim;
@@ -74,7 +78,9 @@ function isRequest(r) {
     && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= 100
     && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
     && (r.status === 'approving'
-      ? !!c && Object.keys(c).sort().join() === 'at,by,pid,start,via' && by(c.by) && ['discord', 'terminal'].includes(c.via) && Number.isSafeInteger(c.pid) && text(c.start) && time(c.at)
+      // `tool`, the state tool of step 2, comes once it starts (T210). The time to approve again is a time of the file too (T223).
+      ? !!c && ['at,by,pid,start,via', 'at,by,pid,start,tool,via'].includes(Object.keys(c).sort().join()) && by(c.by) && ['discord', 'terminal'].includes(c.via)
+        && proc(c) && (c.tool === undefined || (Object.keys(c.tool).sort().join() === 'pid,start' && proc(c.tool))) && time(c.at) && time(c.at + RETRY_AFTER)
       : c === null)
     && (decided ? time(r.decidedAt) && by(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
     && (r.status === 'approved' ? text(r.task) && /^T\d{1,9}$/.test(r.task) : r.task === null)
@@ -135,7 +141,7 @@ export function step(r, e) {
     refuse(`${r.id} is not being approved. Nothing changed.`);
   }
   if (from === 'approving' && !sameClaim(r.claim, e.claim)) refuse(`${r.id} is being approved by another run. Nothing changed.`);
-  if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the sage-lead who sent ${r.id} can withdraw it. Nothing changed.`);
+  if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the person who sent ${r.id} can withdraw it. Nothing changed.`);
   if (e.type === 'claim') return checked({ ...r, status: to, claim: { ...e.claim } });
   if (e.type === 'release') return checked({ ...r, status: to, claim: null });
   if (e.type === 'approve') return checked({ ...r, status: to, claim: null, task: e.task, decidedAt: e.at, decidedBy: r.claim.by, via: r.claim.via });
@@ -213,16 +219,33 @@ export function toolOf(config, r) {
 const marker = (id) => `${id}: `;
 /** The id of the task of a request in the logbook: the task whose title is exactly `<id>: <titleForSage>` (F-T72-9), or null. */
 const taskOf = async (tool, r) => (await tool.tasks()).find((t) => t.title === `${marker(r.id)}${r.titleForSage}`)?.id ?? null;
+/**
+ * The warnings for a request with two or more tasks (T210): for each of `requests` with a task or a claim, when two or more tasks of its
+ * project start with "<id>: ". One read of each project's logbook; a logbook that cannot be read gives no warning here.
+ */
+export async function twoTasks(config, requests) {
+  const books = new Map();
+  const lines = [];
+  for (const r of requests.filter((x) => x.task || x.claim)) {
+    const key = `${r.project} ${r.folder}`;
+    if (!books.has(key)) books.set(key, (async () => toolOf(config, r).tasks())().catch(() => []));
+    const ids = (await books.get(key)).filter((t) => t.title.startsWith(marker(r.id))).map((t) => t.id);
+    if (ids.length > 1) lines.push(`sage tasks ${ids.join(', ')} in ${r.project} all start with "${marker(r.id)}", so ${r.id} has ${ids.length} tasks. Keep ${r.task ?? 'one'}, and remove the others in sage.`);
+  }
+  return lines;
+}
 /** The claims whose approve runs in this process now, by `<path> <id> <claim time>` (F-T72-24). */
 const approving = new Set();
 const claimKey = (path, r) => `${path} ${r.id} ${r.claim.at}`;
+/** Whether a process lives: its pid, with its start time (a pid can be reused). */
+const lives = (p) => alive(p.pid) && startOf(p.pid) === p.start;
 /**
  * Whether the approve of a claim still runs: in this process, only while its approve is in `approving` (a long-lived bridge outlives a
- * failed approve); in another, while that process lives, with the start time of the claim (a pid can be reused).
+ * failed approve); in another, while that process lives. Also while the state tool of its step 2 lives: a lone kill of the approver
+ * does not stop it, and it can run past RETRY_AFTER (T210).
  */
-const runs = (path, r) => (r.claim.pid === process.pid && r.claim.start === startOf(process.pid)
-  ? approving.has(claimKey(path, r))
-  : alive(r.claim.pid) && startOf(r.claim.pid) === r.claim.start);
+const runs = (path, r) => (r.claim.pid === process.pid && r.claim.start === startOf(process.pid) ? approving.has(claimKey(path, r)) : lives(r.claim))
+  || (!!r.claim.tool && lives(r.claim.tool));
 
 /**
  * Ends one claim by what the logbook holds: a task of the request means approved with it; none means pending again, but only when
@@ -287,9 +310,14 @@ export async function approve(config, id, { size = 'large', by, via, now = Date.
 /** Steps 2 and 3 of approve, for the claim of step 1 in `r`. */
 async function addAndRecord(path, r, tool, size, now) {
   const { id, claim } = r;
+  // The tool's pid and start time go in the claim under the lock as soon as it starts (T210). When that fails, the claim lives only
+  // while the approver lives, as before.
+  const onStart = (pid) => {
+    try { change(path, id, (x) => (sameClaim(x.claim, claim) ? checked({ ...x, claim: { ...x.claim, tool: { pid, start: startOf(pid) } } }) : x)); } catch { /* see above */ }
+  };
   let task;
   try {
-    task = await tool.addTask({ title: `${marker(id)}${r.titleForSage}`, size });
+    task = await tool.addTask({ title: `${marker(id)}${r.titleForSage}`, size }, { onStart });
   } catch (e) {
     const why = forTerminal(e?.message ?? e);
     let after;
@@ -297,7 +325,7 @@ async function addAndRecord(path, r, tool, size, now) {
       throw new Error(`could not add the task of ${id} (${why}), and could not read the logbook. ${id} stays being approved ${claimed(claim)}`);
     }
     if (after.status === 'approved') return after;
-    throw new Error(`could not add the task of ${id}: ${why}. ${id} still waits. Fix the cause, then run approve again.`);
+    throw new Error(`could not add the task of ${id}: ${why}. ${id} still waits. Fix the cause (run sage status for ${r.project}), then run approve again.`);
   }
   try {
     return update(path, id, { type: 'approve', claim, task, at: now() });
