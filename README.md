@@ -177,7 +177,7 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 | Word | Meaning |
 | --- | --- |
 | **sage** | The Claude Code plugin whose session frames the work and asks the questions. |
-| **The owner** | The person who runs sage at the terminal and this sage-bot, known by Discord user id. The owner's answer is always final, and only the owner breaks ties, ends votes early and stops the link. |
+| **The owner** | The person who runs sage at the terminal and this sage-bot, known by Discord user id. The owner's answer is always final. Only the owner breaks ties, ends votes early and turns the link on again; the crew and the owner can stop it. |
 | **The bridge** | sage-bot's service on the owner's Mac: `scripts/bridge.mjs`. |
 | **The crew** | Every member with the Discord role named `sage-crew`: they read and ask, and answer and vote. |
 | **Registered channel** | A channel where sage-bot works, for one project. Only the owner registers one. |

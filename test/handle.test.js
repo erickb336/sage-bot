@@ -89,12 +89,12 @@ test('end vote now: the owner gets a confirm, confirms, and the vote ends; a cre
   b.now = clock(15, 20);
   await b.press(ERICK, 'press:B9:0:0'); await b.press(JON, 'press:B9:0:0'); await b.press(MAYA, 'press:B9:0:1');
   const maya = await b.press(MAYA, 'end:B9');
-  assert.deepEqual(maya.replies, [{ kind: 'reply', content: "Only Erick can do this. Your votes on the parts count like everyone's.", ...PRIVATE }]);
+  assert.deepEqual(maya.replies, [{ kind: 'reply', content: "Only Erick can do this: ask Erick. Your votes on the parts count like everyone's.", ...PRIVATE }]);
   const cancel = await b.press(ERICK, 'cancel:B9', undefined, true);
   assert.deepEqual(cancel.replies, [{ kind: 'update', content: 'Cancelled. The vote goes on.', ...PRIVATE, components: [] }]);
   assert.equal(cancel.gate.phase, 'voting');
   b.now = clock(15, 28);
-  assert.equal((await b.press(JON, 'end:B9')).reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
+  assert.equal((await b.press(JON, 'end:B9')).reply.content, "Only Erick can do this: ask Erick. Your votes on the parts count like everyone's.");
   const confirm = await b.press(ERICK, 'end:B9');
   assert.equal(confirm.reply.kind, 'reply');
   assert.equal(confirm.reply.content, ['**End B9 now?**', 'Part 1 goes to A: 2 of 3 votes (**Erick**, **Jon**).',
@@ -123,8 +123,8 @@ test('a tie-break: only the owner, only a tied option, only on a tied part; then
   const notTied = await b.press(ERICK, 'tiebreak:B7:0:0');
   assert.deepEqual(notTied.replies, [{ kind: 'reply', content: 'This part is not tied, so there is no tie to break.', ...PRIVATE }]);
   const maya = await b.press(MAYA, 'tiebreak:B7:1:0');
-  assert.equal(maya.reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
-  assert.equal((await b.press(JON, 'tiebreak:B7:1:0')).reply.content, "Only Erick can do this. Your votes on the parts count like everyone's.");
+  assert.equal(maya.reply.content, "Only Erick can do this: ask Erick. Your votes on the parts count like everyone's.");
+  assert.equal((await b.press(JON, 'tiebreak:B7:1:0')).reply.content, "Only Erick can do this: ask Erick. Your votes on the parts count like everyone's.");
   b.now = clock(17, 5);
   const broken = await b.press(ERICK, 'tiebreak:B7:1:0');
   assert.deepEqual(broken.effects, [{ type: 'decided', part: 1, option: 'A', how: 'lead-tiebreak' }, { type: 'closed', outcome: { status: 'decided' } }]);

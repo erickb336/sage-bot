@@ -17,7 +17,7 @@ import { CREW } from '../src/crew.js';
 const VOTE = new URL('../scripts/vote.mjs', import.meta.url).pathname;
 const QUESTION = ['Switch the automatic-merge mode on for this session?', 'Yes|No'];
 /** The note for the owner without the crew role: the owner decides at the terminal, never with a press. */
-const NOTE = { kind: 'reply', content: 'Only a sage-crew member answers or votes here. Your answer at the terminal is final.', flags: 64, allowedMentions: { parse: [] } };
+const NOTE = { kind: 'reply', content: 'Only a sage-crew member answers or votes here. To vote, give yourself the sage-crew role. Your answer at the terminal is final.', flags: 64, allowedMentions: { parse: [] } };
 
 /**
  * The phrases that switch sage's modes, built from their words so that this file never holds one: no text of the bridge may hold any.

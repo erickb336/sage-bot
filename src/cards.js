@@ -363,8 +363,8 @@ const NOTES = {
   'bad-time': () => 'The bridge clock gave a bad time, so nothing changed. Please press again.',
   'out-of-order': () => 'The bridge clock went back, so nothing changed. Please press again.',
   // The owner without the crew role: the crew answers and votes, the owner decides at the terminal or with the owner's buttons.
-  'not-holder': () => `Only a ${HOLDERS} answers or votes here. Your answer at the terminal is final.`,
-  'not-owner': () => `Only ${OWNER} can do this. Your votes on the parts count like everyone's.`,
+  'not-holder': () => `Only a ${HOLDERS} answers or votes here. To vote, give yourself the ${CREW} role. Your answer at the terminal is final.`,
+  'not-owner': () => `Only ${OWNER} can do this: ask ${OWNER}. Your votes on the parts count like everyone's.`,
   'owner-needs-discord': () => 'Ending a vote or breaking a tie works only here in Discord, not at the terminal.',
   'not-asker': (g, names) => `Only ${who(g.askedBy, names)}, who asked ${g.id}, can withdraw it.`,
   'unknown-option': () => 'This option is not on the card. Nothing changed.',

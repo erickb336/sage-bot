@@ -147,14 +147,14 @@ test('C1 on Discord: a crew member\'s tie-break and End vote now change nothing;
   // A new card pings each role named sage-crew, and nobody else.
   assert.deepEqual(pings(), [[`<@&${CREW_ROLE}> <@&${CREW_B}> project T7 has 2 product questions. Vote on each part within 30 minutes.`, { parse: [], roles: [CREW_ROLE, CREW_B] }]]);
   const id = 'project/G1+G2';
-  assert.equal((await b.press(JON, `end:${id}`))[0].content, 'Only Erick can do this. Your votes on the parts count like everyone\'s.');
+  assert.equal((await b.press(JON, `end:${id}`))[0].content, 'Only Erick can do this: ask Erick. Your votes on the parts count like everyone\'s.');
   assert.equal(b.bridge.entry(id).gate.phase, 'voting');
   await b.press(MAYA, `press:${id}:0:0`);
   await b.press(JON, `press:${id}:0:1`);
   b.now += 30 * MINUTE;
   await b.bridge.loop();
   assert.deepEqual(pings().at(-1), [`<@${OWNER}> ${id} is tied after its vote. T7 waits: please break the tie with the buttons on the card.\nPart 1 is tied: A, B. Nobody gave a reason.\nPart 2 is tied: A, B. Nobody gave a reason.`, { parse: [], users: [OWNER] }]);
-  assert.equal((await b.press(JON, `tiebreak:${id}:0:0`))[0].content, 'Only Erick can do this. Your votes on the parts count like everyone\'s.');
+  assert.equal((await b.press(JON, `tiebreak:${id}:0:0`))[0].content, 'Only Erick can do this: ask Erick. Your votes on the parts count like everyone\'s.');
   assert.equal(b.bridge.entry(id).gate.parts[0].outcome.status, 'open');
   await b.press(OWNER, `tiebreak:${id}:0:1`); // the owner holds no crew role, and the press counts
   assert.deepEqual(b.bridge.entry(id).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'lead-tiebreak', by: OWNER, at: b.now });
@@ -162,7 +162,7 @@ test('C1 on Discord: a crew member\'s tie-break and End vote now change nothing;
   // The owner's press on an option, with no crew role, is no vote.
   b.sh('gate', 'add', 'T8', '--question', 'Ship it?', '--options', 'Yes|No', '--recommend', 'Yes');
   await b.post();
-  assert.equal((await b.press(OWNER, 'press:project/G3:0:0'))[0].content, 'Only a sage-crew member answers or votes here. Your answer at the terminal is final.');
+  assert.equal((await b.press(OWNER, 'press:project/G3:0:0'))[0].content, 'Only a sage-crew member answers or votes here. To vote, give yourself the sage-crew role. Your answer at the terminal is final.');
   assert.equal(b.bridge.entry('project/G3').gate.phase, 'open');
   // Sam has no crew role and is not the owner: no reply, and nothing changes.
   assert.deepEqual(await b.press(SAM, 'press:project/G3:0:0'), []);
@@ -179,9 +179,9 @@ test('the role keys of before T232: the bridge starts and ignores them, and laun
   const config = { channelId: CHANNEL, ownerId: OWNER, apprenticeRole: 'not an id', leadRole: '300000000000000002' };
   assert.doesNotThrow(() => createBridge({ sages: new Map([['project', {}]]), own: 'project', discord: fakeDiscord([]), config, statePath: join(dir, 'gates.json'), log: () => {} }));
   assert.deepEqual([...peopleOf([{ id: MAYA, name: 'Maya', roles: ['sage-apprentice'] }, { id: JON, name: 'Jon', roles: [CREW] }], config).holders], [JON]);
-  // launchd.mjs: the example config with the old keys added, and with no ownerId.
-  const { ownerId, ...example } = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
-  assert.equal(ownerId, OWNER);
+  // launchd.mjs: the example config with the old keys added. It has no ownerId: the app's owner is the owner (F-T232-9).
+  const example = JSON.parse(readFileSync(join(ROOT, 'examples/config.example.json'), 'utf8'));
+  assert.equal(Object.hasOwn(example, 'ownerId'), false);
   const path = join(dir, 'config.json');
   // The project as the disk spells it: the temp folder may be a link (/var on macOS), and the projects check refuses a link.
   writeFileSync(path, JSON.stringify({ ...example, ...old, project: realpathSync.native(dir), projects: undefined }));
