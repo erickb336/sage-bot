@@ -38,11 +38,13 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
 }
 
 /**
- * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, setLocked, members, roles }`
+ * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, unarchive, setLocked, members, roles }`
  * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
  * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
  * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
- * locked thread is refused, and so is an edit of a message in another place. `deleteThread` and `deleteMessage` do what a member's delete
+ * locked thread is refused, and so is an edit of a message in another place. `archive` does what Discord does to a quiet thread: an edit
+ * there is refused with code 50083 until `unarchive` (refused for a locked thread), and a post opens the thread again. A post with
+ * `enforceNonce` and a `nonce` that this place already took gives back that message's id and posts nothing, as Discord does for a few minutes. `deleteThread` and `deleteMessage` do what a member's delete
  * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
  * message with code 10008 (Unknown Message). With `{ keepOnLine: true }`, `deleteThread` does what Discord can do: the message keeps
  * the deleted thread, so a new thread from it is refused with code 160004, and a fetch of the thread with code 10003. `members` is the list that `members()` gives, as
@@ -62,8 +64,11 @@ export function fakeDiscord(members, roles = []) {
     if (deleted.has(target)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
   };
   let next = 900000000000000000n;
-  const archived = (target) => {
-    if (threads.get(target)?.locked) throw Object.assign(new Error('Thread is locked'), { code: 50083, status: 400 });
+  const nonces = new Map(); // `<place> <nonce>` → the id of the message that took it
+  const archived = (target, { edit = false } = {}) => {
+    const t = threads.get(target);
+    if (t?.locked || (edit && t?.archived)) throw Object.assign(new Error(t.locked ? 'Thread is locked' : 'Thread is archived'), { code: 50083, status: 400 });
+    if (t) t.archived = false; // a post opens a quiet thread again
   };
   return {
     members: () => members,
@@ -82,10 +87,14 @@ export function fakeDiscord(members, roles = []) {
       deleted.add(id);
     },
     deleteMessage: (id) => { messages.delete(id); where.delete(id); },
+    archive: (id) => { threads.get(id).archived = true; },
     async post(target, payload) {
       gone(target);
       archived(target);
+      const once = payload.enforceNonce && payload.nonce !== undefined ? `${target} ${payload.nonce}` : null;
+      if (nonces.has(once)) return nonces.get(once);
       const id = String(next++);
+      if (once) nonces.set(once, id);
       messages.set(id, [structuredClone(payload)]);
       posts.push(structuredClone(payload));
       where.set(id, target);
@@ -94,7 +103,7 @@ export function fakeDiscord(members, roles = []) {
     async edit(target, id, payload) {
       gone(target);
       if (where.get(id) !== target) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
-      archived(target);
+      archived(target, { edit: true });
       messages.get(id).push(structuredClone(payload));
     },
     async startThread(from, name) {
@@ -108,6 +117,11 @@ export function fakeDiscord(members, roles = []) {
       const found = [...threads].find(([, t]) => t.from === from);
       if (!found) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
       return found[0];
+    },
+    async unarchive(id) {
+      if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
+      if (threads.get(id).locked) throw Object.assign(new Error('Thread is locked'), { code: 50083, status: 400 });
+      threads.get(id).archived = false;
     },
     async setLocked(id, locked) {
       if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });

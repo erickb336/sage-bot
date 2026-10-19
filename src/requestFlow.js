@@ -31,7 +31,7 @@ const plain = ({ flags, ...payload }) => ({ components: [], embeds: [], ...paylo
 /**
  * The request side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it) and statePath; `channels` is the registry;
  * `projects` are the bridge's (loadProjects). `discord` is the port `{ post(target, payload) → id, edit(target, id, payload),
- * startThread(channel, lineId, name) → id, threadFrom(channel, lineId) → id }` (src/discord.js, or src/fake-discord.js for the tests).
+ * startThread(channel, lineId, name) → id, threadFrom(channel, lineId) → id, unarchive(thread) }` (src/discord.js, or src/fake-discord.js for the tests).
  * `tool(r)` gives the state tool of a request (default: its project's, src/requests.js toolOf); the tests give one with a scratch HOME.
  * `newKey` makes the key of a draft: a random one by default, so a key is hard to guess; the demo gives fixed ones.
  */
@@ -54,48 +54,70 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
 
   // ---- Drawing: the line, the thread and the card of one request, as the file says. One draw at a time, so the loop and a press
   // never post two lines or two cards for one request. ----
+  // A failed draw is logged here once (a refusal of Discord in `call`), and the loop draws it again at its next turn.
   let chain = Promise.resolve();
   const draw = (id) => {
-    const run = chain.then(() => drawNow(id));
+    const run = chain.then(() => drawNow(id)).catch((e) => {
+      if (!logged.has(e)) sayOnce(`${id} is not on Discord as the requests file says yet; the loop tries again: ${e?.message ?? e}`);
+      throw e;
+    });
     chain = run.catch(() => {});
     return run;
   };
+  const logged = new WeakSet(); // the errors that `call` logged
   /** A call to Discord; an error is logged once with its code (never the token: apiError) and thrown, unless `done` takes its code. */
   async function call(what, fn, done = () => false) {
     try { return await fn(); } catch (e) {
       sayOnce(`Discord refused ${what}: ${apiError(e)}`);
       if (done(e?.code)) return null;
+      if (Object(e) === e) logged.add(e);
       throw e;
     }
   }
+  /**
+   * Each post once, also when the file or Discord fails right after it (F-T228-6, F-T228-4). A post whose id the file has not taken yet
+   * stays in `unsaved`, so the next draw only writes it again; and Discord gives back the message of a nonce that it took in the last few
+   * minutes, so a post whose reply was lost, or that a restart cut off from its write, is not posted again.
+   */
+  const unsaved = new Map(); // `<id>:<what>` → the id that Discord gave; only in memory
+  async function once(key, post, write) {
+    if (!unsaved.has(key)) unsaved.set(key, await post(key));
+    const r = write(unsaved.get(key));
+    unsaved.delete(key);
+    return r;
+  }
+  const send = (what, target, payload, nonce, done) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), done);
+  /** An edit. Discord refuses an edit in a thread that it archived after a quiet week (50083, F-T228-8): the thread opens again first. */
+  const edit = (what, target, message, payload) => call(`the edit of ${what}`, () => discord.edit(target, message, payload).catch(async (e) => {
+    if (e?.code !== 50083) throw e;
+    try { await discord.unarchive(target); } catch { throw e; } // a locked thread stays as it is
+    return discord.edit(target, message, payload);
+  }), (c) => NO_EDIT.has(c));
   async function drawNow(id) {
     let r = find(load(), id);
     if (!r.channel) return r;
     const off = linkOff(killPath);
-    if (!r.line) {
-      const line = await call(`the line of ${id}`, () => discord.post(r.channel, requestLine(r, { linkOff: off })));
-      r = setDiscord(config, id, { line });
-    }
+    if (!r.line) r = await once(`${id}:line`, (n) => send(`the line of ${id}`, r.channel, requestLine(r, { linkOff: off }), n), (line) => setDiscord(config, id, { line }));
     if (!r.thread) {
-      const name = requestThreadName(r);
       // Code 160004: the line has its thread already, but the reply that named it was lost.
-      const thread = await call(`the thread of ${id}`, () => discord.startThread(r.channel, r.line, name).catch((e) => {
+      r = await once(`${id}:thread`, () => call(`the thread of ${id}`, () => discord.startThread(r.channel, r.line, requestThreadName(r)).catch((e) => {
         if (e?.code === 160004) return discord.threadFrom(r.channel, r.line);
         throw e;
-      }));
-      r = setDiscord(config, id, { thread });
+      })), (thread) => setDiscord(config, id, { thread }));
     }
     if (!r.card) {
       // The first post of the card pings the owner once (only while it waits and the link is on: requestCard).
-      const card = await call(`the card of ${id}`, () => discord.post(r.thread, requestCard(r, { ownerId: config.ownerId, linkOff: off, ping: true })));
-      r = setDiscord(config, id, { card, ...(OPEN.includes(r.status) && { shown: r.status }) });
+      r = await once(`${id}:card`, (n) => send(`the card of ${id}`, r.thread, requestCard(r, { ownerId: config.ownerId, linkOff: off, ping: true }), n),
+        (card) => setDiscord(config, id, { card, ...(OPEN.includes(r.status) && { shown: r.status }) }));
       drawn.set(id, view(r, off));
     }
     if (drawn.get(id) === view(r, off) && r.shown === r.status) return r;
-    await call(`the edit of the line of ${id}`, () => discord.edit(r.channel, r.line, requestLine(r, { linkOff: off })), (c) => NO_EDIT.has(c));
-    await call(`the edit of the card of ${id}`, () => discord.edit(r.thread, r.card, requestCard(r, { ownerId: config.ownerId, linkOff: off })), (c) => NO_EDIT.has(c));
-    if (!OPEN.includes(r.status) && r.shown !== r.status) await call(`the post after the decision of ${id}`, () => discord.post(r.thread, decidedPost(r)), (c) => NO_EDIT.has(c));
-    if (r.shown !== r.status) r = setDiscord(config, id, { shown: r.status });
+    await edit(`the line of ${id}`, r.channel, r.line, requestLine(r, { linkOff: off }));
+    await edit(`the card of ${id}`, r.thread, r.card, requestCard(r, { ownerId: config.ownerId, linkOff: off }));
+    const shown = () => setDiscord(config, id, { shown: r.status });
+    if (!OPEN.includes(r.status) && r.shown !== r.status) {
+      r = await once(`${id}:${r.status}`, (n) => send(`the post after the decision of ${id}`, r.thread, decidedPost(r), n, (c) => NO_EDIT.has(c)), shown);
+    } else if (r.shown !== r.status) r = shown();
     drawn.set(id, view(r, off));
     return r;
   }
@@ -103,10 +125,11 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
   // ---- The presses ----
   /** Answers a press with a private note; a refusal of Discord is logged. */
   const answer = (i, payload, how = 'reply') => i[how](payload).catch((e) => say(`Discord refused a request reply: ${apiError(e)}`));
-  /** The note for a Refused of src/requests.js, or for any other error (logged), as a private message. */
+  /** The note for a Refused of src/requests.js; any other error is logged and gets a fixed line, so no path reaches Discord (F-T228-5). */
   const failed = (e, id) => {
-    if (!(e instanceof Refused)) say(`${id}: ${e?.message}`);
-    return ephemeral(cut(forTerminal(e?.message ?? e), LIMIT.content));
+    if (e instanceof Refused) return ephemeral(cut(forTerminal(e.message), LIMIT.content));
+    say(`${id}: ${e?.message ?? e}`);
+    return requestNote('broken');
   };
 
   async function draftPress(i, { action, id: key }) {
@@ -229,7 +252,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const off = linkOff(killPath);
       for (const r of load().requests) {
         const due = r.channel && (!r.card || r.shown !== r.status || (OPEN.includes(r.status) && drawn.get(r.id) !== view(r, off)));
-        if (due) await draw(r.id).catch(() => {}); // logged in `call`; tried again at the next turn
+        if (due) await draw(r.id).catch(() => {}); // logged in `draw`; tried again at the next turn
       }
     },
     /** The open requests of a project (its name and folder), oldest first, for /sage board. */

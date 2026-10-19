@@ -235,6 +235,7 @@ export async function start(file) {
       edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
       startThread: async (at, lineId, name) => (await (await (await place(at)).messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
       threadFrom: async (at, lineId) => (await place(lineId)).id, // the thread that a message started has the message's id
+      unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
     } });
     const ask = createAsk({ config, channels, projects, log, audit, files, requests });
     const guild = await enter(client, { config, channels, ask, log });

@@ -109,7 +109,7 @@ test('the request card in every state: the status, the buttons, the colour, and 
     { name: 'Requested by', value: `Jon (sage-crew) at ${t(T0)} · project reports-app` },
     { name: 'Design questions', value: 'When sage designs it, the crew votes on them (Erick breaks ties).' },
     { name: 'Status', value: 'Waiting for Erick' }]);
-  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. Erick approves or declines, here or at the terminal · the sage-crew member who sent it can withdraw it until then · Talk here goes to nobody but the people in this thread: sage does not read it.');
+  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. Erick approves or declines, here or at the terminal · the sage-crew member who sent it can withdraw it until then · Anyone in this channel can read this thread; sage does not read it.');
   const buttons = (c) => c.components.flatMap((r) => r.components.map((b) => `${b.label}${b.disabled ? ' (off)' : ''} ${b.custom_id}`));
   assert.deepEqual(buttons(first), ['Approve rq1:approve:RQ3', 'Decline rq1:decline:RQ3', 'Withdraw rq1:withdraw:RQ3']);
   // An edit pings nobody.
@@ -139,7 +139,8 @@ test('the request card in every state: the status, the buttons, the colour, and 
 test('the decline form, the withdraw confirm, the posts after a decision and the private notes', () => {
   const d = declineModal(R.pending);
   assert.deepEqual([d.custom_id, d.title], ['rq1:decline!:RQ3', 'Decline RQ3']);
-  assert.deepEqual(d.components.map(({ components: [i] }) => [i.custom_id, i.label, i.max_length, i.required]), [['reason', 'Reason (optional)', 300, false]]);
+  assert.deepEqual(d.components.map(({ components: [i] }) => [i.custom_id, i.label, i.max_length, i.required, i.placeholder]),
+    [['reason', 'Reason (optional)', 300, false, 'Everyone who can see this channel sees it in the thread. sage does not read it.']]); // the thread is public (F-T228-1)
   const w = withdrawConfirm(R.pending);
   assert.equal(w.content, 'Withdraw RQ3? Erick then cannot approve it, and nothing goes to sage. You can send a new request at once.');
   assert.deepEqual(w.components[0].components.map((b) => [b.custom_id, b.label, b.style]), [['rq1:withdraw!:RQ3', 'Withdraw RQ3', 4], ['rq1:keep:RQ3', 'Keep it', 2]]);

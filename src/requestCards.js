@@ -130,7 +130,7 @@ export function requestCard(r, { ownerId, linkOff = false, ping = false }) {
       ...(off ? [{ name: 'The link from Discord to sage is off', value: `Approve waits until ${OWNER} turns the link on again at the terminal. ${OWNER} can still decline, and the ${CREW} member who sent it can still withdraw.` }] : []),
     ],
     ...(open && { footer: { text: `${SAGE_GETS} ${OWNER} approves or declines, here or at the terminal · the ${CREW} member who sent it can withdraw it until then · `
-      + 'Talk here goes to nobody but the people in this thread: sage does not read it.' } }),
+      + 'Anyone in this channel can read this thread; sage does not read it.' } }),
     color: open ? COLOR.open : COLOR[r.status],
   };
   const busy = r.status === 'approving';
@@ -146,10 +146,10 @@ export function requestCard(r, { ownerId, linkOff = false, ping = false }) {
   };
 }
 
-/** The decline form: one optional reason of at most 300 characters, for people only. */
+/** The decline form: one optional reason of at most 300 characters, for people only. The thread is public to the channel (F-T228-1). */
 export function declineModal(r) {
   const input = new TextInputBuilder().setCustomId('reason').setLabel('Reason (optional)').setStyle(TextInputStyle.Paragraph)
-    .setMaxLength(LIMITS.reason[1]).setRequired(false).setPlaceholder(`The ${CREW} member and the crew see it in the thread. sage does not read it.`);
+    .setMaxLength(LIMITS.reason[1]).setRequired(false).setPlaceholder('Everyone who can see this channel sees it in the thread. sage does not read it.');
   return new ModalBuilder().setCustomId(requestId('decline!', r.id)).setTitle(`Decline ${r.id}`)
     .addComponents(new ActionRowBuilder().addComponents(input)).toJSON();
 }
@@ -184,7 +184,8 @@ export const REQUEST_NOTES = {
     + 'Change your server nickname, then try again. Nothing was sent.',
   cancelled: () => 'Cancelled. Nothing was sent.',
   gone: () => 'This request form is gone: it expired, or sage-bot restarted. Nothing was sent. Type /sage request again.',
-  sent: (r) => `Sent to ${OWNER} as ${r.id}.${r.thread ? ` Its thread is <#${r.thread}>.` : ''} You can withdraw it there until ${OWNER} decides.`,
+  sent: (r) => `Sent to ${OWNER} as ${r.id}. ${r.thread ? `Its thread is <#${r.thread}>.` : `Its thread opens soon from its line in <#${r.channel}>.`} `
+    + `You can withdraw it there until ${OWNER} decides.`,
   notOwner: () => `Only ${OWNER} approves or declines a request. Nothing changed.`,
   notRequester: (r) => `Only ${nameOf(r)}, who sent ${r.id}, can withdraw it. Nothing changed.`,
   notCard: (r) => `This button is not on the card of ${r.id}. Nothing changed.`,
@@ -195,6 +196,7 @@ export const REQUEST_NOTES = {
   declined: (r) => `You declined ${r.id}. Its thread says so. Nothing goes to sage.`,
   withdrawn: (r) => `You withdrew ${r.id}. Nothing goes to sage. You can send a new request at once.`,
   kept: (r) => `${r.id} stays as it is. Nothing changed.`,
+  broken: () => `Something went wrong on the bridge, so I could not do this. ${OWNER} sees the details at the terminal.`,
 };
 /** A private note of REQUEST_NOTES, with no ping. */
 export const requestNote = (why, r) => ephemeral(REQUEST_NOTES[why](r));

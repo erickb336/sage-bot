@@ -5,7 +5,7 @@
 // made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { restoreLink, setLinkOff } from '../src/audit.js';
 import { createAsk } from '../src/ask.js';
 import { openChannels } from '../src/channels.js';
@@ -36,7 +36,10 @@ function world(tt) {
   const projects = loadProjects(config);
   const channels = openChannels(config, projects);
   const fake = fakeDiscord([]);
-  const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line) };
+  // `b.onPost` and `b.onThread` run after Discord made the message or the thread, before its id comes back: a test fails a reply there.
+  const port = { post: async (at, payload) => { const id = await fake.post(at, payload); await b.onPost?.(payload); return id; }, edit: fake.edit,
+    startThread: async (at, line, name) => { const id = await fake.startThread(line, name); await b.onThread?.(); return id; },
+    threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
   b.tool = sageTool({ sagePath: SAGE, project: b.project, env: b.env });
   b.make = () => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.tool });
   b.flow = b.make();
@@ -288,7 +291,9 @@ test('a restart settles a dead claim: waits 2 minutes, then waits again with its
   let reads = 0; // the first read (before the claim) works; the read after the failed add does not
   b.tool = { tasks: async () => { if (reads++) throw new Error('sample: no logbook'); return good.tasks(); }, addTask: async () => { throw new Error('sample: refused'); } };
   const failed = await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r('RQ1').card });
-  assert.match(failed[1].content, /^could not add the task of RQ1 \(sample: refused\), and could not read the logbook\. RQ1 stays being approved since /);
+  // Not a refusal: a fixed line on Discord, and the details in the terminal log (F-T228-5).
+  assert.equal(failed[1].content, 'Something went wrong on the bridge, so I could not do this. Erick sees the details at the terminal.');
+  assert.match(b.lines.at(-1), /^RQ1: could not add the task of RQ1 \(sample: refused\), and could not read the logbook\. RQ1 stays being approved since /);
   assert.equal(b.r('RQ1').status, 'approving');
   b.tool = good;
   await b.flow.loop();
@@ -381,4 +386,98 @@ test('the late note never shows 1 Jan 1970: a request being approved names the t
   release();
   await running;
   for (const r of b.file().requests) assert.notEqual(r.decidedAt, 0);
+});
+
+/** Holds the requests file's lock as a live process that is not the bridge does (the test runner), until `free`. */
+const hold = (b) => { writeFileSync(`${b.path}.lock`, String(process.ppid)); return () => rmSync(`${b.path}.lock`); };
+const pings = (b) => b.fake.posts.filter((p) => p.content === `<@${OWNER}> a new request waits for you.`).length;
+
+test('F-T228-6: a post that the requests file does not take is not posted again; the error is logged once; after the cause clears: 1 line, 1 thread, 1 card, 1 ping, 1 post after the decision', async (tt) => {
+  for (const what of ['line', 'card', 'decided']) {
+    const b = world(tt);
+    let free;
+    const is = { line: (p) => p.content?.startsWith('**Jon'), card: (p) => p.embeds, decided: (p) => p.content?.startsWith('**Approved.**') }[what];
+    b.onPost = (p) => { if (is(p) && !free) free = hold(b); };
+    await b.request(JON);
+    if (what === 'decided') await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+    await b.flow.loop();
+    await b.flow.loop();
+    assert.ok(free, what);
+    assert.equal(b.fake.posts.filter(is).length, 1, `${what}: posted once while the file takes no write`);
+    assert.equal(b.lines.filter((l) => l.includes(`holds ${b.path}.lock`)).length, 1, what); // logged, once
+    free();
+    await b.flow.loop();
+    await b.flow.loop();
+    const r = b.r();
+    assert.deepEqual(b.fake.in(ASK), [r.line], what);
+    assert.deepEqual([...b.fake.threads.keys()], [r.thread], what);
+    assert.equal(b.fake.in(r.thread)[0], r.card, what);
+    assert.equal(b.fake.in(r.thread).length, what === 'decided' ? 2 : 1, what);
+    assert.equal(pings(b), 1, what);
+    assert.equal(r.shown, what === 'decided' ? 'approved' : 'pending', what);
+  }
+});
+
+test('F-T228-4: a card post whose reply Discord lost is not posted again: the next loop gets the same card by its nonce, and the owner gets 1 ping', async (tt) => {
+  const b = world(tt);
+  let lost = false;
+  b.onPost = (p) => { if (p.embeds && !lost) { lost = true; throw Object.assign(new Error('sample: the reply was lost'), { code: 'ECONNRESET' }); } };
+  await b.request(JON);
+  assert.equal(b.r().card, null);
+  await b.flow.loop();
+  const r = b.r();
+  assert.deepEqual(b.fake.in(r.thread), [r.card]);
+  assert.equal(pings(b), 1);
+});
+
+test('F-T228-7: a thread whose reply Discord lost is found again (code 160004): 1 thread, and the card is in it', async (tt) => {
+  const b = world(tt);
+  let lost = false;
+  b.onThread = () => { if (!lost) { lost = true; throw Object.assign(new Error('sample: the reply was lost'), { code: 'ECONNRESET' }); } };
+  await b.request(JON);
+  assert.deepEqual([b.r().line !== null, b.r().thread], [true, null]);
+  await b.flow.loop();
+  const r = b.r();
+  assert.deepEqual([...b.fake.threads.keys()], [r.thread]);
+  assert.deepEqual(b.fake.in(r.thread), [r.card]);
+  assert.equal(pings(b), 1);
+});
+
+test('F-T228-8: a decision and the kill switch show on the card of a thread that Discord archived: the bridge opens the thread again first', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  await b.request(MAYA, { title: 'Add PDF export' });
+  b.fake.archive(b.r('RQ1').thread);
+  b.fake.archive(b.r('RQ2').thread);
+  setLinkOff(b.killPath, MAYA, b.now);
+  await b.flow.loop();
+  assert.ok(b.card('RQ2').embeds[0].fields.some((f) => f.name === 'The link from Discord to sage is off'));
+  restoreLink(b.killPath);
+  await b.flow.loop();
+  b.fake.archive(b.r('RQ1').thread);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.card().components, []);
+  assert.equal(b.fake.in(b.r().thread).length, 2); // the card and the post after the decision
+  assert.equal(b.fake.threads.get(b.r().thread).archived, false);
+});
+
+test('F-T228-5: a press during a file error gets a fixed line, with no path; the terminal log has the details', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const card = b.r().card;
+  chmodSync(b.path, 0o644); // a requests file that is not the 0600 file sage-bot wrote
+  const replies = await b.press(JON, 'rq1:withdraw:RQ1', { message: card });
+  assert.deepEqual(replies.map((x) => [x.kind, x.flags, x.content]),
+    [['reply', PRIVATE, 'Something went wrong on the bridge, so I could not do this. Erick sees the details at the terminal.']]);
+  assert.ok(b.lines.some((l) => l.startsWith('RQ1: ') && l.includes(b.path)));
+});
+
+test('F-T228-3: when Discord refuses the line at Send, the "Sent" note names the channel where its thread opens', async (tt) => {
+  const b = world(tt);
+  let refused = false;
+  b.onPost = () => { if (!refused) { refused = true; throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); } };
+  const sent = await b.press(JON, `rq1:send-team:${(await b.draft(JON)).key}`);
+  assert.equal(sent[1].content, `Sent to Erick as RQ1. Its thread opens soon from its line in <#${ASK}>. You can withdraw it there until Erick decides.`);
 });
