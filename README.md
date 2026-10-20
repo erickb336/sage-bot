@@ -1,191 +1,175 @@
-<a href="docs/assets/hero-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-  <img alt="sage-bot bridges Discord and Claude Code running sage: a crew member requests a feature, sage designs, the crew votes, sage builds and shows the results on request." src="docs/assets/hero-light.svg" width="100%">
-</picture>
-</a>
+# sage-bot
 
-**sage-bot lets a small team build software together from a Discord server.** It is a bridge between Discord and a Claude Code session that runs [sage](https://github.com/erickb336/sage). The graphic shows the goal. A crew member requests a new feature in a thread. sage designs it and posts its design questions back as cards. The crew asks and votes, and the owner breaks ties. sage builds, with reviews and tests, and shows its progress and results on request: the board, screenshots and the link to the pull request. The owner merges. Nobody on the team needs a terminal.
+**sage-bot is a Discord bot that lets a small team steer one person's [sage](https://github.com/erickb336/sage) session in Claude Code, with that person's approval for every action.**
+A team of 2 to 5 people requests features, votes on design questions and sends instructions from Discord. Nobody on the team needs a terminal, and no instruction from Discord reaches sage until the owner approves it.
 
-**Today:** design questions as vote cards, team votes, the owner's tie-break or early end, read asks (the board, a task, the open questions and the shared files) and the kill switch work. A request from Discord does not reach a live Claude Code session yet: no Discord text reaches sage as an instruction. Bridge sessions add steps 1, 2 and 6 of the graphic; they wait on T159.
+[![check](https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg)](https://github.com/erickb336/sage-bot/actions/workflows/check.yml) · [MIT licence](LICENSE) · **Contents:** [Quick start](#quick-start) · [Usage](#usage) · [How it works](#how-it-works) · [Set up a live trial](#set-up-a-live-trial) · [FAQ](#faq)
+
+```mermaid
+flowchart TD
+  A["Crew member: @sage-bot in a thread,<br>or 'Send to sage' on a message"] --> B["sage-bot adds the earlier messages<br>of the thread as context"]
+  B --> C["Approval card in the thread,<br>with the exact text as payload.txt"]
+  C -->|"Owner: Approve"| D["Outbox: approved, waits"]
+  C -->|"Owner: Decline, or sender: Withdraw"| X["Ends. sage gets nothing."]
+  D -.->|"Not built: T159"| E["Delivered to the owner's live sage session"]
+  E -.->|"Not built: T160"| F["sage's replies in the thread"]
+```
+
+*A message from Discord to sage. The solid steps work today. The dotted steps are not built: they wait for work in sage (T159, T160). The owner's own message skips the card and is approved at once.*
+
+> **Status: built and tested on a fake Discord. The live trial has not run yet.** Requests, task threads, team votes, lookups, the outbox, the catch-up and the emergency stop run in the tests and in the demo. An approved message waits in the outbox: delivery into a live sage session (T159) and replies in the thread (T160) are not built.
 
 Ids such as T159 are sage task ids in this project's logbook. A G-id, such as G42, is a gate: a question that sage parks for the owner. The [reference](docs/reference.md) gives the gates and findings behind each rule.
 
-<p align="center">
-  <a href="https://github.com/erickb336/sage-bot/actions/workflows/check.yml"><img alt="check" src="https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg"></a>
-</p>
-
-**Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) · [Who is who](#who-is-who) · [What to say](#what-to-say) · [Safety](#safety) · [Set up a live trial](#set-up-a-live-trial) · [Concepts](#concepts) · [FAQ](#faq) · [Under the hood](#under-the-hood) · [Credits](#credits)
-
-> **Status: built and tested on a fake Discord; the live trial has not run yet.** Read asks, team votes, the audit log and the kill switch run in the tests and in the demo. Bridge sessions (the owner, or the crew with the owner's approval, instructs sage and starts build sessions) are not built: they wait on T159.
-
 ## Quick start
 
-You need Node 24 or later and the [sage](https://github.com/erickb336/sage) plugin in Claude Code. You do not need a Discord account, an app or a token for the demo.
+You need Node 24 or later. The demo needs no Discord account, app or token.
 
 **1. Get the code:**
 
 <!-- check: skip, the test runs in a copy of this folder -->
 ```sh
 git clone https://github.com/erickb336/sage-bot.git
+```
+
+**2. Go into its folder.** Run the next commands there.
+
+<!-- check: skip, the test runs in this folder already -->
+```sh
 cd sage-bot
 ```
 
-**2. Install** (in the sage-bot folder):
+**3. Install:**
 
 <!-- check: run -->
 ```sh
 npm ci
 ```
 
-**3. Play the demo:**
+**4. Play the demo:**
 
 <!-- check: run, prints "Page: " -->
 ```sh
 npm run demo
 ```
 
-The demo plays one sage session from start to end, with sample people and a scripted clock, on a fake Discord. It uses the real sage state tool, the real hook and the real bridge. It prints each step and the path of one HTML page.
+The demo plays one sage session from start to end on a fake Discord, with sample people and a scripted clock. It uses the real sage state tool, the real hook and the real bridge. It prints each step, then `Page:` and the path of one HTML page.
 
-**4. Open the page.** Open the path that the demo prints after `Page:`. The page shows the session's thread, each card at its final state, the private notes that each person sees, and the answers that sage got. The [reference](docs/reference.md#the-demo) gives the demo's options.
-
-<a href="docs/assets/tip-mention-light.svg">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tip-mention-dark.svg">
-  <img alt="The toad sage's tip: mention @sage-bot in a registered channel. Each mention opens its own thread. Mention it again there to go on." src="docs/assets/tip-mention-light.svg" width="100%">
-</picture>
-</a>
+**5. Open the page** at that path. It shows the thread, each card at its final state, the private notes that each person sees, and the answers that sage got. The [reference](docs/reference.md#the-demo) gives the demo's options.
 
 To connect a real Discord server, follow [Set up a live trial](#set-up-a-live-trial).
 
-## How it works
+## Usage
 
-sage-bot is one small service, the bridge, on the owner's Mac. The graphic at the top shows the loop that it is for. Today it does three jobs:
+Each answer is public and pings nobody. Leave out `project` to use the project of the channel. The examples use sample ids.
 
-1. **It answers read asks.** A member mentions @sage-bot, or types `/sage`. The bridge checks that the member is in the crew (or is the owner) and the hourly limit, reads sage's logbook, and answers. Code writes the answer, with no AI.
-2. **It runs team votes.** sage marks a product question for the team. The bridge posts it as a card with a button for each option. When the question is decided, the bridge gives sage only the chosen option. A question of a task that came from an approved request goes to that request's thread, the task thread, as a vote of 10 minutes (see below).
-3. **It keeps the messages to sage.** A crew member mentions @sage-bot (or uses "Send to sage" on any message) with an instruction, such as "implement what we discussed above". The bridge takes the earlier messages of the thread as context, and posts an approval card with the exact payload. The owner approves or declines each one; the owner's own message is approved at once. An approved message waits until bridge sessions (T159) give it to sage.
+**As a crew member, in Discord:**
 
-The bridge only reads the logbook, and it changes it only through the sage state tool. The owner's answer at the terminal is always final.
-
-### A mention opens a thread
-
-- Each mention in a registered channel opens a public thread, named from the request. The answer goes into the thread.
-- A mention inside that thread continues it. sage-bot cannot read a message that does not mention it.
-- A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel.
-- The threads survive a restart of the bridge.
-
-### A request thread becomes the task thread
-
-- After the owner approves a request, its thread becomes the thread of the new sage task.
-- When sage marks a design question of that task as a team vote, it appears there as a card. Every sage-crew member votes, within 10 minutes.
-- A design question that sage does not mark as a team vote stays with the owner at the terminal.
-- At 10 minutes the votes decide. A tie waits for the owner, and only the owner breaks it or ends the vote early.
-- Other questions stay in the home channel, with 30 minutes, as before.
-
-## Who is who
-
-Each person runs their own sage-bot, with their own Discord app and their own Mac. Two kinds of people use it:
-
-- **The owner** is the person who runs this sage-bot. sage-bot knows the owner by Discord user id: `ownerId` in the config, else the owner of the Discord app. A role never makes anyone the owner.
-- **The crew** is every member with the role named exactly `sage-crew`. Every sage-bot in a server shares that one role.
-
-| | The crew | The owner |
+| You want to | Do this | What you see |
 | --- | --- | --- |
-| Read the board, a task, the open questions and the shared files | Yes | Yes |
-| Answer a single question, and vote on a batch | Yes | Only with the sage-crew role; the owner's answer at the terminal is final |
-| Break a tie, or end a vote early | No | Yes |
-| Recommend on the autopilot question (the owner decides) | Yes | Only with the sage-crew role |
-| Request a feature (`/sage request`), and withdraw it while it waits | Yes | Yes |
-| Approve or decline a request | No | Yes |
-| Unregister a channel | No | Yes |
-| Turn off the link from Discord to sage (`/sage stop`), at once | Yes | Yes |
-| Turn the link on again (at the terminal) | No | Yes |
-| Send a message to sage (a mention or "Send to sage") | Yes: it waits for the owner's Approve | Yes: approved at once |
-| Approve or decline a message to sage | No | Yes |
-| Start build sessions | Not built: waits on T159 | Not built: waits on T159 |
-| Asks in a rolling hour | 10 | 10 |
+| See the board | `@sage-bot board`, or `/sage board [project]` | The tasks by state, the tasks left, the open questions and the waiting requests |
+| See one task | `@sage-bot T5`, or `/sage task T5 [project]` | Its title, size, state and pull request |
+| See the open questions | `@sage-bot gates`, or `/sage gates [project]` | Each question, sage's recommendation and the default |
+| Get the shared graphics and PDFs | `@sage-bot files`, or `/sage files [project]` | The files that the owner shares |
+| Request a feature | `/sage request [project]`, fill in the form, check it, then press Send | One line in the channel, and a thread with the request card. The owner approves or declines it there. You can withdraw it while it waits. |
+| Vote on a design question | Press an option on its card | Your vote counts. At the limit, the votes decide. |
+| Send an instruction to sage | `@sage-bot implement what we discussed above` in a thread, or "Send to sage" in the Apps menu of a message | An approval card in the thread. It waits for the owner. |
+| Stop the link from Discord to sage, in an emergency | `/sage stop`, then the confirm button within 10 minutes | The link goes off at once, with no approval |
 
-Anyone else gets one private line for a `/sage` command or a button, "Only the sage-crew role can use sage-bot.", and no reply to a mention. Nothing they do counts. Only the owner registers a channel, and only the owner turns the link to sage on again, both at the terminal.
+**As the owner, in Discord:** press Approve or Decline on a request card or a message card, break a tie or end a vote early on its card, and `/sage unregister` a channel. Your own mention or "Send to sage" is approved at once.
 
-## What to say
-
-Each answer is public and pings nobody. The answer to a mention goes into its thread. Leave out `project` for the project of the channel. The examples use sample ids.
-
-**As a crew member:**
-
-| You want to | Say this |
-| --- | --- |
-| See the tasks by state, the tasks left and the open questions | `@sage-bot board` or `/sage board [project]` |
-| See one task: its title, size, state and pull request | `@sage-bot T7` or `/sage task T7 [project]` |
-| See the open questions, sage's recommendation and the default | `@sage-bot gates` (or `questions`), or `/sage gates [project]` |
-| Get the project's shared graphics and PDFs | `@sage-bot files` or `/sage files [project]` |
-| Request a feature | `/sage request [project]`, fill in the form, check it, then press Send. The request gets its own thread, and the owner approves or declines it there. You can withdraw it there while it waits. |
-| Answer or vote on a team question | Press an option on its card |
-| Recommend on the autopilot question | Press Yes or No on its card. The owner decides at the terminal. |
-| Stop the link from Discord to sage at once, in an emergency | `/sage stop`, then the confirm button within 10 minutes. No approval is needed. Only the owner turns the link on again, at the terminal. |
-
-A mention that names none of these words gets a reply that lists them.
-
-**As the owner, in Discord:**
-
-| You want to | Say this |
-| --- | --- |
-| Break a tie | Press a tie-break button on the card |
-| Approve or decline a request | Press Approve or Decline on its card. Approve adds the sage task. You can also do it at the terminal: `node scripts/requests.mjs approve RQ1` |
-| Stop sage-bot in this channel | `/sage unregister`, then the confirm button within 10 minutes |
-| Turn off the link from Discord to sage, as any crew member can | `/sage stop`, then the confirm button within 10 minutes |
-| Send a message to sage | `@sage-bot implement what we discussed above`, or "Send to sage" in the Apps menu of a message. The owner approves it on its card; it waits for bridge sessions (T159) |
-| See the messages to sage (owner, terminal) | `node scripts/outbox.mjs list`, `node scripts/outbox.mjs show M1` |
-| Decline or withdraw a message to sage at the terminal (owner), for example one whose card is gone | `node scripts/outbox.mjs decline M1 --reason "not this week"`, `node scripts/outbox.mjs withdraw M1` |
-
-**As the owner, at the terminal** (in the sage-bot folder). These commands read the bridge's config, `~/.config/sage-bot/config.json`: make it first with the [setup guide](docs/setup.md#the-checklist), step 3.
+**As the owner, at the terminal** (in the sage-bot folder). These commands read the bridge's config, `~/.config/sage-bot/config.json`. Make it first with step 3 of the [setup guide](docs/setup.md#the-checklist).
 
 | You want to | Run this |
 | --- | --- |
+| Approve a request | `node scripts/requests.mjs approve RQ1` |
+| See the messages to sage, or one message and its payload | `node scripts/outbox.mjs list`, `node scripts/outbox.mjs show M1` |
+| Decline or withdraw a waiting message (Approve is only on its card) | `node scripts/outbox.mjs decline M1 --reason "not this week"`, `node scripts/outbox.mjs withdraw M1` |
 | Send a question to the team | `node scripts/vote.mjs --project <project> G42` |
 | Register a channel for a project (stop the bridge first) | `node scripts/channels.mjs register <channel id> <project>` |
 | See if the link from Discord to sage is on | `node scripts/leads.mjs status` |
-| Turn the link on again | `node scripts/leads.mjs restore` |
+| Turn the link on again after a stop | `node scripts/leads.mjs restore` |
 | Check the audit log | `node scripts/leads.mjs verify` |
 
-Time left is not estimated yet: the board shows the count of tasks left. The [setup guide](docs/setup.md#channels) tells how to register a channel, and the [reference](docs/reference.md#the-bridge-service) gives every command and option.
+The [reference](docs/reference.md#the-bridge-service) gives every command and option.
 
-## Safety
+## Why
 
-**On now, for every ask:**
+sage runs in one person's terminal. A team that wants to take part has two other ways today, and both are weak:
 
-- **The crew, the owner and registered channels.** sage-bot works only in the channels that the owner registers, and only for the crew and the owner.
-- **An hourly limit.** Each person can ask 10 times in a rolling hour, across all channels.
-- **No AI reads Discord text today.** Code answers each read ask. A message to sage reaches sage only after the owner approves its exact payload, in an escaped data block, and only when bridge sessions come (T159). A vote gives sage only the option's letter and sage's own option text. sage reads a reason only through `scripts/reasons.mjs`, cleaned by an allow-list.
-- **The answer shows little.** It shows a task's id, title, size, state and pull request, and the open questions. It never reads findings, briefs, reports or `decisions.tsv`.
-- **The audit log.** Each message to sage, each decision on it and each read ask of the owner goes into an append-only log with a hash chain before it is kept, with the sha256 of the payload, and a copy goes to #sage-audit.
-- **The kill switch.** Any crew member or the owner types `/sage stop` and confirms. The link goes off at once, with no approval. No message from Discord then goes to sage until the owner turns the link on again at the terminal. Read asks keep working.
+| Way | Problem |
+| --- | --- |
+| Share the terminal, or relay each message by hand | Only one person can type, and the owner becomes the relay for every question. |
+| Connect a Discord chat directly to the sage session | Any message in the channel reaches the session as an instruction, with no review. |
 
-**For bridge sessions, not on yet (T159):**
+sage-bot sits between the two. The team works in Discord, and the owner approves each action before it can reach sage.
 
-A bridge session will be a headless `claude -p` session that sage-bot starts for one thread, so that it delivers the approved messages to sage. Four layers will limit it:
+## How it works
 
-- **The sandbox settings** (built and tested) hold the file and network boundary. They allow no GitHub host, and they deny the sage plugin folder, every logbook and the secret files.
-- **The guard hook** (built and tested) is a second layer. It allows only the commands on its allow-list.
-- **The broker** (built, not used by a session until T159) will give the session a few GitHub verbs: a fetch, an upload to its own branch, and its own pull request. None of them merges.
-- **A spend cap** (built): the bridge policy starts each session with `--max-budget-usd 5`.
+sage-bot is one small service, the bridge (`scripts/bridge.mjs`), on the owner's Mac. It reads sage's logbook and changes it only through the sage state tool. Code writes every answer: no AI reads Discord text today.
 
-A text hook is only a second layer: the sandbox holds each file and network boundary. `npm run proof` checks the sandbox settings (it needs the `claude` command on PATH), and `npm run proof:live` runs the probes in real sessions. The [reference](docs/reference.md#the-guard-for-bridge-sessions) gives each layer and the findings behind it, and [the proof](docs/reference.md#the-proof-of-the-sandbox) lists each row.
+| Job | What happens |
+| --- | --- |
+| Lookups | A mention or `/sage` asks for the board, a task, the open questions or the files. The bridge checks the person and the hourly limit, reads the logbook and answers. A mention opens a thread for the answer. |
+| Requests | `/sage request` makes a request card in its own thread. Only the owner approves or declines it. After Approve, the request becomes a sage task, and its thread becomes the **task thread**. |
+| Team votes | When sage marks a design question of that task as a team vote, its card goes to the task thread. Every crew member votes within 10 minutes. Then the votes decide. Only the owner breaks a tie or ends a vote early. Other questions stay in the home channel, with 30 minutes. |
+| The outbox | A crew mention that is not a lookup, or "Send to sage", becomes a message to sage. The bridge reads the earlier messages of the thread as context: at most 30 messages and 8,000 characters, back to the last message to sage. The owner approves the exact payload on its card. The diagram at the top shows the flow. |
+| The catch-up | Discord does not send the messages of a time when the bridge was offline, for example while the Mac slept. At each reconnect, the bridge reads them back and answers each missed mention once. A mention older than 24 hours gets "This is old, please ask again." |
+| The emergency stop | Any crew member's `/sage stop` turns off the link from Discord to sage at once. Then nobody can approve a request or a message to sage, and new messages wait. Lookups keep working. Only the owner turns the link on again, at the terminal. |
+
+### Who is who
+
+One sage-bot serves one owner, on that owner's Mac, with that owner's own Discord app. Each bot serves one or more projects. Several owners can each run a bot in the same server: each bot keeps its own cards, threads, requests and files.
+
+- **The owner** is one Discord user id, set at setup: `ownerId` in the config, else the owner of the Discord app. A role never makes anyone the owner. The owner approves every action on their own bot.
+- **The crew** is every member with the role named exactly `sage-crew`. Every bot in a server shares that one role, so a crew member can request on each bot.
+- **Anyone else** gets one private line, "Only the sage-crew role can use sage-bot.", for a `/sage` command or a button press. Their mentions get no reply. Nothing that they do counts.
+- **A direct message** does nothing. sage-bot does not ask Discord for direct-message events.
+
+| | The crew | The owner |
+| --- | --- | --- |
+| Lookups, requests, votes, messages to sage | Yes | Yes (votes only with the `sage-crew` role) |
+| Withdraw your own request or message while it waits | Yes | Yes (your own message is approved at once) |
+| Approve or decline a request or a message to sage | No | Yes |
+| Break a tie, or end a vote early | No | Yes |
+| `/sage stop` | Yes | Yes |
+| Turn the link on again, register or unregister a channel | No | Yes |
+| Asks in a rolling hour | 10 | 10 |
+
+The [setup guide](docs/setup.md#who-is-who) tells how sage-bot finds the owner, and how [a second owner joins the server](docs/setup.md#a-second-owner-joins-the-server).
+
+### Safety
+
+- **Registered channels only.** sage-bot works only in the channels that the owner registers, and their threads.
+- **The owner's approval.** A message reaches the outbox as approved only after the owner presses Approve on its card, which shows the exact payload as payload.txt. In the payload, the context messages are quoted data in a marked block, not instructions.
+- **The audit log.** Each message to sage and each decision on it goes into an append-only log with a hash chain. When the config names an audit channel, a copy goes to #sage-audit.
+- **Bridge sessions, not on yet (T159).** A bridge session will be a headless `claude -p` session that delivers the approved messages. The sandbox settings (built and tested) will hold its file and network boundary. The guard hook (built and tested) is a second layer. A spend cap of $5 limits each session. `npm run proof` checks the sandbox settings. The [reference](docs/reference.md#the-guard-for-bridge-sessions) gives each layer.
+
+## What's new
+
+Newest first. The [issue 60](https://github.com/erickb336/sage-bot/issues/60) comments give the design decisions and the plan.
+
+1. **The outbox** (T247, PR 67). A crew mention or "Send to sage" becomes a message to sage, with the context of the thread. The owner approves it on a card with payload.txt.
+2. **Task threads** (T245, PR 66). After Approve, a request's thread becomes the task thread, with 10-minute team votes.
+3. **Many bots in one server** (T244, PR 65). Each owner runs their own bot, and the bots stay apart.
+4. **The catch-up** (T241, PR 64). After the Mac sleeps, the bridge answers the mentions that it missed.
+5. **Team requests** (T228, PR 63). Every crew member can use `/sage request`; only the owner approves.
+
+**Next:** delivery into a live sage session (T159) and replies in the thread (T160). Both wait for work in sage.
 
 ## Set up a live trial
 
 > **The live trial has not run yet.** The owner does each step by hand. sage-bot changes no settings file, and it never types a token.
 
-The [setup guide](docs/setup.md) has the full checklist: each command, the permissions table and the reason for each step. In short:
+The [setup guide](docs/setup.md) has the full checklist, with each command and the reason for each step. In short:
 
-1. **Make a Discord app only for sage-bot, with your own account.** Guild Install only, Public Bot off. Turn on the Server Members and Message Content intents.
-2. **Make one mentionable role named `sage-crew`,** or use the one that the server has already.
-3. **Fill in the config** in `~/.config/sage-bot/config.json`, from `examples/config.example.json`.
-4. **Set the channel permissions,** so that only the crew can ask, and sage-bot can open and lock threads.
-5. **Put the token in the Keychain** as the item `sage-bot`. Never type the token in a shell.
-6. **Add the hook lines** to `.claude/settings.local.json` in each project.
-7. **Deny the Discord plugin's `fetch_messages` tool** in the same settings file.
+1. **Make a Discord app only for sage-bot, with your own account.** Guild Install only, Public Bot off. Turn on the **Server Members** and **Message Content** intents: sage-bot reads the thread as the context of a message to sage.
+2. **Invite it** with the `bot` and `applications.commands` scopes and the permission integer `326417632256`.
+3. **Make one mentionable role named `sage-crew`,** or use the one that the server has already.
+4. **Fill in the config** in `~/.config/sage-bot/config.json`, from `examples/config.example.json`.
+5. **Set the channel permissions,** so that only the crew can ask, and sage-bot can open and lock threads.
+6. **Put the token in the Keychain** as the item `sage-bot`. Never type the token in a shell.
+7. **Add the hook lines,** and deny the Discord plugin's `fetch_messages` tool, in `.claude/settings.local.json` of each project.
 8. **Start the bridge** by hand once, then with launchd.
 9. **Do a smoke test:** mark one test question, and press an option on its card.
 
@@ -194,52 +178,48 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 | Word | Meaning |
 | --- | --- |
 | **sage** | The Claude Code plugin whose session frames the work and asks the questions. |
-| **The owner** | The person who runs sage at the terminal and this sage-bot, known by Discord user id. The owner's answer is always final. Only the owner breaks ties, ends votes early and turns the link on again; the crew and the owner can stop it. |
-| **The bridge** | sage-bot's service on the owner's Mac: `scripts/bridge.mjs`. |
-| **The crew** | Every member with the Discord role named `sage-crew`: they read and ask, answer and vote, and can stop the link from Discord to sage at once. |
-| **Registered channel** | A channel where sage-bot works, for one project. Only the owner registers one. |
-| **Answer thread** | A thread that a mention opens. sage-bot answers read asks there. |
-| **Message to sage** | A mention or a "Send to sage" with its context, kept in the outbox. The owner approves each crew message on its approval card. |
-| **Task thread** | The thread of a request that the owner approved. The design questions of its sage task go there, as votes of 10 minutes. |
+| **Owner** | The one person who runs this sage-bot and its sage, known by Discord user id. The owner approves every action. |
+| **Crew** | Every member with the Discord role named `sage-crew`. |
+| **Bridge** | sage-bot's service on the owner's Mac. |
+| **Registered channel** | A channel where sage-bot works, for one project. |
+| **Request** | A feature that a crew member asks for with `/sage request`. It becomes a sage task after the owner approves it. |
+| **Task thread** | The thread of an approved request. The team votes of its task go there. |
 | **Question** | A sage gate: a question that sage parks for the owner, with options, a recommendation and a default. |
-| **Team vote** | A question that sage marks for the team with `scripts/vote.mjs`. |
-| **Card** | The Discord message of one question or one batch, with a button for each option. |
-| **Audit log** | The append-only record of every message to sage and every decision on it, with a hash chain. |
-| **Kill switch** | `/sage stop`: it turns off the link from Discord to sage until the owner turns it on at the terminal. |
-| **Bridge session** | Not built (T159). A sage session that sage-bot will start for one thread, to deliver the approved messages to sage, inside the sandbox, the guard hook and the $5 cap. |
+| **Team vote** | A question that sage marks for the crew. Its card has a button for each option. |
+| **Message to sage** | An instruction from Discord, with its context, kept in the outbox. |
+| **Outbox** | The bridge's record of every message to sage and its status: waiting, approved, declined or withdrawn. |
+| **Payload** | The exact text that sage will get for one message, shown as payload.txt on its card. |
+| **Emergency stop** | `/sage stop`: it turns off the link from Discord to sage until the owner turns it on again. |
+| **Bridge session** | Not built (T159). A sage session that sage-bot will start to deliver the approved messages. |
 
 ## FAQ
 
-**Does a Discord message ever reach sage?** Not today. A read ask only reads the logbook. A vote gives sage only the chosen option. A message to sage waits in the outbox, approved by the owner, until bridge sessions come with T159.
+**Does a Discord message reach sage today?** No. A lookup only reads the logbook. A vote gives sage only the chosen option. An approved message waits in the outbox until bridge sessions come with T159.
 
-**Can a teammate start work?** Not yet. A session starts only at the owner's terminal. Bridge sessions, which will let the crew ask for build sessions that the owner approves, wait on T159.
+**Can a crew member start work?** A crew member requests a feature, and the owner's Approve adds the sage task. A session still starts only at the owner's terminal until T159.
 
-**Who decides the autopilot question?** The owner. The crew only recommends Yes or No. sage-bot never switches a mode of sage.
+**What if the Mac sleeps?** The bridge is offline, so a button press fails; the card says to press it again later. When the Mac wakes, the bridge answers the mentions that it missed, and posts one line such as "I was offline from … to …. I picked up 1 message."
 
-**What if the Mac sleeps?** The bridge stops while the Mac sleeps, so Discord shows "This interaction failed" for a press. When the Mac wakes, the bridge ends each vote that passed its limit and asks the team to press again.
+**Can two people each run a sage-bot in one server?** Yes. Each one makes their own Discord app and runs their own bridge. They share the `sage-crew` role. See [A second owner joins the server](docs/setup.md#a-second-owner-joins-the-server).
 
-**What does a person outside the crew see?** Nothing from sage-bot. Discord itself shows "The application did not respond" for a `/sage` command, or "This interaction failed" for a button, to that person only.
-
-**Why does every mention open a thread?** Each request and its answer stay together, and the channel stays readable.
+**Why does every mention open a thread?** Each request and its answers stay together, and the channel stays readable.
 
 ## Under the hood
 
 | Path | What it is |
 | --- | --- |
-| `src/ask.js` | Read asks, `/sage` and the limit |
-| `src/threads.js` | Mention threads |
-| `src/vote.js` | The vote rules |
-| `src/cards.js` | The cards |
-| `src/handle.js` | A press of a button |
-| `src/bridge.js` | The bridge's loop |
-| `src/discord.js` | The only link to Discord |
+| `src/ask.js`, `src/threads.js` | Lookups, `/sage`, the limit and mention threads |
+| `src/requests.js`, `src/requestFlow.js` | Requests |
+| `src/vote.js`, `src/cards.js`, `src/handle.js` | The vote rules, the cards and a button press |
+| `src/outbox.js`, `src/outboxFlow.js` | Messages to sage and their approval cards |
+| `src/catchup.js` | The catch-up |
 | `src/crew.js` | Who is the crew and who is the owner |
-| `src/audit.js` | Audit log, kill switch |
-| `src/guard.js` | Guard hook (not on yet) |
-| `src/session-policy.js` | Sandbox (not on yet) |
-| `scripts/` | Commands, demo, graphics |
+| `src/audit.js` | The audit log and the emergency stop |
+| `src/bridge.js`, `src/discord.js` | The bridge's loop, and its only link to Discord |
+| `src/guard.js`, `src/session-policy.js` | The guard hook and the sandbox settings (not on yet) |
+| `scripts/` | The commands and the demo |
 | `docs/setup.md` | The live trial checklist |
-| `docs/reference.md` | **Every rule and setting** |
+| `docs/reference.md` | Every rule and setting |
 
 To run the checks:
 
@@ -252,9 +232,9 @@ The check runs every test with sample data and a fake Discord. No test connects 
 
 ## Credits
 
-- sage-bot is built for, and follows the rules of, [sage](https://github.com/erickb336/sage). Its graphics reuse sage's look and its toad sage: `scripts/sage-world.mjs` is a copy of sage's graphics code at commit `b0af484`, under the MIT licence.
-- It uses [discord.js](https://discord.js.org) for the shapes of Discord messages, and [playwright-core](https://playwright.dev) for the screenshots.
-- The Discord symbol in the diagrams is Discord's own file, unchanged, used to name the service in a flow. Discord is a trademark of Discord Inc. sage-bot is not affiliated with Discord.
+- sage-bot is built for, and follows the rules of, [sage](https://github.com/erickb336/sage).
+- It uses [discord.js](https://discord.js.org) for Discord, and [playwright-core](https://playwright.dev) for the screenshots of the demo page.
+- Discord is a trademark of Discord Inc. sage-bot is not affiliated with Discord.
 
 ## Licence
 

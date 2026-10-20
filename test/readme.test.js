@@ -21,7 +21,7 @@ const NOT_HERE = { 'npm ci': 'the test runs inside the installed tree: npm ci wo
 // Commands that write a page into the repo by default: the test gives them a path in the scratch home.
 const IN_HOME = { 'npm run demo': (home) => `npm run demo -- --out ${join(home, 'demo.html')}`, 'node scripts/preview.mjs': (home) => `node scripts/preview.mjs --out ${join(home, 'preview', 'index.html')}` };
 // The languages a code block may name. The test runs only sh blocks, so a block of another shell language would never run.
-const LANGUAGES = new Set(['sh', 'json', 'js', 'text']);
+const LANGUAGES = new Set(['sh', 'json', 'js', 'text', 'mermaid']);
 /** Runs one command of a document as the owner types it, in the scratch home. spawnSync (test/bridge-setup.js) adds SAGE_TOOL. */
 const sh = (command, home, env = {}) => spawnSync('/bin/sh', ['-c', command], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: home, TMPDIR: join(home, 'tmp'), ...env } });
 /** The scratch home's Claude Code config folder, with a copy of the tests' state tool in the sage plugin's cache, as the owner's install has it. */
