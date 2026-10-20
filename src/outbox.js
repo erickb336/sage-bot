@@ -61,20 +61,24 @@ export const minute = (at) => `${new Date(at).toISOString().slice(0, 16)}Z`;
 
 /**
  * Untrusted text as one JavaScript string literal for a MODEL reader (standing order 12): sage's model reads it in the payload, and no
- * person reads it on Discord. An allow-list: the space and every printable character (a letter, mark, number, punctuation or symbol that is
- * not default-ignorable, and not a look-alike of `"` or `\`: src/clean.js quoteLike, F-T247-24) stay as they are, with `"` and `\` escaped by
- * a backslash; every other code point (a look-alike of `"` or `\`, a newline, a control, a format, bidi or tag character, a variation
- * selector, a private-use, unassigned or lone surrogate code point, any other space) becomes `\u{…}` with its hex value. So nothing hidden
- * reaches the model unseen, no text leaves its quotes or fakes them, and no text starts a line of the payload.
+ * person reads it on Discord. An allow-list (F-T247-29) keeps only: the space; the printable ASCII punctuation and symbols U+0021 to U+007E,
+ * with `"` and `\` escaped by a backslash; a letter or number that is not default-ignorable and not a look-alike of `"` or `\` (ʺ ˮ ײ:
+ * src/clean.js quoteLike, F-T247-24); and a mark that is not default-ignorable on such a letter or number, or on a mark kept on one.
+ * Every other code point becomes `\u{…}` with its hex value: every punctuation or symbol outside ASCII (“ 〝 „ ❝ 🙶 ⧵ ∖ and every emoji
+ * too), a mark on anything else, a newline, a control, a format, bidi or tag character, a variation selector, a private-use, unassigned or
+ * lone surrogate code point, any other space. So nothing hidden reaches the model unseen, no text leaves its quotes or fakes them, no text
+ * starts a line of the payload, and the text reads back exactly.
  */
-const PRINTABLE = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}]--\p{Default_Ignorable_Code_Point}]$/v;
-/** Whether the card hides a character that the payload shows as `\u{…}` (F-T247-25): not printable, and not a space of any kind. */
-export const hidden = (ch) => !PRINTABLE.test(ch) && !/^\p{White_Space}$/u.test(ch);
+const BASE = /^[[\p{L}\p{N}]--\p{Default_Ignorable_Code_Point}]$/v;
+const MARK = /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v;
 export function literal(text) {
   let out = '"';
+  let onBase = false; // whether the last code point is a kept letter or number, or a mark kept on one
   for (const ch of String(text)) {
+    const keep = ch === ' ' || (ch >= '!' && ch <= '~') || (BASE.test(ch) && !quoteLike(ch)) || (onBase && MARK.test(ch));
+    onBase = keep && (BASE.test(ch) || MARK.test(ch));
     if (ch === '"' || ch === '\\') out += `\\${ch}`;
-    else if (ch === ' ' || (PRINTABLE.test(ch) && !quoteLike(ch))) out += ch;
+    else if (keep) out += ch;
     else out += `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`;
   }
   return `${out}"`;

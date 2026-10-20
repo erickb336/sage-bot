@@ -11,12 +11,12 @@
 import { MessageFlags } from 'discord.js';
 import { forLead, forwarded, quoted, recorder } from './audit.js';
 import { apiError } from './bridge.js';
-import { button, cut, ephemeral, LIMIT, NO_MENTIONS, offline, safe, stamp } from './cards.js';
+import { button, cut, ephemeral, LIMIT, NO_MENTIONS, offline, safe, safeOf, stamp } from './cards.js';
 import { CREW, isOwner, namesOf, notCrew, personName, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { ActionRowBuilder, ButtonStyle } from 'discord.js';
 import {
-  addMessage, auditFields, CONTEXT, decide, find, GONE, hidden, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
+  addMessage, auditFields, CONTEXT, decide, find, GONE, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
 } from './outbox.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -60,14 +60,15 @@ const contextLine = (r) => {
 };
 /**
  * The text of a message as the card shows it to people (F-T247-3): each `<@id>` as "@" and the name the record keeps for it (src/crew.js
- * personName; "member" and the last 4 digits of an id with no name), then `safe`. The payload keeps the raw text.
+ * personName; "member" and the last 4 digits of an id with no name), then `safeOf`: the text and the count of code points that it drops.
+ * The payload keeps the raw text.
  */
-const cardText = (r) => safe(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
-/** The hidden characters of the text that the card drops and payload.txt shows as `\u{…}` (F-T247-25): a field when there is one or more. */
-const hiddenField = (r) => {
-  const n = [...r.text].filter(hidden).length;
-  return n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'}, see payload.txt` }] : [];
-};
+const cardText = (r) => safeOf(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
+/**
+ * The characters that the card drops (F-T247-25, F-T247-29): exactly the code points that `safe` drops from the card text, by its own
+ * allow-list. payload.txt shows each one: as `\u{…}`, or raw (a backtick, a fourth mark on a letter). A field when there is one or more.
+ */
+const hiddenField = (n) => (n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'}, see payload.txt` }] : []);
 /** The exact payload as a file of the card. */
 const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
 
@@ -85,12 +86,13 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
     declined: `**Declined by ${us.owner} at ${stamp(r.decidedAt)}.**${reasonOf(r)} Nothing goes to sage.`,
     withdrawn: `**Withdrawn by ${decider(r, us)} at ${stamp(r.decidedAt)}.**${reasonOf(r)} Nothing goes to sage.`,
   }[r.status];
+  const shown = cardText(r);
   const embed = {
     title: cut(`Message ${r.id} to sage · ${r.task ? `${r.kind} of ${r.task}` : r.kind} · ${safe(r.project)}`, LIMIT.title),
-    description: cut(cardText(r) || '(no visible text: see payload.txt)', 1000),
+    description: cut(shown.text || '(no visible text: see payload.txt)', 1000),
     fields: [
       { name: 'From', value: cut(fromLine(r), LIMIT.value) },
-      ...hiddenField(r),
+      ...hiddenField(shown.dropped),
       { name: 'Context', value: contextLine(r) },
       { name: 'sha256 of payload.txt', value: short(r.payloadSha256) },
       { name: 'Status', value: status },

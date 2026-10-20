@@ -56,9 +56,12 @@ const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}
  * escaped (no subtext), every `*`, `_`, `~` and `|` escaped (escapeMarkdown pairs a run of them unevenly: F-T50-1), and every `://` broken to `:// ` so that no URL is clickable. A text with nothing visible gives '': a reason of ''
  * gets no field, because Discord refuses an empty field value, and a name of '' falls back (see `who`).
  */
-export function safe(text) {
+export const safe = (text) => safeOf(text).text;
+/** `safe`, and `dropped`: the count of code points of `text` that the allow-list drops (a white space folds to a space and is not one). */
+export function safeOf(text) {
   const s = String(text);
   let out = '';
+  let dropped = 0;
   let last = ' '; // the last kept character, so that the joiner rule never reads the growing `out` (F-T27-45)
   let onLetter = false; // whether a mark may follow: the last kept is a letter, or a mark or joiner on one
   const on = { stacking: 0, spacing: 0 }; // the marks of each kind on that letter so far
@@ -71,7 +74,7 @@ export function safe(text) {
     const kind = STACKING.test(t) ? 'stacking' : 'spacing';
     const mark = onLetter && MARK.test(t) && on[kind] < MARKS_MAX[kind];
     const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark ? t : SPACE.test(t) ? ' ' : '';
-    if (!keep) continue;
+    if (!keep) { dropped++; continue; } // a dropped token is one code point: an RGI emoji sequence always stays
     if (letter) [onLetter, on.stacking, on.spacing] = [true, 0, 0];
     else if (mark) on[kind]++;
     else if (!joiner) onLetter = false;
@@ -82,7 +85,7 @@ export function safe(text) {
   // escapeMarkdown pairs a run of `*`, `_`, `~` or `|` unevenly (F-T50-1): each one waits as a private-use character (never kept above)
   // while it runs, then comes back escaped.
   const held = out.replace(/ +/g, ' ').trim().replace(/[*_~|]/g, (c) => String.fromCharCode(0xe000 + '*_~|'.indexOf(c)));
-  return escapeMarkdown(held, ESCAPE_ALL).replace(/[\uE000-\uE003]/g, (c) => `\\${'*_~|'[c.charCodeAt(0) - 0xe000]}`).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// ');
+  return { text: escapeMarkdown(held, ESCAPE_ALL).replace(/[\uE000-\uE003]/g, (c) => `\\${'*_~|'[c.charCodeAt(0) - 0xe000]}`).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// '), dropped };
 }
 const GRAPHEMES = new Intl.Segmenter();
 /**

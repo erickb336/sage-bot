@@ -28,7 +28,8 @@ export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([,
 const QUOTE_LIKE = new Set([...LOOKALIKES].filter(([, t]) => /''|\\/.test(t)).map(([c]) => c));
 /**
  * For `literal` in src/outbox.js (F-T247-24): whether a character is `"` or `\`, or looks like one of them. A look-alike's confusables
- * target holds two quotes `''` (the target of `"`, for example “ ” ＂ ʺ 〃) or `\`, or its NFKC holds `"` or `\` (＂ ＼ ﹨).
+ * target holds two quotes `''` (the target of `"`, for example “ ” ＂ ʺ 〃) or `\`, or its NFKC holds `"` or `\` (＂ ＼ ﹨). `literal` escapes
+ * every punctuation and symbol outside ASCII anyway (F-T247-29), so this test still decides only the letters ʺ ˮ ײ.
  */
 export const quoteLike = (ch) => QUOTE_LIKE.has(ch) || /["\\]/.test(ch.normalize('NFKC'));
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
