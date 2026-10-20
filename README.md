@@ -197,7 +197,7 @@ The [setup guide](docs/setup.md) has the full checklist, with each command and t
 
 ## FAQ
 
-**Does a Discord message reach sage today?** Not as an instruction. A lookup only reads the logbook. A vote gives sage the chosen option, and sage reads the voters' typed reasons only through `scripts/reasons.mjs`, as cleaned, quoted data. When the owner presses Approve on a request, its title, cleaned by the same allow-list, becomes the title of the new sage task. An approved message waits in the outbox until bridge sessions come with T159.
+**Does a Discord message reach sage today?** Only as cleaned text, and only after a vote or the owner's approval. A lookup only reads the logbook. A vote gives sage the chosen option, and sage reads the voters' typed reasons only through `scripts/reasons.mjs`, as cleaned, quoted data. When the owner presses Approve on a request, its title, cleaned by the same allow-list, becomes the title of the new sage task. An approved message waits in the outbox until bridge sessions come with T159.
 
 **Can a crew member start work?** A crew member requests a feature, and the owner's Approve adds the sage task. A session still starts only at the owner's terminal until T159.
 
