@@ -106,7 +106,7 @@ export function loadAlive(path) {
  *   for a mention of the crew or the owner (src/discord.js liveOf); a mention that the catch-up already handled is not handled again;
  * - `run()`: at each gateway ready; never rejects.
  * At the start, each mention whose handling a crash cut off (in `taking`) gets OLD once, before the first run, when its place is one of
- * `places()` (an id, or a thread of the map); a mention of any other place gets nothing.
+ * `places()` (an id, or a thread of the map); a mention of any other place gets nothing. Each goes on `taken`, so it is never answered again.
  */
 export function createCatchUp({ config, places, fetch, roles, post, now = Date.now, log = (line) => process.stderr.write(`${line}\n`),
   alive = loadAlive(alivePathOf(config)) }) {
@@ -149,13 +149,13 @@ export function createCatchUp({ config, places, fetch, roles, post, now = Date.n
   /** Records `id` as seen in `place`; the mark never goes back. */
   const mark = (place, id) => { seen.set(place, newest(seen.get(place), id)); save(); };
   const handled = (place, id) => taken.has(id) || taking.has(id) || (seen.has(place) && !after(id, seen.get(place)));
-  // The mentions that a crash cut off, in a place that the catch-up watches: each goes to `taken` first (no second answer, also when this
-  // start crashes too), then gets OLD. A mention of any other place goes from the file with no reply.
+  // The mentions that a crash cut off: each goes to `taken` first (no second answer, also when this start crashes too, or when its place
+  // is not known now: C5). Only a mention of a place that the catch-up watches now then gets OLD; any other gets no reply.
   const cut = [];
   if (taking.size) {
     const { ids, threads = [] } = places();
     const watched = new Set([...ids, ...threads.map((t) => t.id)]);
-    for (const [id, place] of taking) if (watched.has(place)) { cut.push([id, place]); put(taken, id, place); }
+    for (const [id, place] of taking) { put(taken, id, place); if (watched.has(place)) cut.push([id, place]); }
     taking.clear();
     save();
   }

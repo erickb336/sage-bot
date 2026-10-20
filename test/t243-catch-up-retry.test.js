@@ -29,6 +29,7 @@ function light(places = [ASK]) {
   b.make = () => createCatchUp({ config: { ...CONFIG, statePath }, now: () => b.now, log: (l) => b.lines.push(l),
     places: () => {
       if (b.placesDown) throw new Error('no places');
+      if (b.partial) return { ids: b.places.filter((id) => id !== THREAD), threads: [], partial: true }; // the request file cannot be read
       return { ids: b.places, threads: b.threads.map((id) => ({ id, last: last(id) })), partial: false };
     },
     roles: async (user) => { if (b.rolesDown.has(user)) throw new Error('Discord is down'); return user === MAYA ? [CREW] : []; },
@@ -257,10 +258,40 @@ test('T243 repair 2 S1: after a crash, only a cut mention of a watched place get
   const elsewhere = b.place.said(OTHER, { at: T0 + 2000, user: OWNER });
   writeFileSync(alivePathOf(b), `${JSON.stringify({ version: 1, at: T0, seen: {}, taken: {}, taking: { [inAsk]: ASK, [inThread]: THREAD, [elsewhere]: OTHER } })}\n`, { mode: 0o600 });
   b.now = T0 + MIN;
-  await b.make().run();
+  const next = b.make();
+  await next.run();
   assert.deepEqual(b.place.posts.filter((p) => p.content === OLD).map((p) => p.reply.messageReference), [inAsk, inThread]);
   assert.deepEqual([...loadAlive(alivePathOf(b)).taking], []);
-  assert.equal(loadAlive(alivePathOf(b)).taken.has(elsewhere), false);
+  await next.live(OTHER, elsewhere, true, async () => { b.handled.push(elsewhere); }); // no reply, and never an answer (C5)
+  assert.deepEqual(b.handled, []);
+});
+
+test('T243 repair 2 C5: a cut mention of an open request thread, at a start that cannot read the request file, gets no reply and no second answer', async () => {
+  const b = light([ASK, THREAD]);
+  b.catchUp.beat();
+  b.now = T0 + MIN;
+  await b.catchUp.run(); // both places have a mark
+  const inThread = b.place.said(THREAD, { at: b.now + 1000, user: MAYA });
+  const inAsk = b.place.said(ASK, { at: b.now + 2000, user: MAYA }); // the control: a watched place at the start
+  b.now += 3000;
+  // The process dies during both answers.
+  b.catchUp.live(THREAD, inThread, true, () => new Promise(() => {}));
+  b.catchUp.live(ASK, inAsk, true, () => new Promise(() => {}));
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taking.keys()], [inThread, inAsk]);
+  b.partial = true; // the start cannot read the request file, so the open request thread is not one of the places
+  b.now += MIN;
+  const next = b.make();
+  await next.run();
+  b.partial = false; // the request file is readable again
+  b.now += RETRY + MIN;
+  await next.beat();
+  await next.run();
+  await b.make().run(); // and one more restart
+  // The rule: a cut mention gets OLD only when its place is watched at the start; else it gets nothing. Never a second answer.
+  assert.deepEqual(b.place.posts.filter((p) => p.content === OLD).map((p) => p.reply.messageReference), [inAsk]);
+  assert.deepEqual(b.handled, []);
+  assert.deepEqual(b.notes(THREAD), []);
 });
 
 test('T243 repair 2 S1: each list of the file holds at most 100 mentions, the oldest go first, and a file with more gets the "Delete it" refusal', async () => {
