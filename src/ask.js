@@ -19,7 +19,7 @@ import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 import { auditPathOf, killPathOf, linkOff, openLog, recorder, setLinkOff } from './audit.js';
 import { Refused } from './outbox.js';
-import { loadThreads, noRight, readAsk, threadName, threadsPathOf } from './threads.js';
+import { isLiveTask, loadThreads, noRight, readAsk, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of the crew counts,
  * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
@@ -229,7 +229,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   async function answer(i, at) {
     const { sub, options: o } = i;
     if (sub === 'unregister') return unregisterAsk(place(i), at);
-    const name = o.project || projectOf(threads.get(i.channelId), at); // a /sage in sage-bot's thread: the project of its entry (F-T247-14)
+    const name = o.project || projectOf(live(threads.get(i.channelId)), at); // a /sage in sage-bot's thread: the project of its entry (F-T247-14)
     const p = byName.get(name);
     if (!p) return { content: `I do not know a shared project called "${shown(name, 40)}".` };
     if (sub === 'files') {
@@ -289,18 +289,23 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    * entry, the entry whose `origin` is that thread), else to a new one. It moves only when it is public (`x.isPublic()`, src/discord.js
    * publicThread: not a private thread, and its parent channel is open to @everyone; F-T247-11): a move posts its context in the home
    * channel. A thread that is not public is no place for a message to sage (`at` null), so its history is not read, and `shut` is the line that says so, every time (F-T247-13).
+   * A task thread whose channel the registry does not hold now for its task's project (isLiveTask, `live`) is no place either, as a thread
+   * of a channel that is not registered: it neither moves nor reaches the old project's task, and it gets that reply (C1 of R1084).
    * @param {{ channelId: string, parentId: Promise<string | null> | string | null, isPublic: () => Promise<boolean> }} x
    */
   async function placeOfMessage(x) {
     const parent = channels.has(x.channelId) ? null : await x.parentId;
-    const own = parent !== null ? threads.get(x.channelId) ?? null : null;
-    const moves = parent !== null && !own && await x.isPublic().catch(() => false);
+    const entry = parent !== null ? threads.get(x.channelId) ?? null : null;
+    const own = live(entry);
+    const moves = parent !== null && !entry && await x.isPublic().catch(() => false);
     const at = parent === null ? (channels.has(x.channelId) ? x.channelId : null) : (own || moves) && channels.has(parent) ? parent : null;
     const moved = moves ? [...threads].find(([, t]) => t.origin === x.channelId) ?? null : null;
     // A thread that is not public, and not sage-bot's (F-T247-13): the line names its channel when that is registered.
-    const shut = parent !== null && !own && !moves ? `This thread is private, so I cannot take messages to sage here. Nothing was sent. Ask in ${channels.has(parent) ? `<#${parent}>` : here()}.` : null;
+    const shut = parent !== null && !entry && !moves ? `This thread is private, so I cannot take messages to sage here. Nothing was sent. Ask in ${channels.has(parent) ? `<#${parent}>` : here()}.` : null;
     return { at, own, moves, inThread: parent !== null, moved, shut, project: projectOf(own ?? moved?.[1], at) };
   }
+  /** A thread map entry that still names its place: null for a task thread whose channel is not registered now for its project (isLiveTask). */
+  const live = (t) => (t?.kind === 'task' && !isLiveTask(t, channels) ? null : t ?? null);
   /**
    * The project of a place (standing order 15, F-T247-5, F-T247-14): of the thread map entry of sage-bot's thread when it has one (a
    * moved thread keeps the project of the channel it moved from), else of the registered channel `at`, else of the home channel.
