@@ -34,13 +34,19 @@ const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'desig
 const DISCORD = ['line', 'card', 'thread', 'shown'];
 
 /**
- * A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. `forDiscord` is the text
- * for a note on Discord when the text names a folder (a folder path never goes to Discord); the full text is for the terminal.
+ * A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. `text` is for the terminal;
+ * `forDiscord`, required, is the line for a note on Discord, and never names a folder (a folder path never goes to Discord).
  */
 export class Refused extends Error {
-  constructor(text, forDiscord = text) { super(text); this.forDiscord = forDiscord; }
+  constructor(text, forDiscord) {
+    if (typeof forDiscord !== 'string') throw new TypeError('a Refused needs its line for Discord');
+    super(text);
+    this.forDiscord = forDiscord;
+  }
 }
 const refuse = (text, forDiscord) => { throw new Refused(text, forDiscord); };
+/** A refusal whose line names no folder (only ids, statuses, times and limits): the same line at the terminal and on Discord. */
+const refuseSame = (text) => refuse(text, text);
 
 const length = (s) => Array.from(s).length;
 const two = (n) => String(n).padStart(2, '0');
@@ -110,13 +116,13 @@ const checked = (r) => {
  * @param {number} at
  */
 export function newRequest(file, f, at) {
-  if (!REQUEST_ID.test(`RQ${file.next}`)) refuse(`the requests file has used every request id (RQ1 to RQ999999999). Nothing changed.`);
+  if (!REQUEST_ID.test(`RQ${file.next}`)) refuseSame(`the requests file has used every request id (RQ1 to RQ999999999). Nothing changed.`);
   for (const k of ['title', 'text']) {
     const [min, max] = LIMITS[k];
-    if (typeof f[k] !== 'string' || length(f[k]) < min || length(f[k]) > max) refuse(`the ${k} must have ${min} to ${max} characters. Nothing changed.`);
+    if (typeof f[k] !== 'string' || length(f[k]) < min || length(f[k]) > max) refuseSame(`the ${k} must have ${min} to ${max} characters. Nothing changed.`);
   }
   const titleForSage = forModel(f.title);
-  if (!titleForSage) refuse('the title has nothing that sage can read: it needs letters or digits. Nothing changed.');
+  if (!titleForSage) refuseSame('the title has nothing that sage can read: it needs letters or digits. Nothing changed.');
   const request = checked({
     id: `RQ${file.next}`, project: f.project, folder: f.folder, title: f.title, text: f.text, titleForSage,
     designQuestions: f.designQuestions, requester: f.requester, requesterName: f.requesterName, status: 'pending', claim: null,
@@ -144,17 +150,17 @@ const sameClaim = (a, b) => !!a && !!b && a.pid === b.pid && a.start === b.start
 export function step(r, e) {
   const [from, to] = MOVES[e.type] ?? (() => { throw new TypeError(`no request event ${e.type}`); })();
   if (r.status !== from) {
-    if (r.status === 'approving') refuse(`${r.id} is already being approved ${claimed(r.claim)} Nothing changed.`);
-    if (DECIDED.includes(r.status)) refuse(`${r.id} was already ${r.status} at ${when(r.decidedAt)} (${r.via})${r.task ? `: sage task ${r.task}` : ''}. Nothing changed.`);
-    refuse(`${r.id} is not being approved. Nothing changed.`);
+    if (r.status === 'approving') refuseSame(`${r.id} is already being approved ${claimed(r.claim)} Nothing changed.`);
+    if (DECIDED.includes(r.status)) refuseSame(`${r.id} was already ${r.status} at ${when(r.decidedAt)} (${r.via})${r.task ? `: sage task ${r.task}` : ''}. Nothing changed.`);
+    refuseSame(`${r.id} is not being approved. Nothing changed.`);
   }
-  if (from === 'approving' && !sameClaim(r.claim, e.claim)) refuse(`${r.id} is being approved by another run. Nothing changed.`);
-  if (e.type === 'withdraw' && e.by !== r.requester) refuse(`only the person who sent ${r.id} can withdraw it. Nothing changed.`);
+  if (from === 'approving' && !sameClaim(r.claim, e.claim)) refuseSame(`${r.id} is being approved by another run. Nothing changed.`);
+  if (e.type === 'withdraw' && e.by !== r.requester) refuseSame(`only the person who sent ${r.id} can withdraw it. Nothing changed.`);
   if (e.type === 'claim') return checked({ ...r, status: to, claim: { ...e.claim } });
   if (e.type === 'release') return checked({ ...r, status: to, claim: null });
   if (e.type === 'approve') return checked({ ...r, status: to, claim: null, task: e.task, decidedAt: e.at, decidedBy: r.claim.by, via: r.claim.via });
   const reason = e.type === 'decline' ? (e.reason ?? '').trim() : '';
-  if (length(reason) > LIMITS.reason[1]) refuse(`a reason has at most ${LIMITS.reason[1]} characters. Nothing changed.`);
+  if (length(reason) > LIMITS.reason[1]) refuseSame(`a reason has at most ${LIMITS.reason[1]} characters. Nothing changed.`);
   return checked({ ...r, status: to, decidedAt: e.at, decidedBy: e.by, via: e.type === 'withdraw' ? 'discord' : e.via, reason: reason || null });
 }
 
@@ -181,7 +187,7 @@ const save = (path, file) => writeWhole(path, `${JSON.stringify({ version: 1, ne
 
 /** The request with this id, or a refusal that names the ids there are. */
 export function find(file, id) {
-  return file.requests.find((r) => r.id === id) ?? refuse(`there is no request ${id}${file.requests.length ? ` (the latest: ${file.requests.slice(-5).map((r) => r.id).join(', ')})` : ''}. Nothing changed.`);
+  return file.requests.find((r) => r.id === id) ?? refuseSame(`there is no request ${id}${file.requests.length ? ` (the latest: ${file.requests.slice(-5).map((r) => r.id).join(', ')})` : ''}. Nothing changed.`);
 }
 
 /** Adds a request under the lock (newRequest), and returns it. */
@@ -302,14 +308,15 @@ export async function reconcile(config, id, { at = Date.now(), tool } = {}) {
  *   restore?: string }} o  `tool` is the state tool, by default toolOf; `restore` is the command that restores the link, for its refusal.
  */
 export async function approve(config, id, { size = 'large', by, via, now = Date.now, tool, restore = 'node scripts/leads.mjs restore' }) {
-  const refuseIfOff = () => { if (linkOff(killPathOf(config))) refuse(`the link from Discord to sage is off, so ${id} cannot be approved. Restore the link first: ${restore}. Nothing changed.`); };
+  const refuseIfOff = () => { if (linkOff(killPathOf(config))) refuse(`the link from Discord to sage is off, so ${id} cannot be approved. Restore the link first: ${restore}. Nothing changed.`,
+    `the link from Discord to sage is off, so ${id} cannot be approved. Restore the link at the terminal first. Nothing changed.`); }; // `restore` can name the config's path
   refuseIfOff();
   const path = requestsPathOf(config);
   const before = await reconcile(config, id, { at: now(), tool });
   tool ??= toolOf(config, before);
   if (before.status === 'pending') {
     const other = (await tool.tasks()).find((t) => t.title.startsWith(marker(id)));
-    if (other) refuse(`sage task ${other.id} in ${before.project} already starts with "${marker(id)}". ${id} was not approved. Decline ${id}, or rename or remove ${other.id} in sage, then approve again.`);
+    if (other) refuseSame(`sage task ${other.id} in ${before.project} already starts with "${marker(id)}". ${id} was not approved. Decline ${id}, or rename or remove ${other.id} in sage, then approve again.`);
   }
   const claim = { by, via, pid: process.pid, start: startOf(process.pid), at: now() };
   // The link again, under the lock of the claim: it can go off while the logbook is read.
