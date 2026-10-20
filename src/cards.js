@@ -32,19 +32,20 @@ const FINAL_IN_CONFIRM = 200;
 /**
  * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42, F-T27-46, F-T27-48). The cards are for people; no model reads them.
  * 1. A whole RGI emoji sequence (`\p{RGI_Emoji}`: a family, a skin tone, a keycap, a flag, FE0F where an emoji needs it) stays as it is.
- * 2. Any other character stays only when it is a letter (not one of the four Hangul fillers that look blank), a number, punctuation or a
+ * 2. Any other character stays only when it is a letter that is not default-ignorable (not one of the four Hangul fillers that look blank), a number, punctuation or a
  *    symbol (also a bare pictograph such as ™ or ✔; not a backtick, the blank Braille cell or the null notehead U+1D159, F-T27-49), a space (every white space folds to one
- *    space), a mark on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
+ *    space), a mark that is not default-ignorable on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
  *    and `\p{Me}`, so that Burmese ကျော် stays whole: F-T27-46, F-T27-50), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
  *    or Khmer) when the next character is also of one (a Persian word, a Hindi or Bengali conjunct) or the joiner follows a mark (a final
  *    virama, as in a Malayalam legacy chillu); never two joiners in a row.
- * 3. Everything else goes: every format character, variation selector, control, private-use and unassigned code point, a lone surrogate, a
- *    mark on anything but a letter, a joiner anywhere else.
+ * 3. Everything else goes: every default-ignorable code point (a format, bidi, zero-width or tag character, a variation selector, U+034F,
+ *    U+17B4, U+17B5: F-T247-31), control, private-use and unassigned code point, a lone surrogate, a
+ *    mark on anything but a letter, a joiner anywhere else. test/fixtures/hidden-corpus.json names each class, and its test sweeps them.
  */
 const TOKEN = /\p{RGI_Emoji}|./ysv; // the longest RGI sequence at each position, else one code point
 const EMOJI = /^\p{RGI_Emoji}$/v;
-const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
-const MARK = /^[\p{M}--\p{Variation_Selector}]$/v;
+const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v; // the four Hangul fillers are the only default-ignorable letters
+const MARK = /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v; // every variation selector is default-ignorable
 const STACKING = /^\p{Mn}$/u; // a non-spacing mark piles on the letter: 3 at most, so no "zalgo" stack grows past the line
 const MARKS_MAX = { stacking: 3, spacing: 4 }; // a spacing or enclosing mark draws a bar, ring or vowel sign: 4 at most (F-T27-50)
 const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;

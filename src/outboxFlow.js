@@ -65,10 +65,14 @@ const contextLine = (r) => {
  */
 const cardText = (r) => safeOf(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
 /**
- * The characters that the card drops (F-T247-25, F-T247-29): exactly the code points that `safe` drops from the card text, by its own
- * allow-list. payload.txt shows each one: as `\u{…}`, or raw (a backtick, a fourth mark on a letter). A field when there is one or more.
+ * The hidden characters of a message (F-T247-25, F-T247-29, F-T247-32): exactly the code points that `safe` drops, by its own allow-list,
+ * from the card text and from each context text (the card shows no context text, but sage reads it). payload.txt shows each one: as
+ * `\u{…}`, or raw (a backtick, a fourth mark on a letter). A field when there is one or more.
  */
-const hiddenField = (n) => (n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'}, see payload.txt` }] : []);
+const hiddenField = (r, shown) => {
+  const n = r.context.reduce((sum, c) => sum + safeOf(c.text).dropped, shown.dropped);
+  return n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'} in the message or its context, see payload.txt` }] : [];
+};
 /** The exact payload as a file of the card. */
 const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
 
@@ -92,7 +96,7 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
     description: cut(shown.text || '(no visible text: see payload.txt)', 1000),
     fields: [
       { name: 'From', value: cut(fromLine(r), LIMIT.value) },
-      ...hiddenField(shown.dropped),
+      ...hiddenField(r, shown),
       { name: 'Context', value: contextLine(r) },
       { name: 'sha256 of payload.txt', value: short(r.payloadSha256) },
       { name: 'Status', value: status },

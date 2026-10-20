@@ -1,0 +1,68 @@
+{
+  "about": "The scope of the hidden-character and look-alike checks of the outbox (T247, standing order 16). A review blocks only on a gap in this corpus: a code point or text that a rule or example here decides and a function does not follow, or a class of hidden or look-alike characters that is missing here. The 'outOfScope' entries are accepted in writing and are not gaps. test/hidden-corpus.test.js sweeps every code point against these rules. In a text, {U+XXXX} stands for that code point. A rule is the body of a JavaScript regular expression with the v flag, matched against one code point.",
+  "card": {
+    "reader": "People on Discord: the approval card of a message (src/cards.js safeOf). Its 'dropped' count, for the message text and each context text, is the card's Hidden field (src/outboxFlow.js).",
+    "allowList": "A code point stays only when a 'keep' rule matches it. Every other code point is dropped and counted. A white space stays as one space and is not counted. An RGI emoji sequence also stays whole, uncounted (see 'texts'). A 'drop' class with no 'where' meets no keep rule except the joiner rule.",
+    "joining": "[[\\p{L}\\p{M}]&&[\\p{scx=Arabic}\\p{scx=Syriac}\\p{scx=Devanagari}\\p{scx=Bengali}\\p{scx=Gurmukhi}\\p{scx=Gujarati}\\p{scx=Oriya}\\p{scx=Tamil}\\p{scx=Telugu}\\p{scx=Kannada}\\p{scx=Malayalam}\\p{scx=Sinhala}\\p{scx=Myanmar}\\p{scx=Khmer}]]",
+    "keep": [
+      { "class": "a letter that is not default-ignorable", "rule": "[\\p{L}--\\p{Default_Ignorable_Code_Point}]" },
+      { "class": "a number, punctuation or symbol, except the backtick, the blank Braille cell and the null notehead", "rule": "[[\\p{N}\\p{P}\\p{S}]--[\\x60\\u2800\\u{1D159}]]" },
+      { "class": "a white space, shown as one space", "rule": "\\p{White_Space}" },
+      { "class": "a non-spacing mark on a letter, at most 3 on one letter", "rule": "[\\p{Mn}--\\p{Default_Ignorable_Code_Point}]", "onLetter": 3 },
+      { "class": "a spacing or enclosing mark on a letter, at most 4 on one letter", "rule": "[[\\p{Mc}\\p{Me}]--\\p{Default_Ignorable_Code_Point}]", "onLetter": 4 },
+      { "class": "the joiner rule: a joiner U+200C or U+200D right after a kept 'joining' letter or mark, when that is a mark or the next code point is 'joining'; never two joiners in a row", "rule": "[\\u200C\\u200D]", "joiner": true }
+    ],
+    "drop": [
+      { "class": "every default-ignorable code point (F-T247-31: also U+034F, U+17B4, U+17B5 on a letter), except under the joiner rule", "rule": "\\p{Default_Ignorable_Code_Point}", "examples": ["a{U+034F}", "a{U+17B4}", "a{U+17B5}", "a{U+00AD}", "a{U+2060}", "a{U+3164}"] },
+      { "class": "a tag character", "rule": "[\\u{E0000}-\\u{E007F}]", "examples": ["a{U+E0041}", "{U+E007F}"] },
+      { "class": "a variation selector that is not in a kept emoji sequence", "rule": "\\p{Variation_Selector}", "examples": ["x{U+FE0F}", "a{U+E0100}", "a{U+180B}"] },
+      { "class": "a bidi control", "rule": "\\p{Bidi_Control}", "examples": ["{U+202E}ok", "a{U+2067}", "{U+200F}"] },
+      { "class": "a zero-width character, except under the joiner rule", "rule": "[\\u200B-\\u200D\\u2060\\uFEFF]", "examples": ["a{U+200B}b", "a{U+200D}b", "{U+FEFF}"] },
+      { "class": "the backtick, the blank Braille cell and the null notehead", "rule": "[\\x60\\u2800\\u{1D159}]", "examples": ["`b", "c{U+2800}d", "{U+1D159}"] },
+      { "class": "a control, private-use, unassigned or surrogate code point that is not a white space", "rule": "[[\\p{Cc}\\p{Co}\\p{Cn}\\p{Cs}]--\\p{White_Space}]", "examples": ["a{U+0007}", "a{U+E000}", "a{U+0378}"] },
+      { "class": "a mark after punctuation, a space, the start, or anything else that is not a letter", "rule": "\\p{M}", "where": "not on a letter", "examples": [".{U+0301}", "a {U+0301}", "{U+0903}"] },
+      { "class": "a 4th non-spacing mark on one letter, a 5th spacing or enclosing mark", "rule": "\\p{M}", "where": "past the limit on a letter", "examples": ["a{U+0301}{U+0302}{U+0303}{U+0304}", "a{U+0903}{U+0903}{U+0903}{U+0903}{U+0903}"] }
+    ],
+    "texts": [
+      { "text": "a{U+034F}b {U+17B4} x{U+17B5}", "dropped": 3, "why": "F-T247-31: default-ignorable marks" },
+      { "text": "thanks \u2764\uFE0F", "dropped": 0, "why": "an RGI emoji keeps its variation selector" },
+      { "text": "family {U+1F468}{U+200D}{U+1F469}{U+200D}{U+1F467}", "dropped": 0, "why": "an RGI family keeps its joiners" },
+      { "text": "flag {U+1F3F4}{U+E0067}{U+E0062}{U+E0065}{U+E006E}{U+E0067}{U+E007F}", "dropped": 0, "why": "an RGI flag keeps its tag characters" },
+      { "text": "\u0645\u06CC{U+200C}\u062E\u0648\u0627\u0647\u0645", "dropped": 0, "why": "a Persian word keeps its ZWNJ" },
+      { "text": "\u0915\u094D{U+200D}\u0937", "dropped": 0, "why": "a Hindi conjunct keeps its ZWJ" },
+      { "text": "please fix the README{U+E0041}{U+E005B}{U+E004F}", "dropped": 3, "why": "tag characters outside a flag" },
+      { "text": "run .{U+0368}{U+0369}{U+0364}{U+0368}{U+036B}", "dropped": 5, "why": "marks after punctuation" },
+      { "text": "a `b` c{U+2800}d", "dropped": 3, "why": "backticks and the blank Braille cell" },
+      { "text": "one{U+200B}space\nand a new line", "dropped": 1, "why": "a zero-width space; a newline is a white space" }
+    ],
+    "outOfScope": [
+      { "what": "the joiner rule keeps a joiner uncounted, also after a combining mark that a joining script shares with Latin (its scx), such as U+0303 or U+0308: one joiner, so one hidden bit, after each such mark", "texts": ["ta{U+0303}{U+200C}b"], "why": "the owner's design (docs/reference.md, the approval card): Persian, Hindi and Bengali words and a Malayalam chillu need the joiners; never two in a row; payload.txt shows each one as an escape" }
+    ]
+  },
+  "model": {
+    "reader": "A model: sage reads the payload of an approved message (src/outbox.js literal). No person reads it on Discord.",
+    "allowList": "A code point stays raw only when a 'keep' rule matches it and it is not in 'lookalikes'. `\"` and `\\` stay with a backslash before them. Every other code point is written as \\u{HEX}, and the text reads back exactly.",
+    "keep": [
+      { "class": "the space", "rule": " " },
+      { "class": "printable ASCII, U+0021 to U+007E", "rule": "[\\x21-\\x7E]" },
+      { "class": "a letter or number that is not default-ignorable", "rule": "[[\\p{L}\\p{N}]--\\p{Default_Ignorable_Code_Point}]" },
+      { "class": "a mark that is not default-ignorable, on a kept letter or number or on a mark kept on one", "rule": "[\\p{M}--\\p{Default_Ignorable_Code_Point}]", "onBase": true }
+    ],
+    "lookalikes": [
+      { "char": "U+02BA", "of": "\"", "source": "confusables 18.0.0 target ''" },
+      { "char": "U+02EE", "of": "\"", "source": "confusables 18.0.0 target ''" },
+      { "char": "U+05F2", "of": "\"", "source": "confusables 18.0.0 target ''" },
+      { "char": "U+4E36", "of": "\\", "source": "by hand (F-T247-34): confusables 18.0.0 does not map it to \\" }
+    ],
+    "lookalikesAbout": "The letters and numbers that look like \" or \\. Every punctuation or symbol outside ASCII is escaped anyway, so only letters and numbers need this list. The test checks that it holds every letter or number whose NFKC holds \" or \\, or whose confusables 18.0.0 target in src/confusables.json is '' or \\.",
+    "texts": [
+      { "text": "ok\"\\{U+000A}{U+202E}evil{U+200B}{U+E0041}{U+FE0F}\u00E9 {U+1F600} \u2019 \u2014 x\u0301", "literal": "\"ok\\\"\\\\\\u{A}\\u{202E}evil\\u{200B}\\u{E0041}\\u{FE0F}\u00E9 \\u{1F600} \\u{2019} \\u{2014} x\u0301\"" },
+      { "text": "\u02BA \u02EE \u05F2 \u4E36", "literal": "\"\\u{2BA} \\u{2EE} \\u{5F2} \\u{4E36}\"" },
+      { "text": "ok\u4E36\" fake", "literal": "\"ok\\u{4E36}\\\" fake\"" },
+      { "text": "a{U+034F}b .{U+0301} {U+030B}", "literal": "\"a\\u{34F}b .\\u{301} \\u{30B}\"" }
+    ],
+    "outOfScope": [
+      { "what": "a mark that draws a stroke on a letter, kept raw on it: U+20E5, U+030E, U+030B, U+0338 (and any number of them)", "texts": ["a{U+20E5}", "a{U+030E}", "a{U+030B}", "x{U+0338}"], "why": "the escape grammar stays sound: no raw \" or \\ gets through, every output reads back, and a model reads the escaped JSON, not the shapes" }
+    ]
+  }
+}

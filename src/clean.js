@@ -20,6 +20,8 @@ const LOOKALIKES = new Map([
   ...[...'\u232A\u276D\u2771\u27E9\u3009\u226F'].map((c) => [c, '>']),
   // Kept by hand: letters that look like an apostrophe and that confusables 18.0.0 does not map to one (F-T131-9).
   ...[...'\u02BF\u0559'].map((c) => [c, "'"]),
+  // Kept by hand: the letter \u4E36 (U+4E36) looks like `\`, and confusables 18.0.0 does not map it to `\` (F-T247-34).
+  ['\u4E36', '\\'],
 ]);
 LOOKALIKES.delete('\u05D9');
 /** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
@@ -28,8 +30,9 @@ export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([,
 const QUOTE_LIKE = new Set([...LOOKALIKES].filter(([, t]) => /''|\\/.test(t)).map(([c]) => c));
 /**
  * For `literal` in src/outbox.js (F-T247-24): whether a character is `"` or `\`, or looks like one of them. A look-alike's confusables
- * target holds two quotes `''` (the target of `"`, for example “ ” ＂ ʺ 〃) or `\`, or its NFKC holds `"` or `\` (＂ ＼ ﹨). `literal` escapes
- * every punctuation and symbol outside ASCII anyway (F-T247-29), so this test still decides only the letters ʺ ˮ ײ.
+ * target holds two quotes `''` (the target of `"`, for example “ ” ＂ ʺ 〃), or its NFKC holds `"` or `\` (＂ ＼ ﹨), or it is 丶, kept by
+ * hand above: the extract has no target `\` (F-T247-34). `literal` escapes every punctuation and symbol outside ASCII anyway
+ * (F-T247-29), so this test still decides only the letters ʺ ˮ ײ 丶 (test/fixtures/hidden-corpus.json).
  */
 export const quoteLike = (ch) => QUOTE_LIKE.has(ch) || /["\\]/.test(ch.normalize('NFKC'));
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
