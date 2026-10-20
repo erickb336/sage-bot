@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { forTerminal } from '../src/clean.js';
 import { auditPathOf, openLog, recorder } from '../src/audit.js';
 import { namesOf } from '../src/crew.js';
-import { auditFields, decide, find, headerOf, loadOutbox, MESSAGE_ID, outboxPathOf, REASON_MAX, STATUS_WORDS } from '../src/outbox.js';
+import { auditFields, decide, find, headerOf, loadOutbox, MESSAGE_ID, outboxPathOf, REASON_MAX, STATUS_WORDS, withNames } from '../src/outbox.js';
 import { loadProjects } from '../src/projects.js';
 import { when, whenLocal } from '../src/requests.js';
 import { defaultConfigPath } from '../src/session-policy.js';
@@ -54,7 +54,7 @@ try {
     const all = [...file.messages].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || b.at - a.at);
     if (!all.length) say('no messages');
     for (const r of all) {
-      say([r.id, r.project, r.task ?? 'question', STATUS_WORDS[r.status], by(r), whenLocal(r.at), `${r.context.length} earlier`, `sha256 ${r.payloadSha256.slice(0, 12)}`, quoted(r.text)].join('  '));
+      say([r.id, r.project, r.task ?? 'question', STATUS_WORDS[r.status], by(r), whenLocal(r.at), `${r.context.length} earlier`, `sha256 ${r.payloadSha256.slice(0, 12)}`, quoted(withNames(r))].join('  '));
     }
   } else {
     const r = find(file, id);

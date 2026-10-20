@@ -398,6 +398,7 @@ export async function start(file) {
       post: async (target, payload) => (await (await place(target)).send(payload)).id,
       edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
+      locked: async (thread) => (await client.channels.fetch(thread, { force: true })).locked === true, // fresh: a moderator may lock it at any time
       // Get Channel Message, never from the cache, so a card that a member deleted shows as gone (code 10008, F-T247-16).
       seen: async (target, id) => { await (await place(target)).messages.fetch({ message: id, force: true }); },
     } });

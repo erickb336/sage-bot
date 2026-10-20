@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import { ballotsOf, limitOf, MINUTE, REASON_MAX } from './vote.js';
 import { CREW } from './crew.js';
+import { shownMark } from './clean.js';
 
 /** The people who may answer and vote: the crew (T232). */
 const HOLDERS = `${CREW} member`;
@@ -33,8 +34,9 @@ const FINAL_IN_CONFIRM = 200;
  * What `safe` keeps: an allow-list, nothing else (F-T27-39 to F-T27-42, F-T27-46, F-T27-48). The cards are for people; no model reads them.
  * 1. A whole RGI emoji sequence (`\p{RGI_Emoji}`: a family, a skin tone, a keycap, a flag, FE0F where an emoji needs it) stays as it is.
  * 2. Any other character stays only when it is a letter that is not default-ignorable (not one of the four Hangul fillers that look blank), a number, punctuation or a
- *    symbol (also a bare pictograph such as ™ or ✔; not a backtick, the blank Braille cell or the null notehead U+1D159, F-T27-49), a space (every white space folds to one
- *    space), a mark that is not default-ignorable on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
+ *    symbol (also a bare pictograph such as ™ or ✔; not a backtick, the blank Braille cell or the null notehead U+1D159, F-T27-49; the approval card of the outbox
+ *    shows a backtick escaped, `backticks`, F-T247-30), a space (every white space folds to one
+ *    space), a mark that is not default-ignorable and not a blank filler (U+16FE4, U+1BC9D: src/clean.js blankFiller) on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
  *    and `\p{Me}`, so that Burmese ကျော် stays whole: F-T27-46, F-T27-50), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
  *    or Khmer) when the next character is also of one (a Persian word, a Hindi or Bengali conjunct) or the joiner follows a mark (a final
  *    virama, as in a Malayalam legacy chillu); never two joiners in a row.
@@ -45,7 +47,6 @@ const FINAL_IN_CONFIRM = 200;
 const TOKEN = /\p{RGI_Emoji}|./ysv; // the longest RGI sequence at each position, else one code point
 const EMOJI = /^\p{RGI_Emoji}$/v;
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v; // the four Hangul fillers are the only default-ignorable letters
-const MARK = /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v; // every variation selector is default-ignorable
 const STACKING = /^\p{Mn}$/u; // a non-spacing mark piles on the letter: 3 at most, so no "zalgo" stack grows past the line
 const MARKS_MAX = { stacking: 3, spacing: 4 }; // a spacing or enclosing mark draws a bar, ring or vowel sign: 4 at most (F-T27-50)
 const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;
@@ -58,11 +59,14 @@ const JOINING = /^[[\p{L}\p{M}]&&[\p{scx=Arabic}\p{scx=Syriac}\p{scx=Devanagari}
  * gets no field, because Discord refuses an empty field value, and a name of '' falls back (see `who`).
  */
 export const safe = (text) => safeOf(text).text;
-/** `safe`, and `dropped`: the count of code points of `text` that the allow-list drops (a white space folds to a space and is not one). */
-export function safeOf(text) {
+/**
+ * `safe`, and `dropped`: the code points of `text` that the allow-list drops, in order (a white space folds to a space and is not one).
+ * `backticks`: a backtick stays, escaped, so that a code span such as `npm test` shows as typed and drops nothing (F-T247-30).
+ */
+export function safeOf(text, { backticks = false } = {}) {
   const s = String(text);
   let out = '';
-  let dropped = 0;
+  const dropped = [];
   let last = ' '; // the last kept character, so that the joiner rule never reads the growing `out` (F-T27-45)
   let onLetter = false; // whether a mark may follow: the last kept is a letter, or a mark or joiner on one
   const on = { stacking: 0, spacing: 0 }; // the marks of each kind on that letter so far
@@ -71,11 +75,11 @@ export function safeOf(text) {
     t = TOKEN.exec(s)[0];
     const letter = LETTER.test(t);
     const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(last)
-      && (MARK.test(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
+      && (shownMark(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
     const kind = STACKING.test(t) ? 'stacking' : 'spacing';
-    const mark = onLetter && MARK.test(t) && on[kind] < MARKS_MAX[kind];
-    const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark ? t : SPACE.test(t) ? ' ' : '';
-    if (!keep) { dropped++; continue; } // a dropped token is one code point: an RGI emoji sequence always stays
+    const mark = onLetter && shownMark(t) && on[kind] < MARKS_MAX[kind];
+    const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark || (backticks && t === '`') ? t : SPACE.test(t) ? ' ' : '';
+    if (!keep) { dropped.push(t); continue; } // a dropped token is one code point: an RGI emoji sequence always stays
     if (letter) [onLetter, on.stacking, on.spacing] = [true, 0, 0];
     else if (mark) on[kind]++;
     else if (!joiner) onLetter = false;
@@ -83,10 +87,10 @@ export function safeOf(text) {
     out += keep;
   }
   // One line first, so that the heading and list escapes see the start of the text.
-  // escapeMarkdown pairs a run of `*`, `_`, `~` or `|` unevenly (F-T50-1): each one waits as a private-use character (never kept above)
-  // while it runs, then comes back escaped.
-  const held = out.replace(/ +/g, ' ').trim().replace(/[*_~|]/g, (c) => String.fromCharCode(0xe000 + '*_~|'.indexOf(c)));
-  return { text: escapeMarkdown(held, ESCAPE_ALL).replace(/[\uE000-\uE003]/g, (c) => `\\${'*_~|'[c.charCodeAt(0) - 0xe000]}`).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// '), dropped };
+  // escapeMarkdown pairs a run of `*`, `_`, `~` or `|` unevenly (F-T50-1), and a backtick too: each one waits as a private-use character
+  // (never kept above) while it runs, then comes back escaped.
+  const held = out.replace(/ +/g, ' ').trim().replace(/[*_~|`]/g, (c) => String.fromCharCode(0xe000 + '*_~|`'.indexOf(c)));
+  return { text: escapeMarkdown(held, ESCAPE_ALL).replace(/[\uE000-\uE004]/g, (c) => `\\${'*_~|`'[c.charCodeAt(0) - 0xe000]}`).replace(/[[\]<>]/g, '\\$&').replace(/^-#/, '\\-#').replace(/:\/\/(?=\S)/g, ':// '), dropped };
 }
 const GRAPHEMES = new Intl.Segmenter();
 /**
