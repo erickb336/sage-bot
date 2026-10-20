@@ -17,12 +17,19 @@ const MIN = 60_000;
 const RETRY = 3 * MIN; // a place that a run could not read is read again at the first loop turn this long after that run
 const offline = (from, to, n) => `I was offline from <t:${Math.floor(from / 1000)}:f> to <t:${Math.floor(to / 1000)}:f>. I picked up ${n} message${n === 1 ? '' : 's'}.`;
 
-/** A catch-up on a fake Discord whose `handle` only records. `b.threads` are the thread map's threads; `b.rolesDown` the users whose roles fail. */
+/**
+ * A catch-up on a fake Discord whose `handle` only records. `b.threads` are the thread map's threads, each with its newest message as its
+ * last message, as the gateway gives it at a ready; `b.rolesDown` the users whose roles fail.
+ */
 function light(places = [ASK]) {
   const statePath = join(tempFolder('sage-bot-t243-'), 'state', 'gates.json');
   const b = { now: T0, place: fakeDiscord([]), handled: [], lines: [], statePath, places, threads: [], rolesDown: new Set() };
+  const last = (id) => b.place.in(id).reduce((a, m) => (a === null || BigInt(m) > BigInt(a) ? m : a), null);
   b.make = () => createCatchUp({ config: { ...CONFIG, statePath }, now: () => b.now, log: (l) => b.lines.push(l),
-    places: () => { if (b.placesDown) throw new Error('no places'); return { ids: b.places, threads: b.threads, partial: false }; },
+    places: () => {
+      if (b.placesDown) throw new Error('no places');
+      return { ids: b.places, threads: b.threads.map((id) => ({ id, last: last(id) })), partial: false };
+    },
     roles: async (user) => { if (b.rolesDown.has(user)) throw new Error('Discord is down'); return user === MAYA ? [CREW] : []; },
     fetch: async (at, after) => (await b.place.fetchAfter(at, after)).map((m) => ({ id: m.id, forMe: m.mentions, user: { id: m.user },
       reply: async () => {}, handle: async () => { b.handled.push(m.id); } })),
@@ -97,7 +104,7 @@ test('T243 F-T241-11: a mention handled live while its mark waits is not answere
   await b.catchUp.run();
   b.catchUp.down(); // the gateway drops: the marks wait for the next run
   const live = b.place.said(ASK, { at: b.now + MIN, user: OWNER });
-  await b.catchUp.live(ASK, live, async () => { b.handled.push(live); });
+  await b.catchUp.live(ASK, live, true, async () => { b.handled.push(live); });
   // The process restarts before the next run: a new catch-up from the same file.
   b.now += 5 * MIN;
   const again = b.make();
@@ -107,30 +114,81 @@ test('T243 F-T241-11: a mention handled live while its mark waits is not answere
   assert.deepEqual([...loadAlive(alivePathOf(b)).taken], []); // the run's end takes it off the list
   // A file of before T243, with no list of handled messages, loads with an empty one.
   writeFileSync(alivePathOf(b), `{"version":1,"at":${T0},"seen":{"${ASK}":"${live}"}}`, { mode: 0o600 });
-  assert.deepEqual(loadAlive(alivePathOf(b)), { at: T0, seen: new Map([[ASK, live]]), taken: new Map() });
+  assert.deepEqual(loadAlive(alivePathOf(b)), { at: T0, seen: new Map([[ASK, live]]), taken: new Map(), taking: new Map() });
 });
 
-test('T243 F-T241-12: the catch-up reads the channels, the open threads and only the threads of the map that were active in the 24 hours', async () => {
-  const OLD_T = idAt(T0 - WINDOW - 60 * MIN); // made 25 hours before the gap, quiet since
+test('T243 F-T241-12: the catch-up reads the channels, the open threads, the threads of the map active in the 24 hours, and a quiet thread with a mention in the gap', async () => {
+  const OLD_T = idAt(T0 - WINDOW - 60 * MIN); // made 25 hours before the gap, quiet until a mention in the gap
+  const QUIET_T = idAt(T0 - 2 * WINDOW); // made 2 days before the gap, quiet since
   const NEW_T = idAt(T0 - 60 * MIN); // made an hour before the gap
   const TALK_T = idAt(T0 - 5 * WINDOW); // made 5 days before, with a message just before the gap
   const b = light([ASK, THREAD]);
-  b.threads = [OLD_T, NEW_T, TALK_T, THREAD];
+  b.threads = [OLD_T, QUIET_T, NEW_T, TALK_T, THREAD];
   b.catchUp.beat();
   b.now = T0 + MIN;
   await b.catchUp.run();
   assert.deepEqual(b.read(), new Set([ASK, THREAD, NEW_T]));
+  assert.equal(loadAlive(alivePathOf(b)).seen.has(OLD_T), false); // a quiet thread keeps no mark
   const chat = b.place.said(TALK_T, { at: b.now, user: MAYA, mentions: false });
-  await b.catchUp.live(TALK_T, chat, async () => {});
+  await b.catchUp.live(TALK_T, chat, false, async () => {});
   b.catchUp.beat();
   b.catchUp.down();
   const ids = [OLD_T, NEW_T, TALK_T].map((at) => b.place.said(at, { at: b.now + MIN, user: OWNER }));
   b.place.reads.length = 0;
   b.now += 60 * MIN;
   await b.catchUp.run();
-  assert.deepEqual(b.read(), new Set([ASK, THREAD, NEW_T, TALK_T]));
-  assert.deepEqual(new Set(b.handled), new Set(ids.slice(1)));
-  assert.equal(loadAlive(alivePathOf(b)).seen.has(OLD_T), false); // a quiet thread keeps no mark
+  assert.deepEqual(b.read(), new Set([ASK, THREAD, OLD_T, NEW_T, TALK_T])); // never the quiet thread with nothing new
+  assert.deepEqual(new Set(b.handled), new Set(ids));
+  assert.deepEqual(b.notes(OLD_T), [offline(T0 + MIN, b.now, 1)]);
+});
+
+test('T243 repair R2: a mention whose handling a crash cut off gets "please ask again" once after the restart, and no second answer', async () => {
+  const b = light();
+  b.catchUp.beat();
+  b.now = T0 + MIN;
+  await b.catchUp.run();
+  const cut = b.place.said(ASK, { at: b.now, user: OWNER });
+  b.catchUp.live(ASK, cut, true, () => new Promise(() => {})); // the process dies during the handling
+  // The process restarts: a new catch-up from the same file, and a ready.
+  b.now += MIN;
+  const again = b.make();
+  await again.run();
+  const old = b.place.posts.filter((p) => p.content === 'This is old, please ask again.');
+  assert.deepEqual(old, [{ content: 'This is old, please ask again.', reply: { messageReference: cut }, allowedMentions: { parse: [], repliedUser: true } }]);
+  assert.deepEqual(b.handled, []);
+  // A second restart says nothing again.
+  b.now += MIN;
+  await b.make().run();
+  assert.equal(b.place.posts.filter((p) => p.content === 'This is old, please ask again.').length, 1);
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taking], []);
+  // A file of T243 before the repair, with no `taking` list, still loads.
+  writeFileSync(alivePathOf(b), `{"version":1,"at":${T0},"seen":{"${ASK}":"${cut}"},"taken":{"${cut}":"${ASK}"}}`, { mode: 0o600 });
+  assert.deepEqual(loadAlive(alivePathOf(b)), { at: T0, seen: new Map([[ASK, cut]]), taken: new Map([[cut, ASK]]), taking: new Map() });
+});
+
+test('T243 repair R3: while a mark waits, only the mentions of sage-bot go on the list in the file, so it grows only with real mentions', async () => {
+  const b = light();
+  b.catchUp.beat();
+  b.now = T0 + MIN;
+  await b.catchUp.run();
+  b.catchUp.down(); // the marks wait for the next run
+  for (let i = 1; i <= 50; i++) {
+    const chat = b.place.said(ASK, { at: b.now + i * 1000, user: MAYA, mentions: false });
+    await b.catchUp.live(ASK, chat, false, async () => {});
+  }
+  const mention = b.place.said(ASK, { at: b.now + 60_000, user: OWNER });
+  await b.catchUp.live(ASK, mention, true, async () => { b.handled.push(mention); });
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taken], [[mention, ASK]]);
+  b.now += 2 * MIN;
+  await b.catchUp.run();
+  assert.deepEqual(b.handled, [mention]); // the run does not answer it again
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taken], []);
+});
+
+test('T243 repair Q1: a catch-up file that holds null gets the normal "Delete it" refusal, not a crash', () => {
+  const path = join(tempFolder('sage-bot-t243-'), 'gates.json.alive');
+  writeFileSync(path, 'null\n', { mode: 0o600 });
+  assert.throws(() => loadAlive(path), { name: 'TypeError', message: `the catch-up file ${path} is not a version 1 catch-up file that the bridge wrote. Delete it: the next catch-up then starts from now. Nothing was loaded.` });
 });
 
 test('T243 F-T241-13: a short pause that no drop follows is forgotten; a later drop starts its gap at the last turn', async () => {
