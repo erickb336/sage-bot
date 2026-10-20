@@ -6,6 +6,8 @@
 // A press is trusted only through the server side (R918 C2): its custom_id must parse (an allow-list), the request must be in the file,
 // a card button must be on the request's own card message, and the status must still take the move, so a forged or replayed id does
 // nothing. A draft lives only in memory, for its own person, and goes at its send or cancel: single use.
+// After the owner approves a request, its thread becomes the thread of its sage task (T245): an entry of kind 'task' in the thread map,
+// where the bridge posts the task's design questions.
 import { randomInt } from 'node:crypto';
 import { MessageFlags } from 'discord.js';
 import { apiError } from './bridge.js';
@@ -18,6 +20,7 @@ import {
   requestThreadName, withdrawConfirm,
 } from './requestCards.js';
 import { addRequest, approve, decline, find, loadRequests, MAX_NAME, reconcile, Refused, requestsPathOf, setDiscord, withdraw } from './requests.js';
+import { isLiveTask, loadThreads, taskThread, threadsPathOf } from './threads.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
 /** How long a draft's confirm works after the form, and a withdraw confirm after its press. */
@@ -33,10 +36,11 @@ const plain = ({ flags, ...payload }) => ({ components: [], embeds: [], ...paylo
  * `projects` are the bridge's (loadProjects). `discord` is the port `{ post(target, payload) → id, edit(target, id, payload),
  * startThread(channel, lineId, name) → id, threadFrom(channel, lineId) → id, unarchive(thread) }` (src/discord.js, or src/fake-discord.js for the tests).
  * `tool(r)` gives the state tool of a request (default: its project's, src/requests.js toolOf); the tests give one with a scratch HOME.
- * `newKey` makes the key of a draft: a random one by default, so a key is hard to guess; the demo gives fixed ones.
+ * `newKey` makes the key of a draft: a random one by default, so a key is hard to guess; the demo gives fixed ones. `threads` is the
+ * process's one thread map (src/threads.js loadThreads; src/discord.js gives the one that src/ask.js and the bridge share).
  */
 export function createRequestFlow({ config, channels, projects, discord, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), tool,
-  newKey = () => `D${randomInt(1, 2 ** 47)}` }) {
+  newKey = () => `D${randomInt(1, 2 ** 47)}`, threads = loadThreads(threadsPathOf(config)) }) {
   const path = requestsPathOf(config);
   const killPath = killPathOf(config);
   const toolOf = (r) => tool?.(r);
@@ -123,6 +127,27 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
     return r;
   }
 
+  /**
+   * Makes the thread of an approved request the thread of its task (T245), once: approved on Discord or at the terminal, also before a
+   * restart. A save that fails is logged and tried again at the next loop; until then the map in memory holds the task thread. A request
+   * of a channel that the registry does not hold now gets no task thread (isLiveTask, F-T245-3).
+   */
+  const unsavedThreads = new Set();
+  function adopt(r) {
+    if (r.status !== 'approved' || !r.thread || (threads.has(r.thread) && !unsavedThreads.has(r.thread))) return;
+    const entry = taskThread(r);
+    if (!isLiveTask(entry, channels)) return;
+    threads.set(r.thread, entry);
+    try {
+      threads.save();
+      unsavedThreads.delete(r.thread);
+      say(`${r.id}: its thread ${r.thread} is now the thread of ${r.task} in ${r.project}`);
+    } catch (e) {
+      unsavedThreads.add(r.thread);
+      sayOnce(`the thread map could not be saved, so the thread of ${r.task} lasts only until the next restart; the loop tries again: ${e?.message}`);
+    }
+  }
+
   // ---- The presses ----
   /** Answers a press with a private note; a refusal of Discord is logged. */
   const answer = (i, payload, how = 'reply') => i[how](payload).catch((e) => say(`Discord refused a request reply: ${apiError(e)}`));
@@ -196,6 +221,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const after = action === 'approve' ? await approve(config, id, { by, via: 'discord', tool: toolOf(r), now })
         : action === 'decline!' ? await decline(config, id, { by, via: 'discord', reason: String(i.fields?.getTextInputValue('reason') ?? ''), at: now() })
         : await withdraw(config, id, { by, at: now() });
+      adopt(after); // the card is in the request's thread, so the thread is known: it becomes the task's thread before the reply
       out = requestNote({ approve: 'approved', 'decline!': 'declined', 'withdraw!': 'withdrawn' }[action], us, after);
     } catch (e) {
       // A move that the status no longer takes (another press or the terminal came first): the late note, with the time.
@@ -242,7 +268,8 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
     /**
      * One turn of the sync loop (T229): settles each claim whose approve no longer runs (also this bridge's own failed approve, and a
      * claim of the process before a restart: src/requests.js reconcile), then draws each request whose line or card is not as the file
-     * says: a decision at the terminal, a new status, the link turned off or on. Never rejects.
+     * says: a decision at the terminal, a new status, the link turned off or on. The thread of each approved request becomes its task's
+     * thread (adopt). Never rejects.
      */
     async loop() {
       let file;
@@ -253,7 +280,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const off = linkOff(killPath);
       for (const r of load().requests) {
         const due = r.channel && (!r.card || r.shown !== r.status || (OPEN.includes(r.status) && drawn.get(r.id) !== view(r, off)));
-        if (due) await draw(r.id).catch(() => {}); // logged in `draw`; tried again at the next turn
+        adopt(due ? await draw(r.id).catch(() => r) : r); // a failed draw is logged in `draw`, and tried again at the next turn
       }
     },
     /** The threads of the open requests, for the catch-up (T241); null while the file cannot be read (the loop logs why): unknown, not none. */

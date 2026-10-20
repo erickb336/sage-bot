@@ -11,7 +11,8 @@ import { handle, peopleOf } from './handle.js';
 import { optionsOf, OTHER } from './sage.js';
 import { lineOf, readSpools, runs, sessionOf, sessionsPathOf, titleOf } from './sessions.js';
 import { alive, keyOf, leadsPathOf, load, loadLeads, loadVotes, migrateMarks, projectOfKey, save, votesPathOf } from './state.js';
-import { HOUR, MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step } from './vote.js';
+import { isLiveTask } from './threads.js';
+import { BATCH_LIMIT, HOUR, limitOf, MAX_OPTIONS, MINUTE, nextReminderAt, openGate, step, THREAD_LIMIT } from './vote.js';
 
 /** A Discord id: only these go into an event's `by` (F-T28-6). */
 export const SNOWFLAKE = /^\d{17,20}$/;
@@ -76,8 +77,9 @@ export function monotonic(now, floor = 0) {
  * Returns { refused } for a group that cannot be a card: more than 4 parts, or a question without 1 to 5 options.
  * With `leads` (T73) the one row is a crew recommendation: it must be LEADS_QUESTION with the options Yes and No, so that the crew
  * never answers another question and every text that the bridge writes about the answer comes from that allow-list.
+ * With `inThread` (T245) the group is of a task with a task thread: the crew votes on it, also on one question alone, within THREAD_LIMIT.
  */
-export function frame(project, rows, title, ownerId, at, leads = false) {
+export function frame(project, rows, title, ownerId, at, { leads = false, inThread = false } = {}) {
   if (rows.length > MAX_PARTS) return { refused: `${rows[0].task} asked ${rows.length} questions together, and a batch holds at most ${MAX_PARTS} parts` };
   const texts = rows.map((r) => r.options.split('|').map((o) => o.trim()).filter(Boolean));
   const bad = rows.find((r, i) => texts[i].length === 0 || texts[i].length > MAX_OPTIONS || new Set(texts[i]).size !== texts[i].length);
@@ -94,10 +96,11 @@ export function frame(project, rows, title, ownerId, at, leads = false) {
       options: Object.fromEntries(keys.map((k, j) => [k, shown(texts[i][j], 500, k)])),
     };
   });
-  const kind = rows.length === 1 ? 'single' : 'batch';
+  const kind = rows.length === 1 && !inThread ? 'single' : 'batch';
   const id = keyOf(project, rows.map((r) => r.id).join('+'));
   const keys = parts.map((p) => Object.keys(p.options));
-  const gate = openGate(kind === 'single' ? { id, kind, options: keys[0], askedBy: ownerId, at } : { id, kind, parts: keys, askedBy: ownerId, at });
+  const gate = openGate(kind === 'single' ? { id, kind, options: keys[0], askedBy: ownerId, at }
+    : { id, kind, parts: keys, askedBy: ownerId, at, limit: inThread ? THREAD_LIMIT : BATCH_LIMIT });
   return { gate, ask: { kind, task: shown(rows[0].task, 40, 'a task'), title: shown(title, 300), parts, ...(leads && { leads }) }, texts };
 }
 
@@ -141,10 +144,13 @@ export function askedTogether(rows) {
  *     members(): Promise<Iterable<object>> | Iterable<object> },
  *     roles(): Iterable<{ id: string, name: string }> },
  *   config: { channelId: string, ownerId: string, votesPath?: string, sessionsPath?: string },
- *   statePath: string, now?: () => number, log?: (line: string) => void }} o
- *   A `target` is the parent channel or a thread, by its Discord id.
+ *   statePath: string, threads?: Map<string, object>, channels?: Map<string, object>, now?: () => number, log?: (line: string) => void }} o
+ *   A `target` is the parent channel or a thread, by its Discord id. `threads` is the process's one thread map (src/threads.js), which the
+ *   bridge only reads: the design questions of a task with a task thread go there (T245), while the channel registry `channels`
+ *   (src/channels.js) holds its channel (isLiveTask). None: no task has a thread.
  */
-export function createBridge({ sages, own, discord, config, statePath, now = Date.now, log = (line) => process.stderr.write(`${line}\n`) }) {
+export function createBridge({ sages, own, discord, config, statePath, threads = new Map(), channels = new Map(), now = Date.now,
+  log = (line) => process.stderr.write(`${line}\n`) }) {
   // ownerId is the owner that src/crew.js ownerOf resolved at the start (T232), never a role.
   for (const key of ['channelId', 'ownerId']) {
     if (!SNOWFLAKE.test(config[key] ?? '')) throw new TypeError(`the config needs ${key} as a Discord id (17 to 20 digits)`);
@@ -158,6 +164,12 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   const folders = new Map([...sages].map(([name, sage]) => [name, sage.folder ?? null]));
   /** Whether the mark or entry `key`, of `folder`, is of a project of the config with that name and that folder now. */
   const serves = (key, folder) => folders.has(projectOfKey(key)) && folders.get(projectOfKey(key)) === folder;
+  /**
+   * The task thread of the sage task `task` of `project` (T245), by the project's name and its folder now (G45 A), as [thread id, whether
+   * its channel is registered now (isLiveTask)], or undefined. A task with a thread votes in 10 minutes; only a live one gets the card.
+   */
+  const taskThreadOf = (project, task) => [...threads].filter(([, t]) => t.kind === 'task' && t.task === task && t.project === project && t.folder === folders.get(project))
+    .map(([id, t]) => [id, isLiveTask(t, channels)])[0];
   const loaded = load(statePath, own, folders);
   // The entries of a project that the config does not serve now (its name left the config, or names another folder): they keep their
   // place in the gate file, and nothing but `closeGone` and a press on their card reads them (F-T132-8, F-T132-21).
@@ -416,13 +428,16 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
     const task = `${projectOfKey(id)} ${ask.task}`; // the project name, so that a ping says which project asks (T132)
+    const n = gate.parts?.length;
     const text = (ask.leads ? `${task} asks the crew for a recommendation to ${us.owner}. The first answer is the recommendation; ${us.owner} decides at the terminal.`
       : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
-      : `${task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
+      : `${task} has ${n === 1 ? '1 product question. Vote on it' : `${n} product questions. Vote on each part`} within ${limitOf(gate) / MINUTE} minutes.`
+        + (m.thread ? ` Then the votes decide, and ${us.owner} breaks a tie.` : ''))
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
     const payload = { ...card(gate, ask, ppl), ...crewAlert(text) };
     let message = await post(at, payload);
-    if (!message && at !== config.channelId && !sessions.get(m.session)?.thread) message = await post((at = config.channelId), payload);
+    // A refused post in a task thread, or in a session thread that is gone, goes to the parent channel at once (T245, F-T29-9).
+    if (!message && at !== config.channelId && (at === m.thread || !sessions.get(m.session)?.thread)) message = await post((at = config.channelId), payload);
     if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
     return message;
   }
@@ -736,7 +751,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
       try {
-        if (!m.message && waits(id)) await postCard(id, ppl, m.channel ?? await placeOf(m.session, projectOfKey(id)));
+        if (!m.message && waits(id)) await postCard(id, ppl, m.channel ?? m.thread ?? await placeOf(m.session, projectOfKey(id)));
         await postHeld(id);
       } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
     }
@@ -796,7 +811,11 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(key(r.id)))) < SETTLE) continue;
       // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
       // ones count too, so no later card takes the rest.
-      const framed = frame(project, group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, leadsOnly(group[0]));
+      // A design question of a task with a task thread goes to that thread as a vote of THREAD_LIMIT; a crew recommendation never (T245).
+      // A task thread of a channel that the owner unregistered gets nothing: the card goes to the home channel instead, still as the
+      // task's vote of THREAD_LIMIT (F-T245-3).
+      const [thread, live] = (!leadsOnly(group[0]) && taskThreadOf(project, group[0].task)) || [];
+      const framed = frame(project, group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, { leads: leadsOnly(group[0]), inThread: thread !== undefined });
       const groupKey = key(group.map((r) => r.id).join('+'));
       if (framed.refused) {
         if (!refused.has(groupKey)) say(`not posted: ${project}: ${framed.refused}. Answer them at the terminal.`);
@@ -805,7 +824,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       }
       const { gate, ask, texts } = framed;
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, questions: rowsOpen.map((r) => r.question), message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project) });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, questions: rowsOpen.map((r) => r.question), message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project), ...(thread && { thread: live ? thread : config.channelId }) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
   }

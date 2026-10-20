@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { createAsk } from '../src/ask.js';
+import { createAsk, openAskFiles } from '../src/ask.js';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
 import { parseCustomId } from '../src/cards.js';
 import { openChannels } from '../src/channels.js';
@@ -19,6 +19,7 @@ import { createRequestFlow } from '../src/requestFlow.js';
 import { loadRequests, requestsPathOf } from '../src/requests.js';
 import { CREW } from '../src/crew.js';
 import { sagePath, sageTool } from '../src/sage.js';
+import { loadThreads, threadsPathOf } from '../src/threads.js';
 import { MINUTE } from '../src/vote.js';
 import { CSS, esc, hhmm, md, message, modalHtml, noteHtml } from './render.mjs';
 
@@ -84,7 +85,11 @@ const discord = { ...fake, async post(target, payload) {
   editedAt.set(id, [...editedAt.get(id) ?? [], now]);
 } };
 const log = [];
-const bridge = createBridge({ sages: new Map([['project', sageTool({ sagePath: SAGE, project, env })]]), own: 'project', discord, config: CONFIG, statePath, now: () => now, log: (l) => log.push(l) });
+const threads = loadThreads(threadsPathOf({ statePath })); // the one thread map of the process: the bridge, the requests and the mentions share it
+const rconfig = { ...CONFIG, askChannelId: ASK, project, sagePath: SAGE, statePath }; // the crew requests in #ask-sage (docs/setup.md)
+const projects = loadProjects(rconfig);
+const channels = openChannels(rconfig, projects);
+const bridge = createBridge({ sages: new Map([['project', sageTool({ sagePath: SAGE, project, env })]]), own: 'project', discord, config: CONFIG, statePath, threads, channels, now: () => now, log: (l) => log.push(l) });
 const loop = () => bridge.loop();
 /** Moves the clock on by `ms`, with a loop of the bridge every LOOP, as the running bridge does (a longer gap is a sleep of the Mac). */
 async function advance(ms) {
@@ -204,14 +209,11 @@ step(`SessionEnd: the line says ended; the thread is ${thread.locked ? 'locked' 
 
 // ---- A request (T228): a crew member asks for a feature in the channel, and the owner approves it -------------------------------
 const split = story.length; // the events of the request come after this one
-const rconfig = { ...CONFIG, askChannelId: ASK, project, sagePath: SAGE, statePath }; // the crew requests in #ask-sage (docs/setup.md)
-const projects = loadProjects(rconfig);
-const channels = openChannels(rconfig, projects);
 let drafts = 0;
 const requests = createRequestFlow({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), tool: () => sageTool({ sagePath: SAGE, project, env }),
-  newKey: () => `D${++drafts}`, // fixed keys, so that two runs give the same page
+  newKey: () => `D${++drafts}`, threads, // fixed keys, so that two runs give the same page
   discord: { post: discord.post, edit: discord.edit, startThread: (at, line, name) => discord.startThread(line, name), threadFrom: (at, line) => discord.threadFrom(line), unarchive: discord.unarchive } });
-const ask = createAsk({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), env, requests });
+const ask = createAsk({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), env, requests, files: { ...openAskFiles(rconfig, projects), threads } });
 const roleNames = new Map(MEMBERS.map((m) => [m.id, m.roles]));
 /** One request press (or form) by a sample person, with its private replies, as src/discord.js maps it. */
 async function ask1(who, text, customId, { fields, message: on, form } = {}) {
@@ -236,7 +238,29 @@ await ask1(SAM, 'Sam has no role and presses Approve.', `rq1:approve:${rq.id}`, 
 await advance(MINUTE);
 await ask1(ERICK, 'Erick, the owner, presses Approve.', `rq1:approve:${rq.id}`, { message: rq.card });
 await advance(LOOP);
-step(`Erick approves ${rq.id}: sage task ${loadRequests(requestsPathOf(rconfig)).requests[0].task} is in the logbook; Maya and Sam cannot approve`);
+const task = loadRequests(requestsPathOf(rconfig)).requests[0].task;
+step(`Erick approves ${rq.id}: sage task ${task} is in the logbook, and the request thread is its task thread; Maya and Sam cannot approve`);
+
+// ---- The task thread (T245): sage's design question for the new task is a vote of 10 minutes in the request's thread ---------------
+await advance(MINUTE);
+const g7 = sage('gate', 'add', task, '--question', 'Which file name does the CSV get?', '--options', 'report-2026-10.csv|Monthly report October 2026.csv', '--recommend', 'report-2026-10.csv').split(' ')[0];
+node([script('vote.mjs'), '--config', configPath, g7]);
+terminal(`sage adds ${g7} for ${task} and marks it as a team vote.`);
+await loop();
+await advance(SETTLE);
+const design = `project/${g7}`;
+step(`gate add ${g7} (${task}): its card is a vote of 10 minutes in the task thread`);
+await advance(MINUTE);
+await press(MAYA, 'Maya votes A in the task thread.', `press:${design}:0:0`);
+await press(MAYA, 'Maya adds a reason.', `reason:${design}:0:0`, { fields: { reason: 'Short names sort by date.' } });
+await advance(MINUTE);
+await press(JON, 'Jon votes B.', `press:${design}:0:1`);
+await press(JON, 'Jon adds a reason.', `reason:${design}:0:1`, { fields: { reason: 'Finance reads the name in their mail.' } });
+await advance(bridge.entry(design).gate.endsAt - now);
+step(`the vote ends at 10 minutes, tied 1-1; the tie post pings Erick in the task thread`);
+await advance(MINUTE);
+await press(ERICK, 'Erick, the owner, breaks the tie: A.', `tiebreak:${design}:0:0`);
+step(`Erick breaks the tie on ${design}; sage gets the answer`);
 
 // ---- The answers in sage and the reasons for sage -------------------------------------------------------------------------
 const [head, ...rowsTsv] = readFileSync(join(sage('logbook'), 'gates.tsv'), 'utf8').split('\n').filter(Boolean);

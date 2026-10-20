@@ -318,7 +318,7 @@ test('F-T232-3: a bad thread map or an unsafe audit log folder stops the start i
   const threads = `${b.statePath}.threads`;
   mkdirSync(dirname(threads), { recursive: true, mode: 0o700 });
   writeFileSync(threads, 'not json', { mode: 0o600 });
-  assert.throws(() => prepare(b.config, () => {}), { message: `the thread map ${threads} is not a version 1 thread map that the bridge wrote. Nothing was loaded.` });
+  assert.throws(() => prepare(b.config, () => {}), { message: `the thread map ${threads} is not a version 1 or 2 thread map that the bridge wrote. Nothing was loaded.` });
   rmSync(`${b.statePath}.lock`); // this test process took the lock in prepare(): the stopped bridge gives it back
   rmSync(threads);
   const auditDir = join(b.root, 'audit');

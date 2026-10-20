@@ -2,12 +2,12 @@
 // as the JSON that Discord takes (discord.js builders). Pure functions of a gate, its ask and the people.
 // No Client, no network. The names and the ballot reasons are untrusted text: `safe` keeps only what a person needs to read.
 // Times are Discord timestamps (<t:…:t>), so each viewer's Discord shows them in the viewer's own zone,
-// and the 30-minute countdown (<t:…:R>) runs live with no edit of the card.
+// and the countdown to the vote's limit (<t:…:R>: 30 minutes, or 10 in a task thread) runs live with no edit of the card.
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ModalBuilder,
   TextInputBuilder, TextInputStyle, embedLength, escapeMarkdown,
 } from 'discord.js';
-import { ballotsOf, REASON_MAX } from './vote.js';
+import { ballotsOf, limitOf, MINUTE, REASON_MAX } from './vote.js';
 import { CREW } from './crew.js';
 
 /** The people who may answer and vote: the crew (T232). */
@@ -298,16 +298,16 @@ function batch(gate, ask, holders, names, shut, us) {
     : gate.votingEndedAt < gate.endsAt ? `Ended early by ${actor(gate.endedBy, names, us)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
     : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
   const description = shut && !withdrawn ? shutLine(us) : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
-    : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote on each part; change your vote until the vote ends. The work on the task goes on. ` +
+    : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote${gate.parts.length > 1 ? ' on each part' : ''}; change your vote until the vote ends. The work on the task goes on. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
     : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for ${us.owner}. ` +
       `${tiedParts < gate.parts.length ? 'The other parts are provisional, and ' : ''}${ask.task} waits.`
     : `${ended}Closed: every part is ${ask.parts.some((p) => p.final) ? 'decided or answered at the terminal' : 'decided'}. ${ask.task} goes on.`;
-  const footer = { text: `Rule: 30 minutes, then each part goes to the option with the most votes · a tied part waits for ${us.owner} · ` +
+  const footer = { text: `Rule: ${limitOf(gate) / MINUTE} minutes, then each part goes to the option with the most votes · a tied part waits for ${us.owner} · ` +
     `Who votes: every ${HOLDERS}, one vote per part · Reason: optional, after a press${done ? '' : ` · ${offline(us)}`}` };
   reasons.sort((a, b) => a.at - b.at); // oldest first: `budget` drops from the front and shows the newest
   const build = (plan) => ({
-    title: cut(`Batch vote ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
+    title: cut(`${gate.parts.length > 1 ? 'Batch vote' : 'Vote'} ${gate.id} · ${ask.task} ${ask.title}`, LIMIT.title),
     // The dropped reasons leave one line that never shrinks (F-T27-35).
     description: plan.reasons < reasons.length ? `${description}\n${plural(reasons.length - plan.reasons, 'more reason')}; sage has them all` : description,
     fields: [...parts.map((field) => field(plan)), ...reasons.slice(reasons.length - plan.reasons).map(({ name, value }) => ({ name, value }))],

@@ -16,7 +16,7 @@ import { loadProjects, pickProject, TYPES } from './projects.js';
 import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 import { auditPathOf, entryOf, forLead, killPathOf, linkOff, openLog, quoted, setLinkOff } from './audit.js';
-import { DRY_RUN, foreign, isTalk, linkOffReply, loadThreads, noRight, readAsk, saveThreads, threadName, threadsPathOf } from './threads.js';
+import { DRY_RUN, foreign, isTalk, linkOffReply, loadThreads, noRight, readAsk, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of the crew counts,
  * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
@@ -176,7 +176,6 @@ export const openAskFiles = (config, projects) => ({ threads: loadThreads(thread
  */
 export function createAsk({ config, channels, projects = loadProjects(config), now = Date.now, log = (line) => process.stderr.write(`${line}\n`), env, audit,
   files = openAskFiles(config, projects), requests }) {
-  const threadsPath = threadsPathOf(config);
   const { threads, auditLog } = files;
   const killPath = killPathOf(config);
   const byName = new Map(projects.map((p) => [p.name, { ...p, tool: sageTool({ sagePath: p.sagePath, project: p.project, ...(env && { env }) }) }]));
@@ -285,7 +284,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
 
   /** Saves the thread map after a change to the thread `thread`; a failure only loses the change at the next restart. */
   function keep(thread) {
-    try { saveThreads(threadsPath, threads); } catch (e) { say(`the thread map could not be saved, so the last change to ${thread} lasts only until the next restart: ${e?.message}`); }
+    try { threads.save(); } catch (e) { say(`the thread map could not be saved, so the last change to ${thread} lasts only until the next restart: ${e?.message}`); }
   }
 
   /**
@@ -310,7 +309,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       return { content: off ? linkOffReply(us) : DRY_RUN };
     }
     if (lead) record(m, { thread, project: t.project, outcome: 'read-ask' });
-    else { t.held.push({ id: m.id, user: m.user.id, roles: keptRoles(place(m)), content: m.content ?? '' }); keep(thread); }
+    else if (t.kind === 'answer') { t.held.push({ id: m.id, user: m.user.id, roles: keptRoles(place(m)), content: m.content ?? '' }); keep(thread); }
     const ask = readAsk(m.content);
     if (ask) return answer({ ...m, ...ask }, t.channel);
     return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : builds(us)}` : POINTER };

@@ -108,7 +108,7 @@ test('T131: the thread map survives a restart: a mention in a thread from before
   const [thread] = b.threads();
   const path = threadsPathOf(b.config);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 1, threads: { [thread]: { kind: 'lead', channel: ASK, project: 'project', by: OWNER, at: T0 } } });
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 2, threads: { [thread]: { kind: 'lead', channel: ASK, project: 'project', by: OWNER, at: T0 } } });
   b.start(); // a new bridge on the same files
   assert.deepEqual(await b.say(OWNER, '<@1> and the logout', { channelId: thread, parentId: ASK }), [[thread, DRY_RUN, NONE]]);
   // A thread map that is a symlink, or not the bridge's, stops the start.
@@ -119,7 +119,7 @@ test('T131: the thread map survives a restart: a mention in a thread from before
   assert.throws(() => b.start(), { message: `the thread map ${path} must be a regular file of this user with mode 0600. Nothing was loaded.` });
   rmSync(path);
   writeFileSync(path, JSON.stringify({ version: 1, threads: { [thread]: { kind: 'admin', channel: ASK, project: 'project', by: OWNER, at: T0 } } }), { mode: 0o600 });
-  assert.throws(() => b.start(), { message: `the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.` });
+  assert.throws(() => b.start(), { message: `the thread map ${path} is not a version 1 or 2 thread map that the bridge wrote. Nothing was loaded.` });
 });
 
 test('T131: a lead\'s talk is logged and gets the dry-run reply; an apprentice in a sage-lead thread is logged as quoted data; no role gets nothing and nothing is logged', async (t) => {
@@ -723,7 +723,7 @@ test('F-T143-7: the thread map refuses a held mention that the bridge did not wr
   const good = JSON.parse(readFileSync(path, 'utf8'));
   assert.deepEqual(good.threads[thread].held.map((h) => h.roles), [[CREW], [CREW]]);
   b.start(); // the map as the bridge wrote it loads
-  const bad = `the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.`;
+  const bad = `the thread map ${path} is not a version 1 or 2 thread map that the bridge wrote. Nothing was loaded.`;
   const held = good.threads[thread].held[0];
   // T232: a held mention keeps the role NAMES (1 to 100 characters, as Discord allows); a map of before T232 with role ids still loads.
   // F-T232-2: Discord counts code points, so a name of 100 emoji (200 UTF-16 units) is one that the bridge saves, and it loads.
