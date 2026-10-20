@@ -991,6 +991,60 @@ test('F-T242-out: a card edit in a thread that a moderator locked leaves the thr
   assert.deepEqual([b.card('M2').components, b.r('M2').shown], [[], 'approved']);
 });
 
+test('T248 S2: a thread that a moderator locked but Discord did not archive gets no card, although sage-bot with Manage Threads could post there: the message is withdrawn as for 50083', async (tt) => {
+  const b = world(tt);
+  await b.mention(JON, '<@1> one', { place: ASK });
+  const thread = b.r('M1').thread;
+  b.place.threads.get(thread).locked = true; // locked, not archived: Discord takes a post of a bot with Manage Threads here
+  const before = b.place.in(thread).length;
+  const home = b.place.in(CHANNEL).length;
+  const target = b.say(thread, MAYA, 'and a PDF export');
+  const told = await b.send(JON, target, { place: thread, parentId: ASK });
+  const shut = 'its card cannot be posted: its thread on Discord is locked, or the bot cannot see it';
+  assert.equal(told.at(-1).content, `I could not post the card of M2 in <#${thread}>: the thread is locked, or sage-bot cannot see it. sage-bot withdrew M2, so nothing goes to sage.`);
+  assert.deepEqual([b.r('M2').status, b.r('M2').card, b.r('M2').decidedBy, b.r('M2').reason, b.r('M2').shown], ['withdrawn', null, 'sage-bot', shut, 'withdrawn']);
+  assert.equal(b.place.in(thread).length, before + 1); // only Maya's own message: sage-bot posts nothing in the locked thread
+  assert.deepEqual(b.place.in(CHANNEL).slice(home).map((id) => b.place.latest(id)), [{ content: `**M2 from Jon withdrawn** by sage-bot (${shut}). Nothing goes to sage.`, allowedMentions: NONE, nonce: 'M2:withdrawn', enforceNonce: true }]);
+  // The fake reflects Discord: the same post without the lock check goes through.
+  assert.match(await b.place.post(thread, { content: 'a post of a bot with Manage Threads' }), /^\d+$/);
+});
+
+test('T248 C2: a message decided after a moderator locked its thread gets its status line once in the home channel, with no thread text; the thread gets nothing', async (tt) => {
+  const b = world(tt);
+  await b.mention(JON, '<@1> one', { place: ASK });
+  await b.mention(MAYA, '<@1> two', { place: ASK });
+  const [shut, open] = [b.r('M1').thread, b.r('M2').thread];
+  b.place.setLocked(shut, true); // locked and archived: a post there is refused with 50083
+  b.place.threads.get(open).locked = true; // locked, not archived: a post there would go through
+  const sizes = [b.place.in(shut).length, b.place.in(open).length];
+  const home = b.place.in(CHANNEL).length;
+  await b.press(OWNER, 'ob1:approve:M1');
+  await b.press(OWNER, 'ob1:decline:M2');
+  await b.outbox.loop();
+  await b.outbox.loop();
+  assert.deepEqual([b.r('M1').shown, b.r('M2').shown], ['approved', 'declined']);
+  assert.deepEqual([b.place.in(shut).length, b.place.in(open).length], sizes);
+  assert.deepEqual(b.place.in(CHANNEL).slice(home).map((id) => b.place.latest(id)), [
+    { content: `**M1 from Jon approved** by Erick. It waits for sage sessions (T159). sha256 ${b.r('M1').payloadSha256.slice(0, 12)}`, allowedMentions: NONE, nonce: 'M1:approved', enforceNonce: true },
+    { content: '**M2 from Maya declined** by Erick. Nothing goes to sage.', allowedMentions: NONE, nonce: 'M2:declined', enforceNonce: true },
+  ]);
+});
+
+test('T248 C2: the owner\'s own message in a locked thread gets its line in the home channel without payload.txt, so no thread text leaves the thread', async (tt) => {
+  const b = world(tt);
+  await b.mention(JON, '<@1> one', { place: ASK });
+  const thread = b.r('M1').thread;
+  b.place.threads.get(thread).locked = true;
+  const home = b.place.in(CHANNEL).length;
+  const target = b.say(thread, MAYA, 'a secret plan in the thread');
+  await b.send(OWNER, target, { place: thread, parentId: ASK });
+  const r = b.r('M2');
+  assert.deepEqual([r.status, r.shown, r.card], ['approved', 'approved', null]);
+  assert.deepEqual(b.place.in(CHANNEL).slice(home).map((id) => b.place.latest(id)), [
+    { content: `**M2 from Erick is recorded** with 0 earlier messages. It waits for sage sessions (T159). sha256 ${r.payloadSha256.slice(0, 12)}`, allowedMentions: NONE, nonce: 'M2:approved', enforceNonce: true },
+  ]);
+});
+
 test('F-T247-36, F-T247-37: the Hidden field names the code points of each message, the writer of a forwarded message, at most 4 messages, and the blank filler U+16FE4', async (tt) => {
   const b = world(tt);
   // The blank filler on a letter: the card drops and names it, the payload escapes it.

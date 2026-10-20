@@ -148,7 +148,7 @@ export function statusLine(r, us, home = false) {
       declined: `**${it} declined** by ${us.owner}${reasonOf(r)}. Nothing goes to sage.`,
       withdrawn: `**${it} withdrawn** by ${decider(r, us)}${reasonOf(r)}. Nothing goes to sage.`,
     }[r.status];
-  return { content, allowedMentions: NO_MENTIONS, ...(own && { files: [payloadFile(r)] }) };
+  return { content, allowedMentions: NO_MENTIONS, ...(own && !home && { files: [payloadFile(r)] }) }; // payload.txt holds thread text: never home
 }
 
 /** The private notes of the outbox, each a function of `us` and the message. */
@@ -213,6 +213,14 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
   }
   const send = (what, target, payload, nonce, done = NO_EDIT) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), (c) => done.has(c));
   /**
+   * A post in the thread of a message, or null when the thread is shut: a moderator locked it, or Discord refuses the post (SHUT). sage-bot
+   * with Manage Threads could post in a locked thread that is not archived, so the lock is read first (T248 S2, as `edit`).
+   */
+  const inThread = async (what, thread, payload, nonce) => {
+    const locked = await discord.locked(thread).catch((e) => { if (SHUT.has(e?.code)) return true; throw e; });
+    return locked ? null : send(what, thread, payload, nonce, SHUT);
+  };
+  /**
    * An edit. Discord refuses an edit in a thread that it archived (50083): the thread opens again first. A thread that a moderator locked
    * stays as it is (F-T242-out, as src/requestFlow.js in T242): Discord would open it for sage-bot, so the lock is read first.
    */
@@ -236,13 +244,13 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
     }
   }
   /**
-   * The status line of a message: in its thread, or in the home channel when sage-bot withdrew it or its thread is gone, so that the
-   * line names the sender. Each line once (`nonce`), wherever it goes.
+   * The status line of a message: in its thread, or in the home channel when sage-bot withdrew it, or its thread is gone or shut (a
+   * moderator locked it: T248 C2), so that the line names the sender. Each line once (`nonce`), wherever it goes.
    */
   async function line(r, nonce) {
     const what = `the status line of ${r.id}`;
     if (r.decidedBy !== 'sage-bot') {
-      try { return await send(what, r.thread, statusLine(r, us), nonce, SHUT); } catch (e) { if (!lost(e)) throw e; }
+      try { const posted = await inThread(what, r.thread, statusLine(r, us), nonce); if (posted) return posted; } catch (e) { if (!lost(e)) throw e; }
     }
     return send(what, config.channelId, statusLine(r, us, true), nonce);
   }
@@ -252,7 +260,7 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
       try {
         if (!r.card) {
           const posted = { ...outboxCard(r, { ownerId: config.ownerId, us, ping: true }), files: [payloadFile(r)] };
-          r = await once(`${mid}:card`, (n) => send(`the card of ${mid}`, r.thread, posted, n, SHUT),
+          r = await once(`${mid}:card`, (n) => inThread(`the card of ${mid}`, r.thread, posted, n),
             (card) => (card ? setDiscord(config, mid, { card, shown: 'pending' }) : withdrawLost(r, SHUT_OUT))); // SHUT: no card, ever (F-T247-23)
         } else if (r.shown === 'pending') await call(`the read of the card of ${mid}`, () => discord.seen(r.thread, r.card)).catch((e) => { if (lost(e)) throw e; });
       } catch (e) {
