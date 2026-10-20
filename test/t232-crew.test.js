@@ -11,7 +11,7 @@ import { tempFolder } from './temp-folder.js';
 import { CREW, crewWarning, namesOf, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
 import { appOf, rolesOf, watchCrew } from '../src/discord.js';
 import { createBridge } from '../src/bridge.js';
-import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
+import { fakeCommand, fakeDiscord } from '../src/fake-discord.js';
 import { askCommand, createAsk, STOP, STOP_CANCEL } from '../src/ask.js';
 import { auditPathOf, killPathOf, verifyLog } from '../src/audit.js';
 import { openChannels, withHome } from '../src/channels.js';
@@ -21,7 +21,6 @@ import { peopleOf } from '../src/handle.js';
 import { MINUTE, openGate, step } from '../src/vote.js';
 import { CHANNEL, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
 const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
-const LINK_OFF = 'The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only Erick can turn the link on again, at the terminal. Read asks still work.';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const GUILD = '200000000000000001';
@@ -214,11 +213,6 @@ function asks(t) {
       update: async (p) => { replies.push(p.content); }, reply: async (p) => { replies.push(p.content); } });
     return replies;
   };
-  b.talk = async (user, roles) => {
-    const place = fakeDiscord([]);
-    await b.ask.mention(fakeMention({ user, roles, channelId: ASK, content: '<@1> talk: the login', place }));
-    return [...place.where.keys()].map((id) => place.latest(id)?.content).filter(Boolean);
-  };
   b.flag = killPathOf(b.config);
   return b;
 }
@@ -232,8 +226,7 @@ test('the crew\'s emergency stop: a crew member\'s /sage stop and its confirm tu
   assert.equal(existsSync(b.flag), true);
   assert.match(readFileSync(b.flag, 'utf8'), new RegExp(MAYA)); // the flag says who
   assert.deepEqual(verifyLog(auditPathOf(b.config)).lines.map((l) => [l.author, l.outcome]), [[MAYA, 'link-off-set']]);
-  // The owner's talk now gets the fixed reply: the link is off, with no step of the owner.
-  assert.deepEqual(await b.talk(OWNER, [CREW]), ['<@1> talk: the login', LINK_OFF]); // the message, then the reply in its thread
+  // While the link is off, Approve is refused and the owner's own message waits too: test/t247-outbox.test.js.
 });
 
 test('the crew\'s emergency stop: a crew member cannot turn the link on again; only the terminal (the owner) can', async (t) => {

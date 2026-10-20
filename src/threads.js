@@ -1,6 +1,7 @@
 // The threads that sage-bot opens for a mention (T131): each @sage-bot mention in a registered channel opens a public thread from the
-// message, and the request and its answer live there. An answer thread holds read asks: the bridge answers them itself, with no AI. An
-// owner thread (kind 'lead') is the owner's "talk": in this step it only records each message in the audit log and says that sessions are not on yet.
+// message, and the request and its answer live there. In such a thread (kind 'answer') a read ask gets its answer from the bridge, with
+// no AI, and any other mention is a message to sage that waits for the owner (T247, src/outboxFlow.js). A mention in a thread that
+// sage-bot does not own opens one of these threads from a line in the home channel (R918 C7).
 // No sage session starts from this code, and no code here can start one: it has no process port at all.
 // A task thread (kind 'task', T245) is the thread of a request that the owner approved: the bridge posts the design questions of its
 // task there, as votes of 10 minutes.
@@ -28,13 +29,13 @@ class ThreadMap extends Map {
 }
 
 /**
- * The thread map, as a ThreadMap: thread id → { kind: 'answer' | 'lead', channel, project, by, at }, and for an answer thread `held`: the
- * mentions of the crew there, each { id, user, roles, content }, in order. When the owner talks in an answer thread, it becomes an owner
- * thread ('lead', the name from before T232) and its held mentions go into the audit log as quoted data (G27). A task thread (T245) is
- * { kind: 'task', task, request, project, folder, channel }: the sage task id, the request id, the project's name and folder (G45 A) and
- * the registered channel of the thread. A version 1 file (before T245) loads as it is: it has no task threads. An empty map when there is
- * no file. Throws, and the bridge stops, for a file that is not this user's 0600 file, a symlink, bad JSON or an entry that the bridge did
- * not write.
+ * The thread map, as a ThreadMap: thread id → { kind: 'answer', channel, project, by, at } for a mention's thread (with `origin`, the
+ * thread that sage-bot does not own, for a thread that a move opened: R918 C7), or { kind: 'task', task,
+ * request, project, folder, channel } for a task thread (T245): the sage task id, the request id, the project's name and folder (G45 A) and
+ * the registered channel of the thread. A file of before T247 loads too: its owner threads (kind 'lead') load as answer threads, and the
+ * held mentions of an answer thread are dropped (the outbox takes the context of a message from Discord now); the next save writes the
+ * entries as they load. A version 1 file (before T245) has no task threads. An empty map when there is no file. Throws, and the bridge
+ * stops, for a file that is not this user's 0600 file, a symlink, bad JSON or an entry that the bridge did not write.
  */
 export function loadThreads(path) {
   const text = readOwn(path, 'thread map');
@@ -48,13 +49,16 @@ export function loadThreads(path) {
   const isHeld = (h) => shape(h) === 'content,id,roles,user' && SNOWFLAKE.test(h.id) && SNOWFLAKE.test(h.user) && typeof h.content === 'string'
     && Array.isArray(h.roles) && h.roles.every((r) => typeof r === 'string' && r !== '' && Array.from(r).length <= 100);
   const isTask = (t) => TASK_ID.test(t.task) && REQUEST_ID.test(t.request) && typeof t.folder === 'string' && t.folder.startsWith('/');
-  const isMention = (t) => SNOWFLAKE.test(t.by) && Number.isSafeInteger(t.at) && (t.kind !== 'answer' || (Array.isArray(t.held) && t.held.every(isHeld)));
+  const isMention = (t) => SNOWFLAKE.test(t.by) && Number.isSafeInteger(t.at) && (t.held === undefined || (Array.isArray(t.held) && t.held.every(isHeld)))
+    && (t.origin === undefined || SNOWFLAKE.test(t.origin));
+  const kinds = { answer: ['at,by,channel,kind,project', 'at,by,channel,kind,origin,project', 'at,by,channel,held,kind,project'], lead: ['at,by,channel,kind,project'],
+    ...(data.version === 2 && { task: ['channel,folder,kind,project,request,task'] }) };
   for (const [id, t] of Object.entries(data.threads)) {
-    const kinds = { answer: 'at,by,channel,held,kind,project', lead: 'at,by,channel,kind,project', ...(data.version === 2 && { task: 'channel,folder,kind,project,request,task' }) };
-    if (!SNOWFLAKE.test(id) || shape(t) !== kinds[t?.kind] || !SNOWFLAKE.test(t.channel) || typeof t.project !== 'string'
+    if (!SNOWFLAKE.test(id) || !kinds[t?.kind]?.includes(shape(t)) || !SNOWFLAKE.test(t.channel) || typeof t.project !== 'string'
       || !(t.kind === 'task' ? isTask(t) : isMention(t))) throw bad;
   }
-  return new ThreadMap(path, Object.entries(data.threads));
+  const now = (t) => (t.kind === 'task' ? t : { kind: 'answer', channel: t.channel, project: t.project, by: t.by, at: t.at, ...(t.origin && { origin: t.origin }) });
+  return new ThreadMap(path, Object.entries(data.threads).map(([id, t]) => [id, now(t)]));
 }
 
 /**
@@ -79,9 +83,6 @@ export function threadName(text) {
   return name || 'sage-bot request';
 }
 
-/** Whether a mention asks to talk to sage: it holds the word "talk". Only the owner's talk opens an owner thread. */
-export const isTalk = (text) => /\btalk\b/i.test(words(text));
-
 /**
  * The read ask in a mention, as a /sage subcommand and its options: a task id (T7) asks for that task; else the first of the words
  * board, gates (or questions) and files; null when it names none of them.
@@ -95,11 +96,5 @@ export function readAsk(text) {
   return { sub: word === 'questions' ? 'gates' : word, options: {} };
 }
 
-/** The reply to the owner's talk while sessions are not on (this step is a dry run). */
-export const DRY_RUN = 'Recorded in the audit log. Sessions with sage are not on yet, so nothing goes to sage. Use /sage board, gates, task or files to read the records.';
-/** The reply to a talk while the kill switch is set. `us` is src/crew.js namesOf (T244). */
-export const linkOffReply = (us) => `The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only ${us.owner} can turn the link on again, at the terminal. Read asks still work.`;
-/** The reply in a thread that sage-bot did not open, or in a forum post. */
-export const foreign = (channel) => `I answer in my own threads. Mention me in <#${channel}> and I open one for you.`;
 /** The reply in place when sage-bot lacks a right for its thread. `us` is src/crew.js namesOf (T244). */
 export const noRight = (right, us) => `I cannot answer in a thread here: ${us.bot} lacks the right "${right}" in this channel. Ask ${us.owner} to give it to ${us.bot}'s role.`;

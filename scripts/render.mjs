@@ -23,10 +23,10 @@ const rows = (components) => components.map((r) => `<div class="row">${r.compone
   `<button class="${STYLE[b.style]}"${b.disabled ? ' disabled' : ''} title="${esc(b.custom_id)}">${esc(b.label)}</button>`).join('')}</div>`).join('');
 const head = (now) => `<span class="av">sb</span><div class="body"><div class="meta"><b>sage bridge</b> <span class="app">APP</span> · ${hhmm(now / 1000)}</div>`;
 /** The text, the card (an embed) and the buttons of a message, each when it has one. */
-const parts = ({ content, embeds: [e] = [], components = [] }, now) => `${content ? `<div>${md(content, now)}</div>` : ''}${e ? `
+const parts = ({ content, embeds: [e] = [], components = [], files = [] }, now) => `${content ? `<div>${md(content, now)}</div>` : ''}${e ? `
   <div class="embed" style="border-color:#${e.color.toString(16).padStart(6, '0')}"><div class="title">${esc(e.title)}</div><div class="desc">${md(e.description, now)}</div>
   ${(e.fields ?? []).map((f) => `<div class="field"><div class="fname">${esc(f.name)}</div><div class="fvalue">${md(f.value, now)}</div></div>`).join('')}
-  ${e.footer ? `<div class="footer">${esc(e.footer.text)}</div>` : ''}</div>` : ''}${rows(components)}`;
+  ${e.footer ? `<div class="footer">${esc(e.footer.text)}</div>` : ''}</div>` : ''}${files.map((f) => `<div class="footer">Attached file: ${esc(f.name)}</div>`).join('')}${rows(components)}`;
 /** A message of the bridge. */
 export const message = (m, now) => `<div class="msg">${head(now)}${parts(m, now)}</div></div>`;
 /** A private note: only the person who pressed sees it. It can have a card, as the confirm of /sage request has (F-T228-2). */

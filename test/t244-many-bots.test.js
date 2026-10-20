@@ -205,7 +205,7 @@ test('two bots: a vote-card press for a gate that only B holds gets A\'s unknown
   assert.deepEqual(i.replies.map((x) => [x.kind, x.content, x.flags]), [['reply', 'I do not know this button or its question. Nothing changed.', PRIVATE]]);
 });
 
-test('two bots: a mention of B in A\'s thread is not A\'s; A answers a mention of A in B\'s thread only with the pointer to its channel', async (tt) => {
+test('two bots: a mention of B in A\'s thread is not A\'s; a mention of A in B\'s thread moves to a thread of A (T247, R918 C7)', async (tt) => {
   const { fake, a, b } = twoBots(tt);
   // Jon opens a thread of A with a mention of A in #ask-sage.
   const opened = fakeMention({ user: JON, roles: ROLES[JON], channelId: ASK, content: `<@${BOT_A}> board`, place: fake });
@@ -224,12 +224,17 @@ test('two bots: a mention of B in A\'s thread is not A\'s; A answers a mention o
   routes({ config: b.config, ask: spy('B'), fetch, botId: BOT_B }).message(message([BOT_B], threadA));
   assert.deepEqual(asked, [['B', threadA]]);
   assert.deepEqual([fake.posts.length, mapA()], before);
-  // A thread of B is not in A's thread map: a mention of A there gets the pointer, in place, and A keeps no record of the thread.
+  // A thread of B is not in A's thread map: a mention of A there moves to a new thread of A, from a line in A's home channel; the thread
+  // of B gets one line that pings nobody, and A keeps no record of B's thread.
   const threadB = '400000000000000555';
   const inB = fakeMention({ user: JON, roles: ROLES[JON], channelId: threadB, parentId: ASK, content: `<@${BOT_A}> board`, place: fake });
   await a.ask.mention(inB);
-  assert.deepEqual(inB.replies.map((x) => x.content), [`I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`]);
-  assert.doesNotMatch(mapA(), new RegExp(threadB));
+  const movedTo = [...fake.threads.keys()].at(-1);
+  assert.deepEqual(inB.replies, []);
+  assert.deepEqual(fake.in(threadB).map((id) => fake.latest(id)).filter((p) => p.allowedMentions), [{ content: `Moved to sage-bot: <#${movedTo}>`, allowedMentions: { parse: [] } }]);
+  const map = JSON.parse(mapA()).threads;
+  assert.equal(map[movedTo].origin, threadB); // the next mention there goes to the same thread of A
+  assert.equal(threadB in map, false);
 });
 
 test('two bots: each bot has its own request file and thread map; a request on A is not in B\'s file', async (tt) => {

@@ -4,12 +4,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createAsk } from '../src/ask.js';
+import { createAsk, openAskFiles } from '../src/ask.js';
 import { auditPathOf, openLog, verifyLog } from '../src/audit.js';
 import { openChannels, withHome } from '../src/channels.js';
 import { CREW, isOwner, keptRoles, placeOf } from '../src/crew.js';
 import { fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { loadProjects } from '../src/projects.js';
+import { outboxPathOf } from '../src/outbox.js';
+import { createOutboxFlow } from '../src/outboxFlow.js';
 import { writeWhole } from '../src/state.js';
 import { threadsPathOf } from '../src/threads.js';
 import { openGate, step } from '../src/vote.js';
@@ -30,8 +32,12 @@ function world(t) {
   b.config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
   b.place = fakeDiscord([]);
   b.start = () => {
-    const channels = openChannels(b.config, loadProjects(b.config));
-    b.ask = createAsk({ config: withHome(b.config, channels), channels, env: b.env, now: () => T0, log: () => {}, audit: async () => {} });
+    const projects = loadProjects(b.config);
+    const channels = openChannels(b.config, projects);
+    const config = withHome(b.config, channels);
+    const files = openAskFiles(config, projects); // one audit log for the ask and the outbox (T247)
+    const outbox = createOutboxFlow({ config, files, now: () => T0, log: () => {}, discord: { post: b.place.post, edit: b.place.edit, unarchive: b.place.unarchive } });
+    b.ask = createAsk({ config, channels, env: b.env, now: () => T0, log: () => {}, audit: async () => {}, files, outbox });
   };
   b.start();
   b.say = (user, roles, content, at = {}) => b.ask.mention(fakeMention({ user, roles, content, place: b.place, channelId: ASK, ...at }));
@@ -59,26 +65,28 @@ test('F-T232-13: keptRoles keeps only the crew name, and never any other text of
 
 test('F-T232-13: the audit log keeps only the crew name: no role name with a bidi or zero-width character, and no unrelated role name', async (t) => {
   const b = world(t);
-  await b.say(OWNER, [CREW, RLO, ZW, PRIVATE], '<@1> talk: the login');
-  await b.say(OWNER, [RLO, ZW, PRIVATE], '<@1> talk: the board');
+  await b.say(OWNER, [CREW, RLO, ZW, PRIVATE], '<@1> fix the login');
+  await b.say(OWNER, [RLO, ZW, PRIVATE], '<@1> board');
+  await b.say(MAYA, [CREW, RLO, ZW, PRIVATE], '<@1> the login breaks');
   const { lines, broken } = b.log();
   assert.equal(broken, null);
-  assert.deepEqual(lines.map((x) => [x.author, x.roles, x.outcome]), [[OWNER, [CREW], 'dry-run'], [OWNER, [], 'dry-run']]);
+  assert.deepEqual(lines.map((x) => [x.author, x.roles, x.outcome]), [[OWNER, [CREW], 'M1 approved'], [OWNER, [], 'read-ask'], [MAYA, [CREW], 'M2 pending']]);
   assert.doesNotMatch(b.raw(), HIDDEN);
 });
 
-test('F-T232-13: a held crew mention keeps only the crew name in the thread map, and its log line has only that name', async (t) => {
+test('F-T232-13, T247: a crew message to sage keeps no role name: the outbox has its place (crew), the thread map no role, and its log line only the crew name', async (t) => {
   const b = world(t);
   await b.say(MAYA, [CREW, RLO, PRIVATE], '<@1> show the board');
   const [thread] = [...b.place.threads.keys()];
   const at = { channelId: thread, parentId: ASK };
   await b.say(MAYA, [CREW, ZW, PRIVATE], '<@1> the login breaks', at);
   const map = readFileSync(threadsPathOf(b.config), 'utf8');
-  assert.deepEqual(JSON.parse(map).threads[thread].held.map((h) => h.roles), [[CREW], [CREW]]);
-  assert.doesNotMatch(map, HIDDEN);
-  b.start(); // the saved form loads again
-  await b.say(OWNER, [], '<@1> talk: fix the login', at);
-  assert.deepEqual(b.log().lines.map((x) => [x.author, x.roles, x.outcome]), [[MAYA, [CREW], 'earlier'], [MAYA, [CREW], 'earlier'], [OWNER, [], 'dry-run']]);
+  const outbox = readFileSync(outboxPathOf(b.config), 'utf8');
+  assert.deepEqual(JSON.parse(outbox).messages.map((r) => [r.author, r.place]), [[MAYA, 'crew']]);
+  assert.doesNotMatch(map + outbox, HIDDEN);
+  b.start(); // the saved forms load again
+  await b.say(OWNER, [], '<@1> fix the login', at);
+  assert.deepEqual(b.log().lines.map((x) => [x.author, x.roles, x.outcome]), [[MAYA, [CREW], 'M1 pending'], [OWNER, [], 'M2 approved']]);
   assert.doesNotMatch(b.raw(), HIDDEN);
 });
 
@@ -95,12 +103,13 @@ test('F-T232-13: an audit log and a thread map from before this change still loa
     { id: '500000000000000032', user: MAYA, roles: [CREW, RLO, PRIVATE], content: '<@1> names' },
   ] } } })}\n`);
   b.start();
-  await b.say(OWNER, [], '<@1> talk: go', { channelId: THREAD, parentId: ASK });
+  await b.say(OWNER, [], '<@1> go', { channelId: THREAD, parentId: ASK });
   const { lines, broken } = b.log();
   assert.equal(broken, null);
+  // T247: the held mentions of the old map are dropped as it loads (the outbox reads the context from Discord now).
   assert.deepEqual(lines.map((x) => [x.author, x.roles, x.outcome]), [
     [MAYA, ['300000000000000099'], 'dry-run'], [MAYA, [CREW, RLO], 'dry-run'], // the old lines, as they were
-    [JON, [], 'earlier'], [MAYA, [CREW], 'earlier'], [OWNER, [], 'dry-run'],
+    [OWNER, [], 'M1 approved'],
   ]);
   assert.doesNotMatch(b.raw().split('\n').slice(2).join('\n'), HIDDEN);
 });

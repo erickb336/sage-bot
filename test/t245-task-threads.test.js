@@ -208,7 +208,7 @@ test('when Discord refuses the card in the task thread, it goes to the home chan
   assert.equal(b.bridge.entry(id).gate.limit, 10 * MINUTE);
 });
 
-test('a version 1 thread map loads as it is and saves as version 2; a task entry in a version 1 file, or a bad task entry, is refused', async (tt) => {
+test('a version 1 thread map loads and saves as version 2 (T247: an owner thread loads as an answer thread, and held mentions are dropped); a task entry in a version 1 file, or a bad task entry, is refused', async (tt) => {
   const b = setup();
   tt.after(() => rmSync(b.root, { recursive: true, force: true }));
   const path = threadsPathOf({ statePath: b.statePath });
@@ -219,11 +219,13 @@ test('a version 1 thread map loads as it is and saves as version 2; a task entry
   };
   writeWhole(path, JSON.stringify({ version: 1, threads: v1 }));
   const map = loadThreads(path);
-  assert.deepEqual(Object.fromEntries(map), v1);
+  const now = { [A]: { kind: 'answer', channel: ASK, project: NAME, by: MAYA, at: T0 }, [L]: { kind: 'answer', channel: ASK, project: NAME, by: OWNER, at: T0 } };
+  assert.deepEqual(Object.fromEntries(map), now);
   const task = { kind: 'task', task: 'T5', request: 'RQ1', project: NAME, folder: b.project, channel: ASK };
   map.set(K, task);
   map.save();
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 2, threads: { ...v1, [K]: task } });
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 2, threads: { ...now, [K]: task } });
+  assert.deepEqual(Object.fromEntries(loadThreads(path)), { ...now, [K]: task });
   assert.deepEqual(loadThreads(path).get(K), task);
   const refused = `the thread map ${path} is not a version 1 or 2 thread map that the bridge wrote. Nothing was loaded.`;
   for (const [version, entry] of [[1, task], [2, { ...task, task: 'T5x' }], [2, { ...task, request: 'R1' }], [2, { ...task, folder: 'relative' }],
@@ -261,7 +263,7 @@ test('the routes take a press of the bridge in a task thread of any registered c
   const on = routes({ config: CONFIG, ask: {}, requests: {}, bridge: { interaction: (i) => { reached.push(i.channelId); return b.bridge.interaction(i); } },
     fetch: async () => ({ isThread: () => true, parentId: ASK }), botId: '1', threads: b.threads, channels: b.channels });
   const pressIn = (channelId) => ({ ...fakeInteraction({ user: MAYA, customId: `press:${id}:0:1`, message: b.discord.cardOf(id) }), guildId: GUILD, channelId,
-    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false });
+    isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => true, isModalSubmit: () => false });
   const unknown = '900000000000000077'; // another thread of the same registered channel
   await on.interaction(pressIn(unknown));
   assert.deepEqual(reached, []);
@@ -307,7 +309,7 @@ test('after the owner unregisters its channel, a task thread takes no card, ping
   const on = routes({ config: CONFIG, ask: {}, requests: {}, bridge: { interaction: (i) => { reached.push(i.channelId); return b.bridge.interaction(i); } },
     fetch: async () => ({ isThread: () => true, parentId: ASK }), botId: '1', threads: b.threads, channels: b.channels });
   const pressIn = (channelId) => ({ ...fakeInteraction({ user: MAYA, customId: `press:${id}:0:1`, message: b.discord.cardOf(id) }), guildId: GUILD, channelId,
-    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false });
+    isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => true, isModalSubmit: () => false });
   await on.interaction(pressIn(b.thread));
   assert.deepEqual(reached, []);
   assert.equal(b.bridge.entry(id).gate.parts[0].ballots.length, 0);

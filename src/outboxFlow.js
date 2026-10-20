@@ -1,0 +1,271 @@
+// The outbox on Discord (T247, issue 60 PR 7): the approval card of a crew member's message to sage, in the thread of the message, with
+// Approve, Decline and Withdraw and the exact payload as payload.txt; the status line in the thread when the state changes; and the
+// sync loop that posts each card and line that the outbox file holds and Discord does not show yet. Every rule of a message is in
+// src/outbox.js; src/ask.js decides where a message goes (its thread) and calls `send`. Nothing here sends anything to a model.
+// Who may do what (src/crew.js): only the owner (`ownerId`, by user id, never a role) approves or declines (R918 C1); only the sender
+// withdraws, while the message waits. Anyone else gets notCrew, privately.
+// A press is trusted only through the server side (R918 C2): its custom_id must parse (an allow-list), the message must be in the outbox,
+// the button must be on the message's own card, and the status must still take the move, so a forged or replayed press does nothing.
+// Who reads the card: people on Discord only. The text and the names show through `safe` and `cut`; the model reads only the payload.
+import { MessageFlags } from 'discord.js';
+import { forLead, quoted, recorder } from './audit.js';
+import { apiError } from './bridge.js';
+import { button, cut, ephemeral, LIMIT, NO_MENTIONS, offline, safe, stamp } from './cards.js';
+import { CREW, namesOf, notCrew, personName, placeOf } from './crew.js';
+import { forTerminal } from './clean.js';
+import { ActionRowBuilder, ButtonStyle } from 'discord.js';
+import {
+  addMessage, CONTEXT, decide, find, fullNote, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, setDiscord, short, windowOf,
+} from './outbox.js';
+
+const SNOWFLAKE = /^\d{17,20}$/;
+/** Discord's codes for a place or a message that is gone, or a locked thread: an edit or a post there can never work. */
+const NO_EDIT = new Set([10003, 10008, 50001, 50083]);
+/** At most this many pages of 100 messages are read for the context of one message (bots and webhooks are skipped in them). */
+export const PAGES = 3;
+const COLOR = { pending: 0x6b4fd8, approved: 0x2e8b57, declined: 0xb33a3a, withdrawn: 0x8a8a8a };
+
+/** The custom_id of a button of an approval card: `ob1:<action>:<message id>`. `ob1` is the version of this format. */
+const ACTIONS = ['approve', 'decline', 'withdraw'];
+export function outboxId(action, mid) {
+  if (!ACTIONS.includes(action) || !MESSAGE_ID.test(mid)) throw new TypeError(`no outbox custom_id for ${action} ${mid}`);
+  return `ob1:${action}:${mid}`;
+}
+/** The action and message id of an outbox custom_id, or null for anything else. */
+export function parseOutboxId(text) {
+  const m = /^ob1:([a-z]+):(M\d+)$/.exec(String(text));
+  if (!m) return null;
+  try { return outboxId(m[1], m[2]) === text ? { action: m[1], id: m[2] } : null; } catch { return null; }
+}
+
+/** The label of a place for the payload and the card: 'owner', 'crew' or 'not crew' (src/crew.js placeOf). */
+export const placeLabel = (p) => (p.owner ? 'owner' : p.crew ? 'crew' : 'not crew');
+/** A Discord name for the record: src/crew.js personName, else "member" and the last 4 digits of the id (never the raw id). */
+export const nameFor = (name, user) => personName(name) || `member ${String(user).slice(-4)}`;
+/** The sender as the card shows it, with the person whose message they send when it is not theirs. */
+const fromLine = (r) => `${safe(r.name)} (${r.place})${r.quote ? `, sending the message of ${safe(r.quote.name)} (${r.quote.place})` : ''}`;
+const kb = (r) => (Buffer.byteLength(r.payload) / 1024).toFixed(1);
+const earlier = (n) => `${n} earlier message${n === 1 ? '' : 's'}`;
+/** The exact payload as a file of the card. */
+const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
+
+/**
+ * The approval card of a message, in its thread. While it waits: Approve, Decline and Withdraw, and the first post pings the owner once
+ * (`ping`); decided: no buttons. The payload goes once, as payload.txt, with the first post; an edit keeps it (discord.js keeps the
+ * attachments of a message that an edit does not name).
+ * @param {object} r  a record of src/outbox.js  @param {{ ownerId: string, us: { owner: string, Owner: string, bot: string }, ping?: boolean }} o
+ */
+export function outboxCard(r, { ownerId, us, ping = false }) {
+  const open = r.status === 'pending';
+  const status = {
+    pending: `Waiting for ${us.owner}`,
+    approved: `**Approved by ${us.owner} at ${stamp(r.decidedAt)}.** It waits for sage sessions (T159).`,
+    declined: `**Declined by ${us.owner} at ${stamp(r.decidedAt)}.** Nothing goes to sage.`,
+    withdrawn: `**Withdrawn by ${safe(r.name)} at ${stamp(r.decidedAt)}.** Nothing goes to sage.`,
+  }[r.status];
+  const embed = {
+    title: cut(`Message ${r.id} to sage · ${r.task ? `${r.kind} of ${r.task}` : r.kind} · ${safe(r.project)}`, LIMIT.title),
+    description: cut(safe(r.text) || '(no visible text: see payload.txt)', 1000),
+    fields: [
+      { name: 'From', value: cut(fromLine(r), LIMIT.value) },
+      { name: 'Context', value: `with ${earlier(r.context.length)}, ${kb(r)} KB, see payload.txt` },
+      { name: 'sha256 of payload.txt', value: short(r.payloadSha256) },
+      { name: 'Status', value: status },
+    ],
+    ...(open && { footer: { text: `Only ${us.owner} approves or declines. The sender can withdraw it while it waits. sage gets payload.txt exactly, `
+      + `after one line that says who approved it. ${offline(us)}` } }),
+    color: COLOR[r.status],
+  };
+  const components = open ? [new ActionRowBuilder().addComponents(
+    button(outboxId('approve', r.id), 'Approve', ButtonStyle.Success), button(outboxId('decline', r.id), 'Decline', ButtonStyle.Danger),
+    button(outboxId('withdraw', r.id), 'Withdraw', ButtonStyle.Secondary)).toJSON()] : [];
+  const pinged = ping && open;
+  return {
+    content: pinged ? `<@${ownerId}> a message to sage waits for you.` : '',
+    embeds: [embed], components,
+    allowedMentions: pinged ? { parse: [], users: [ownerId] } : NO_MENTIONS,
+  };
+}
+
+/** The status line in the thread after a change. No ping. The owner's own message, approved at once, has no card: its line has payload.txt. */
+export function statusLine(r, us) {
+  const own = r.status === 'approved' && !r.card;
+  const content = own ? `**${r.id} from ${us.owner} is recorded** with ${earlier(r.context.length)}. It waits for sage sessions (T159). sha256 ${short(r.payloadSha256)}`
+    : {
+      approved: `**${r.id} approved** by ${us.owner}. It waits for sage sessions (T159). sha256 ${short(r.payloadSha256)}`,
+      declined: `**${r.id} declined** by ${us.owner}. Nothing goes to sage.`,
+      withdrawn: `**${r.id} withdrawn** by ${safe(r.name)}. Nothing goes to sage.`,
+    }[r.status];
+  return { content, allowedMentions: NO_MENTIONS, ...(own && { files: [payloadFile(r)] }) };
+}
+
+/** The private notes of the outbox, each a function of `us` and the message. */
+export const OUTBOX_NOTES = {
+  notCard: (us, r) => `This button is not on the card of ${r.id}. Nothing changed.`,
+  notOwner: (us) => `Only ${us.owner} approves or declines a message to sage. Nothing changed.`,
+  notSender: (us, r) => `Only ${safe(r.name)}, who sent ${r.id}, can withdraw it. Nothing changed.`,
+  late: (us, r) => `${r.id} was already ${r.status} at ${stamp(r.decidedAt)}. Nothing changed.`,
+  approved: (us, r) => `You approved ${r.id}. It waits for sage sessions (T159).`,
+  declined: (us, r) => `You declined ${r.id}. Nothing goes to sage.`,
+  withdrawn: (us, r) => `You withdrew ${r.id}. Nothing goes to sage.`,
+  broken: (us) => `Something went wrong on the bridge, so I could not do this. ${us.Owner} sees the details at the terminal.`,
+};
+const note = (why, us, r) => ephemeral(OUTBOX_NOTES[why](us, r));
+
+/**
+ * The outbox side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it) and statePath. `discord` is the port
+ * `{ post(target, payload) → id, edit(target, id, payload), unarchive(thread) }` (src/discord.js, or src/fake-discord.js for the tests).
+ * `files` are src/ask.js openAskFiles (the audit log); `audit` posts the #sage-audit copy of each audit log line. `newMarker` makes the
+ * marker of each payload: src/outbox.js newMarker (random) by default; the demo gives fixed ones, so that two runs give the same page.
+ */
+export function createOutboxFlow({ config, discord, files, audit, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), newMarker }) {
+  const path = outboxPathOf(config);
+  const say = (line) => log(forTerminal(line));
+  const said = new Set();
+  const sayOnce = (line) => { if (!said.has(line)) { said.add(line); say(line); } };
+  const us = namesOf(config);
+  const place = (user, roles) => placeOf(user, roles ?? [], config.ownerId);
+  const record = recorder({ auditLog: files.auditLog, audit, now, say });
+  const load = () => loadOutbox(path);
+
+  // ---- Drawing: the card and the status line of one message, as the file says; one draw at a time (as src/requestFlow.js). ----
+  let chain = Promise.resolve();
+  const logged = new WeakSet();
+  const draw = (mid) => {
+    const run = chain.then(() => drawNow(mid)).catch((e) => {
+      if (!logged.has(e)) sayOnce(`${mid} is not on Discord as the outbox says yet; the loop tries again: ${e?.message ?? e}`);
+      throw e;
+    });
+    chain = run.catch(() => {});
+    return run;
+  };
+  /** A call to Discord; an error is logged once with its code and thrown, unless `done` takes its code (then null). */
+  async function call(what, fn, done = () => false) {
+    try { return await fn(); } catch (e) {
+      sayOnce(`Discord refused ${what}: ${apiError(e)}`);
+      if (done(e?.code)) return null;
+      if (Object(e) === e) logged.add(e);
+      throw e;
+    }
+  }
+  /** Each post once (as src/requestFlow.js): an id that the file has not taken yet waits in `unsaved`, and Discord's nonce drops a repost. */
+  const unsaved = new Map();
+  async function once(key, post, write) {
+    if (!unsaved.has(key)) unsaved.set(key, await post(key));
+    const r = write(unsaved.get(key));
+    unsaved.delete(key);
+    return r;
+  }
+  const send = (what, target, payload, nonce) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), (c) => NO_EDIT.has(c));
+  const edit = (what, target, message, payload) => call(`the edit of ${what}`, () => discord.edit(target, message, payload).catch(async (e) => {
+    if (e?.code !== 50083) throw e;
+    try { await discord.unarchive(target); } catch { throw e; } // a locked thread stays as it is
+    return discord.edit(target, message, payload);
+  }), (c) => NO_EDIT.has(c));
+  async function drawNow(mid) {
+    let r = find(load(), mid);
+    if (r.status === 'pending' && !r.card) {
+      const posted = { ...outboxCard(r, { ownerId: config.ownerId, us, ping: true }), files: [payloadFile(r)] };
+      r = await once(`${mid}:card`, (n) => send(`the card of ${mid}`, r.thread, posted, n), (card) => setDiscord(config, mid, { card, shown: 'pending' }));
+    }
+    if (r.shown === r.status) return r;
+    if (r.card) await edit(`the card of ${mid}`, r.thread, r.card, outboxCard(r, { ownerId: config.ownerId, us }));
+    return once(`${mid}:${r.status}`, (n) => send(`the status line of ${mid}`, r.thread, statusLine(r, us), n), () => setDiscord(config, mid, { shown: r.status }));
+  }
+
+  /**
+   * One audit log line for a new message (`fresh`) or a decision by `who` (src/crew.js placeOf `p`): the payload goes in as its sha256, so
+   * the line's textSha256 is the message's payloadSha256 (F6 of R917).
+   */
+  const audited = (r, who, p, fresh) => record({ message: r.message, author: who, place: p, raw: r.payload,
+    text: !fresh ? `${r.id} ${r.status} · sha256 ${r.payloadSha256}` : p.owner ? forLead(r.text) : quoted(r.text), thread: r.thread, project: r.project, outcome: `${r.id} ${r.status}` });
+
+  /**
+   * The context of a message from its place: the pages of `history(before)` (newest first, at most 100 each, up to PAGES), read until
+   * the window of src/outbox.js windowOf is full or `since` is reached, and `replied()`. Each message as `{ id, user, name, roles, bot,
+   * webhook, at, text }` from the port; here it gets its place and a clean name.
+   */
+  async function contextOf(before, history, replied, since) {
+    const as = (m) => m && { ...m, name: nameFor(m.name, m.user), place: placeLabel(place(m.user, m.roles)) };
+    const newest = [];
+    for (let page = 0, at = before; page < PAGES; page++) {
+      const got = (await history(at)).map(as);
+      newest.push(...got);
+      const kept = windowOf(newest, since, null);
+      const ended = got.length < 100 || (since && got.some((m) => BigInt(m.id) <= BigInt(since)));
+      if (ended || kept.length === CONTEXT.messages || kept.reduce((n, m) => n + Array.from(m.text).length, 0) >= CONTEXT.chars) break;
+      at = got.at(-1).id;
+    }
+    return windowOf(newest, since, as(await replied()));
+  }
+
+  return {
+    /** The refusal when `user` has PENDING_MAX messages waiting (src/outbox.js fullNote), else null; a line too while the outbox cannot be read. */
+    full(user) {
+      try { return fullNote(load(), user); } catch (e) {
+        sayOnce(`the outbox cannot be read, so no message to sage can be added: ${e?.message}`);
+        return `I cannot record messages to sage just now. Nothing was sent. ${us.Owner} sees the details at the terminal.`;
+      }
+    },
+    /**
+     * Records one message to sage and draws its card (or, for the owner's own message, its status line) in `thread`. `s`:
+     * `{ message, where, thread, entry, author: { id, name, roles }, quote: { user, name, roles } | null, text, history, replied }`, where
+     * `message` is the Discord message whose text is `text`, `where` its place, `entry` the thread map entry of `thread` (a task thread
+     * makes a steer of its task), and `history` and `replied` the port that reads the context. Its audit log line comes first: when the
+     * log cannot be written, nothing is recorded. Returns the record, or throws Refused with the line for the sender (PENDING_MAX
+     * waiting), or another error (the context, the file or the audit log could not be read or written).
+     */
+    async send(s) {
+      const me = place(s.author.id, s.author.roles);
+      const quote = s.quote && s.quote.user !== s.author.id
+        ? { user: s.quote.user, name: nameFor(s.quote.name, s.quote.user), place: placeLabel(place(s.quote.user, s.quote.roles)) } : null;
+      const r = await addMessage(config, {
+        message: s.message, where: s.where, thread: s.thread, project: s.entry.project, task: s.entry.kind === 'task' ? s.entry.task : null,
+        author: s.author.id, name: personName(s.author.name) || `a ${CREW} member`,
+        place: me.owner ? 'owner' : 'crew', quote, text: s.text,
+      }, { ownerId: config.ownerId, at: now(), context: (since) => contextOf(s.message, s.history, s.replied, since), audit: (x) => audited(x, s.author.id, me, true), ...(newMarker && { marker: newMarker() }) });
+      say(`${r.id}: ${s.author.id} sent a message to sage in ${r.thread}; it is ${r.status} (sha256 ${r.payloadSha256}; node scripts/outbox.mjs show ${r.id})`);
+      try { await draw(r.id); } catch { /* the loop draws it again */ }
+      return r;
+    },
+    /**
+     * A press of an approval card (a custom_id `ob1:…`): `{ user: { id, bot }, roles, customId, message: { id } | null, reply,
+     * deferReply, editReply }`. Anything else, and a bot, get nothing. Never rejects.
+     */
+    async interaction(i) {
+      const pressed = parseOutboxId(i.customId);
+      if (!pressed || i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '')) return;
+      const answer = (payload, how = 'reply') => i[how](payload).catch((e) => say(`Discord refused an outbox reply: ${apiError(e)}`));
+      const me = place(i.user.id, i.roles);
+      if (!me.crew && !me.owner) return answer(ephemeral(notCrew(us)));
+      try {
+        const { action, id } = pressed;
+        let r;
+        try { r = find(load(), id); } catch (e) { return answer(e instanceof Refused ? ephemeral(e.message) : note('broken', us)); }
+        if (!r.card || i.message?.id !== r.card) return answer(note('notCard', us, r));
+        if (action !== 'withdraw' && !me.owner) return answer(note('notOwner', us, r));
+        if (action === 'withdraw' && i.user.id !== r.author) return answer(note('notSender', us, r));
+        if (r.status !== 'pending') return answer(note('late', us, r));
+        try { await i.deferReply({ flags: MessageFlags.Ephemeral }); } catch (e) { say(`Discord refused to defer an outbox press: ${apiError(e)}`); return; }
+        let out;
+        try {
+          const after = decide(config, id, { type: action, by: i.user.id, at: now() }, (x) => audited(x, i.user.id, me, false));
+          out = note(after.status, us, after);
+        } catch (e) {
+          if (!(e instanceof Refused)) say(`${id}: ${e?.message ?? e}`);
+          out = e instanceof Refused ? ephemeral(cut(forTerminal(e.message), LIMIT.content)) : note('broken', us);
+        }
+        try { await draw(id); } catch { /* the loop draws it again */ }
+        await answer({ content: out.content, allowedMentions: NO_MENTIONS }, 'editReply');
+      } catch (e) { say(`an outbox press: ${e?.message}`); }
+    },
+    /** One turn of the sync loop: draws each message whose card or status line Discord does not show yet. Never rejects. */
+    async loop() {
+      let file;
+      try { file = load(); } catch (e) { sayOnce(`the outbox cannot be read, so no message is shown: ${e?.message}`); return; }
+      for (const r of file.messages) {
+        if ((r.status === 'pending' && !r.card) || r.shown !== r.status) await draw(r.id).catch(() => {});
+      }
+    },
+  };
+}

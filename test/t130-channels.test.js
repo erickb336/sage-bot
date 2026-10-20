@@ -355,7 +355,7 @@ test('F-T130-9 permission check: after the login, the start logs each permission
   const lines = [];
   const channels = new Map([[CHANNEL, { project: 'alpha', home: true }], [ASK, { project: 'alpha' }], [OTHER, { project: 'beta' }]]);
   assert.equal(await enter(client, { config: { guildId: GUILD }, channels, ask: { projects: [] }, log: (l) => lines.push(l) }), guild);
-  assert.deepEqual(set, [['sage']]);
+  assert.deepEqual(set, [['sage', 'Send to sage']]); // /sage and the message command of T247
   assert.deepEqual(lines, [
     `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links. Give them to its role in that channel`,
     `sage-bot cannot see the registered channel ${OTHER} (beta): add it to the channel, or unregister the channel`,
@@ -368,7 +368,7 @@ const button = ({ user = OWNER, roles = [CREW], channelId = ASK, customId, age =
   const calls = [];
   return { calls, guildId: GUILD, channelId, channel: null, customId, user: { id: user, bot: false, username: 'jon_l' },
     member: { roles: { cache: new Map(roles.map((r) => [r, { name: r }])) }, displayName: 'Erick <Owner>' }, message: { createdTimestamp: Date.now() - age },
-    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false,
+    isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => true, isModalSubmit: () => false,
     update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
 };
 

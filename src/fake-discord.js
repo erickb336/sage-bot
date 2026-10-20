@@ -2,7 +2,7 @@
 // every reply. No Client, no login, no network, no token. SAMPLE DATA ONLY.
 import { EventEmitter } from 'node:events';
 import { Events, MessageFlags, MessageFlagsBitField } from 'discord.js';
-import { idAt } from './catchup.js';
+import { idAt, timeOf } from './catchup.js';
 import { parseCustomId } from './cards.js';
 
 /**
@@ -67,7 +67,8 @@ export function fakeDiscord(members, roles = []) {
     if (deleted.has(target)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
   };
   let next = 900000000000000000n;
-  const history = []; // the members' messages (said), for fetchAfter
+  const history = []; // the members' messages (said), for fetchAfter and fetchBefore
+  const asRaw = (m) => ({ id: m.id, user: m.user, name: m.name, roles: m.roles, bot: m.bot, webhook: m.webhook, at: timeOf(m.id), text: m.content });
   const reads = [];
   const noHistory = new Map(); // place → the code of a refused read
   let seq = 0;
@@ -97,16 +98,33 @@ export function fakeDiscord(members, roles = []) {
     },
     deleteMessage: (id) => { messages.delete(id); where.delete(id); },
     /**
-     * A message of a member at the time `at` (T241), with an id that holds that time as Discord's ids do: `{ user, roles, bot, webhook,
-     * mentions, content }`, where `mentions` says that it mentions sage-bot. It goes into `history`; nothing tells the bridge.
+     * A message of a member at the time `at` (T241), with an id that holds that time as Discord's ids do: `{ user, name, roles, bot, webhook,
+     * mentions, content, reply }`, where `mentions` says that it mentions sage-bot and `reply` is the id of the message it replies to. It
+     * goes into `history`; nothing tells the bridge.
      */
-    said: (place, { at, user, roles = [], bot = false, webhook = false, mentions = true, content = '' }) => {
+    said: (place, { at, user, name = 'Sample member', roles = [], bot = false, webhook = false, mentions = true, content = '', reply = null }) => {
       const id = String(BigInt(idAt(at)) + BigInt(seq++));
       messages.set(id, [{ content }]);
       where.set(id, place);
-      history.push({ id, place, user, roles, bot, webhook, mentions, content });
+      history.push({ id, place, user, name, roles, bot, webhook, mentions, content, reply });
       return id;
     },
+    /** Edits the text of a message that `said` made, as its author can on Discord. */
+    change: (id, content) => { history.find((m) => m.id === id).content = content; messages.get(id).push({ content }); },
+    /**
+     * Get Channel Messages with `before` (T247): at most `limit` (100) of the members' messages of `place` right before the id `before`,
+     * newest first, as the context port of src/discord.js gives them: `{ id, user, name, roles, bot, webhook, at, text }`.
+     */
+    async fetchBefore(place, before, limit = 100) {
+      gone(place);
+      if (noHistory.has(place)) throw Object.assign(new Error('Missing Access'), { code: noHistory.get(place), status: 403 });
+      return history.filter((m) => m.place === place && BigInt(m.id) < BigInt(before)).sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1))
+        .slice(0, limit).map(asRaw);
+    },
+    /** The message that `said` made with this id, as the context port gives it, or null. */
+    raw: (id) => { const m = history.find((x) => x.id === id); return m ? asRaw(m) : null; },
+    /** The message that the message `id` replies to (its `reply` in `said`), as the context port gives it, or null. */
+    repliedTo: (id) => { const to = history.find((x) => x.id === id)?.reply; const m = to && history.find((x) => x.id === to); return m ? asRaw(m) : null; },
     /** Makes each read of the history of `place` refuse with `code` (null: read again). */
     refuseHistory: (place, code) => { if (code === null) noHistory.delete(place); else noHistory.set(place, code); },
     /** The reads of history, each [place, after]. */
@@ -185,24 +203,53 @@ export function fakeCommand({ user, name = 'Sample member', roles = [], bot = fa
 }
 
 /**
- * A fake message that mentions the bot, as src/discord.js maps a real one: `{ id, user: { id, bot }, roles, channelId, parentId, forum,
- * content, reply, startThread, post }`. `replies` records the replies in place. The threads and their posts go to `place`, a
- * fakeDiscord (a new one when none is given): the message is posted in its channel there first, so `startThread` opens a thread from it.
- * `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }` (Missing Permissions). `id` is a message that
- * `said` made in `place` already: the catch-up gives it to the mention path. SAMPLE DATA ONLY.
+ * The context port of a message `id` in `channelId` on the fake Discord `place`, as src/discord.js contextPort gives it: `history`,
+ * `replied` (the message that it replies to: its `reply` in `said`), `open`, `post` and `startThread`. `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }`
+ * (Missing Permissions) or `{ history: 50001 }`.
  */
-export function fakeMention({ user, roles = [], bot = false, channelId, parentId = null, forum = false, content = '', place = fakeDiscord([]), refuse = {}, id: had }) {
-  const replies = [];
+function fakePort(place, id, channelId, refuse) {
   const no = (call) => { if (refuse[call]) throw Object.assign(new Error('Missing Permissions'), { code: refuse[call], status: 403 }); };
+  return {
+    history: async (before) => { no('history'); return place.fetchBefore(channelId, before); },
+    replied: async () => place.repliedTo(id),
+    open: async (channel, payload, name) => { no('open'); return place.startThread(await place.post(channel, payload), name); },
+    post: async (at, payload) => { no('post'); return place.post(at, payload); },
+    startThread: async (name) => { no('startThread'); return place.startThread(id, name); },
+  };
+}
+
+/**
+ * A fake message that mentions the bot, as src/discord.js maps a real one: `{ id, user: { id, bot }, name, roles, channelId, parentId,
+ * content, reply, startThread, post, open, history, replied }`. `replies` records the replies in place. The threads and their posts go to
+ * `place`, a fakeDiscord (a new one when none is given): the message is posted in its channel there first, so `startThread` opens a thread
+ * from it. `refuse` makes Discord refuse one call with a code (fakePort). `id` is a message that `said` made in `place` already (the
+ * catch-up gives it to the mention path; its `reply` is the message that `replied` gives). SAMPLE DATA ONLY.
+ */
+export function fakeMention({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, content = '', place = fakeDiscord([]), refuse = {}, id: had }) {
+  const replies = [];
   const id = had ?? String(800000000000000000n + BigInt(place.messages.size));
   if (!had) {
     place.messages.set(id, [{ content }]);
     place.where.set(id, channelId);
   }
-  return { id, user: { id: user, bot }, roles, channelId, parentId, forum, content, replies, place,
-    reply: async (payload) => { no('reply'); replies.push(structuredClone(payload)); },
-    startThread: async (name) => { no('startThread'); return place.startThread(id, name); },
-    post: async (thread, payload) => { no('post'); return place.post(thread, payload); } };
+  return { id, user: { id: user, bot }, name, roles, channelId, parentId, content, replies, place,
+    ...fakePort(place, id, channelId, refuse),
+    reply: async (payload) => { if (refuse.reply) throw Object.assign(new Error('Missing Permissions'), { code: refuse.reply, status: 403 }); replies.push(structuredClone(payload)); } };
+}
+
+/**
+ * A fake "Send to sage" message command (T247) on the message `target` that `said` made in `place`, as src/discord.js sendOf maps a real
+ * one: `{ user, name, roles, channelId, parentId, target, defer, edit, reply }` and the context port of the target. `replies` records each
+ * answer as `{ kind, ...payload }`, kind 'reply', 'defer' or 'edit'. SAMPLE DATA ONLY.
+ */
+export function fakeSend({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, target, place, refuse = {} }) {
+  const replies = [];
+  const record = (kind) => async (payload = {}) => { replies.push(structuredClone({ kind, ...payload })); };
+  const t = place.raw(target);
+  return { user: { id: user, bot }, name, roles, channelId, parentId, replies,
+    target: { ...t, user: { id: t.user }, content: t.text },
+    defer: record('defer'), edit: record('edit'), reply: record('reply'),
+    ...fakePort(place, target, channelId, refuse) };
 }
 
 /**

@@ -9,7 +9,9 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { ANGLES, forModel } from './clean.js';
+import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
+import { ANGLES, forModel, forTerminal } from './clean.js';
+import { keptRoles } from './crew.js';
 import { projectAt } from './projects.js';
 import { readOwn, writeWhole } from './state.js';
 
@@ -129,6 +131,25 @@ export function openLog(path, projects) {
 export const entryOf = ({ at, message, author, roles, raw, text, thread, project, outcome }) => ({
   at: new Date(at).toISOString(), message, author, roles: [...roles], textSha256: sha256(String(raw ?? '')), text, thread, project, outcome,
 });
+
+/**
+ * The one writer of audit log lines in the bridge's process (src/ask.js and src/outboxFlow.js share it): `record(fields)` appends one line
+ * (entryOf) and posts its copy to #sage-audit (`audit`, none: the log only), which pings nobody and shows the text through `safe`. The
+ * owner's text (`place` from src/crew.js placeOf) goes in cleaned by forLead, a crew member's as quoted data, unless `text` is given. `raw`
+ * goes in only as its sha256: for a message to sage it is the exact payload, so the line holds the payload's sha256 (F6 of R917).
+ * Throws when the log cannot be written: then nothing goes further.
+ * @param {{ auditLog: ReturnType<typeof openLog>, audit?: (payload: object) => Promise<unknown>, now: () => number, say: (line: string) => void }} o
+ */
+export function recorder({ auditLog, audit, now, say }) {
+  return ({ message = null, author, place, raw, text, thread = null, project = null, outcome }) => {
+    const line = auditLog.append(entryOf({ at: now(), message, author, roles: keptRoles(place), raw,
+      text: text ?? (place.owner ? forLead(raw) : quoted(raw)), thread, project, outcome }));
+    const copy = [`**Audit log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
+      safe(cut(String(line.text ?? ''), 1500))].join('\n');
+    audit?.({ content: copy, allowedMentions: NO_MENTIONS }).catch((e) => say(forTerminal(`Discord refused the #sage-audit copy: code ${e?.code ?? '-'}: ${e?.message}`)));
+    return line;
+  };
+}
 
 /** Whether the kill switch is set: the flag file is there, or it cannot be checked (fail closed). Only a missing flag means "on". */
 export function linkOff(path) {
