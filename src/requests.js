@@ -29,9 +29,12 @@ const DECIDED = ['approved', 'declined', 'withdrawn'];
 const SNOWFLAKE = /^\d{17,20}$/;
 /** The keys of every record, in the order the file holds them. `claim` is set only while approving. */
 const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'designQuestions', 'requester', 'requesterName',
-  'status', 'claim', 'createdAt', 'decidedAt', 'decidedBy', 'via', 'reason', 'task', 'channel', 'line', 'card', 'thread', 'shown'];
-/** The Discord fields that the bridge sets with setDiscord. */
-const DISCORD = ['line', 'card', 'thread', 'shown'];
+  'status', 'claim', 'createdAt', 'decidedAt', 'decidedBy', 'via', 'reason', 'task', 'channel', 'line', 'card', 'thread', 'shown', 'cardShown'];
+/**
+ * The Discord fields that the bridge sets with setDiscord. `shown`: the status that the line and the post after the decision show.
+ * `cardShown`: the status that the card shows; it waits while a moderator's lock holds the edit of the card, also over a restart (C3).
+ */
+const DISCORD = ['line', 'card', 'thread', 'shown', 'cardShown'];
 
 /**
  * A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. `text` is for the terminal;
@@ -99,7 +102,7 @@ function isRequest(r) {
     && (decided ? time(r.decidedAt) && by(r.decidedBy) && ['discord', 'terminal'].includes(r.via) : r.decidedAt === null && r.decidedBy === null && r.via === null)
     && (r.status === 'approved' ? text(r.task) && /^T\d{1,9}$/.test(r.task) : r.task === null)
     && (r.status === 'declined' ? opt(r.reason, text) : r.reason === null)
-    && [r.channel, r.line, r.card, r.thread].every((x) => opt(x, id)) && opt(r.shown, (s) => STATUSES.includes(s));
+    && [r.channel, r.line, r.card, r.thread].every((x) => opt(x, id)) && [r.shown, r.cardShown].every((x) => opt(x, (s) => STATUSES.includes(s)));
 }
 /** The record, when the loader takes it back; else a TypeError, before anything is written (F-T72-20). */
 const checked = (r) => {
@@ -127,7 +130,7 @@ export function newRequest(file, f, at) {
     id: `RQ${file.next}`, project: f.project, folder: f.folder, title: f.title, text: f.text, titleForSage,
     designQuestions: f.designQuestions, requester: f.requester, requesterName: f.requesterName, status: 'pending', claim: null,
     createdAt: at, decidedAt: null, decidedBy: null, via: null, reason: null, task: null,
-    channel: f.channel ?? null, line: null, card: null, thread: null, shown: null,
+    channel: f.channel ?? null, line: null, card: null, thread: null, shown: null, cardShown: null,
   });
   return { file: { next: file.next + 1, requests: [...file.requests, request] }, request };
 }
@@ -177,7 +180,12 @@ export function loadRequests(path) {
   if (!data || Object.keys(data).sort().join() !== 'next,requests,version' || data.version !== 1 || !Number.isSafeInteger(data.next) || data.next < 1
     || !Array.isArray(data.requests)) throw bad;
   // A record of before T247 has textForSage, which no code reads now (R950 Q2): it loads without it, and the next save drops it.
-  const requests = data.requests.map((r) => { if (!r || typeof r !== 'object' || !('textForSage' in r)) return r; const { textForSage, ...rest } = r; return rest; });
+  // A record of before C3 has no cardShown: its card shows what its line shows.
+  const requests = data.requests.map((r) => {
+    if (!r || typeof r !== 'object') return r;
+    const { textForSage, ...rest } = r;
+    return 'cardShown' in rest ? rest : { ...rest, cardShown: rest.shown };
+  });
   if (!requests.every(isRequest)) throw bad;
   const ids = requests.map((r) => Number(r.id.slice(2)));
   if (new Set(ids).size !== ids.length || ids.some((n) => n >= data.next)) throw bad;
@@ -210,8 +218,8 @@ const change = (path, id, how) => withLock(path, () => {
 const update = (path, id, event) => change(path, id, (r) => step(r, event));
 
 /**
- * Sets the Discord fields of a request (line, card, thread, shown) under the lock; the status stays. Returns the request after it.
- * @param {{ line?: string | null, card?: string | null, thread?: string | null, shown?: string | null }} fields
+ * Sets the Discord fields of a request (line, card, thread, shown, cardShown) under the lock; the status stays. Returns the request after it.
+ * @param {{ line?: string | null, card?: string | null, thread?: string | null, shown?: string | null, cardShown?: string | null }} fields
  */
 export function setDiscord(config, id, fields) {
   if (!Object.keys(fields).every((k) => DISCORD.includes(k))) throw new TypeError(`setDiscord sets only ${DISCORD.join(', ')}`);

@@ -41,7 +41,8 @@ function world(tt) {
   const fake = fakeDiscord([]);
   // `b.onPost` and `b.onThread` run after Discord made the message or the thread, before its id comes back: a test fails a reply there.
   // `b.manage`: a post in a locked thread works and opens it, as Discord does for a bot with Manage Threads. `b.onUnarchive` runs before
-  // an unarchive, and `b.lockReads` counts the reads of a lock.
+  // an unarchive, and `b.onLocked` before a read of a lock: what it gives back, other than undefined, is the read. `b.lockReads` counts
+  // the reads of a lock.
   const manage = async (at, payload) => {
     const t = fake.threads.get(at);
     if (!b.manage || !t?.locked) return fake.post(at, payload);
@@ -51,7 +52,7 @@ function world(tt) {
   const port = { post: async (at, payload) => { const id = await manage(at, payload); await b.onPost?.(payload); return id; }, edit: fake.edit,
     startThread: async (at, line, name) => { const id = await fake.startThread(line, name); await b.onThread?.(); return id; },
     threadFrom: (at, line) => fake.threadFrom(line), unarchive: async (id) => { await b.onUnarchive?.(id); return fake.unarchive(id); },
-    locked: (id) => { b.lockReads += 1; return fake.locked(id); } };
+    locked: async (id) => { b.lockReads += 1; const read = await b.onLocked?.(id); return read === undefined ? fake.locked(id) : read; } };
   b.lockReads = 0;
   b.tool = sageTool({ sagePath: SAGE, project: b.project, env: b.env });
   b.make = (tool = () => b.tool) => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool });
@@ -592,7 +593,12 @@ test('C2: when Discord refuses to open an archived thread (50013), the edit of t
   assert.equal(b.fake.in(thread).length, 2); // the card and the post after the decision
   assert.match(b.fake.latest(b.fake.in(thread)[1]).content, /^\*\*Approved\.\*\*/);
   assert.match(b.line().content, /approved/);
-  assert.equal(b.lines.filter((l) => l.startsWith('Discord refused to open the thread of the card of RQ1: ')).length, 1);
+  // C4: one line for the refusal, and no second line for the edit that it skipped. Every line of the log about RQ1:
+  assert.deepEqual(b.lines.filter((l) => l.includes('RQ1')), [
+    `RQ1: ${JON} requested a feature in project; it waits for the owner (node scripts/requests.mjs show RQ1)`,
+    'Discord refused to open the thread of the card of RQ1: code 50013, status 403: Missing Permissions',
+    `RQ1: its thread ${thread} is now the thread of T1 in project`,
+  ]);
 });
 
 test('S2: a Refused needs its line for Discord; the approve refused while the link is off names no command or path on Discord', async (tt) => {
@@ -643,4 +649,63 @@ test('Q2: a card edit skipped in a locked thread waits, with one read of the loc
   const reads = b.lockReads;
   await b.flow.loop();
   assert.equal(b.lockReads, reads); // nothing waits now
+});
+
+// Repair round 2 of PR 71 (R1103): C3, C4 (in the C2 test above) and S4.
+test('C3: a card edit that waits for a moderator\'s unlock waits over a restart too, with one read of the lock a loop; after the unlock the card shows the decision, and no post comes', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  await b.fake.setLocked(thread, true);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  b.flow = b.make(); // a restart: what the last process kept in memory is gone
+  for (let n = 0; n < 3; n += 1) {
+    const reads = b.lockReads;
+    await b.flow.loop();
+    assert.equal(b.lockReads - reads, 1, `loop ${n}`); // one read of the lock a loop
+  }
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/); // the thread is locked: the card is as it was
+  await b.fake.setLocked(thread, false); // a moderator unlocks the thread
+  b.fake.archive(thread); // it is still quiet
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.card().components, []);
+  assert.deepEqual(b.fake.in(thread), [b.r().card]); // no post after the decision: it never comes later
+  const reads = b.lockReads;
+  const edits = b.fake.messages.get(b.r().card).length;
+  await b.flow.loop();
+  assert.deepEqual([b.lockReads, b.fake.messages.get(b.r().card).length], [reads, edits]); // nothing waits now
+});
+
+test('C3: a requests file of before C3 (no cardShown) loads with the status that its line shows, and a restart draws no decided card again', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+  await b.flow.loop();
+  const old = JSON.parse(readFileSync(b.path, 'utf8'));
+  old.requests = old.requests.map(({ cardShown, ...r }) => r);
+  writeFileSync(b.path, `${JSON.stringify(old)}\n`);
+  assert.equal(b.r().cardShown, 'approved');
+  const edits = [b.r().line, b.r().card].map((m) => b.fake.messages.get(m).length);
+  b.flow = b.make(); // a restart
+  await b.flow.loop();
+  assert.deepEqual([b.r().line, b.r().card].map((m) => b.fake.messages.get(m).length), edits);
+});
+
+test('S4: a read of the lock that Discord refuses, or that gives no answer, counts as locked: no post after the decision; the line and the card show it', async (tt) => {
+  for (const [what, read] of [['refused', () => { throw Object.assign(new Error('Missing Access'), { code: 50001, status: 403 }); }], ['no answer', () => null]]) {
+    const b = world(tt);
+    await b.request(JON);
+    const thread = b.r().thread;
+    b.onLocked = read;
+    await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+    await b.flow.loop();
+    await b.flow.loop();
+    assert.deepEqual(b.fake.in(thread), [b.r().card], what); // no post after the decision
+    assert.equal(b.r().shown, 'approved', what);
+    assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/, what);
+    assert.match(b.line().content, /approved/, what);
+    assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the lock of the thread of RQ1')).length, what === 'refused' ? 1 : 0, what);
+  }
 });

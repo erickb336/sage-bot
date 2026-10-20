@@ -625,7 +625,8 @@ test('F-T72-20: setDiscord sets the Discord fields under the lock and keeps the 
   const before = readFileSync(w.path, 'utf8');
   assert.throws(() => setDiscord(w.config, 'RQ1', { card: 100000000000000012 }), { message: 'the record of RQ1 has a field of the wrong kind, so it was not saved. Nothing changed.' });
   assert.throws(() => setDiscord(w.config, 'RQ1', { shown: 'waiting' }), TypeError);
-  assert.throws(() => setDiscord(w.config, 'RQ1', { status: 'approved' }), { message: 'setDiscord sets only line, card, thread, shown' });
+  assert.throws(() => setDiscord(w.config, 'RQ1', { cardShown: 'waiting' }), TypeError);
+  assert.throws(() => setDiscord(w.config, 'RQ1', { status: 'approved' }), { message: 'setDiscord sets only line, card, thread, shown, cardShown' });
   assert.equal(readFileSync(w.path, 'utf8'), before);
 });
 
