@@ -92,6 +92,18 @@ function world(tt) {
   return b;
 }
 
+test('the request side refuses a Discord port with no lock read, so a missing method never passes for a moderator\'s lock (C8)', (tt) => {
+  const b = setup({ markAll: false });
+  tt.after(() => rmSync(b.root, { recursive: true, force: true }));
+  const config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
+  const projects = loadProjects(config);
+  const channels = openChannels(config, projects);
+  const fake = fakeDiscord([]);
+  const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+  assert.throws(() => createRequestFlow({ config, channels, projects, discord: port }), { name: 'TypeError', message: 'the Discord port of the request side has no locked(thread)' });
+  assert.equal(typeof createRequestFlow({ config, channels, projects, discord: { ...port, locked: fake.locked } }).interaction, 'function');
+});
+
 test('a crew member requests a feature end to end: the form with no defer, the confirm, Send, one line, one thread, one card that pings the owner once; the owner approves', async (tt) => {
   const b = world(tt);
   const { key, opened, confirm } = await b.draft(JON);

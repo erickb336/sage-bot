@@ -44,6 +44,8 @@ const plain = ({ flags, ...payload }) => ({ components: [], embeds: [], ...paylo
  */
 export function createRequestFlow({ config, channels, projects, discord, now = Date.now, log = (line) => process.stderr.write(`${line}\n`), tool,
   newKey = () => `D${randomInt(1, 2 ** 47)}`, threads = loadThreads(threadsPathOf(config)) }) {
+  // A refused lock read counts as locked (S4), so a port with no `locked` would silently drop every post after a decision (C8).
+  if (typeof discord?.locked !== 'function') throw new TypeError('the Discord port of the request side has no locked(thread)');
   const path = requestsPathOf(config);
   const killPath = killPathOf(config);
   const toolOf = (r) => tool?.(r);

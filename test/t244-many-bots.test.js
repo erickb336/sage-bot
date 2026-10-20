@@ -151,7 +151,7 @@ function twoBots(tt) {
     const config = { ...CONFIG, ...owner, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
     const projects = loadProjects(config);
     const channels = openChannels(config, projects);
-    const port = { post: (at, payload) => fake.post(at, payload, extra.id), edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+    const port = { post: (at, payload) => fake.post(at, payload, extra.id), edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive, locked: fake.locked };
     const flow = createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.sage });
     const ask = createAsk({ config, channels, projects, now: () => b.now, log: (l) => b.lines.push(l), env: b.env, requests: flow });
     return Object.assign(b, extra, { config, flow, ask, r: () => loadRequests(requestsPathOf(config)).requests[0] });
