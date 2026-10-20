@@ -192,7 +192,7 @@ sage-bot knows two kinds of people. It reads both at each start, in one place (`
 
    > the Discord application of sage-bot belongs to a Developer Team, so sage-bot cannot tell who its owner is. Add "ownerId" with your Discord user id to the config, then start sage-bot again. Nothing was started.
 
-**Names in the messages.** The cards, buttons, notes and `/sage` descriptions name you by your display name in the server, and name the bot by its own name, for example "Waiting for Maya" and "If a button does not respond, Maya's sage is offline". sage-bot reads both names at each start. It keeps only letters, digits, marks on a letter, spaces and `. ' -`, at most 32 characters. When Discord gives no name, or nothing is left of it, the messages say "the owner" and "sage-bot". A new display name shows after the next start.
+**Names in the messages.** The cards, buttons, notes and `/sage` descriptions name you by your own Discord name (your display name, else your user name; never a server nickname, which a moderator can change), and name the bot by its own name, for example "Waiting for Maya" and "If a button does not respond, Maya's sage is offline". sage-bot reads both names at each start. It keeps only letters, digits, marks on a letter, spaces and `. ' -`, at most 32 characters. When Discord gives no name, or nothing is left of it, the messages say "the owner" and "sage-bot". A new display name shows after the next start.
 
 **A config from before.** A config with `apprenticeRole`, `leadRole` or the older `driverRole` still starts. The log says that sage-bot no longer reads them, and they do nothing. Remove them, and delete the old `sage-apprentice` and `sage-lead` roles when no other sage-bot uses them. This warning goes away in the next release, and then the keys are only unknown keys.
 
@@ -212,7 +212,7 @@ The second owner, for example Maya, does these steps:
 
 | What | Why it reaches only its own bot |
 | --- | --- |
-| A button or a form | Discord sends a press only to the app that posted the message. The request buttons also check the message id that the bot keeps for each card. |
+| A button or a form | Discord sends a press only to the app that posted the message. The vote and request buttons also check the message id that the bot keeps for each card, so a press from any other message changes nothing. |
 | A mention | Discord tells each bot which users a message mentions. A bot answers only a mention of itself, so a mention of Maya's bot in Erick's thread is not Erick's bot's. |
 | `/sage` | Each bot sets its own `/sage` in the server. Discord shows the bot's name beside each one, and the descriptions name its owner. |
 | A thread | Each bot keeps its own thread map. In a thread of another bot, a bot only points to its own channel. |
