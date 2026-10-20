@@ -13,7 +13,7 @@ import { fakeInteraction } from '../src/fake-discord.js';
 import { step } from '../src/vote.js';
 import { embedLength } from 'discord.js';
 import { ASKS, MEMBERS, CONFIG, ERICK, MAYA, JON, clock, openAsk } from '../examples/sample.js';
-import { openGate } from '../src/vote.js';
+import { openGate, THREAD_LIMIT } from '../src/vote.js';
 import { CREW } from '../src/crew.js';
 import { CSS, esc, message, modalHtml, noteHtml } from './render.mjs';
 
@@ -91,6 +91,23 @@ moment('10-withdrawn', 'Erick withdraws B9', 'Nothing is decided; every button i
   moments.push({ file: '11-five-by-four-limits', title: 'A team of 5 with 32-character names, 4 parts, a 500-character reason from everyone on every part',
     about: `Each reason shows cut to 200 characters; the gate keeps the full text. The oldest reasons go first, and the description counts them. ${c.embeds[0].fields.length} fields of 25; ${embedLength(c.embeds[0])} characters of 6000.`,
     now: ctx.now, card: c });
+}
+// 12 to 13 (T245): a design question of an approved request's task, in its task thread: a vote of 10 minutes, also for one question.
+{
+  const id = 'project/G7';
+  const ask = { kind: 'batch', task: 'T5', title: 'RQ1: Add CSV export', parts: [{ question: 'Which file name does the CSV get?', why: 'A short name sorts by date.',
+    recommended: 'A', options: { A: 'report-2026-10.csv', B: 'Monthly report October 2026.csv' } }] };
+  const thread = { gates: new Map([[id, { gate: openGate({ id, kind: 'batch', parts: [['A', 'B']], askedBy: ERICK, at: clock(16, 30), limit: THREAD_LIMIT }), ask }]]),
+    people, clock: () => thread.now, now: clock(16, 31) };
+  await handle(fakeInteraction({ user: MAYA, customId: `press:${id}:0:0` }), thread);
+  thread.now = clock(16, 33);
+  await handle(fakeInteraction({ user: JON, customId: `press:${id}:0:1` }), thread);
+  moments.push({ file: '12-task-thread-vote', title: 'A vote of 10 minutes in a task thread', now: clock(16, 34), card: cardOf(id, thread),
+    about: 'After Erick approves a request, its thread is the task thread. Every sage-crew member votes; the card says when it closes and who breaks a tie.' });
+  const g = thread.gates.get(id);
+  thread.gates.set(id, { ...g, gate: step(g.gate, { type: 'tick', at: clock(16, 40) }, people.holders, people.ownerId).gate });
+  moments.push({ file: '13-task-thread-tie', title: 'At 10 minutes the votes decide; a 1-1 tie waits for Erick', now: clock(16, 40), card: cardOf(id, thread),
+    about: 'Only Erick, the owner, breaks the tie. The tie post in the thread pings only him.' });
 }
 
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>sage-bot B2: the cards (sample data)</title><style>${CSS}</style></head><body><div class="banner">SAMPLE DATA · the card JSON of sage-bot B2 rendered to HTML: made-up people and questions, times in UTC, no Discord, no network.</div>

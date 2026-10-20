@@ -43,6 +43,8 @@ function entryOf(e, path) {
     && e.sent && typeof e.sent === 'object' && Object.values(e.sent).every(isText)
     // Version 2 (T29): the sage session of the entry (null: none known) and the channel or thread of its card (absent: the parent channel).
     && (e.session === undefined || e.session === null || SESSION_ID.test(e.session)) && (e.channel === undefined || isText(e.channel))
+    // T245: the task thread of a design question of a task (src/threads.js), where its card goes; absent: none.
+    && (e.thread === undefined || ids([e.thread], 1, 1))
     // T73: a crew recommendation (a single Yes or No question for the crew) has `ask.leads: true`.
     && (e.ask.leads === undefined || (e.ask.leads === true && e.ask.kind === 'single'))
     // T132: a card posted before T132 whose buttons still carry the bare gate ids, until an edit gives it the keys (F-T132-5).

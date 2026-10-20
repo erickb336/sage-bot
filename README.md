@@ -63,7 +63,7 @@ To connect a real Discord server, follow [Set up a live trial](#set-up-a-live-tr
 sage-bot is one small service, the bridge, on the owner's Mac. The graphic at the top shows the loop that it is for. Today it does three jobs:
 
 1. **It answers read asks.** A member mentions @sage-bot, or types `/sage`. The bridge checks that the member is in the crew (or is the owner) and the hourly limit, reads sage's logbook, and answers. Code writes the answer, with no AI.
-2. **It runs team votes.** sage marks a product question for the team. The bridge posts it as a card with a button for each option. When the question is decided, the bridge gives sage only the chosen option.
+2. **It runs team votes.** sage marks a product question for the team. The bridge posts it as a card with a button for each option. When the question is decided, the bridge gives sage only the chosen option. A question of a task that came from an approved request goes to that request's thread, the task thread, as a vote of 10 minutes (see below).
 3. **It records the owner's talk.** The owner's mention with the word "talk" opens an owner thread. The bridge writes each message to the audit log and to #sage-audit. It does not go to sage yet: bridge sessions wait on T159.
 
 The bridge only reads the logbook, and it changes it only through the sage state tool. The owner's answer at the terminal is always final.
@@ -74,6 +74,13 @@ The bridge only reads the logbook, and it changes it only through the sage state
 - A mention inside that thread continues it. sage-bot cannot read a message that does not mention it.
 - A mention in a thread that sage-bot did not open, or in a forum post, gets one reply: mention me in the channel.
 - The threads survive a restart of the bridge.
+
+### A request thread becomes the task thread
+
+- After the owner approves a request, its thread becomes the thread of the new sage task.
+- sage's design questions for that task appear there as cards. Every sage-crew member votes, within 10 minutes.
+- At 10 minutes the votes decide. A tie waits for the owner, and only the owner breaks it or ends the vote early.
+- Other questions stay in the home channel, with 30 minutes, as before.
 
 ## Who is who
 
@@ -188,6 +195,7 @@ The [setup guide](docs/setup.md) has the full checklist: each command, the permi
 | **Registered channel** | A channel where sage-bot works, for one project. Only the owner registers one. |
 | **Answer thread** | A thread that a mention opens. sage-bot answers read asks there. |
 | **Owner thread** | A thread that the owner's "talk" opens. Each message there goes into the audit log. |
+| **Task thread** | The thread of a request that the owner approved. The design questions of its sage task go there, as votes of 10 minutes. |
 | **Question** | A sage gate: a question that sage parks for the owner, with options, a recommendation and a default. |
 | **Team vote** | A question that sage marks for the team with `scripts/vote.mjs`. |
 | **Card** | The Discord message of one question or one batch, with a button for each option. |

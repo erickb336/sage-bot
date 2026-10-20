@@ -2,7 +2,7 @@
 // No clock, no network, no Discord: every event carries its own time `at` (ms).
 //
 //   const gate = openGate({ id, kind: 'single', options, askedBy, at });
-//   const gate = openGate({ id, kind: 'batch', parts: [options, options, ...], askedBy, at });
+//   const gate = openGate({ id, kind: 'batch', parts: [options, options, ...], askedBy, at, limit });
 //   ({ gate, effects } = step(gate, event, holders, ownerId));
 //
 // `holders` are the Discord user ids that may answer and vote (the crew), as any iterable of strings
@@ -16,7 +16,14 @@ import { isOwner } from './crew.js';
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
+/** The time limit of a batch vote in the home channel or a session thread, and of a gate saved before T245 (it has no `limit`). */
 export const BATCH_LIMIT = 30 * MINUTE;
+/** The time limit of a batch vote in a task thread (T245): the crew of the task decides fast. */
+export const THREAD_LIMIT = 10 * MINUTE;
+/** The time limits that a gate may store: an allow-list, so parseGate takes no other. */
+const LIMITS = [THREAD_LIMIT, BATCH_LIMIT];
+/** The time limit of a batch gate: its stored `limit`, or BATCH_LIMIT for a gate saved before T245. */
+export const limitOf = (gate) => gate.limit ?? BATCH_LIMIT;
 export const REMINDER_EVERY = 2 * HOUR;
 export const REASON_MAX = 500;
 /** The most options of a single gate or of one batch part: Discord holds 5 buttons in a row, and a card uses one row per part (F-T28-18). */
@@ -52,10 +59,11 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPT
  *   outcome: { status: 'open' } | { status: 'answered', option: string, by: string, via: 'discord' | 'terminal' }
  *     | { status: 'withdrawn' } }} SingleGate
  * @typedef {{ id: string, kind: 'batch', askedBy: string, openedAt: number, lastAt: number,
- *   phase: 'voting' | 'tied' | 'closed', endsAt: number, votingEndedAt: number | null,
+ *   phase: 'voting' | 'tied' | 'closed', limit?: number, endsAt: number, votingEndedAt: number | null,
  *   endedBy?: string | null, parts: Part[],
  *   outcome: { status: 'open' } | { status: 'decided' } | { status: 'withdrawn' } }} BatchGate  endedBy: after the vote ended, the person who
- *   ended it early, or null at the time limit (missing in a gate saved before T39)
+ *   ended it early, or null at the time limit (missing in a gate saved before T39); limit: THREAD_LIMIT or BATCH_LIMIT (missing in a
+ *   gate saved before T245: then BATCH_LIMIT), and endsAt is openedAt + limit
  * @typedef {SingleGate | BatchGate} Gate
  * @typedef {{ type: 'press', by: string, option: string, part?: number, at: number, via: 'discord' | 'terminal', reason?: string }
  *   | { type: 'end', by: string, at: number, via: 'discord' | 'terminal' }
@@ -73,11 +81,11 @@ const isOptions = (x) => Array.isArray(x) && x.length > 0 && x.length <= MAX_OPT
 /**
  * Open a gate. A single gate has one list of options; a batch has parts, each a list of options.
  * Throws on a gate it refuses: a kind other than single or batch, no id or askedBy,
- * a time that is not a safe integer (ms), a batch whose end (`at` + 30 minutes) is not a safe integer, or empty or duplicate options or parts,
- * or more than MAX_OPTIONS options in one list.
+ * a time that is not a safe integer (ms), a batch whose end (`at` + `limit`) is not a safe integer, a batch `limit` other than
+ * THREAD_LIMIT or BATCH_LIMIT (the default), or empty or duplicate options or parts, or more than MAX_OPTIONS options in one list.
  * @returns {Gate}
  */
-export function openGate({ id, kind, options, parts, askedBy, at }) {
+export function openGate({ id, kind, options, parts, askedBy, at, limit = BATCH_LIMIT }) {
   if (!KINDS.has(kind)) throw new RangeError('openGate: unknown gate kind');
   if (!isId(id) || !isId(askedBy)) throw new TypeError('openGate: a gate needs an id and askedBy');
   if (!Number.isSafeInteger(at)) throw new RangeError('openGate: a gate needs a time in whole ms');
@@ -86,12 +94,13 @@ export function openGate({ id, kind, options, parts, askedBy, at }) {
     if (!isOptions(options)) throw new TypeError('openGate: a single gate needs a non-empty list of unique options');
     return freeze({ ...base, phase: 'open', options: [...options] });
   }
-  if (!Number.isSafeInteger(at + BATCH_LIMIT)) throw new RangeError('openGate: a batch needs a time whose end, 30 minutes later, is in whole ms');
+  if (!LIMITS.includes(limit)) throw new RangeError('openGate: a batch limit is THREAD_LIMIT or BATCH_LIMIT');
+  if (!Number.isSafeInteger(at + limit)) throw new RangeError(`openGate: a batch needs a time whose end, ${limit / MINUTE} minutes later, is in whole ms`);
   if (!(Array.isArray(parts) && parts.length > 0 && parts.every(isOptions))) {
     throw new TypeError('openGate: a batch needs a non-empty list of parts, each with a non-empty list of unique options');
   }
   return freeze({
-    ...base, phase: 'voting', endsAt: at + BATCH_LIMIT, votingEndedAt: null,
+    ...base, phase: 'voting', limit, endsAt: at + limit, votingEndedAt: null,
     parts: parts.map((opts) => ({ options: [...opts], ballots: [], outcome: OPEN })),
   });
 }
@@ -277,8 +286,9 @@ const BATCH_KEYS = [...SINGLE_KEYS.slice(0, -1), 'endsAt', 'votingEndedAt', 'par
 
 /** What is wrong with a gate, or '' when it is a gate that openGate and step could make. */
 function gateProblem(g) {
-  // A batch saved before T39 has no endedBy: it still loads, with the person who ended it unknown.
-  if (!keysAre(g, ...(g?.kind === 'batch' ? [BATCH_KEYS, ['endedBy']] : [SINGLE_KEYS])) || !KINDS.has(g.kind)) return 'unknown fields or kind';
+  // A batch saved before T39 has no endedBy, and one saved before T245 no limit: it still loads, with the person who ended it unknown and
+  // the limit BATCH_LIMIT.
+  if (!keysAre(g, ...(g?.kind === 'batch' ? [BATCH_KEYS, ['endedBy', 'limit']] : [SINGLE_KEYS])) || !KINDS.has(g.kind)) return 'unknown fields or kind';
   if (!isId(g.id) || !isId(g.askedBy)) return 'no id or askedBy';
   const inTime = (t) => Number.isSafeInteger(t) && t >= g.openedAt && t <= g.lastAt;
   if (!Number.isSafeInteger(g.openedAt) || !inTime(g.lastAt)) return 'openedAt or lastAt is not a time';
@@ -291,7 +301,8 @@ function gateProblem(g) {
     const ok = g.phase === 'open' ? status === 'open' : g.phase === 'closed' && (status === 'withdrawn' || answered);
     return ok ? '' : 'the phase and the outcome do not match';
   }
-  if (!Number.isSafeInteger(g.endsAt) || g.endsAt !== g.openedAt + BATCH_LIMIT) return 'endsAt is not 30 minutes after openedAt';
+  if (g.limit !== undefined && !LIMITS.includes(g.limit)) return 'limit is not THREAD_LIMIT or BATCH_LIMIT';
+  if (!Number.isSafeInteger(g.endsAt) || g.endsAt !== g.openedAt + limitOf(g)) return 'endsAt is not the limit after openedAt';
   const ended = g.votingEndedAt;
   if (ended !== null && !(inTime(ended) && ended <= g.endsAt)) return 'votingEndedAt is not a time';
   // The owner ends the vote only before the time limit; at the limit nobody ends it.

@@ -33,7 +33,7 @@ Everything goes into a new scratch folder, with `HOME` and `SAGE_HOME` of every 
 | Kinds | Two only: single and batch. Any other kind is refused. |
 | Single gate | One question with options, each option once. The first answer from a holder is final at once. A later press is ignored. A single answer has no reason. |
 | Batch gate | The task's one batch of product questions, as parts, each with its own options (each option once in a part). It is a vote: every holder may vote on each part, and the last ballot of each person on each part counts. |
-| Time limit | A batch vote ends 30 minutes after it opens (at 29:59.999 it is still open). Each part goes to the option with the most votes cast; people who did not vote do not count. The countdown keeps running while the owner's Mac sleeps: when the bridge wakes after the limit, its tick closes the vote with the votes cast so far. |
+| Time limit | A batch vote ends at its stored limit after it opens: 30 minutes (`BATCH_LIMIT`), or 10 minutes (`THREAD_LIMIT`) for a vote in a task thread (T245). At 29:59.999 of a 30-minute vote it is still open. A gate saved before T245 has no `limit` and reads as 30 minutes. Each part goes to the option with the most votes cast; people who did not vote do not count. The countdown keeps running while the owner's Mac sleeps: when the bridge wakes after the limit, its tick closes the vote with the votes cast so far. |
 | Tie | A part with a tie, or with no votes, stays open. Only the owner decides it, by choosing one of the tied options (with no votes, every option is tied). While a part is tied, the batch is not closed: sage gets the answers only when every part is decided or answered at the terminal. |
 | End early | The owner may end a batch vote at any time. The parts are then decided as at the time limit. |
 | Holder list changes | A holder added to the list counts at once. A removed holder's ballot does not count at the time limit. Nothing is decided with no holders. |
@@ -42,7 +42,7 @@ Everything goes into a new scratch folder, with `HOME` and `SAGE_HOME` of every 
 | Terminal answer | The owner's answer at the terminal is final, with no role: the bridge reads it from sage by the owner's user id (`ownerId`) and closes that question or part with it (G10), whatever the presses and votes. The owner needs the sage-crew role only to press an option in Discord. The bridge never sends `step` a press with `via: 'terminal'`; such an event counts only from a holder. |
 | Outcome | Single: open, answered (option, who, and via Discord or the terminal), or withdrawn. Batch: each part is open or decided (by votes or by the owner's tie-break); the batch closes when every part is decided. |
 | Withdraw | The person who asked may withdraw the gate. A withdraw while any part is still open cancels the whole gate: no part of a withdrawn batch stays decided, also when the vote already decided it. A step that ends withdrawn gives only the `'closed'` effect, also when the time limit passed before it. Once a gate closes as decided, a withdraw has no effect. A withdraw at or after the time limit, with no tick before it, comes after the limit: the vote ends first, so the withdraw has no effect when the vote decided every part. |
-| Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, a batch whose end 30 minutes later is not a safe integer, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate, as `nextReminderAt` and `parseGate` do. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
+| Odd input | `openGate` throws on a gate it refuses (also a time that is not a safe integer, a batch whose end at its limit is not a safe integer, a limit other than 10 or 30 minutes, or a duplicate option). `step` never throws for odd events; it throws a TypeError for a missing or wrong gate, as `nextReminderAt` and `parseGate` do. An odd event, a time that is not a safe integer (whole ms), or a time earlier than the last applied event is ignored, with the reason. A refused event does not move the gate's time. |
 
 ### Reasons are untrusted text
 
@@ -58,13 +58,16 @@ It also exports these constants, all in ms except the last:
 | --- | --- |
 | `MINUTE` | 60,000 |
 | `HOUR` | 60 minutes |
-| `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote |
+| `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote in the home channel or a session thread, and of a gate with no `limit` |
+| `THREAD_LIMIT` | 10 minutes: the time limit of a batch vote in a task thread (T245) |
+
+`limitOf(gate)` gives the time limit of a batch gate: its `limit`, or `BATCH_LIMIT` for a gate saved before T245. The bridge, the cards and `parseGate` read the limit only through it.
 | `REMINDER_EVERY` | 2 hours |
 | `REASON_MAX` | 500: the most characters (code points) in a ballot reason; a longer one is cut |
 | `MAX_OPTIONS` | 5: the most options of a single gate or of one batch part (one row of Discord buttons) |
 | `MAX_BALLOTS` | 1000: the most voters on one part; the next new voter gets `full` |
 
-### openGate({ id, kind, options, parts, askedBy, at })
+### openGate({ id, kind, options, parts, askedBy, at, limit })
 
 Makes a new gate.
 
@@ -75,11 +78,12 @@ Makes a new gate.
 | `options` | array of unique non-empty strings | Single only: the options. |
 | `parts` | array of such arrays | Batch only: the options of each part. Parts count from 0. |
 | `askedBy` | non-empty string | The id of the person who asked. Only this person may withdraw. |
-| `at` | safe integer (ms) | The time the gate opens. A batch vote ends at `at + 30 minutes` (`gate.endsAt`). |
+| `at` | safe integer (ms) | The time the gate opens. A batch vote ends at `at + limit` (`gate.endsAt`). |
+| `limit` | `BATCH_LIMIT` (the default) or `THREAD_LIMIT` | Batch only: the time limit of the vote. The gate stores it. |
 
 It throws:
 
-- a RangeError for a kind other than `'single'` or `'batch'`, for an `at` that is not a safe integer, or for a batch whose end (`at` + 30 minutes) is not a safe integer;
+- a RangeError for a kind other than `'single'` or `'batch'`, for an `at` that is not a safe integer, for a batch `limit` other than `BATCH_LIMIT` or `THREAD_LIMIT`, or for a batch whose end (`at` + `limit`) is not a safe integer;
 - a TypeError for a missing `id` or `askedBy`, or for empty or duplicate options or parts, or for more than `MAX_OPTIONS` (5) options in one list.
 
 ### step(gate, event, holders, ownerId)
@@ -145,7 +149,7 @@ The `why` codes:
 | `id`, `kind`, `askedBy` | as given to `openGate` | as given to `openGate` |
 | `openedAt` | the `at` of `openGate` | the `at` of `openGate` |
 | `lastAt` | the time of the last applied event (`openedAt` at first) | the same |
-| other | `options` | `endsAt`, `votingEndedAt`, `endedBy` (after the vote ended), `parts` |
+| other | `options` | `limit`, `endsAt`, `votingEndedAt`, `endedBy` (after the vote ended), `parts` |
 
 A batch also has `endedBy` once its vote ended: the id of the person who ended it early, or `null` at the time limit. Each part of a batch has `options`, `outcome` (`{ status: 'open' }`, `{ status: 'decided', option, how: 'votes' }` or `{ status: 'decided', option, how: 'lead-tiebreak', by, at }`, with the id of the person and the time of the tie-break) and, after the vote ended with no single leader, `tied` (the tied options). The final answers of a decided batch are the parts' outcomes; the parts of a withdrawn batch show `{ status: 'open' }` and keep their ballots. A part also has `ballots`, stored as `[id, ballot]` pairs so that the gate stays plain JSON. Do not read `ballots` directly: call `ballotsOf(part)`. It returns a Map from id to `{ option, at, via, reason? }`, the last ballot of each person.
 
@@ -155,7 +159,7 @@ A gate is plain JSON: it keeps one ballot per person on each part, so its size g
 
 ### parseGate(value)
 
-Checks a loaded gate, freezes it all through and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, tied options on a part that the votes decided, one tied option of several (only a part with one option has one tied option), an `endsAt` that is not a safe integer, a ballot after the end of the vote, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, more than `MAX_BALLOTS` ballots or `MAX_OPTIONS` options on a part, a reason that is empty, longer than 500 characters or has a lone surrogate, a time that is not a safe integer or is later than `lastAt`, a tie-break time before the end of the vote, or an `endedBy` that does not match the end (an id for an early end, `null` at the time limit). A gate saved before T39, without `endedBy` or a tie-break's `by` and `at`, still loads. `step` and `nextReminderAt` make the same check.
+Checks a loaded gate, freezes it all through and returns it. **The bridge (B3) must call `parseGate` on each gate that it loads**, for example from JSON after a restart. It throws a TypeError, with the reason, for a value that `openGate` and `step` could not have made: unknown fields, a phase that does not match the outcomes, a tied part without its tied options, tied options on a part that the votes decided, one tied option of several (only a part with one option has one tied option), an `endsAt` that is not a safe integer or not `openedAt` plus the limit, a `limit` other than 10 or 30 minutes, a ballot after the end of the vote, an option that the gate or part does not have, a ballot by an empty id or a second ballot by one person, more than `MAX_BALLOTS` ballots or `MAX_OPTIONS` options on a part, a reason that is empty, longer than 500 characters or has a lone surrogate, a time that is not a safe integer or is later than `lastAt`, a tie-break time before the end of the vote, or an `endedBy` that does not match the end (an id for an early end, `null` at the time limit). A gate saved before T39, without `endedBy` or a tie-break's `by` and `at`, still loads; so does a batch saved before T245, without `limit`, as a 30-minute vote. `step` and `nextReminderAt` make the same check.
 
 ### nextReminderAt(gate, now)
 
@@ -283,12 +287,12 @@ For the read commands it also exports `fakeCommand({ user, roles, bot, channelId
 
 ### The preview
 
-<!-- check: run, prints "with 11 moments" -->
+<!-- check: run, prints "with 13 moments" -->
 ```sh
 node scripts/preview.mjs
 ```
 
-This command renders the card JSON of the design's ten moments, plus a card of a team of 5 with 4 parts and 500-character reasons, to `design/b2/index.html` with sample data (or to the path after `--out <page.html>`), through `scripts/render.mjs` (the demo uses it too). With `--shots` it also screenshots each moment to `shots/` beside the page with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder. Chrome runs with `--disable-gpu`, so the shots are byte-identical from one cold run to the next (the GPU raster path draws the rounded border corner by one shade differently in some runs).
+This command renders the card JSON of the design's ten moments, plus a card of a team of 5 with 4 parts and 500-character reasons and two moments of a vote of 10 minutes in a task thread (T245), to `design/b2/index.html` with sample data (or to the path after `--out <page.html>`), through `scripts/render.mjs` (the demo uses it too). With `--shots` it also screenshots each moment to `shots/` beside the page with the local Chrome (playwright-core, channel `chrome`); run it with `HOME` set to a scratch folder. Chrome runs with `--disable-gpu`, so the shots are byte-identical from one cold run to the next (the GPU raster path draws the rounded border corner by one shade differently in some runs).
 
 ## The bridge service
 
@@ -512,7 +516,8 @@ The bridge runs the sage state tool with `execFile` (no shell): `sage logbook` f
 | A gate that a task adds after its card was posted | Its own card, also within 30 seconds of the first. |
 | A gate with no option or more than 5 | Refused the same way: one row of Discord buttons holds 5. |
 | A marked gate whose question or options name a merge (any word that holds "merg", in any letter case: "merge", "merging", "mergeable", "unmerged", "automerge", "auto_merge", "MERGE_CHECK") | Not posted. Merges never go to a vote; they stay at the terminal. |
-| A new card | The post mentions the roles named sage-crew, and only those roles: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." |
+| A new card | The post mentions the roles named sage-crew, and only those roles: "T7 has 3 product questions. Vote on each part within 30 minutes." or "T8 needs one product answer. The first answer is final." In a task thread: "T7 has 1 product question. Vote on it within 10 minutes. Then the votes decide, and Erick breaks a tie." |
+| An open gate of a task that has a task thread (T245) | A vote in that thread, with a limit of 10 minutes, also for one question alone: see [Task threads](#task-threads). A crew recommendation never goes there. |
 | The owner answers a posted gate in the chat, and sage records that answer with `sage gate answer` | Final, whatever the owner's roles. The card shows "Answered by Erick (terminal) at 14:05: B. text. Final." on that question, or on that part of a batch, and its buttons go grey. A press on it gets "Already answered by Erick at the terminal: … Your press did not count." The other parts of a batch keep voting, and the owner never gets a tie for an answered part. The answer is no ballot. A new card that the owner answered whole before its first post (after a crash of the bridge between its save and its post) is never posted. The owner's answer is final also while the bridge checks its own write in a decisions trail that does not show it; then the log says to update sage-bot so it reads sage's new answer rows, and to restart the bridge. |
 | An answer in the logbook that the bridge did not write | The owner's: sage recorded it with `sage gate answer`. The bridge reads the logbook before each press and again before each `sage gate answer`, and never gives sage an answer for a gate that the owner answered. |
 | sage answers an open single gate with text that names no option (the owner's own words, kept as "other: …") | The owner's final answer, as for an option: the card shows "Answered by Erick (terminal) at 14:05: other: … Final.", and the bridge gives sage nothing for it. On a part of a batch it is the same. No button withdraws a gate. |
@@ -579,9 +584,9 @@ A test sweeps every Unicode code point through `forModel` and proves that no con
 4. A mention in a thread of a registered channel that is not in the thread map (a thread that sage-bot did not open, a session thread, or a forum post) gets one reply in place: "I answer in my own threads. Mention me in #channel and I open one for you." For a forum post, #channel is the first registered channel.
 5. A mention in the registered channel itself opens a public thread from the message (auto-archive after one day). Its name is the request with the mention tags taken out, cleaned for the terminal (printable characters only), on one line, at most 80 characters, or "sage-bot request". The owner's mention with the word "talk" opens an owner thread (`lead` in the thread map, the name from before T232); every other mention opens an answer thread. When Discord refuses the thread for a missing right (codes 50001 and 50013), the reply in place names "Create Public Threads"; when it refuses the post in the thread, "Send Messages in Threads".
 6. In the thread: the owner's "talk", and every mention in an owner thread, is a would-be delivery to sage. The bridge checks the kill switch, writes the log line, and replies with the dry-run text ("Recorded in the audit log. Sessions with sage are not on yet, so nothing goes to sage. …") or, while the switch is set, the fixed text ("The link from Discord to sage is off. …"). The owner's talk in an answer thread first turns it into an owner thread (G27): the bridge writes each held crew mention of that thread to the log, in order, as quoted data with the outcome `earlier`, then records the thread as `lead` in the thread map. The owner's read ask keeps it an answer thread. No sage session starts: no code in `src/` can start a `claude` process (a test checks that only `/bin/ps`, the Keychain tool and the sage state tool run as child processes).
-7. Any other mention in a thread is a read ask: a task id (`T7`) gets `/sage task`; else the first of `board`, `gates` (or `questions`) and `files` gets that command; any other text gets the pointer to these words. The owner's read ask is logged with the outcome `read-ask`. A crew member's mention in an answer thread is not logged; the thread map holds it until the owner talks there. Every post pings nobody.
+7. Any other mention in a thread is a read ask: a task id (`T7`) gets `/sage task`; else the first of `board`, `gates` (or `questions`) and `files` gets that command; any other text gets the pointer to these words. The owner's read ask is logged with the outcome `read-ask`. A crew member's mention in an answer thread is not logged; the thread map holds it until the owner talks there. A crew member's mention in a task thread is a read ask only: nothing holds it, and nothing goes to sage (the outbox of a later pull request of issue 60 adds that). Every post pings nobody.
 
-**The thread map** is `<statePath>.threads`: `{ "version": 1, "threads": { "<thread id>": { "kind": "answer" | "lead", "channel", "project", "by", "at" } } }`. An answer thread also has `held`: the crew mentions there, each `{ "id", "user", "roles", "content" }`, in order. `roles` is `["sage-crew"]` or `[]`, as in the audit log; a map with role ids or role names from before still loads, and only the crew name from it reaches the log. An owner thread has no `held`. It is safe like the channel registry (0600, written whole by a rename, read with `O_NOFOLLOW`; a bad file stops the start). It is a file of its own, not a part of the gate file: the bridge's loop rewrites the gate file whole from memory, so a second writer there would lose lines.
+**The thread map** is `<statePath>.threads`: `{ "version": 2, "threads": { "<thread id>": { "kind": "answer" | "lead", "channel", "project", "by", "at" } } }`. A task thread (T245) is `{ "kind": "task", "task", "request", "project", "folder", "channel" }`: see [Task threads](#task-threads). A version 1 file (before T245) loads as it is, and the next save writes version 2. One process holds one thread map in memory: `src/ask.js`, `src/requestFlow.js` and the bridge share it, and its `save` is the file's one writer (F4 of R917). An answer thread also has `held`: the crew mentions there, each `{ "id", "user", "roles", "content" }`, in order. `roles` is `["sage-crew"]` or `[]`, as in the audit log; a map with role ids or role names from before still loads, and only the crew name from it reaches the log. An owner thread has no `held`. It is safe like the channel registry (0600, written whole by a rename, read with `O_NOFOLLOW`; a bad file stops the start). It is a file of its own, not a part of the gate file: the bridge's loop rewrites the gate file whole from memory, so a second writer there would lose lines.
 
 **The audit log** (`src/audit.js`) is `auditPath` in the config, or `<statePath>.leads.jsonl` (the file name is from before T232). At start the bridge makes its folder with mode 0700 and stops when the folder is open to others or is inside a project folder of the config. Every append opens the file with `O_APPEND | O_NOFOLLOW` (a symlink is refused) and checks that it is this user's regular 0600 file. One JSON line holds, in this order: `at` (ISO time from the bridge's clock), `message`, `author`, `roles` (`["sage-crew"]` when the author was in the crew at that time, else `[]`: no other role name and no text of Discord, F-T232-13; role ids or role names in older lines), `textSha256` (of the raw text), `text`, `thread`, `project`, `outcome`, then `prev` (the hash of the line before it, 64 zeros for the first) and `hash` = sha256 of `prev` and the JSON list of the nine fields. Outcomes: `earlier`, `dry-run`, `link-off`, `read-ask`, `not-registered`, `over-limit`, `not-my-thread`, `no-thread-right`, `no-thread`, `link-off-set`. When the line cannot be written, nothing goes further and the thread gets "I could not record or answer this just now". A write that takes only a part of the line (a full disk) counts as not written (F-T143-8). A log whose last line has no newline (a write that stopped in a line) keeps that torn line as it is: the next append starts on a new line, so the torn line does not take in the next one.
 
@@ -737,7 +742,23 @@ A custom id that does not parse gets nothing at all. The routes (`src/discord.js
 
 The field `shown` of the record is the status that the line and the card last showed, so a decided request is not drawn again after a restart, and the post after a decision comes once. After a restart, each open request is drawn once.
 
+After Approve, the request's thread becomes the thread of its sage task: see [Task threads](#task-threads).
+
 **The tests.** `test/t228-request-wiring.test.js` runs each of these on the fake Discord with the pinned sage copy in a scratch HOME: a whole request; a person outside the crew; a crew member who cannot approve or decline; withdraw; forged and replayed ids; the route; a decision at the terminal; a dead claim after a restart and the bridge's own failed approve; the kill switch; the refusals before the form; the board; and the late note.
+
+### Task threads
+
+A team steers sage on a task inside one Discord thread (T245, issue 60 PR 5 and 6). After the owner approves a request, its thread becomes the thread of its sage task, and the bridge posts the task's design questions there as votes of 10 minutes.
+
+1. **Approve.** When the owner approves a request (on Discord, or at the terminal with `scripts/requests.mjs approve`), the request flow writes one entry to the thread map: the request's thread id → `{ "kind": "task", "task": "T5", "request": "RQ1", "project", "folder", "channel" }`. A press of Approve writes it before the private reply; the sync loop writes it for each approved request that has a thread and no entry, also after a restart or for an approve at the terminal. When the save fails, the log says so once, the map in memory keeps the entry, and the next loop saves again.
+2. **The questions.** When sage marks an open gate of that task as a team vote, the bridge posts its card in the task thread, not in the home channel or a session thread. The task counts by its id, the project's name and the project's folder now (G45 A), so a task of another folder with the same name gets no task thread. The card is always a vote, also for one question alone, so that the crew decides together; its limit is `THREAD_LIMIT`, 10 minutes, and the gate stores it. The alert pings the roles named sage-crew: "project T5 has 1 product question. Vote on it within 10 minutes. Then the votes decide, and Erick breaks a tie." The card's footer says "Rule: 10 minutes, then each part goes to the option with the most votes · a tied part waits for Erick".
+3. **The vote.** Every member with the role named sage-crew votes, one vote per part; there is no join step and no decider. At 10 minutes the votes decide each part. A tied part waits for the owner: only the owner (`ownerId`) breaks the tie, or ends the vote early, as on every card.
+4. **Other gates.** A gate of a task with no task thread stays where it went before: in the home channel or its session thread, with 30 minutes. A crew recommendation (the automatic-merge question) never goes to a task thread.
+5. **The buttons.** The routes (`src/discord.js` `accepts`) take a press of the bridge's buttons in the home channel, in its threads, and in each thread whose entry in the thread map is a task thread, in any registered channel (F3 of R917). A press in any other thread gets nothing; on a known thread, the press still counts only on the card's own message.
+
+When Discord refuses the card in the task thread (the thread is gone, or a right is missing), the card goes to the home channel, as for a session thread that Discord refuses.
+
+**The tests.** `test/t245-task-threads.test.js` plays each of these on the fake Discord with the pinned sage copy in a scratch HOME: Approve turns the request thread into the task thread; a design gate of that task posts in its thread with a 10-minute limit; the crew votes and the votes decide at 10 minutes; a tie waits for the owner and only the owner breaks it; a gate with no task thread stays in the home channel with 30 minutes; a version 1 thread map loads; an old gate with no limit reads as 30 minutes; a press in a task thread is accepted, and one in an unknown thread is not.
 
 ## Sage sessions and their threads
 

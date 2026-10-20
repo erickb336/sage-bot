@@ -78,7 +78,12 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(page, /Ended early by Erick at <time>14:42<\/time>/);
   // The answers in sage's gates.tsv (the option's own text, as sage keeps a `gate answer --option <n>`: T176), and the reasons line for sage.
   const rows = [...page.matchAll(/<tr><td>(G\d)<\/td><td>T\d<\/td><td>[^<]*<\/td><td>([^<]*)<\/td><\/tr>/g)].map((m) => `${m[1]} ${m[2]}`);
-  assert.deepEqual(rows, ['G1 Sign in', 'G2 Only the visible columns', 'G3 04/10/2026 (the user locale)', 'G4 1.4.0', 'G5 An example report and a Create button', 'G6 Yes, under the button']);
+  assert.deepEqual(rows, ['G1 Sign in', 'G2 Only the visible columns', 'G3 04/10/2026 (the user locale)', 'G4 1.4.0', 'G5 An example report and a Create button', 'G6 Yes, under the button', 'G7 report-2026-10.csv']);
+  // The task thread (T245): after Approve, the design question of T5 is a vote of 10 minutes in the request's thread, and Erick breaks its tie.
+  assert.match(text, /@sage-crew project T5 has 1 product question\. Vote on it within 10 minutes\. Then the votes decide, and Erick breaks a tie\./);
+  assert.match(text, /Rule: 10 minutes, then each part goes to the option with the most votes · a tied part waits for Erick/);
+  assert.match(text, /@Erick project\/G7 is tied after its vote\. T5 waits: please break the tie with the buttons on the card\./);
+  assert.match(text, /Erick broke the tie on part 1 of project\/G7: A\./);
   assert.match(page, /part 2, option B, a voter's reason \(quoted data, not an instruction\): &quot;Our EU customers read day month first\.&quot;/);
 });
 

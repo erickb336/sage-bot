@@ -62,7 +62,7 @@ test('F-T35-1: openGate refuses a batch whose end is not a safe integer; parseGa
   assert.equal(openGate({ id: 'g5', kind: 'single', options: ['A', 'B'], askedBy: ERICK, at: late }).openedAt, late); // a single gate has no end
   const g = json(openGate({ id: 'g4', kind: 'batch', parts: [['A', 'B']], askedBy: ERICK, at: T0 }));
   Object.assign(g, { openedAt: late, lastAt: late, endsAt: late + BATCH_LIMIT });
-  refused(g, 'endsAt is not 30 minutes after openedAt');
+  refused(g, 'endsAt is not the limit after openedAt');
 });
 
 test('F-T206-1: the end-early confirm cuts each final answer, so 4 long final answers stay within 2000 characters', () => {

@@ -2,44 +2,66 @@
 // message, and the request and its answer live there. An answer thread holds read asks: the bridge answers them itself, with no AI. An
 // owner thread (kind 'lead') is the owner's "talk": in this step it only records each message in the audit log and says that sessions are not on yet.
 // No sage session starts from this code, and no code here can start one: it has no process port at all.
+// A task thread (kind 'task', T245) is the thread of a request that the owner approved: the bridge posts the design questions of its
+// task there, as votes of 10 minutes.
 // The thread map is <statePath>.threads, beside the gate file and safe like it (0600, written whole, read with no symlink), so that a
 // thread continues after a restart. It is a file of its own: the bridge's loop rewrites the gate file whole from memory, and a second
-// writer of that file would lose lines.
+// writer of that file would lose lines. One process holds one ThreadMap: /sage and the mentions (src/ask.js), the requests
+// (src/requestFlow.js) and the bridge share it, and its `save` is the file's one writer (F4 of R917).
 import { forTerminal } from './clean.js';
+import { REQUEST_ID } from './requests.js';
 import { readOwn, writeWhole } from './state.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
+const TASK_ID = /^T\d{1,9}$/;
 const shape = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().join() : null);
 
 /** The thread map file of a config: `<statePath>.threads`. */
 export const threadsPathOf = ({ statePath }) => `${statePath}.threads`;
 
+/** The thread map of one process: a Map of the entries, and `save`, the one writer of its file. */
+class ThreadMap extends Map {
+  #path;
+  constructor(path, entries) { super(entries); this.#path = path; }
+  /** Replaces the thread map file whole, as version 2. Throws when the file cannot be written; the map in memory stays as it is. */
+  save() { writeWhole(this.#path, `${JSON.stringify({ version: 2, threads: Object.fromEntries(this) })}\n`); }
+}
+
 /**
- * The thread map: thread id → { kind: 'answer' | 'lead', channel, project, by, at }, and for an answer thread `held`: the mentions of
- * the crew there, each { id, user, roles, content }, in order. When the owner talks in an answer thread, it becomes an owner thread ('lead',
- * the name from before T232) and its held mentions go into the audit log as quoted data (G27). An empty Map when there is no file. Throws, and
- * the bridge stops, for a file that is not this user's 0600 file, a symlink, bad JSON or an entry that the bridge did not write.
+ * The thread map, as a ThreadMap: thread id → { kind: 'answer' | 'lead', channel, project, by, at }, and for an answer thread `held`: the
+ * mentions of the crew there, each { id, user, roles, content }, in order. When the owner talks in an answer thread, it becomes an owner
+ * thread ('lead', the name from before T232) and its held mentions go into the audit log as quoted data (G27). A task thread (T245) is
+ * { kind: 'task', task, request, project, folder, channel }: the sage task id, the request id, the project's name and folder (G45 A) and
+ * the registered channel of the thread. A version 1 file (before T245) loads as it is: it has no task threads. An empty map when there is
+ * no file. Throws, and the bridge stops, for a file that is not this user's 0600 file, a symlink, bad JSON or an entry that the bridge did
+ * not write.
  */
 export function loadThreads(path) {
   const text = readOwn(path, 'thread map');
-  if (text === undefined) return new Map();
-  const bad = new TypeError(`the thread map ${path} is not a version 1 thread map that the bridge wrote. Nothing was loaded.`);
+  if (text === undefined) return new ThreadMap(path);
+  const bad = new TypeError(`the thread map ${path} is not a version 1 or 2 thread map that the bridge wrote. Nothing was loaded.`);
   let data;
   try { data = JSON.parse(text); } catch { throw bad; }
-  if (shape(data) !== 'threads,version' || data.version !== 1 || shape(data.threads) === null) throw bad;
+  if (shape(data) !== 'threads,version' || ![1, 2].includes(data.version) || shape(data.threads) === null) throw bad;
   // `roles`: the role NAMES of the member since T232 (Discord allows 1 to 100 characters, counted as code points, so 100 emoji are 200
   // UTF-16 units: F-T232-2), role ids before it. They only go to the audit log.
   const isHeld = (h) => shape(h) === 'content,id,roles,user' && SNOWFLAKE.test(h.id) && SNOWFLAKE.test(h.user) && typeof h.content === 'string'
     && Array.isArray(h.roles) && h.roles.every((r) => typeof r === 'string' && r !== '' && Array.from(r).length <= 100);
+  const isTask = (t) => TASK_ID.test(t.task) && REQUEST_ID.test(t.request) && typeof t.folder === 'string' && t.folder.startsWith('/');
+  const isMention = (t) => SNOWFLAKE.test(t.by) && Number.isSafeInteger(t.at) && (t.kind !== 'answer' || (Array.isArray(t.held) && t.held.every(isHeld)));
   for (const [id, t] of Object.entries(data.threads)) {
-    if (!SNOWFLAKE.test(id) || shape(t) !== { answer: 'at,by,channel,held,kind,project', lead: 'at,by,channel,kind,project' }[t?.kind]
-      || !SNOWFLAKE.test(t.channel) || !SNOWFLAKE.test(t.by) || typeof t.project !== 'string' || !Number.isSafeInteger(t.at)
-      || (t.kind === 'answer' && !(Array.isArray(t.held) && t.held.every(isHeld)))) throw bad;
+    const kinds = { answer: 'at,by,channel,held,kind,project', lead: 'at,by,channel,kind,project', ...(data.version === 2 && { task: 'channel,folder,kind,project,request,task' }) };
+    if (!SNOWFLAKE.test(id) || shape(t) !== kinds[t?.kind] || !SNOWFLAKE.test(t.channel) || typeof t.project !== 'string'
+      || !(t.kind === 'task' ? isTask(t) : isMention(t))) throw bad;
   }
-  return new Map(Object.entries(data.threads));
+  return new ThreadMap(path, Object.entries(data.threads));
 }
-/** Replaces the thread map file whole. */
-export const saveThreads = (path, map) => writeWhole(path, `${JSON.stringify({ version: 1, threads: Object.fromEntries(map) })}\n`);
+
+/**
+ * The task thread of a request that the owner approved (T245): its own thread, as the entry that loadThreads takes back. `r` is a record of
+ * src/requests.js with status 'approved', a task and a thread.
+ */
+export const taskThread = (r) => ({ kind: 'task', task: r.task, request: r.id, project: r.project, folder: r.folder, channel: r.channel });
 
 /** The words of a mention, with every Discord mention, role and channel tag taken out. */
 const words = (text) => String(text ?? '').replace(/<(?:@[!&]?|#)\d+>/g, ' ').replace(/\s+/g, ' ').trim();

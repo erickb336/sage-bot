@@ -154,11 +154,11 @@ test('a press in a thread of the configured channel counts; a press in another c
   const thread = '400000000000000009';
   const press = (channelId, channel) => ({ isButton: () => true, isModalSubmit: () => false, channelId, channel });
   const fetch = async () => { throw new Error('not fetched: the channel is in the cache'); };
-  assert.equal(await accepts(press(CHANNEL, { isThread: () => false }), CHANNEL, fetch), true);
-  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: CHANNEL }), CHANNEL, fetch), true);
-  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: '400000000000000002' }), CHANNEL, fetch), false);
-  assert.equal(await accepts(press('400000000000000002', { isThread: () => false }), CHANNEL, fetch), false);
-  assert.equal(await accepts({ ...press(thread, { isThread: () => true, parentId: CHANNEL }), isButton: () => false }, CHANNEL, fetch), false);
+  assert.equal(await accepts(press(CHANNEL, { isThread: () => false }), CHANNEL, fetch, new Map()), true);
+  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: CHANNEL }), CHANNEL, fetch, new Map()), true);
+  assert.equal(await accepts(press(thread, { isThread: () => true, parentId: '400000000000000002' }), CHANNEL, fetch, new Map()), false);
+  assert.equal(await accepts(press('400000000000000002', { isThread: () => false }), CHANNEL, fetch, new Map()), false);
+  assert.equal(await accepts({ ...press(thread, { isThread: () => true, parentId: CHANNEL }), isButton: () => false }, CHANNEL, fetch, new Map()), false);
   // The press on the card in the thread answers the gate, and the card in the thread shows it.
   const b = setup();
   hook(b, S1, 'SessionStart');
@@ -573,7 +573,7 @@ test('F-T29-10: a press in a thread that is not in the cache (i.channel is null)
   const fetch = async (id) => { fetched.push(id); if (!places.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003 }); return places.get(id); };
   const press = (channelId) => ({ isButton: () => true, isModalSubmit: () => false, channelId, channel: null });
   const results = [];
-  for (const id of [thread, '400000000000000008', '400000000000000007', '400000000000000006']) results.push(await accepts(press(id), CHANNEL, fetch));
+  for (const id of [thread, '400000000000000008', '400000000000000007', '400000000000000006']) results.push(await accepts(press(id), CHANNEL, fetch, new Map()));
   assert.deepEqual(results, [true, false, false, false]);
   assert.deepEqual(fetched, [thread, '400000000000000008', '400000000000000007', '400000000000000006']);
 });
