@@ -196,8 +196,8 @@ const leaders = (counts) => {
  */
 export const settled = (gate, ask) => gate.phase === 'closed'
   || (gate.parts ?? [gate]).every((p, i) => ask.parts[i].final || p.outcome.status === 'decided');
-/** The body line of a closed card of a project that left the config: the vote is closed (F-T132-20). */
-const shutLine = (us) => `**Closed:** this question's project is no longer served; ${us.owner} answers it at the terminal.`;
+/** The body line of a closed card: the vote is closed, and why (F-T132-20, F-T245-5). */
+const shutLine = (us, why) => `**Closed:** this question's ${why}; ${us.owner} answers it at the terminal.`;
 /** The line of a part that the owner answered at the terminal. */
 const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at)}: ${f.text}. Final.**`;
 
@@ -208,10 +208,11 @@ const finalLine = (f, name) => `**Answered by ${name} (terminal) at ${stamp(f.at
  * @param {{ task: string, title: string, parts: { question: string, why: string, recommended: string, default?: string, options: Record<string, string>,
  *   final?: { by: string, at: number, option?: string, text: string } }[] }} ask  `final`: the owner's answer at the terminal, made safe
  * @param {{ holders: Set<string>, names: Map<string, string>, us: { owner: string, bot: string } }} people  `us`: src/crew.js namesOf
- * @param {{ shut?: boolean }} [o]  `shut`: the card of a project that left the config (F-T132-20): its body has no rule, no reminder
- *   and no who-can-answer line, only the line that the owner answers it at the terminal
+ * @param {{ shut?: string }} [o]  `shut`: why the card is closed, after "this question's": a project that left the config (F-T132-20) or
+ *   an unregistered task thread (F-T245-5). Its body has no rule, no reminder and no who-can-answer line, only the line that the owner
+ *   answers it at the terminal
  */
-export function card(gate, ask, { holders, names, us }, { shut = false } = {}) {
+export function card(gate, ask, { holders, names, us }, { shut = '' } = {}) {
   const closed = settled(gate, ask);
   const withdrawn = gate.outcome.status === 'withdrawn';
   const { embed, rows } = gate.kind === 'single' ? single(gate, ask, names, shut, us) : batch(gate, ask, holders, names, shut, us);
@@ -236,7 +237,7 @@ function single(gate, ask, names, shut, us) {
       ...gate.options.map((k) => optionLine(p, k, k === p.default ? ' · Default' : '', cap)), '',
       `**Why recommended:** ${cutAtWord(p.why, why)}`,
       ...(p.default ? [`**Default:** ${cutAtWord(label(p, p.default), cap)}, but no time-out applies it`] : []),
-      ...(shut ? [shutLine(us)] : ask.leads ? [`**Rule:** the first answer is the crew's recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
+      ...(shut ? [shutLine(us, shut)] : ask.leads ? [`**Rule:** the first answer is the crew's recommendation to ${owner} · ${owner} decides at the terminal · reminder every 2 h until answered`,
         `**Who can answer:** every ${HOLDERS}`]
         : ['**Rule:** the first answer is final · reminder every 2 h until answered', `**Who can answer:** every ${HOLDERS}`]),
       ...(p.final ? ['', finalLine(p.final, ask.leads ? owner : who(p.final.by, names))]
@@ -301,7 +302,7 @@ function batch(gate, ask, holders, names, shut, us) {
   const ended = gate.votingEndedAt === null ? ''
     : gate.votingEndedAt < gate.endsAt ? `Ended early by ${actor(gate.endedBy, names, us)} at ${stamp(gate.votingEndedAt)}, with the votes so far. `
     : `Voting ended at ${stamp(gate.votingEndedAt)}. `;
-  const description = shut && !withdrawn ? shutLine(us) : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
+  const description = shut && !withdrawn ? shutLine(us, shut) : withdrawn ? `**Withdrawn by ${who(gate.askedBy, names)} at ${stamp(gate.lastAt)}.** Closed: nothing is decided.`
     : voting ? `${plural(gate.parts.length, 'product question')} of ${ask.task}. Vote${gate.parts.length > 1 ? ' on each part' : ''}; change your vote until the vote ends. The work on the task goes on. ` +
       `Closes at ${stamp(gate.endsAt)} (${stamp(gate.endsAt, 'R')}).`
     : tiedParts ? `${ended}${tiedParts === 1 ? '1 part is tied: it waits' : `${tiedParts} parts are tied: they wait`} for ${us.owner}. ` +

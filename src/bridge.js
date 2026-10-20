@@ -45,6 +45,9 @@ export function notLeadsOnly(row) {
   return row.options === 'Yes|No' ? null : `${row.id} cannot be a crew recommendation: it needs the options Yes|No, exactly`; // F-T94-6
 }
 const NOT_MARKED = 'sage did not mark it as a team vote';
+/** Why a card is closed, after "This question's" (src/cards.js card `shut`): its project left the config (F-T132-8), or the channel of its task thread is unregistered (F-T245-5). */
+const NOT_SERVED = 'project is no longer served';
+const UNREGISTERED = 'channel is unregistered';
 /** Why a gate stays at the terminal while the marks files are refused: the bridge cannot tell whether sage marked it (F-T46-1). */
 const UNREAD = 'the bridge cannot read the marks, so no gate is posted (see the line "no gate is posted")';
 /** A reminder never comes this soon after the card's last ping: a moved card posted just before a 2-hour mark waits for the next one (F-T66-1). */
@@ -165,11 +168,21 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
   /** Whether the mark or entry `key`, of `folder`, is of a project of the config with that name and that folder now. */
   const serves = (key, folder) => folders.has(projectOfKey(key)) && folders.get(projectOfKey(key)) === folder;
   /**
-   * The task thread of the sage task `task` of `project` (T245), by the project's name and its folder now (G45 A), as [thread id, whether
-   * its channel is registered now (isLiveTask)], or undefined. A task with a thread votes in 10 minutes; only a live one gets the card.
+   * The live task thread of the sage task `task` of `project` (T245), by the project's name and its folder now (G45 A), or undefined. A task
+   * thread whose channel the registry does not hold now for the project (isLiveTask) counts as none: its task follows the rules of a task
+   * with no task thread, as a task approved after the unregister does (F-T245-8).
    */
-  const taskThreadOf = (project, task) => [...threads].filter(([, t]) => t.kind === 'task' && t.task === task && t.project === project && t.folder === folders.get(project))
-    .map(([id, t]) => [id, isLiveTask(t, channels)])[0];
+  const taskThreadOf = (project, task) => [...threads].find(([, t]) => isLiveTask(t, channels) && t.task === task && t.project === project && t.folder === folders.get(project))?.[0];
+  /** Whether `place` is a task thread whose channel the registry does not hold now for its project (F-T245-3, F-T245-7). */
+  const unregistered = (place) => threads.get(place)?.kind === 'task' && !isLiveTask(threads.get(place), channels);
+  /**
+   * Whether the card of `id` is a waiting card in an unregistered task thread (F-T245-5): no press there reaches the bridge, so the card is
+   * closed. It gets no tick, no tie ping, no reminder and no held message; the owner answers it at the terminal. When Erick registers the
+   * channel again for its project, the loop gives the card its buttons back, and its vote goes on.
+   */
+  const closedHere = (id) => Boolean(meta.get(id).message) && waits(id) && unregistered(meta.get(id).channel);
+  /** The note of a closed card: the reason, then that the owner answers at the terminal. */
+  const closedNote = (why) => `This question's ${why}; ${us.owner} answers it at the terminal.`;
   const loaded = load(statePath, own, folders);
   // The entries of a project that the config does not serve now (its name left the config, or names another folder): they keep their
   // place in the gate file, and nothing but `closeGone` and a press on their card reads them (F-T132-8, F-T132-21).
@@ -263,14 +276,25 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
   };
   /** A message that pings the owner and nobody else: a tie waits for the owner (C1). */
   const ownerAlert = (text) => ({ content: `<@${config.ownerId}> ${text}`, allowedMentions: { parse: [], users: [config.ownerId] } });
-  /** The session whose thread `target` is, when Discord's error `e` says that the thread is gone. */
-  const goneThread = (target, e) => GONE.has(e?.code) && [...sessions.values()].find((y) => y.thread === target);
+  /**
+   * When Discord's error `e` says that the thread `target` is gone: forgets a session thread (`lost`), or moves the waiting cards of a task
+   * thread to the home channel (F-T245-9). True when it did one of them; a lost thread has its own lines.
+   */
+  const lostPlace = (target, e) => {
+    if (!GONE.has(e?.code)) return false;
+    const x = [...sessions.values()].find((y) => y.thread === target);
+    if (x) lost(x, e);
+    else if (threads.get(target)?.kind === 'task') {
+      sayOnce(`the task thread ${target} is gone from Discord, so its cards go to the parent channel: ${apiError(e)}`);
+      moveHome(target, `its task thread ${target} is gone`);
+    } else return false;
+    return true;
+  };
   /** Posts a message; null when Discord refused it. `log` gets the line of a refusal (a lost thread has its own lines). */
   const post = async (target, payload, log = say) => {
     // A payload with no allowedMentions would ping every mention in its text: the bridge's default pings nobody (F-T65-3).
     try { return await discord.post(target, { allowedMentions: NO_MENTIONS, ...payload }); } catch (e) {
-      const x = goneThread(target, e);
-      if (x) lost(x, e); else log(`Discord refused a post: ${apiError(e)}`);
+      if (!lostPlace(target, e)) log(`Discord refused a post: ${apiError(e)}`);
       return null;
     }
   };
@@ -284,10 +308,17 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     const thread = x.thread;
     sayOnce(`the thread ${thread} of ${x.title} is gone from Discord, so its cards go to the parent channel until the next card makes a new thread: ${apiError(e)}`);
     Object.assign(x, { thread: null, closed: false });
-    const moving = [...meta].filter(([id, m]) => m.message && m.channel === thread && waits(id));
+    moveHome(thread, `the thread of ${x.title} is gone`);
+  };
+  /**
+   * Each card in the thread `thread` that still waits loses its message and gets the parent channel as its place, in one save (G17). A
+   * card closed in an unregistered task thread stays closed (F-T245-5).
+   */
+  const moveHome = (thread, why) => {
+    const moving = [...meta].filter(([id, m]) => m.message && m.channel === thread && waits(id) && !closedHere(id));
     for (const [, m] of moving) Object.assign(m, { message: null, channel: config.channelId });
     persist();
-    for (const [id] of moving) say(`${id}: its card moves to the parent channel, because the thread of ${x.title} is gone (G17)`);
+    for (const [id] of moving) say(`${id}: its card moves to the parent channel, because ${why} (G17)`);
   };
   /**
    * Edits a message; true when Discord took the edit, null when it refused an edit that can never work (NO_EDIT), else false.
@@ -295,8 +326,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
    */
   const edit = async (target, message, payload, what, log = say) => {
     try { await discord.edit(target, message, payload); return true; } catch (e) {
-      const x = goneThread(target, e);
-      if (x) lost(x, e); else log(`Discord refused the edit of ${what}: ${apiError(e)}`);
+      if (!lostPlace(target, e)) log(`Discord refused the edit of ${what}: ${apiError(e)}`);
       return NO_EDIT.has(e?.code) ? null : false;
     }
   };
@@ -371,6 +401,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
    */
   const postAbout = async (id, payload) => {
     const m = meta.get(id);
+    if (closedHere(id)) return; // a closed card in an unregistered task thread gets nothing (F-T245-5)
     await postHeld(id);
     if (!m.held?.length && m.message && (await post(m.channel ?? config.channelId, payload))) return;
     if ((moved(m) || m.held?.length) && waits(id)) { m.held = [...(m.held ?? []), payload]; persist(); }
@@ -405,7 +436,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
       persist();
       return;
     }
-    if (clock() < (backoff.get(id)?.at ?? 0)) return;
+    if (clock() < (backoff.get(id)?.at ?? 0) || closedHere(id)) return;
     while (m.message && m.held.length) {
       let line;
       if (!(await post(m.channel, m.held[0], (l) => { line = l; }))) {
@@ -433,7 +464,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
       : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
       : `${task} has ${n === 1 ? '1 product question. Vote on it' : `${n} product questions. Vote on each part`} within ${limitOf(gate) / MINUTE} minutes.`
         + (m.thread ? ` Then the votes decide, and ${us.owner} breaks a tie.` : ''))
-      + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
+      + (m.channel ? ` Its ${m.thread ? 'task' : 'session'} thread was deleted, so the card is here now, with the votes so far.` : '');
     const payload = { ...card(gate, ask, ppl), ...crewAlert(text) };
     let message = await post(at, payload);
     // A refused post in a task thread, or in a session thread that is gone, goes to the parent channel at once (T245, F-T29-9).
@@ -462,11 +493,15 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
    * buttons back without the note, so it loses its mark `shut` (F-T132-15). False when Discord refused an edit that a later try can
    * get through; true for a card with nothing to try again: not posted yet, or an edit that can never work.
    * A refused edit waits like a held message: the loop tries the card again only when `redrawDue`, and the log says each reason once (F-T45-3).
+   * A waiting card in an unregistered task thread is drawn closed, like `closeGone` draws one, and gets the mark `shut`; the log says so
+   * once (F-T245-5).
    */
   async function redraw(id, ppl) {
     const { gate, ask } = gates.get(id);
     const m = meta.get(id);
-    const payload = { ...card(gate, ask, ppl), ...(m.shut && { content: '' }) };
+    const off = closedHere(id);
+    const payload = off ? { ...card(gate, ask, ppl, { shut: UNREGISTERED }), components: [], content: closedNote(UNREGISTERED) }
+      : { ...card(gate, ask, ppl), ...(m.shut && { content: '' }) };
     if (!m.message) return true;
     let line;
     const took = await edit(m.channel ?? config.channelId, m.message, payload, id, (l) => { line = l; });
@@ -478,7 +513,12 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     // tries the card again for them, and a gate that waits gets its reminders again (F-T145-1, F-T145-L2).
     if (line) sayOnce(`${line}. Discord can never take this edit, so the bridge stops trying it`);
     redrawWaits.delete(id);
-    if (m.oldButtons || m.shut) {
+    if (off && !m.shut) {
+      m.shut = true;
+      delete m.oldButtons;
+      persist();
+      say(`${id}: the channel of its task thread is unregistered, so the bridge closed its card; ${us.owner} answers it at the terminal`);
+    } else if (!off && (m.oldButtons || m.shut)) {
       delete m.oldButtons;
       delete m.shut;
       persist();
@@ -751,7 +791,8 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     // settled (T65, F-T65-4). An error on one card never stops the posts of the others (F-T55-3).
     for (const [id, m] of meta) {
       try {
-        if (!m.message && waits(id)) await postCard(id, ppl, m.channel ?? m.thread ?? await placeOf(m.session, projectOfKey(id)));
+        // A card that waits for its first post in a task thread that is unregistered now goes to the home channel (F-T245-6).
+        if (!m.message && waits(id)) await postCard(id, ppl, m.channel ?? (m.thread && (unregistered(m.thread) ? config.channelId : m.thread)) ?? await placeOf(m.session, projectOfKey(id)));
         await postHeld(id);
       } catch (e) { say(`${id}: the bridge could not post its card; it tries again: ${e?.message}`); }
     }
@@ -811,10 +852,9 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
       if (!rowsOpen.length || t - Math.max(...rowsOpen.map((r) => firstSeen.get(key(r.id)))) < SETTLE) continue;
       // A task that asked 5 or more together stays at the terminal until each of those questions has an answer (G10 b): the answered
       // ones count too, so no later card takes the rest.
-      // A design question of a task with a task thread goes to that thread as a vote of THREAD_LIMIT; a crew recommendation never (T245).
-      // A task thread of a channel that the owner unregistered gets nothing: the card goes to the home channel instead, still as the
-      // task's vote of THREAD_LIMIT (F-T245-3).
-      const [thread, live] = (!leadsOnly(group[0]) && taskThreadOf(project, group[0].task)) || [];
+      // A design question of a task with a live task thread goes to that thread as a vote of THREAD_LIMIT; a crew recommendation never
+      // (T245). A task thread of a channel that the owner unregistered counts as none (F-T245-8).
+      const thread = leadsOnly(group[0]) ? undefined : taskThreadOf(project, group[0].task);
       const framed = frame(project, group.length > MAX_PARTS ? group : rowsOpen, titles.get(group[0].task) ?? '', config.ownerId, t, { leads: leadsOnly(group[0]), inThread: thread !== undefined });
       const groupKey = key(group.map((r) => r.id).join('+'));
       if (framed.refused) {
@@ -824,7 +864,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
       }
       const { gate, ask, texts } = framed;
       gates.set(gate.id, { gate, ask });
-      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, questions: rowsOpen.map((r) => r.question), message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project), ...(thread && { thread: live ? thread : config.channelId }) });
+      meta.set(gate.id, { sage: rowsOpen.map((r) => r.id), texts, questions: rowsOpen.map((r) => r.question), message: null, remindedAt: gate.openedAt, sent: {}, session: sessionOf(rowsOpen, spools, alive, project, folders.get(project)), folder: folders.get(project), ...(thread && { thread }) });
       persist(); // the entry is saved before the post, so a crash in between posts it again instead of losing it
     }
   }
@@ -833,7 +873,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
   async function timers(ppl) {
     for (const id of gates.keys()) {
       const { gate } = gates.get(id);
-      if (gate.phase === 'voting' && clock() >= gate.endsAt) await apply(id, { type: 'tick', at: clock() }, ppl);
+      if (gate.phase === 'voting' && clock() >= gate.endsAt && !closedHere(id)) await apply(id, { type: 'tick', at: clock() }, ppl);
       const { gate: g, ask } = gates.get(id);
       const m = meta.get(id);
       let due = waits(id) && nextReminderAt(g, m.remindedAt);
@@ -862,7 +902,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     for (const e of parked) {
       const id = e.gate.id;
       if (e.shut || !e.message || settled(e.gate, e.ask)) continue;
-      const payload = { ...card(e.gate, e.ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${us.owner} answers it at the terminal.` };
+      const payload = { ...card(e.gate, e.ask, ppl, { shut: NOT_SERVED }), components: [], content: closedNote(NOT_SERVED) };
       let why = null;
       try { await discord.edit(e.channel ?? config.channelId, e.message, payload); } catch (x) {
         if (!NO_EDIT.has(x?.code)) { say(`Discord refused the edit of ${id}: ${apiError(x)}`); continue; }
@@ -926,12 +966,13 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
         await reconcile(); // first, so that a resumed session's thread is open before anything is posted in it (G14 3)
         // The cards with old buttons, open or settled (F-T132-5), and the closed cards of a project that is in the config again (F-T132-15),
         // after reconcile: their thread is open again now.
-        for (const [id, m] of meta) if ((m.oldButtons || m.shut) && redrawDue(id)) await redraw(id, ppl);
+        // A waiting card in an unregistered task thread closes, and opens again when its channel is registered again (F-T245-5).
+        for (const [id, m] of meta) if ((m.oldButtons || Boolean(m.shut) !== closedHere(id)) && redrawDue(id)) await redraw(id, ppl);
         // A press while the Mac slept never reached the bridge: Discord said that the interaction failed (F-T28-1). One note in each
         // place that has an open question.
         if (lastEnd !== null && wall - lastEnd > SLEPT) {
           const places = new Set();
-          for (const [id, m] of meta) if (m.message && waits(id)) places.add(m.channel ?? config.channelId);
+          for (const [id, m] of meta) if (m.message && waits(id) && !closedHere(id)) places.add(m.channel ?? config.channelId);
           for (const at of places) await post(at, { content: `The host was asleep from ${stamp(lastEnd)} to ${stamp(wall)}. Presses in that time did not count. Please press again on any open question.`, allowedMentions: NO_MENTIONS });
         }
         checked = true;
@@ -976,7 +1017,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
         const onCard = confirm || (i.message?.id !== undefined && i.message.id === meta.get(pressed?.gateId)?.message);
         if (twin && (!gates.has(pressed.gateId) || !onCard)) {
           if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: ${listed(pressed.gateId) ? "its project's name now names another folder" : 'its project is no longer in the config'}, so its card takes no press; ${us.owner} answers it at the terminal`); }
-          await i.reply(ephemeral(`This question's project is no longer served; ${us.owner} answers it at the terminal.`));
+          await i.reply(ephemeral(closedNote(NOT_SERVED)));
           return;
         }
         if (!onCard) { await i.reply(note('unknown-gate')); return; }
