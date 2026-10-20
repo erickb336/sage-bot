@@ -42,7 +42,7 @@ function world(t) {
     const files = openAskFiles(config, projects); // one audit log for the ask and the outbox
     const audit = async (payload) => { b.copies.push(payload); };
     const outbox = createOutboxFlow({ config, files, audit, now: () => b.now, log: (l) => b.lines.push(l),
-      discord: { post: b.place.post, edit: b.place.edit, unarchive: b.place.unarchive } });
+      discord: { post: b.place.post, edit: b.place.edit, unarchive: b.place.unarchive, seen: b.place.seen } });
     b.ask = createAsk({ config, channels, env: b.env, now: () => b.now, log: (l) => b.lines.push(l), audit, files, outbox });
   };
   b.start();

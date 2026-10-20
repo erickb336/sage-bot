@@ -2,8 +2,9 @@
 // crew member in an owner thread, as one JSON line each, with a hash chain: each line holds the hash of the line before it, so an edit,
 // a removal or a reorder of a line that has lines after it shows as a break (`verifyLog`). The chain has no key and no anchor (T135):
 // a cut tail, an older copy put back, or lines hashed again from an edited line to the end verify as intact; only the #sage-audit copy (a
-// known earlier head) shows those. Only the
-// bridge appends to it. Its folder is 0700 and outside every project folder, the file is 0600, and every open refuses a symlink. A
+// known earlier head) shows those. The
+// bridge appends to it, and so does scripts/outbox.mjs (the owner's decline or withdraw at the terminal, F-T247-16): each append is under
+// the log's lock and chains on the last line of the file. Its folder is 0700 and outside every project folder, the file is 0600, and every open refuses a symlink. A
 // session runs as the same user, so these modes do not stop a session: the sandbox of the sessions must deny the state folder (T134).
 // The kill switch is a flag file: while it is there, no message from Discord goes to sage. A flag that cannot be checked counts as set.
 import { createHash } from 'node:crypto';
@@ -13,7 +14,7 @@ import { cut, NO_MENTIONS, safe, stamp } from './cards.js';
 import { ANGLES, forModel, forTerminal } from './clean.js';
 import { keptRoles } from './crew.js';
 import { projectAt } from './projects.js';
-import { readOwn, writeWhole } from './state.js';
+import { readOwn, withLock, writeWhole } from './state.js';
 
 /** The audit log: `auditPath` in the config, else `<statePath>.leads.jsonl` (the name from before T232), beside the gate file in its 0700 folder. */
 export const auditPathOf = (config) => config.auditPath ?? `${config.statePath}.leads.jsonl`;
@@ -96,7 +97,9 @@ export function verifyLog(path) {
  * Opens the audit log for appends. Throws, and the bridge stops, for a folder or a file that is not safe. A log with a break stays as
  * it is (it is evidence): the new lines chain on from its last line, and `broken` says where the break is, for the start log.
  * `has(id)` says whether a line of the log (also one after a break) is for the message `id`. A torn last line (F-T143-8) stays as it is,
- * and the next append starts on a new line, so the torn line does not take in the next one.
+ * and the next append starts on a new line, so the torn line does not take in the next one. Each append holds the log's lock (withLock),
+ * and when the file's size is not the one that this process left, another process appended: the append reads the log again first, so
+ * the new line chains on the file's last line, not on this process's last line (F-T247-16).
  * @returns {{ append: (line: object) => object, has: (id: string) => boolean, broken: { line: number, why: string } | null }}
  */
 export function openLog(path, projects) {
@@ -104,31 +107,36 @@ export function openLog(path, projects) {
   const found = verifyLog(path);
   let prev = found.last; // after a break: the hash of the last line as it is
   let torn = found.torn; // the file does not end in a newline: the next append writes one first
+  let size = lstatSync(path, { throwIfNoEntry: false })?.size ?? 0; // the size of the file after this process's last read or append
   const messages = new Set([...found.lines, ...found.rest.map((r) => { try { return JSON.parse(r); } catch { return null; } })].map((x) => x?.message));
   return {
     broken: found.broken,
     has: (id) => messages.has(id),
     /** Appends one line: the fields of FIELDS, then prev and hash. The open refuses a symlink; the file must stay this user's 0600 file. */
     append(fields) {
-      const line = Object.fromEntries(FIELDS.map((f) => [f, fields[f] ?? null]));
-      line.prev = prev;
-      line.hash = hashOf(line, prev);
-      let fd;
-      try { fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600); } catch (e) {
-        throw e.code === 'ELOOP' ? new Error(`the audit log ${path} is a symlink. Nothing was written.`) : e;
-      }
-      try {
-        const st = fstatSync(fd);
-        if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) throw new Error(`the audit log ${path} must be a regular file of this user with mode 0600. Nothing was written.`);
-        const bytes = Buffer.from(`${torn ? '\n' : ''}${JSON.stringify(line)}\n`);
-        const wrote = writeSync(fd, bytes);
-        torn = wrote !== bytes.length; // a short write (a full disk, a file size limit) leaves a torn line, and the line is not logged
-        if (torn) throw new Error(`the audit log ${path} took only ${wrote} of the ${bytes.length} bytes of a line. The line is not logged.`);
-        fsyncSync(fd);
-      } finally { closeSync(fd); }
-      prev = line.hash;
-      messages.add(line.message);
-      return line;
+      return withLock(path, () => {
+        let fd;
+        try { fd = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600); } catch (e) {
+          throw e.code === 'ELOOP' ? new Error(`the audit log ${path} is a symlink. Nothing was written.`) : e;
+        }
+        try {
+          const st = fstatSync(fd);
+          if (!st.isFile() || st.uid !== process.getuid() || (st.mode & 0o077) !== 0) throw new Error(`the audit log ${path} must be a regular file of this user with mode 0600. Nothing was written.`);
+          if (st.size !== size) ({ last: prev, torn } = verifyLog(path)); // another process appended
+          const line = Object.fromEntries(FIELDS.map((f) => [f, fields[f] ?? null]));
+          line.prev = prev;
+          line.hash = hashOf(line, prev);
+          const bytes = Buffer.from(`${torn ? '\n' : ''}${JSON.stringify(line)}\n`);
+          const wrote = writeSync(fd, bytes);
+          size = st.size + wrote;
+          torn = wrote !== bytes.length; // a short write (a full disk, a file size limit) leaves a torn line, and the line is not logged
+          if (torn) throw new Error(`the audit log ${path} took only ${wrote} of the ${bytes.length} bytes of a line. The line is not logged.`);
+          fsyncSync(fd);
+          prev = line.hash;
+          messages.add(line.message);
+          return line;
+        } finally { closeSync(fd); }
+      });
     },
   };
 }
@@ -150,7 +158,8 @@ export function recorder({ auditLog, audit, now, say }) {
   return ({ message = null, author, place, raw, text, thread = null, project = null, outcome }) => {
     const line = auditLog.append(entryOf({ at: now(), message, author, roles: keptRoles(place), raw,
       text: text ?? (place.owner ? forLead(raw) : quoted(raw)), thread, project, outcome }));
-    const copy = [`**Audit log** · ${stamp(Date.parse(line.at), 'f')} · <@${line.author}> · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
+    const who = /^\d+$/.test(line.author) ? `<@${line.author}>` : line.author; // `sage-bot` for its own withdraw (src/outbox.js OFF_DISCORD)
+    const copy = [`**Audit log** · ${stamp(Date.parse(line.at), 'f')} · ${who} · ${outcome}${thread ? ` · <#${thread}>` : ''} · ${line.hash.slice(0, 12)}`,
       safe(cut(String(line.text ?? ''), 1500))].join('\n');
     audit?.({ content: copy, allowedMentions: NO_MENTIONS }).catch((e) => say(forTerminal(`Discord refused the #sage-audit copy: code ${e?.code ?? '-'}: ${e?.message}`)));
     return line;

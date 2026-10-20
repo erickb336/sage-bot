@@ -6,12 +6,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { ChannelType, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
+import { ChannelType, GatewayIntentBits, MessageReferenceType, PermissionFlagsBits } from 'discord.js';
 import { createAsk, openAskFiles, SEND, sendCommand } from '../src/ask.js';
 import { auditPathOf, killPathOf, restoreLink, setLinkOff, verifyLog } from '../src/audit.js';
 import { openChannels, withHome } from '../src/channels.js';
 import { CREW } from '../src/crew.js';
-import { CLIENT_OPTIONS, publicThread, routes } from '../src/discord.js';
+import { CLIENT_OPTIONS, publicThread, routes, sendOf } from '../src/discord.js';
 import { fakeDiscord, fakeInteraction, fakeMention, fakeSend } from '../src/fake-discord.js';
 import { addMessage, CONTEXT, headerOf, literal, loadOutbox, outboxPathOf, PENDING_MAX, sha256 } from '../src/outbox.js';
 import { readAsk } from '../src/threads.js';
@@ -49,7 +49,7 @@ function world(tt) {
   /** `b.refusePost`: a Discord code that refuses every post of the outbox (null: none). */
   b.refusePost = null;
   b.port = { post: (at, p) => (b.refusePost ? Promise.reject(Object.assign(new Error('Missing Permissions'), { code: b.refusePost, status: 403 })) : b.place.post(at, p)),
-    edit: (at, id, p) => b.place.edit(at, id, p), unarchive: (id) => b.place.unarchive(id) };
+    edit: (at, id, p) => b.place.edit(at, id, p), unarchive: (id) => b.place.unarchive(id), seen: (at, id) => b.place.seen(at, id) };
   b.outbox = createOutboxFlow({ config: b.config, files: b.files, audit, now: () => b.now, log, discord: b.port });
   b.ask = createAsk({ config: b.config, channels: b.channels, projects, now: () => b.now, log, env: b.env, files: b.files, outbox: b.outbox, audit });
   b.clock = T0;
@@ -206,7 +206,7 @@ test(`at most ${PENDING_MAX} messages wait for each person: the next mention get
   for (const text of ['one', 'two', 'three']) await b.mention(JON, `<@1> ${text}`);
   assert.deepEqual(b.file().messages.map((r) => [r.id, r.status]), [['M1', 'pending'], ['M2', 'pending'], ['M3', 'pending']]);
   const threads = b.place.threads.size;
-  const full = 'You have 3 messages waiting for the owner (M1, M2, M3): that is the limit. Withdraw one on its card, or wait for the owner\'s answer. Nothing was sent.';
+  const full = 'You have 3 messages waiting for the owner (M1, M2, M3): that is the limit. Withdraw one on its card, or wait for the owner\'s answer; the owner can also decline or withdraw one at the terminal. Nothing was sent.';
   const m = await b.mention(JON, '<@1> four', { place: ASK });
   assert.deepEqual(m.replies, [{ content: full, allowedMentions: QUIET }]);
   const target = b.say(TASK, MAYA, 'please also add a PDF');
@@ -654,4 +654,150 @@ test('F-T247-12: the audit line of a forwarded message names its writer and plac
   // The owner's own words stay the owner's.
   await b.mention(OWNER, '<@1> go');
   assert.equal(b.audit().find((l) => l.outcome === 'M2 approved').text, '(@1) go');
+});
+
+// ---- Repair round 2 (R1030): the findings of cycle 2 (R1026 to R1028). ----
+
+test('F-T247-16: the loop withdraws a waiting message whose thread or card is gone on Discord: one audit line, one quiet line in the home channel that names the sender and the id, and the place is free again', async (tt) => {
+  const b = world(tt);
+  for (const text of ['one', 'two']) await b.mention(JON, `<@1> ${text}`, { place: ASK });
+  b.refusePost = 'ENOTFOUND'; // Discord is down: M3 is recorded with no card
+  await b.mention(JON, '<@1> three', { place: ASK });
+  b.refusePost = null;
+  assert.deepEqual(b.file().messages.map((r) => [r.id, r.status, !!r.card]), [['M1', 'pending', true], ['M2', 'pending', true], ['M3', 'pending', false]]);
+  b.place.deleteThread(b.r('M1').thread); // the thread is gone (10003)
+  b.place.deleteMessage(b.r('M2').card); // the card is gone, the thread stays (10008)
+  b.place.deleteThread(b.r('M3').thread); // the thread is gone before the card was posted (10003)
+  const home = b.place.in(CHANNEL).length;
+  await b.outbox.loop();
+  assert.deepEqual(b.file().messages.map((r) => [r.id, r.status, r.decidedBy, r.reason]), ['M1', 'M2', 'M3'].map((id) => [id, 'withdrawn', 'sage-bot', 'its thread or card on Discord is gone']));
+  const lines = b.place.in(CHANNEL).slice(home).map((id) => b.place.latest(id)).map((p) => [p.content, p.allowedMentions]);
+  assert.deepEqual(lines, ['M1', 'M2', 'M3'].map((id) => [`**${id} from Jon withdrawn** by sage-bot (its thread or card on Discord is gone). Nothing goes to sage.`, NONE]));
+  assert.deepEqual(b.audit().filter((l) => / withdrawn$/.test(l.outcome)).map((l) => [l.outcome, l.author, l.text]),
+    ['M1', 'M2', 'M3'].map((id) => [`${id} withdrawn`, 'sage-bot', `${id} withdrawn · its thread or card on Discord is gone · sha256 ${b.r(id).payloadSha256}`]));
+  assert.match(b.copies.at(-1).content, /^\*\*Audit log\*\* · <t:\d+:f> · sage-bot · M3 withdrawn · /);
+  // Once: the next turns post nothing more, and Jon can send again.
+  const posts = b.place.posts.length;
+  await b.outbox.loop();
+  assert.equal(b.place.posts.length, posts);
+  const m = await b.mention(JON, '<@1> four', { place: ASK });
+  assert.deepEqual([m.replies, b.r('M4').status, !!b.r('M4').card], [[], 'pending', true]);
+  // A card that is there stays: the loop withdraws nothing else.
+  await b.outbox.loop();
+  assert.equal(b.r('M4').status, 'pending');
+});
+
+test('F-T247-16: the cap refusal names the terminal, not only the card', async (tt) => {
+  const b = world(tt);
+  for (const text of ['one', 'two', 'three']) await b.mention(JON, `<@1> ${text}`);
+  const m = await b.mention(JON, '<@1> four', { place: ASK });
+  assert.deepEqual(m.replies.map((x) => x.content), ['You have 3 messages waiting for the owner (M1, M2, M3): that is the limit. Withdraw one on its card, or wait for the owner\'s answer; the owner can also decline or withdraw one at the terminal. Nothing was sent.']);
+});
+
+test('F-T247-16: the owner declines or withdraws a message at the terminal, under the lock and in the audit log; the loop draws it on Discord, in the home channel when its thread is gone', async (tt) => {
+  const b = world(tt);
+  await b.mention(JON, '<@1> one');
+  await b.mention(JON, '<@1> two', { place: ASK });
+  await b.mention(MAYA, '<@1> three');
+  const config = `${b.root}/config.json`;
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(config, JSON.stringify(b.config));
+  const cli = (...args) => spawnSync(process.execPath, ['scripts/outbox.mjs', '--config', config, ...args], { encoding: 'utf8' });
+  const declined = cli('decline', 'M1', '--reason', 'not this week\u202E');
+  assert.deepEqual([declined.status, declined.stderr, declined.stdout], [0, '', 'M1 declined. Nothing goes to sage. The bridge shows it on Discord at its next turn.\n']);
+  b.place.deleteThread(b.r('M2').thread);
+  const withdrawn = cli('withdraw', 'M2');
+  assert.deepEqual([withdrawn.status, withdrawn.stdout], [0, 'M2 withdrawn. Nothing goes to sage. The bridge shows it on Discord at its next turn.\n']);
+  assert.deepEqual(b.file().messages.map((r) => [r.id, r.status, r.decidedBy, r.reason]), [['M1', 'declined', 'terminal', 'not this week'], ['M2', 'withdrawn', 'terminal', null], ['M3', 'pending', null, null]]);
+  // A second decision, an approve, a bad id or a reason for a withdraw changes nothing.
+  assert.deepEqual([cli('withdraw', 'M1').stderr, cli('approve', 'M3').status, cli('decline', 'M9').stderr, cli('withdraw', 'M3', '--reason', 'x').status],
+    ['sage-bot outbox: M1 was already declined meanwhile. Nothing changed.\n', 1, 'sage-bot outbox: there is no message M9. Nothing changed.\n', 1]);
+  assert.equal(b.r('M3').status, 'pending');
+  // The terminal's lines and the bridge's lines make one intact chain.
+  await b.mention(MAYA, '<@1> four');
+  const log = verifyLog(auditPathOf(b.config));
+  assert.equal(log.broken, null);
+  assert.deepEqual(log.lines.filter((l) => l.author === 'terminal').map((l) => [l.outcome, l.text]),
+    [['M1 declined', `M1 declined · not this week · sha256 ${b.r('M1').payloadSha256}`], ['M2 withdrawn', `M2 withdrawn · sha256 ${b.r('M2').payloadSha256}`]]);
+  assert.equal(log.lines.at(-1).outcome, 'M4 pending');
+  // The loop draws them: M1's card loses its buttons and its thread gets the line; M2's thread is gone, so its line goes to the home channel.
+  const home = b.place.in(CHANNEL).length;
+  await b.outbox.loop();
+  assert.deepEqual(b.card('M1').components, []);
+  assert.match(b.field('M1', 'Status'), /^\*\*Declined by Erick at <t:\d+:t>\.\*\* \(not this week\) Nothing goes to sage\.$/);
+  assert.equal(b.place.in(TASK).map((id) => b.place.latest(id).content).filter((c) => /declined/.test(c)).join('\n'), '**M1 declined** by Erick (not this week). Nothing goes to sage.');
+  assert.deepEqual(b.place.in(CHANNEL).slice(home).map((id) => b.place.latest(id).content), ['**M2 from Jon withdrawn** by Erick. Nothing goes to sage.']);
+  assert.deepEqual(b.file().messages.map((r) => r.shown), ['declined', 'withdrawn', 'pending', 'pending']);
+});
+
+test('F-T247-17: when the thread that a move opened is gone, the next mention in the foreign thread drops it and moves to a new thread with its card', async (tt) => {
+  const b = world(tt);
+  await b.mention(JON, '<@1> first', { place: OTHER, parentId: ASK });
+  const gone = b.r('M1').thread;
+  b.place.deleteThread(gone);
+  const m = await b.mention(JON, '<@1> second', { place: OTHER, parentId: ASK });
+  const r = b.r('M2');
+  assert.notEqual(r.thread, gone);
+  assert.deepEqual([m.replies, r.status, b.posts(r.thread)], [[], 'pending', [r.card]]);
+  assert.equal(b.files.threads.has(gone), false);
+  assert.deepEqual(b.files.threads.get(r.thread), { kind: 'answer', channel: CHANNEL, project: NAME, by: JON, at: T0, origin: OTHER });
+  assert.deepEqual(b.posts(OTHER).map((id) => b.place.latest(id).content), [`Moved to sage-bot: <#${gone}>`, `Moved to sage-bot: <#${r.thread}>`]);
+  // The third mention goes on to the new thread.
+  await b.mention(MAYA, '<@1> third', { place: OTHER, parentId: ASK });
+  assert.equal(b.r('M3').thread, r.thread);
+});
+
+test('F-T247-18: a bridge with no outbox refuses the owner\'s message too, and no thread opens', async (tt) => {
+  const b = world(tt);
+  const ask = createAsk({ config: b.config, channels: b.channels, projects: loadProjects(b.config), now: () => b.now, log: (l) => b.lines.push(l), env: b.env, files: b.files, audit: async () => {} });
+  const threads = b.place.threads.size;
+  for (const user of [OWNER, JON]) {
+    const id = b.say(ASK, user, '<@1> build it');
+    const m = fakeMention({ id, user, name: NAMES[user], roles: ROLES[user], channelId: ASK, content: '<@1> build it', place: b.place });
+    await ask.mention(m);
+    assert.deepEqual(m.replies, [{ content: 'Messages to sage are not on in this bridge. Nothing was sent.', allowedMentions: QUIET }]);
+  }
+  assert.equal(b.place.threads.size, threads);
+  assert.equal(b.lines.some((l) => /Cannot read properties/.test(l)), false);
+});
+
+test('F-T247-19: the replied-to message comes into the context only for a reply in the same place; a forward never pulls its source from another channel', async () => {
+  const HERE = '400000000000000009';
+  const SECRET = '400000000000000055'; // a private channel
+  const source = { id: '800000000000000001', channelId: SECRET, author: { id: MAYA, username: 'maya' }, member: null, createdTimestamp: T0, content: 'the private plan', system: false, webhookId: null };
+  const earlier = { ...source, id: '800000000000000002', channelId: HERE, content: 'the public question' };
+  const message = (reference, from) => ({ id: '800000000000000009', channelId: HERE, author: { id: JON, username: 'jon' }, member: null, createdTimestamp: T0 + 1000,
+    content: '', system: false, webhookId: null, reference, mentions: { users: new Map() }, fetchReference: async () => from });
+  const replied = (reference, from) => sendOf({ user: { id: JON }, member: null, channelId: HERE, channel: { isThread: () => false }, targetMessage: message(reference, from) }, async () => null, new Map()).replied();
+  assert.equal(await replied({ type: MessageReferenceType.Forward, channelId: SECRET, messageId: source.id }, source), null);
+  assert.equal(await replied({ type: MessageReferenceType.Default, channelId: SECRET, messageId: source.id }, source), null);
+  assert.deepEqual(await replied({ type: MessageReferenceType.Default, channelId: HERE, messageId: earlier.id }, earlier),
+    { id: earlier.id, user: MAYA, name: 'maya', roles: [], bot: false, webhook: false, at: T0, text: 'the public question' });
+  assert.equal(await replied(undefined, earlier), null);
+});
+
+test('F-T247-20: a second Send to sage of the same message by the same person is refused with its id while the first waits or is approved; someone else, or after a decline, can send it', async (tt) => {
+  const b = world(tt);
+  const target = b.say(TASK, SAM, 'please add a PDF export');
+  await b.send(MAYA, target);
+  const again = await b.send(MAYA, target);
+  assert.deepEqual(again.map((x) => [x.kind, x.content]), [['defer', undefined], ['edit', 'You sent this message to sage already as M1 (waiting for the owner). Nothing was sent.']]);
+  assert.equal(b.file().messages.length, 1);
+  await b.press(OWNER, 'ob1:approve:M1');
+  assert.equal((await b.send(MAYA, target)).at(-1).content, 'You sent this message to sage already as M1 (approved, waits for sage sessions). Nothing was sent.');
+  await b.send(JON, target);
+  assert.deepEqual([b.r('M2').author, b.file().messages.length], [JON, 2]);
+  await b.press(OWNER, 'ob1:decline:M2');
+  await b.send(JON, target);
+  assert.deepEqual([b.r('M3').author, b.r('M3').status], [JON, 'pending']);
+  // In a registered channel too: the second send names M4 before any thread opens.
+  const line = b.say(ASK, SAM, 'and a CSV one');
+  await b.send(MAYA, line, { place: ASK, parentId: null });
+  const threads = b.place.threads.size;
+  assert.equal((await b.send(MAYA, line, { place: ASK, parentId: null })).at(-1).content, 'You sent this message to sage already as M4 (waiting for the owner). Nothing was sent.');
+  assert.equal(b.place.threads.size, threads);
+  // The same check is in the record itself, under the lock: two sends at the same moment record one message.
+  const both = b.say(TASK, SAM, 'one more');
+  await Promise.all([b.send(JON, both), b.send(JON, both)]);
+  assert.equal(b.file().messages.filter((r) => r.message === both).length, 1);
 });

@@ -159,6 +159,13 @@ export function fakeDiscord(members, roles = []) {
       archived(target, { edit: true });
       messages.get(id).push(structuredClone(payload));
     },
+    /** Get Channel Message: resolves when the message `id` is in `target`; else code 10003 for a place that is gone, 10008 for a message. */
+    async seen(target, id) {
+      gone(target);
+      if (where.get(id) !== target) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
+    },
+    /** Get Channel: resolves for a place that is there; code 10003 for a deleted thread. */
+    async channel(id) { gone(id); return { id }; },
     async startThread(from, name) {
       if (!messages.has(from)) throw Object.assign(new Error('Unknown Message'), { code: 10008, status: 404 });
       if (kept.has(from) || [...threads.values()].some((t) => t.from === from)) throw Object.assign(new Error('Cannot start a thread here'), { code: 160004, status: 400 });
@@ -212,6 +219,7 @@ function fakePort(place, id, channelId, refuse, pub = true, mentions = {}) {
   const no = (call) => { if (refuse[call]) throw Object.assign(new Error('Missing Permissions'), { code: refuse[call], status: 403 }); };
   return {
     isPublic: async () => pub,
+    channel: (at) => place.channel(at),
     mentions,
     history: async (before) => { no('history'); return place.fetchBefore(channelId, before); },
     replied: async () => place.repliedTo(id),

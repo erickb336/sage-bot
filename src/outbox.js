@@ -28,6 +28,15 @@ export const CONTEXT = { messages: 30, chars: 8000 };
 export const PLACES = ['owner', 'crew', 'not crew'];
 /** The kind of a message: a steer of a task in its task thread, or a question anywhere else. */
 export const KINDS = ['steer', 'question'];
+/**
+ * Who decides a message away from Discord (F-T247-16): the owner at the terminal (scripts/outbox.mjs), or sage-bot itself, which withdraws
+ * a waiting message whose thread or card is gone on Discord (src/outboxFlow.js). Neither is a Discord user id, so no press can be them.
+ */
+export const OFF_DISCORD = ['terminal', 'sage-bot'];
+/** The reason of sage-bot's own withdraw. */
+export const GONE = 'its thread or card on Discord is gone';
+/** The longest reason of a decision, in characters. */
+export const REASON_MAX = 200;
 /** The longest text of one message in the file, in UTF-16 units: Discord allows 4,000 characters, so 8,000 units. */
 const TEXT_MAX = 8000;
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -35,7 +44,7 @@ const TASK_ID = /^T\d{1,9}$/;
 const MARKER = /^[0-9a-f]{12}$/;
 /** The keys of every record, in the order the file holds them. */
 const KEYS = ['id', 'message', 'where', 'thread', 'project', 'task', 'kind', 'author', 'name', 'place', 'quote', 'text', 'mentions', 'context', 'payload',
-  'payloadSha256', 'status', 'at', 'decidedAt', 'decidedBy', 'card', 'shown'];
+  'payloadSha256', 'status', 'at', 'decidedAt', 'decidedBy', 'reason', 'card', 'shown'];
 /** The keys of one message of the context. `replied`: the message that the sent message replies to. */
 const CONTEXT_KEYS = ['id', 'user', 'name', 'place', 'at', 'replied', 'text'];
 
@@ -140,7 +149,8 @@ function isMessage(r) {
     && opt(r.quote, (q) => keys(q, ['user', 'name', 'place']) && id(q.user) && name(q.name) && PLACES.includes(q.place))
     && text(r.text) && r.text.length <= TEXT_MAX && isMentions(r.mentions, r.text) && Array.isArray(r.context) && r.context.length <= CONTEXT.messages + 1 && r.context.every(isContext)
     && text(r.payload) && r.payloadSha256 === sha256(r.payload) && STATUSES.includes(r.status) && time(r.at)
-    && (decided ? time(r.decidedAt) && id(r.decidedBy) : r.decidedAt === null && r.decidedBy === null)
+    && (decided ? time(r.decidedAt) && (id(r.decidedBy) || OFF_DISCORD.includes(r.decidedBy)) && opt(r.reason, (x) => text(x) && x !== '' && Array.from(x).length <= REASON_MAX)
+      : r.decidedAt === null && r.decidedBy === null && r.reason === null)
     && opt(r.card, id) && opt(r.shown, (s) => STATUSES.includes(s));
 }
 /** The record, when the loader takes it back; else a TypeError, before anything is written. */
@@ -161,26 +171,30 @@ const checked = (r) => {
 export function newMessage(file, f, at, marker = newMarker()) {
   if (!MESSAGE_ID.test(`M${file.next}`)) refuse('the outbox has used every message id (M1 to M999999999). Nothing changed.');
   if (!MARKER.test(marker)) throw new TypeError('a marker is 12 hex digits');
-  const full = f.place === 'owner' ? null : fullNote(file, f.author); // the owner has no cap (F-T247-9)
-  if (full) refuse(full);
+  const no = refusalOf(file, f.author, f.message, f.place !== 'owner'); // the owner has no cap (F-T247-9)
+  if (no) refuse(no);
   const payload = payloadOf(f, marker);
   const message = checked({
     id: `M${file.next}`, message: f.message, where: f.where, thread: f.thread, project: f.project, task: f.task, kind: f.task ? 'steer' : 'question',
     author: f.author, name: f.name, place: f.place, quote: f.quote, text: f.text,
     mentions: Object.fromEntries(Object.entries(f.mentions ?? {}).filter(([k]) => mentionIds(f.text).has(k))), context: f.context, payload, payloadSha256: sha256(payload),
-    status: f.approvedBy ? 'approved' : 'pending', at, decidedAt: f.approvedBy ? at : null, decidedBy: f.approvedBy ?? null, card: null, shown: null,
+    status: f.approvedBy ? 'approved' : 'pending', at, decidedAt: f.approvedBy ? at : null, decidedBy: f.approvedBy ?? null, reason: null, card: null, shown: null,
   });
   return { file: { next: file.next + 1, messages: [...file.messages, message] }, message };
 }
 
 /**
- * The refusal for a person with PENDING_MAX messages waiting for the owner (owner decision), or null when they can send one more. Only
- * they see it: a private note for the message command, a reply in place that pings nobody for a mention.
+ * Why `author` cannot send the Discord message `message` to sage now, or null when they can. Only they see it: a private note for the
+ * message command, a reply in place that pings nobody for a mention.
+ * - They sent the same message already, and it waits or is approved (F-T247-20): one record for each message and sender.
+ * - `capped` (anyone but the owner) and PENDING_MAX of their messages wait for the owner (owner decision).
  */
-export function fullNote(file, author) {
+export function refusalOf(file, author, message, capped) {
+  const same = file.messages.find((r) => r.author === author && r.message === message && ['pending', 'approved'].includes(r.status));
+  if (same) return `You sent this message to sage already as ${same.id} (${STATUS_WORDS[same.status]}). Nothing was sent.`;
   const waiting = file.messages.filter((r) => r.author === author && r.status === 'pending');
-  return waiting.length >= PENDING_MAX
-    ? `You have ${PENDING_MAX} messages waiting for the owner (${waiting.map((r) => r.id).join(', ')}): that is the limit. Withdraw one on its card, or wait for the owner's answer. Nothing was sent.`
+  return capped && waiting.length >= PENDING_MAX
+    ? `You have ${PENDING_MAX} messages waiting for the owner (${waiting.map((r) => r.id).join(', ')}): that is the limit. Withdraw one on its card, or wait for the owner's answer; the owner can also decline or withdraw one at the terminal. Nothing was sent.`
     : null;
 }
 
@@ -188,14 +202,14 @@ export function fullNote(file, author) {
 const MOVES = { approve: ['pending', 'approved'], decline: ['pending', 'declined'], withdraw: ['pending', 'withdrawn'] };
 
 /**
- * The message after one event `{ type, by, at }` (pure). Throws Refused, with the line for a person, for an event that the status does
- * not take, and for a withdraw by anyone but the sender. Who may approve or decline (only the owner) is the caller's check.
+ * The message after one event `{ type, by, at, reason? }` (pure). Throws Refused, with the line for a person, for an event that the status
+ * does not take, and for a withdraw by anyone but the sender or OFF_DISCORD. Who may approve or decline (only the owner) is the caller's check.
  */
 export function step(r, e) {
   const [from, to] = MOVES[e.type] ?? (() => { throw new TypeError(`no outbox event ${e.type}`); })();
   if (r.status !== from) refuse(`${r.id} was already ${r.status} meanwhile. Nothing changed.`);
-  if (e.type === 'withdraw' && e.by !== r.author) refuse(`Only the person who sent ${r.id} can withdraw it. Nothing changed.`);
-  return checked({ ...r, status: to, decidedAt: e.at, decidedBy: e.by });
+  if (e.type === 'withdraw' && e.by !== r.author && !OFF_DISCORD.includes(e.by)) refuse(`Only the person who sent ${r.id} can withdraw it. Nothing changed.`);
+  return checked({ ...r, status: to, decidedAt: e.at, decidedBy: e.by, reason: e.reason ?? null });
 }
 
 /**
@@ -251,6 +265,15 @@ export async function addMessage(config, f, { ownerId, at, context, audit, marke
   });
 }
 
+/**
+ * The fields of the audit log line (src/audit.js recorder) of a message `r` by `author` (a Discord user id, or OFF_DISCORD) of the place
+ * `place` (src/crew.js placeOf): the payload goes in as its sha256, so the line's textSha256 is the message's payloadSha256 (F6 of R917).
+ * `text` is the line's text; by default, that of a decision: its status, its reason when it has one, and the payload's sha256.
+ */
+export const auditFields = (r, author, place, text = `${r.id} ${r.status}${r.reason ? ` · ${r.reason}` : ''} · sha256 ${r.payloadSha256}`) => ({
+  message: r.message, author, place, raw: r.payload, text, thread: r.thread, project: r.project, outcome: `${r.id} ${r.status}`,
+});
+
 /** Changes one message under the lock with `how` (a checked record), saves the file, and returns the message after it. */
 const change = (path, mid, how) => withLock(path, () => {
   const file = loadOutbox(path);
@@ -260,7 +283,7 @@ const change = (path, mid, how) => withLock(path, () => {
 });
 
 /**
- * One event on a message: approve, decline or withdraw `{ type, by, at }`. An approve is refused while the link from Discord to sage is
+ * One event on a message: approve, decline or withdraw `{ type, by, at, reason? }`. An approve is refused while the link from Discord to sage is
  * off, checked under the lock. `audit(message)` writes the audit log line of the change before the file is saved; when it throws, nothing
  * changes. Returns the message after it.
  */

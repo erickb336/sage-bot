@@ -1,6 +1,7 @@
 // The outbox on Discord (T247, issue 60 PR 7): the approval card of a crew member's message to sage, in the thread of the message, with
 // Approve, Decline and Withdraw and the exact payload as payload.txt; the status line in the thread when the state changes; and the
-// sync loop that posts each card and line that the outbox file holds and Discord does not show yet. Every rule of a message is in
+// sync loop that posts each card and line that the outbox file holds and Discord does not show yet, and withdraws a waiting message whose
+// thread or card is gone on Discord (F-T247-16), with one line in the home channel. Every rule of a message is in
 // src/outbox.js; src/ask.js decides where a message goes (its thread) and calls `send`. Nothing here sends anything to a model.
 // Who may do what (src/crew.js): only the owner (`ownerId`, by user id, never a role) approves or declines (R918 C1); only the sender
 // withdraws, while the message waits. Anyone else gets notCrew, privately.
@@ -11,16 +12,20 @@ import { MessageFlags } from 'discord.js';
 import { forLead, forwarded, quoted, recorder } from './audit.js';
 import { apiError } from './bridge.js';
 import { button, cut, ephemeral, LIMIT, NO_MENTIONS, offline, safe, stamp } from './cards.js';
-import { CREW, namesOf, notCrew, personName, placeOf } from './crew.js';
+import { CREW, isOwner, namesOf, notCrew, personName, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { ActionRowBuilder, ButtonStyle } from 'discord.js';
 import {
-  addMessage, CONTEXT, decide, find, fullNote, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, setDiscord, short, windowOf,
+  addMessage, auditFields, CONTEXT, decide, find, GONE, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
 } from './outbox.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
-/** Discord's codes for a place or a message that is gone, or a locked thread: an edit or a post there can never work. */
-const NO_EDIT = new Set([10003, 10008, 50001, 50083]);
+/** Discord's codes for a place (Unknown Channel) or a message (Unknown Message) that is gone. */
+const LOST = new Set([10003, 10008]);
+/** Discord's codes for a place that sage-bot cannot see (Missing Access), or a locked thread. */
+const SHUT = new Set([50001, 50083]);
+/** LOST or SHUT: an edit or a post there can never work. */
+const NO_EDIT = new Set([...LOST, ...SHUT]);
 /** Discord's code for a right that sage-bot lacks in a place (Missing Permissions): for a card, most often Attach Files (F-T247-4). */
 const NO_PERMISSION = 50013;
 /** At most this many pages of 100 messages are read for the context of one message (bots and webhooks are skipped in them). */
@@ -72,8 +77,8 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
   const status = {
     pending: `Waiting for ${us.owner}`,
     approved: `**Approved by ${us.owner} at ${stamp(r.decidedAt)}.** It waits for sage sessions (T159).`,
-    declined: `**Declined by ${us.owner} at ${stamp(r.decidedAt)}.** Nothing goes to sage.`,
-    withdrawn: `**Withdrawn by ${safe(r.name)} at ${stamp(r.decidedAt)}.** Nothing goes to sage.`,
+    declined: `**Declined by ${us.owner} at ${stamp(r.decidedAt)}.**${reasonOf(r)} Nothing goes to sage.`,
+    withdrawn: `**Withdrawn by ${decider(r, us)} at ${stamp(r.decidedAt)}.**${reasonOf(r)} Nothing goes to sage.`,
   }[r.status];
   const embed = {
     title: cut(`Message ${r.id} to sage · ${r.task ? `${r.kind} of ${r.task}` : r.kind} · ${safe(r.project)}`, LIMIT.title),
@@ -99,14 +104,23 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
   };
 }
 
-/** The status line in the thread after a change. No ping. The owner's own message, approved at once, has no card: its line has payload.txt. */
-export function statusLine(r, us) {
+/** Who withdrew a message, for people: its sender, sage-bot (its thread or card is gone), or the owner at the terminal (F-T247-16). */
+const decider = (r, us) => (r.decidedBy === r.author ? safe(r.name) : r.decidedBy === 'sage-bot' ? us.bot : us.owner);
+/** The reason of a decision, for people, as " (reason)"; none when there is none. */
+const reasonOf = (r) => (r.reason ? ` (${safe(r.reason)})` : '');
+
+/**
+ * The status line after a change, in the thread. No ping. The owner's own message, approved at once, has no card: its line has
+ * payload.txt. `home`: the line goes to the home channel (its thread is gone, or sage-bot withdrew it), so it names the sender too.
+ */
+export function statusLine(r, us, home = false) {
   const own = r.status === 'approved' && !r.card;
+  const it = home ? `${r.id} from ${safe(r.name)}` : r.id;
   const content = own ? `**${r.id} from ${us.owner} is recorded** with ${earlier(r.context.length)}. It waits for sage sessions (T159). sha256 ${short(r.payloadSha256)}`
     : {
-      approved: `**${r.id} approved** by ${us.owner}. It waits for sage sessions (T159). sha256 ${short(r.payloadSha256)}`,
-      declined: `**${r.id} declined** by ${us.owner}. Nothing goes to sage.`,
-      withdrawn: `**${r.id} withdrawn** by ${safe(r.name)}. Nothing goes to sage.`,
+      approved: `**${it} approved** by ${us.owner}. It waits for sage sessions (T159). sha256 ${short(r.payloadSha256)}`,
+      declined: `**${it} declined** by ${us.owner}${reasonOf(r)}. Nothing goes to sage.`,
+      withdrawn: `**${it} withdrawn** by ${decider(r, us)}${reasonOf(r)}. Nothing goes to sage.`,
     }[r.status];
   return { content, allowedMentions: NO_MENTIONS, ...(own && { files: [payloadFile(r)] }) };
 }
@@ -127,8 +141,9 @@ const note = (why, us, r) => ephemeral(OUTBOX_NOTES[why](us, r));
 const RIGHTS = 'Send Messages in Threads, Embed Links and Attach Files';
 
 /**
- * The outbox side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it) and statePath. `discord` is the port
- * `{ post(target, payload) → id, edit(target, id, payload), unarchive(thread) }` (src/discord.js, or src/fake-discord.js for the tests).
+ * The outbox side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it), statePath and channelId (the home channel).
+ * `discord` is the port `{ post(target, payload) → id, edit(target, id, payload), unarchive(thread), seen(target, id) }`, where `seen`
+ * resolves when the message is there (src/discord.js, or src/fake-discord.js for the tests).
  * `files` are src/ask.js openAskFiles (the audit log); `audit` posts the #sage-audit copy of each audit log line. `newMarker` makes the
  * marker of each payload: src/outbox.js newMarker (random) by default; the demo gives fixed ones, so that two runs give the same page.
  */
@@ -170,30 +185,60 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
     unsaved.delete(key);
     return r;
   }
-  const send = (what, target, payload, nonce) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), (c) => NO_EDIT.has(c));
+  const send = (what, target, payload, nonce, done = NO_EDIT) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), (c) => done.has(c));
   const edit = (what, target, message, payload) => call(`the edit of ${what}`, () => discord.edit(target, message, payload).catch(async (e) => {
     if (e?.code !== 50083) throw e;
     try { await discord.unarchive(target); } catch { throw e; } // a locked thread stays as it is
     return discord.edit(target, message, payload);
   }), (c) => NO_EDIT.has(c));
+  const lost = (e) => LOST.has(e?.code);
+  /**
+   * sage-bot withdraws a waiting message whose thread or card Discord says is gone (F-T247-16), so it frees its sender's place; it is in
+   * the audit log, and its status line goes to the home channel. A decision that came first stays. Returns the message after it.
+   */
+  function withdrawLost(r) {
+    try {
+      return decide(config, r.id, { type: 'withdraw', by: 'sage-bot', at: now(), reason: GONE }, (x) => audited(x, 'sage-bot', place('sage-bot'), false));
+    } catch (e) {
+      if (e instanceof Refused) return find(load(), r.id);
+      throw e;
+    }
+  }
+  /**
+   * The status line of a message: in its thread, or in the home channel when sage-bot withdrew it or its thread is gone, so that the
+   * line names the sender. Each line once (`nonce`), wherever it goes.
+   */
+  async function line(r, nonce) {
+    const what = `the status line of ${r.id}`;
+    if (r.decidedBy !== 'sage-bot') {
+      try { return await send(what, r.thread, statusLine(r, us), nonce, SHUT); } catch (e) { if (!lost(e)) throw e; }
+    }
+    return send(what, config.channelId, statusLine(r, us, true), nonce);
+  }
   async function drawNow(mid) {
     let r = find(load(), mid);
-    if (r.status === 'pending' && !r.card) {
-      const posted = { ...outboxCard(r, { ownerId: config.ownerId, us, ping: true }), files: [payloadFile(r)] };
-      r = await once(`${mid}:card`, (n) => send(`the card of ${mid}`, r.thread, posted, n), (card) => setDiscord(config, mid, { card, shown: 'pending' }));
+    if (r.status === 'pending') {
+      try {
+        if (!r.card) {
+          const posted = { ...outboxCard(r, { ownerId: config.ownerId, us, ping: true }), files: [payloadFile(r)] };
+          r = await once(`${mid}:card`, (n) => send(`the card of ${mid}`, r.thread, posted, n, SHUT), (card) => setDiscord(config, mid, { card, shown: 'pending' }));
+        } else if (r.shown === 'pending') await call(`the read of the card of ${mid}`, () => discord.seen(r.thread, r.card)).catch((e) => { if (lost(e)) throw e; });
+      } catch (e) {
+        if (!lost(e)) throw e;
+        r = withdrawLost(r);
+      }
     }
     if (r.shown === r.status) return r;
     if (r.card) await edit(`the card of ${mid}`, r.thread, r.card, outboxCard(r, { ownerId: config.ownerId, us }));
-    return once(`${mid}:${r.status}`, (n) => send(`the status line of ${mid}`, r.thread, statusLine(r, us), n), () => setDiscord(config, mid, { shown: r.status }));
+    return once(`${mid}:${r.status}`, (n) => line(r, n), () => setDiscord(config, mid, { shown: r.status }));
   }
 
   /**
-   * One audit log line for a new message (`fresh`) or a decision by `who` (src/crew.js placeOf `p`): the payload goes in as its sha256, so
-   * the line's textSha256 is the message's payloadSha256 (F6 of R917). A forwarded message keeps its writer and place apart from `who`.
+   * One audit log line for a new message (`fresh`) or a decision by `who` (src/crew.js placeOf `p`), src/outbox.js auditFields. A
+   * forwarded message keeps its writer and place apart from `who`.
    */
   const freshText = (r, p) => (r.quote ? forwarded(r.quote, r.where, r.text) : p.owner ? forLead(r.text) : quoted(r.text));
-  const audited = (r, who, p, fresh) => record({ message: r.message, author: who, place: p, raw: r.payload,
-    text: fresh ? freshText(r, p) : `${r.id} ${r.status} · sha256 ${r.payloadSha256}`, thread: r.thread, project: r.project, outcome: `${r.id} ${r.status}` });
+  const audited = (r, who, p, fresh) => record(auditFields(r, who, p, fresh ? freshText(r, p) : undefined));
 
   /**
    * The context of a message from its place: the pages of `history(before)` (newest first, at most 100 each, up to PAGES), read until
@@ -215,9 +260,12 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
   }
 
   return {
-    /** The refusal when `user` has PENDING_MAX messages waiting (src/outbox.js fullNote), else null; a line too while the outbox cannot be read. */
-    full(user) {
-      try { return fullNote(load(), user); } catch (e) {
+    /**
+     * Why `user` cannot send the Discord message `message` to sage now (src/outbox.js refusalOf: sent already, or PENDING_MAX waiting;
+     * the owner has no cap), else null; a line too while the outbox cannot be read. The record checks it again under the lock.
+     */
+    full(user, message) {
+      try { return refusalOf(load(), user, message, !isOwner(user, config.ownerId)); } catch (e) {
         sayOnce(`the outbox cannot be read, so no message to sage can be added: ${e?.message}`);
         return `I cannot record messages to sage just now. Nothing was sent. ${us.Owner} sees the details at the terminal.`;
       }
@@ -278,12 +326,15 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
         await answer({ content: out.content, allowedMentions: NO_MENTIONS }, 'editReply');
       } catch (e) { say(`an outbox press: ${e?.message}`); }
     },
-    /** One turn of the sync loop: draws each message whose card or status line Discord does not show yet. Never rejects. */
+    /**
+     * One turn of the sync loop: draws each message whose card or status line Discord does not show yet, and reads the card of each
+     * waiting message, which sage-bot withdraws when Discord says that its thread or card is gone (F-T247-16). Never rejects.
+     */
     async loop() {
       let file;
       try { file = load(); } catch (e) { sayOnce(`the outbox cannot be read, so no message is shown: ${e?.message}`); return; }
       for (const r of file.messages) {
-        if ((r.status === 'pending' && !r.card) || r.shown !== r.status) await draw(r.id).catch(() => {});
+        if (r.status === 'pending' || r.shown !== r.status) await draw(r.id).catch(() => {});
       }
     },
   };

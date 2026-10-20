@@ -218,7 +218,7 @@ const requests = createRequestFlow({ config: rconfig, channels, projects, now: (
 const files = { ...openAskFiles(rconfig, projects), threads }; // one audit log and one thread map for the ask and the outbox
 let markers = 0;
 const outbox = createOutboxFlow({ config: rconfig, files, now: () => now, log: (l) => log.push(l), newMarker: () => String(++markers).padStart(12, '0'), // fixed markers: the same page each run
-  discord: { post: discord.post, edit: discord.edit, unarchive: discord.unarchive } });
+  discord: { post: discord.post, edit: discord.edit, unarchive: discord.unarchive, seen: discord.seen } });
 const ask = createAsk({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), env, requests, files, outbox });
 const roleNames = new Map(MEMBERS.map((m) => [m.id, m.roles]));
 /** One request press (or form) by a sample person, with its private replies, as src/discord.js maps it. */

@@ -137,6 +137,7 @@ A mention that names none of these words gets a reply that lists them.
 | Turn off the link from Discord to sage, as any crew member can | `/sage stop`, then the confirm button within 10 minutes |
 | Send a message to sage | `@sage-bot implement what we discussed above`, or "Send to sage" in the Apps menu of a message. The owner approves it on its card; it waits for bridge sessions (T159) |
 | See the messages to sage (owner, terminal) | `node scripts/outbox.mjs list`, `node scripts/outbox.mjs show M1` |
+| Decline or withdraw a message to sage at the terminal (owner), for example one whose card is gone | `node scripts/outbox.mjs decline M1 --reason "not this week"`, `node scripts/outbox.mjs withdraw M1` |
 
 **As the owner, at the terminal** (in the sage-bot folder). These commands read the bridge's config, `~/.config/sage-bot/config.json`: make it first with the [setup guide](docs/setup.md#the-checklist), step 3.
 

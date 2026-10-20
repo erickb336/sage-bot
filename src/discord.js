@@ -2,7 +2,7 @@
 // src/bridge.js uses. The tests never run `start`: it is the only code that connects to Discord.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, ThreadAutoArchiveDuration } from 'discord.js';
+import { ChannelType, Client, Events, GatewayIntentBits, MessageReferenceType, PermissionFlagsBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
 import { askCommand, createAsk, openAskFiles, SEND, sendCommand, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { createOutboxFlow, parseOutboxId } from './outboxFlow.js';
@@ -144,15 +144,19 @@ export const mentionNames = (m) => Object.fromEntries([...(m.mentions?.users?.va
 /**
  * The context port of a message `m` in its place (src/ask.js mention and send): `history(before)` reads the 100 messages of the place
  * before the id `before`, newest first (Get Channel Messages, which needs Read Message History); `replied()` the message that `m` replies
- * to, or null; `open(channel, payload, name)` posts a line in a channel and opens a public thread from it (the move of R918 C7); `post`;
- * `isPublic()` whether the place is a public thread (publicThread); `mentions` the names of the people that `m` mentions.
+ * to, or null: only a reply in the same place, never a forward, whose source can be a channel that the place's readers cannot see
+ * (F-T247-19); `open(channel, payload, name)` posts a line in a channel and opens a public thread from it (the move of R918 C7); `post`;
+ * `channel(id)` fetches a channel or thread; `isPublic()` whether the place is a public thread (publicThread); `mentions` the names of
+ * the people that `m` mentions.
  */
 const contextPort = (m, fetch, guildRoles) => ({
   isPublic: async () => publicThread(await fetch(m.channelId).catch(() => null), fetch),
   mentions: mentionNames(m),
   history: async (before) => [...(await (await fetch(m.channelId)).messages.fetch({ before, limit: 100, cache: false })).values()]
     .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)).map((x) => rawOf(x, guildRoles)),
-  replied: async () => (m.reference?.messageId ? m.fetchReference().then((x) => rawOf(x, guildRoles), () => null) : null),
+  replied: async () => (m.reference?.messageId && m.reference.type === MessageReferenceType.Default && m.reference.channelId === m.channelId
+    ? m.fetchReference().then((x) => rawOf(x, guildRoles), () => null) : null),
+  channel: (id) => fetch(id),
   open: async (channel, payload, name) => (await (await (await fetch(channel)).send(payload)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
   post: async (place, payload) => (await (await fetch(place)).send(payload)).id,
   startThread: async (name) => (await m.startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
@@ -392,6 +396,8 @@ export async function start(file) {
       post: async (target, payload) => (await (await place(target)).send(payload)).id,
       edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
+      // Get Channel Message, never from the cache, so a card that a member deleted shows as gone (code 10008, F-T247-16).
+      seen: async (target, id) => { await (await place(target)).messages.fetch({ message: id, force: true }); },
     } });
     const ask = createAsk({ config, channels, projects, log, audit, files, requests, outbox });
     const guild = await enter(client, { config, channels, ask, log });

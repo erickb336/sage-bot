@@ -36,7 +36,7 @@ function world(t) {
     const channels = openChannels(b.config, projects);
     const config = withHome(b.config, channels);
     const files = openAskFiles(config, projects); // one audit log for the ask and the outbox (T247)
-    const outbox = createOutboxFlow({ config, files, now: () => T0, log: () => {}, discord: { post: b.place.post, edit: b.place.edit, unarchive: b.place.unarchive } });
+    const outbox = createOutboxFlow({ config, files, now: () => T0, log: () => {}, discord: { post: b.place.post, edit: b.place.edit, unarchive: b.place.unarchive, seen: b.place.seen } });
     b.ask = createAsk({ config, channels, env: b.env, now: () => T0, log: () => {}, audit: async () => {}, files, outbox });
   };
   b.start();
