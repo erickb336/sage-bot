@@ -41,12 +41,14 @@ export function fakeInteraction({ user, customId, fields, ephemeral = false, ref
 }
 
 /**
- * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, unarchive, setLocked, members, roles }`
+ * A fake channel, its threads and the guild for the bridge (src/bridge.js): the port `{ post, edit, startThread, threadFrom, unarchive, locked, setLocked, members, roles }`
  * with a record of every message. `messages` maps a message id to its payloads, the first one posted and each edit after it; `posts`
  * lists the posted payloads in order, and `where` maps a message id to the channel or thread it was posted in. `threads` maps a thread
- * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, a post or an edit in a
- * locked thread is refused, and so is an edit of a message in another place. `archive` does what Discord does to a quiet thread: an edit
- * there is refused with code 50083 until `unarchive` (refused for a locked thread), and a post opens the thread again. A post with
+ * id to { from, name, archived, locked }, where `from` is the message the thread started from. Like Discord, an edit in a locked
+ * thread is refused, and so is a post in a locked thread that is archived; as for a bot with Manage Threads, a post in a locked thread
+ * that is not archived goes through (T248), so the bridge reads `locked` before it posts. An edit of a message in another place is refused. `archive` does what Discord does to a quiet thread: an edit
+ * there is refused with code 50083 until `unarchive`, and a post opens the thread again. As for a bot with Manage Threads, `unarchive`
+ * works on a locked thread too, and the thread stays locked; `locked` reads the lock. A post with
  * `enforceNonce` and a `nonce` that this place already took from the same author (`by`, the third argument of `post`: one bot by default) gives back that message's id and posts nothing, as Discord does for a few minutes. `deleteThread` and `deleteMessage` do what a member's delete
  * in Discord does: a post, edit or lock in a deleted thread is refused with code 10003 (Unknown Channel), and a thread from a deleted
  * message with code 10008 (Unknown Message). With `{ keepOnLine: true }`, `deleteThread` does what Discord can do: the message keeps
@@ -75,7 +77,8 @@ export function fakeDiscord(members, roles = []) {
   const nonces = new Map(); // `<author> <place> <nonce>` → the id of the message that took it: Discord keeps a nonce per author (T244)
   const archived = (target, { edit = false } = {}) => {
     const t = threads.get(target);
-    if (t?.locked || (edit && t?.archived)) throw Object.assign(new Error(t.locked ? 'Thread is locked' : 'Thread is archived'), { code: 50083, status: 400 });
+    // A bot with Manage Threads may post in a locked thread that is not archived, as Discord allows (T248).
+    if ((t?.locked && (edit || t.archived)) || (edit && t?.archived)) throw Object.assign(new Error(t.locked ? 'Thread is locked' : 'Thread is archived'), { code: 50083, status: 400 });
     if (t) t.archived = false; // a post opens a quiet thread again
   };
   return {
@@ -141,6 +144,8 @@ export function fakeDiscord(members, roles = []) {
         .slice(0, limit).reverse().map((m) => ({ ...m }));
     },
     archive: (id) => { threads.get(id).archived = true; },
+    /** Forgets every nonce, as Discord does after a few minutes: a restart after that gets no help from a nonce (F-T247-10). */
+    forgetNonces: () => nonces.clear(),
     async post(target, payload, by = 'sage-bot') {
       gone(target);
       archived(target);
@@ -180,8 +185,15 @@ export function fakeDiscord(members, roles = []) {
     },
     async unarchive(id) {
       if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
-      if (threads.get(id).locked) throw Object.assign(new Error('Thread is locked'), { code: 50083, status: 400 });
       threads.get(id).archived = false;
+    },
+    /**
+     * Get Channel: whether a moderator locked the thread (its thread_metadata.locked); false for a channel or a thread that this fake did not
+     * open, as src/discord.js reads `locked === true`; code 10003 for a thread that is gone.
+     */
+    async locked(id) {
+      gone(id);
+      return threads.get(id)?.locked === true;
     },
     async setLocked(id, locked) {
       if (!threads.has(id)) throw Object.assign(new Error('Unknown Channel'), { code: 10003, status: 404 });
