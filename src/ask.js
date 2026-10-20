@@ -25,8 +25,8 @@ import { loadThreads, noRight, readAsk, threadName, threadsPathOf } from './thre
  * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
 export const ASK_LIMIT = 10;
 export const HOUR = 3_600_000;
-/** A burst limit per person, apart from ASK_LIMIT (F-T143-2, F-T143-5): at most BURST /sage stop of one person, and at most
- * BURST log lines of a crew member's mentions over ASK_LIMIT in an owner thread, in BURST_FOR. So neither floods #sage-audit or a channel. */
+/** A burst limit per person, apart from ASK_LIMIT (F-T143-2): at most BURST /sage stop of one person in BURST_FOR, so the stops do not
+ * flood #sage-audit or a channel. */
 export const BURST = 3;
 export const BURST_FOR = 10 * 60_000;
 const DAY = 24 * HOUR;
@@ -185,7 +185,6 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   const warned = new Map(); // person id → until when a mention over the limit gets no second note
   const stops = new Map(); // person id → the times of their /sage stop in the last BURST_FOR
   const stopWarned = new Map(); // person id → until when a /sage stop over BURST gets no second note
-  const overLines = new Map(); // person id → the times of a crew member's over-limit log lines in an owner thread
   const daily = new Map(); // person id → the UTC day of their last pointer in a channel that is not registered
   const say = (line) => log(forTerminal(line));
   /** The registered channel that a pointer names: the first one of the registry. */
@@ -284,14 +283,16 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    * Where a message to sage goes (T247): the registered channel `at` of its place (null: none), whether the place is a thread, and the
    * thread map entry of that thread (`own`). A thread that sage-bot does not own (another bot's thread, a forum post, or a thread of a
    * channel that is not registered) `moves` (R918 C7), to the thread of sage-bot that an earlier move from it opened (`moved`: its id and
-   * entry, the entry whose `origin` is that thread), else to a new one.
-   * @param {{ channelId: string, parentId: Promise<string | null> | string | null }} x
+   * entry, the entry whose `origin` is that thread), else to a new one. It moves only when it is public (`x.isPublic()`, src/discord.js
+   * publicThread: not a private thread, and its parent channel is open to @everyone; F-T247-11): a move posts its context in the home
+   * channel. A thread that is not public is no place for a message to sage (`at` null), so it gets the pointer and its history is not read.
+   * @param {{ channelId: string, parentId: Promise<string | null> | string | null, isPublic: () => Promise<boolean> }} x
    */
   async function placeOfMessage(x) {
     const parent = channels.has(x.channelId) ? null : await x.parentId;
-    const at = parent === null ? (channels.has(x.channelId) ? x.channelId : null) : (channels.has(parent) ? parent : null);
     const own = parent !== null ? threads.get(x.channelId) ?? null : null;
-    const moves = parent !== null && !own;
+    const moves = parent !== null && !own && await x.isPublic().catch(() => false);
+    const at = parent === null ? (channels.has(x.channelId) ? x.channelId : null) : (own || moves) && channels.has(parent) ? parent : null;
     return { at, own, moves, inThread: parent !== null, moved: moves ? [...threads].find(([, t]) => t.origin === x.channelId) ?? null : null };
   }
 
@@ -321,8 +322,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
           : 'I could not open a thread just now. Nothing changed. Please ask again in a minute.');
       return null;
     }
-    const channel = moves ? home : at;
-    const t = { kind: 'answer', channel, project: channels.get(channel).project, by: who.user.id, at: now(), ...(moves && { origin: x.channelId }) };
+    // The project of the place (F-T247-5): of its registered channel, also when the thread moves from there; of the home channel only
+    // for a thread of a channel that is not registered.
+    const t = { kind: 'answer', channel: moves ? home : at, project: channels.get(at ?? home).project, by: who.user.id, at: now(), ...(moves && { origin: x.channelId }) };
     threads.set(thread, t);
     keep(thread);
     if (moves) await told(thread);
@@ -330,14 +332,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   }
 
   /**
-   * Gives the message `x` (its `id` and `content`, by `x.user`) of the sender `who` to the outbox, for the thread `at` (threadFor). Returns
-   * the record, or null after `tell(text)` said why it was not sent: PENDING_MAX messages waiting, or the context or the outbox could not
-   * be read or written.
+   * Gives the message `x` (its `id`, `content` and `mentions`, by `x.user`) of the sender `who` to the outbox, for the thread `at`
+   * (threadFor). Returns the record, or null after `tell(text)` said why it was not sent: PENDING_MAX messages waiting, or the context or
+   * the outbox could not be read or written. The outbox also uses `tell` when Discord refuses the card of a recorded message.
    */
   async function toOutbox(x, who, { thread, t }, tell) {
     try {
       return await outbox.send({ message: x.id, where: x.channelId, thread, entry: t, author: { id: who.user.id, name: who.name, roles: who.roles },
-        quote: { user: x.user.id, name: x.name, roles: x.roles }, text: x.content ?? '', history: x.history, replied: x.replied });
+        quote: { user: x.user.id, name: x.name, roles: x.roles }, text: x.content ?? '', mentions: x.mentions ?? {}, history: x.history, replied: x.replied, tell });
     } catch (e) {
       if (e instanceof Refused) { await tell(e.message); return null; }
       say(`a message to sage in ${thread}: code ${e?.code ?? '-'}: ${e?.message}`);
@@ -543,11 +545,13 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     },
     /**
      * One message that mentions the bot: `{ id, user: { id, bot }, name, roles, channelId, parentId, content, reply, startThread, post, open,
-     * history, replied }`. `parentId` is a thread's parent (or a promise of it); `reply` answers in place; `startThread(name)` opens a public
+     * history, replied, isPublic, mentions }`. `parentId` is a thread's parent (or a promise of it); `reply` answers in place; `startThread(name)` opens a public
      * thread from the message and gives its id; `post(place, payload)` posts in a channel or thread; `open(channel, payload, name)` posts a
-     * line in a channel and opens a thread from it; `history(before)` and `replied()` read the context (src/outboxFlow.js send).
+     * line in a channel and opens a thread from it; `history(before)` and `replied()` read the context (src/outboxFlow.js send);
+     * `isPublic()` says whether the place is a public thread (src/discord.js publicThread); `mentions` names the people that it mentions.
      * - In a registered channel: opens a thread named from the message (src/threads.js).
-     * - In a thread that sage-bot opened: continues it. In any other thread, or a forum post: moves to a new thread of sage-bot (threadFor).
+     * - In a thread that sage-bot opened: continues it. In any other public thread, or a forum post: moves to a new thread of sage-bot
+     *   (threadFor). A private thread, or a thread of a channel that @everyone cannot view, gets the pointer, as a channel that is not registered.
      * - Elsewhere: one pointer to a registered channel per person per UTC day (shared with /sage).
      * In the thread, a read ask gets its answer; any other mention is a message to sage (toOutbox): a crew member's waits for the owner
      * on its approval card, the owner's own is approved at once. The owner's mentions on a side path go into the audit log, and every
@@ -578,7 +582,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
           return;
         }
         const ask = readAsk(m.content);
-        const refused = ask ? null : outbox ? outbox.full(id) : NOT_ON;
+        const refused = ask || lead ? null : outbox ? outbox.full(id) : NOT_ON; // the owner has no cap (F-T247-9)
         if (refused) return await inPlace(refused); // before a thread opens for it
         const opened = await threadFor(m, m, where, inPlace);
         if (!opened) return;
@@ -586,7 +590,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         let payload;
         try {
           if (lead) record(m, { thread: opened.thread, project: opened.t.project, outcome: 'read-ask' });
-          payload = await answer({ ...m, ...ask }, opened.t.channel);
+          payload = await answer({ ...m, sub: ask.sub, options: { ...ask.options, project: opened.t.project } }, opened.t.channel);
         } catch (e) {
           say(`a mention in ${opened.thread}: ${e?.message}`);
           payload = { content: 'I could not record or answer this just now, so nothing went further. Please ask again in a minute.' };
@@ -602,7 +606,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     /**
      * The "Send to sage" message command (T247) on the message `target`: `{ user: { id, bot }, name, roles, channelId, parentId, target:
      * { id, user: { id }, name, roles, bot, webhook, content }, defer, edit, reply, startThread, post, open, history, replied }`, where
-     * `startThread`, `history` and `replied` work on the target as the mention's do on the mention. The sender sends the target's text,
+     * `startThread`, `history`, `replied` and `mentions` work on the target as the mention's do on the mention, and `isPublic` on the place. The sender sends the target's text,
      * with its context, as their own message to sage, whoever wrote it; the payload names its writer when that is someone else. The answer
      * is private: notCrew for anyone but the crew and the owner (nothing counts), else a deferred reply that says what happened. The
      * thread is found as for a mention. Never rejects.
@@ -616,17 +620,18 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       try {
         const w = c.target;
         if (w.bot || w.webhook) return void await tell(`I send only the messages of people to sage, not of bots or webhooks. Nothing was sent.`);
-        const x = { ...w, channelId: c.channelId, startThread: c.startThread, open: c.open, post: c.post, history: c.history, replied: c.replied };
+        const x = { ...w, channelId: c.channelId, startThread: c.startThread, open: c.open, post: c.post, history: c.history, replied: c.replied, mentions: c.mentions };
         const where = await placeOfMessage(c);
         if (!where.at && !where.moves) return void await tell(`I take messages to sage in ${here()} and the other channels of ${us.bot}. Nothing was sent.`);
         const next = spend(c.user.id);
         if (next) return void await tell(limited(next));
-        const refused = outbox ? outbox.full(c.user.id) : NOT_ON;
+        const refused = !outbox ? NOT_ON : place(c).owner ? null : outbox.full(c.user.id); // the owner has no cap (F-T247-9)
         if (refused) return void await tell(refused);
         const opened = await threadFor(x, c, where, tell);
         if (!opened) return;
-        const r = await toOutbox(x, c, opened, tell);
-        if (r) await tell(r.status === 'pending' ? `Sent to ${us.owner} as ${r.id}. Its card is in <#${opened.thread}>; you can withdraw it there until ${us.owner} decides.`
+        let told = false; // the outbox tells when the card cannot be posted: that line stays the answer
+        const r = await toOutbox(x, c, opened, (text) => { told = true; return tell(text); });
+        if (r && !told) await tell(r.status === 'pending' ? `Sent to ${us.owner} as ${r.id}. Its card is in <#${opened.thread}>; you can withdraw it there until ${us.owner} decides.`
           : `Recorded as ${r.id} in <#${opened.thread}>. It waits for sage sessions (T159).`);
       } catch (e) {
         say(`${SEND}: ${e?.message}`);

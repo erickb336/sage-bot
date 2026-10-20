@@ -38,7 +38,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | --- | --- |
   | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads, Create Private Threads and Use Application Commands. |
   | sage-crew | Deny the same five permissions. |
-  | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
+  | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Attach Files, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. The approval card of a message to sage carries payload.txt, so it needs Attach Files. |
 
   **Do not let the Discord plugin watch the parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type and use `/sage` in the parent channel and every session thread, so they must not.
@@ -49,7 +49,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | --- | --- |
   | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
   | sage-crew | Allow Send Messages and Use Application Commands. |
-  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
+  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks all eight at each start and logs each one that is missing. |
 
   **Do not let the Discord plugin watch #ask-sage.** If it does, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts.
   *Why:* the crew asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. A `/sage request` here posts one line and opens its thread, where you approve or decline it. You and the crew type `/sage stop` here: it turns the link off at once. Only you turn it on again, at the terminal. sage-bot ignores everyone else. If you do not hold sage-crew, allow yourself Send Messages and Use Application Commands here too.

@@ -76,7 +76,7 @@ test('F-T232-13: the audit log keeps only the crew name: no role name with a bid
 
 test('F-T232-13, T247: a crew message to sage keeps no role name: the outbox has its place (crew), the thread map no role, and its log line only the crew name', async (t) => {
   const b = world(t);
-  await b.say(MAYA, [CREW, RLO, PRIVATE], '<@1> show the board');
+  await b.say(MAYA, [CREW, RLO, PRIVATE], '<@1> board'); // a bare read word: a read ask (F-T247-1)
   const [thread] = [...b.place.threads.keys()];
   const at = { channelId: thread, parentId: ASK };
   await b.say(MAYA, [CREW, ZW, PRIVATE], '<@1> the login breaks', at);

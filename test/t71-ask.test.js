@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { ChannelType, Client, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
 import { askCommand, attachmentName, createAsk as rawAsk, HOUR, MAX_BYTES, NOT_ON, readShared, sharedFiles } from '../src/ask.js';
 import { loadProjects, projectsOf } from '../src/projects.js';
@@ -505,7 +505,10 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const b = world(t);
   const pressed = [];
   const sent = [];
-  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
+  // THREAD is a public thread (F-T247-11): a public thread type, and its parent lets @everyone view it.
+  const everyone = { id: CONFIG_GUILD };
+  const open = { permissionsFor: (role) => ({ has: (flag) => role === everyone && flag === PermissionFlagsBits.ViewChannel }) };
+  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK, type: ChannelType.PublicThread, parent: open, guild: { roles: { everyone } } } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
   const guildRoles = new Map([[CREW_ROLE, { name: CREW }]]); // the guild's roles, as discord.js keeps them
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER, guildRoles });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };

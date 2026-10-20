@@ -34,7 +34,7 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const TASK_ID = /^T\d{1,9}$/;
 const MARKER = /^[0-9a-f]{12}$/;
 /** The keys of every record, in the order the file holds them. */
-const KEYS = ['id', 'message', 'where', 'thread', 'project', 'task', 'kind', 'author', 'name', 'place', 'quote', 'text', 'context', 'payload',
+const KEYS = ['id', 'message', 'where', 'thread', 'project', 'task', 'kind', 'author', 'name', 'place', 'quote', 'text', 'mentions', 'context', 'payload',
   'payloadSha256', 'status', 'at', 'decidedAt', 'decidedBy', 'card', 'shown'];
 /** The keys of one message of the context. `replied`: the message that the sent message replies to. */
 const CONTEXT_KEYS = ['id', 'user', 'name', 'place', 'at', 'replied', 'text'];
@@ -125,6 +125,9 @@ const id = (x) => text(x) && SNOWFLAKE.test(x);
 const opt = (x, ok) => x === null || ok(x);
 const keys = (x, k) => !!x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).join() === k.join();
 const name = (x) => text(x) && x.length >= 1 && Array.from(x).length <= 32;
+/** The names of the people that a text mentions, for the card (F-T247-3): user id → src/crew.js personName, only the ids of its `<@id>`. */
+const mentionIds = (t) => new Set(Array.from(t.matchAll(/<@!?(\d{1,20})>/g), (m) => m[1]));
+const isMentions = (x, t) => !!x && typeof x === 'object' && !Array.isArray(x) && Object.entries(x).every(([k, v]) => mentionIds(t).has(k) && name(v));
 const isContext = (c) => keys(c, CONTEXT_KEYS) && id(c.id) && id(c.user) && name(c.name) && PLACES.includes(c.place) && time(c.at)
   && typeof c.replied === 'boolean' && text(c.text) && c.text.length <= TEXT_MAX;
 
@@ -135,7 +138,7 @@ function isMessage(r) {
   return text(r.id) && MESSAGE_ID.test(r.id) && [r.message, r.where, r.thread, r.author].every(id) && text(r.project) && opt(r.task, (t) => TASK_ID.test(t))
     && KINDS.includes(r.kind) && (r.kind === 'steer') === (r.task !== null) && name(r.name) && ['owner', 'crew'].includes(r.place)
     && opt(r.quote, (q) => keys(q, ['user', 'name', 'place']) && id(q.user) && name(q.name) && PLACES.includes(q.place))
-    && text(r.text) && r.text.length <= TEXT_MAX && Array.isArray(r.context) && r.context.length <= CONTEXT.messages + 1 && r.context.every(isContext)
+    && text(r.text) && r.text.length <= TEXT_MAX && isMentions(r.mentions, r.text) && Array.isArray(r.context) && r.context.length <= CONTEXT.messages + 1 && r.context.every(isContext)
     && text(r.payload) && r.payloadSha256 === sha256(r.payload) && STATUSES.includes(r.status) && time(r.at)
     && (decided ? time(r.decidedAt) && id(r.decidedBy) : r.decidedAt === null && r.decidedBy === null)
     && opt(r.card, id) && opt(r.shown, (s) => STATUSES.includes(s));
@@ -148,21 +151,23 @@ const checked = (r) => {
 
 /**
  * A new message, and the file with it (pure). It is approved at once when `approvedBy` is set (the owner's own message while the link is
- * on); else it waits, and a person with PENDING_MAX messages waiting is refused. The payload is made here, once, with a new marker.
+ * on); else it waits, and a crew member with PENDING_MAX messages waiting is refused (the owner never is). `mentions` are the names of the
+ * people that its text mentions (user id → name); only the ids that the text has are kept. The payload is made here, once, with a new marker.
  * @param {{ next: number, messages: object[] }} file
  * @param {{ message: string, where: string, thread: string, project: string, task: string | null, author: string, name: string,
- *   place: 'owner' | 'crew', quote: object | null, text: string, context: object[], approvedBy?: string }} f
+ *   place: 'owner' | 'crew', quote: object | null, text: string, mentions?: Record<string, string>, context: object[], approvedBy?: string }} f
  * @param {number} at  @param {string} [marker]
  */
 export function newMessage(file, f, at, marker = newMarker()) {
   if (!MESSAGE_ID.test(`M${file.next}`)) refuse('the outbox has used every message id (M1 to M999999999). Nothing changed.');
   if (!MARKER.test(marker)) throw new TypeError('a marker is 12 hex digits');
-  const full = fullNote(file, f.author);
-  if (!f.approvedBy && full) refuse(full);
+  const full = f.place === 'owner' ? null : fullNote(file, f.author); // the owner has no cap (F-T247-9)
+  if (full) refuse(full);
   const payload = payloadOf(f, marker);
   const message = checked({
     id: `M${file.next}`, message: f.message, where: f.where, thread: f.thread, project: f.project, task: f.task, kind: f.task ? 'steer' : 'question',
-    author: f.author, name: f.name, place: f.place, quote: f.quote, text: f.text, context: f.context, payload, payloadSha256: sha256(payload),
+    author: f.author, name: f.name, place: f.place, quote: f.quote, text: f.text,
+    mentions: Object.fromEntries(Object.entries(f.mentions ?? {}).filter(([k]) => mentionIds(f.text).has(k))), context: f.context, payload, payloadSha256: sha256(payload),
     status: f.approvedBy ? 'approved' : 'pending', at, decidedAt: f.approvedBy ? at : null, decidedBy: f.approvedBy ?? null, card: null, shown: null,
   });
   return { file: { next: file.next + 1, messages: [...file.messages, message] }, message };
@@ -215,16 +220,20 @@ const save = (path, file) => writeWhole(path, `${JSON.stringify({ version: 1, ne
 export const find = (file, mid) => file.messages.find((r) => r.id === mid) ?? refuse(`there is no message ${mid}. Nothing changed.`);
 
 /**
- * The id of the last message to sage from the place `where` (pending or approved; a declined or withdrawn one never reached sage), or
- * null: the context of the next message from there starts after it.
+ * The id of the newest Discord message that went to sage from the place `where` (pending or approved; a declined or withdrawn one never
+ * reached sage), or null: the context of the next message from there starts after it. The newest by its Discord id, not by the order of
+ * the file (F-T247-8): "Send to sage" on an older message does not move the start back.
  */
-export const lastFrom = (file, where) => file.messages.findLast((r) => r.where === where && ['pending', 'approved'].includes(r.status))?.message ?? null;
+export const lastFrom = (file, where) => file.messages.filter((r) => r.where === where && ['pending', 'approved'].includes(r.status))
+  .map((r) => r.message).reduce((a, b) => (a === null || BigInt(b) > BigInt(a) ? b : a), null);
 
 /**
  * Adds a message under the lock (newMessage). The owner's message (`ownerId`) is approved at once while the link from Discord to sage is
  * on; while it is off, it waits like any other, and its Approve is refused until the owner turns the link on again. The context comes from
  * `context(since)`, given the last message from its place (lastFrom), read before the lock is taken. `audit(message)` writes its audit
  * log line before the file is saved: when the log cannot be written, it throws, and nothing is saved (G27: no message goes unlogged).
+ * The id is reserved first (the file is saved with `next` past it), so a save that fails after the audit line never gives that id to
+ * another message (F-T247-6): the audit log never holds one id for two payloads.
  * `marker` is the payload's marker: a new random one by default; the demo gives fixed ones.
  */
 export async function addMessage(config, f, { ownerId, at, context, audit, marker = newMarker() }) {
@@ -233,7 +242,9 @@ export async function addMessage(config, f, { ownerId, at, context, audit, marke
   const ctx = await context(since);
   return withLock(path, () => {
     const approvedBy = f.author === ownerId && !linkOff(killPathOf(config)) ? ownerId : undefined;
-    const { file, message } = newMessage(loadOutbox(path), { ...f, context: ctx, approvedBy }, at, marker);
+    const before = loadOutbox(path);
+    const { file, message } = newMessage(before, { ...f, context: ctx, approvedBy }, at, marker);
+    save(path, { ...before, next: file.next });
     audit(message);
     save(path, file);
     return message;

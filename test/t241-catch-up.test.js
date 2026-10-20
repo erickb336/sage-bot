@@ -60,7 +60,7 @@ test('T241: a mention sent while sage-bot was offline is answered once after the
   const b = world(t);
   b.catchUp.beat(); // the last loop turn before the sleep
   const asleep = b.now;
-  const id = b.said(MAYA, '<@1> show the board please', T0 + 20 * MIN);
+  const id = b.said(MAYA, '<@1> board', T0 + 20 * MIN);
   b.now = T0 + 60 * MIN; // the Mac wakes up
   await b.catchUp.run();
   const [thread] = b.place.threads.keys();

@@ -75,15 +75,15 @@ function world(t) {
 
 test('T131: a mention in a registered channel opens a thread named from the request and answers there; a mention in that thread continues it', async (t) => {
   const b = world(t);
-  const first = await b.say(MAYA, '<@1> show the board please');
+  const first = await b.say(MAYA, '<@1> board');
   assert.equal(b.threads().length, 1);
   const [thread] = b.threads();
-  assert.equal(b.place.threads.get(thread).name, 'show the board please');
+  assert.equal(b.place.threads.get(thread).name, 'board');
   assert.deepEqual(first.map(([at]) => at), [thread]); // nothing in place: the answer is in the thread
   assert.match(first[0][1], /^\*\*Board · project\*\*\n1 task\(s\) · framed 1/);
   assert.deepEqual(first[0][2], NONE);
   // A follow-up mention in the thread: answered there, and no new thread.
-  assert.deepEqual(await b.say(MAYA, '<@1> task t1', { channelId: thread, parentId: ASK }), [[thread, '**T1 · Board sort**\nsmall · framed · no pull request', NONE]]);
+  assert.deepEqual(await b.say(MAYA, '<@1> t1', { channelId: thread, parentId: ASK }), [[thread, '**T1 · Board sort**\nsmall · framed · no pull request', NONE]]);
   // T247: any other mention is a message to sage; the owner's is approved at once, with its status line in the thread.
   const [[at, text, mentions]] = await b.say(OWNER, '<@1> what now?', { channelId: thread, parentId: ASK });
   assert.deepEqual([at, mentions], [thread, NONE]);
@@ -553,7 +553,7 @@ test('F-T131-11: the real Discord route takes the stop confirm and its Cancel, i
 
 test('F-T90-15: a mention with gates or questions gets the open questions in its thread, as /sage gates does', async (t) => {
   const b = world(t);
-  for (const ask of ['<@1> gates', '<@1> any open questions?', '<@1> QUESTIONS']) {
+  for (const ask of ['<@1> gates', '<@1> questions?', '<@1> QUESTIONS']) { // only a bare read word is a read ask (F-T247-1)
     const [[thread, content]] = await b.say(MAYA, ask);
     assert.equal(b.place.threads.get(thread).name, ask.slice(5));
     assert.equal(content, 'project has no open questions.');

@@ -84,16 +84,15 @@ export function threadName(text) {
 }
 
 /**
- * The read ask in a mention, as a /sage subcommand and its options: a task id (T7) asks for that task; else the first of the words
- * board, gates (or questions) and files; null when it names none of them.
+ * The read ask in a mention (owner decision, F-T247-1), as a /sage subcommand and its options: the text without its mentions is only one
+ * read word (board, gates, questions or files) or one task id (T7), with at most a closing "?", "." or "!". Anything longer is a message
+ * to sage (null), also when it names a task or a read word: "for T5 use ; between the columns" is a steer.
  */
 export function readAsk(text) {
-  const w = words(text);
-  const id = /\bT\d{1,9}\b/i.exec(w)?.[0];
-  if (id) return { sub: 'task', options: { id: id.toUpperCase() } };
-  const word = /\b(board|gates|questions|files)\b/i.exec(w)?.[1]?.toLowerCase();
-  if (!word) return null;
-  return { sub: word === 'questions' ? 'gates' : word, options: {} };
+  const w = /^(T\d{1,9}|board|gates|questions|files)[?.!]?$/i.exec(words(text))?.[1]?.toLowerCase();
+  if (!w) return null;
+  if (w.startsWith('t')) return { sub: 'task', options: { id: w.toUpperCase() } };
+  return { sub: w === 'questions' ? 'gates' : w, options: {} };
 }
 
 /** The reply in place when sage-bot lacks a right for its thread. `us` is src/crew.js namesOf (T244). */

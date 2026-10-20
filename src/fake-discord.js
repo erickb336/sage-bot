@@ -204,12 +204,15 @@ export function fakeCommand({ user, name = 'Sample member', roles = [], bot = fa
 
 /**
  * The context port of a message `id` in `channelId` on the fake Discord `place`, as src/discord.js contextPort gives it: `history`,
- * `replied` (the message that it replies to: its `reply` in `said`), `open`, `post` and `startThread`. `refuse` makes Discord refuse one call with a code, for example `{ startThread: 50013 }`
- * (Missing Permissions) or `{ history: 50001 }`.
+ * `replied` (the message that it replies to: its `reply` in `said`), `open`, `post`, `startThread`, `isPublic` (`pub`: whether the place is a
+ * public thread, true by default) and `mentions` (user id → name). `refuse` makes Discord refuse one call with a code, for example
+ * `{ startThread: 50013 }` (Missing Permissions) or `{ history: 50001 }`.
  */
-function fakePort(place, id, channelId, refuse) {
+function fakePort(place, id, channelId, refuse, pub = true, mentions = {}) {
   const no = (call) => { if (refuse[call]) throw Object.assign(new Error('Missing Permissions'), { code: refuse[call], status: 403 }); };
   return {
+    isPublic: async () => pub,
+    mentions,
     history: async (before) => { no('history'); return place.fetchBefore(channelId, before); },
     replied: async () => place.repliedTo(id),
     open: async (channel, payload, name) => { no('open'); return place.startThread(await place.post(channel, payload), name); },
@@ -222,10 +225,10 @@ function fakePort(place, id, channelId, refuse) {
  * A fake message that mentions the bot, as src/discord.js maps a real one: `{ id, user: { id, bot }, name, roles, channelId, parentId,
  * content, reply, startThread, post, open, history, replied }`. `replies` records the replies in place. The threads and their posts go to
  * `place`, a fakeDiscord (a new one when none is given): the message is posted in its channel there first, so `startThread` opens a thread
- * from it. `refuse` makes Discord refuse one call with a code (fakePort). `id` is a message that `said` made in `place` already (the
+ * from it. `refuse` makes Discord refuse one call with a code; `pub` and `mentions` go to the port (fakePort). `id` is a message that `said` made in `place` already (the
  * catch-up gives it to the mention path; its `reply` is the message that `replied` gives). SAMPLE DATA ONLY.
  */
-export function fakeMention({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, content = '', place = fakeDiscord([]), refuse = {}, id: had }) {
+export function fakeMention({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, content = '', place = fakeDiscord([]), refuse = {}, id: had, pub, mentions }) {
   const replies = [];
   const id = had ?? String(800000000000000000n + BigInt(place.messages.size));
   if (!had) {
@@ -233,7 +236,7 @@ export function fakeMention({ user, name = 'Sample member', roles = [], bot = fa
     place.where.set(id, channelId);
   }
   return { id, user: { id: user, bot }, name, roles, channelId, parentId, content, replies, place,
-    ...fakePort(place, id, channelId, refuse),
+    ...fakePort(place, id, channelId, refuse, pub, mentions),
     reply: async (payload) => { if (refuse.reply) throw Object.assign(new Error('Missing Permissions'), { code: refuse.reply, status: 403 }); replies.push(structuredClone(payload)); } };
 }
 
@@ -242,14 +245,14 @@ export function fakeMention({ user, name = 'Sample member', roles = [], bot = fa
  * one: `{ user, name, roles, channelId, parentId, target, defer, edit, reply }` and the context port of the target. `replies` records each
  * answer as `{ kind, ...payload }`, kind 'reply', 'defer' or 'edit'. SAMPLE DATA ONLY.
  */
-export function fakeSend({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, target, place, refuse = {} }) {
+export function fakeSend({ user, name = 'Sample member', roles = [], bot = false, channelId, parentId = null, target, place, refuse = {}, pub }) {
   const replies = [];
   const record = (kind) => async (payload = {}) => { replies.push(structuredClone({ kind, ...payload })); };
   const t = place.raw(target);
   return { user: { id: user, bot }, name, roles, channelId, parentId, replies,
     target: { ...t, user: { id: t.user }, content: t.text },
     defer: record('defer'), edit: record('edit'), reply: record('reply'),
-    ...fakePort(place, target, channelId, refuse) };
+    ...fakePort(place, target, channelId, refuse, pub) };
 }
 
 /**

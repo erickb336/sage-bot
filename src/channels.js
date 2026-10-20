@@ -17,7 +17,7 @@ export const channelsPathOf = ({ statePath }) => `${statePath}.channels`;
 /** The permissions that sage-bot needs in a registered channel, with the names that Discord shows in the channel settings. */
 export const NEEDED = [['ViewChannel', 'View Channel'], ['SendMessages', 'Send Messages'], ['ReadMessageHistory', 'Read Message History'],
   ['CreatePublicThreads', 'Create Public Threads'], ['SendMessagesInThreads', 'Send Messages in Threads'], ['ManageThreads', 'Manage Threads'],
-  ['EmbedLinks', 'Embed Links']];
+  ['EmbedLinks', 'Embed Links'], ['AttachFiles', 'Attach Files']];
 
 /** How Erick makes the first registry when the config has no channelId (the README, Channels). */
 export const FIRST = 'node scripts/channels.mjs --config <config.json> register <channel id> <project> --home';

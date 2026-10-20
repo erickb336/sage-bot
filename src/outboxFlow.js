@@ -8,7 +8,7 @@
 // the button must be on the message's own card, and the status must still take the move, so a forged or replayed press does nothing.
 // Who reads the card: people on Discord only. The text and the names show through `safe` and `cut`; the model reads only the payload.
 import { MessageFlags } from 'discord.js';
-import { forLead, quoted, recorder } from './audit.js';
+import { forLead, forwarded, quoted, recorder } from './audit.js';
 import { apiError } from './bridge.js';
 import { button, cut, ephemeral, LIMIT, NO_MENTIONS, offline, safe, stamp } from './cards.js';
 import { CREW, namesOf, notCrew, personName, placeOf } from './crew.js';
@@ -21,6 +21,8 @@ import {
 const SNOWFLAKE = /^\d{17,20}$/;
 /** Discord's codes for a place or a message that is gone, or a locked thread: an edit or a post there can never work. */
 const NO_EDIT = new Set([10003, 10008, 50001, 50083]);
+/** Discord's code for a right that sage-bot lacks in a place (Missing Permissions): for a card, most often Attach Files (F-T247-4). */
+const NO_PERMISSION = 50013;
 /** At most this many pages of 100 messages are read for the context of one message (bots and webhooks are skipped in them). */
 export const PAGES = 3;
 const COLOR = { pending: 0x6b4fd8, approved: 0x2e8b57, declined: 0xb33a3a, withdrawn: 0x8a8a8a };
@@ -46,6 +48,16 @@ export const nameFor = (name, user) => personName(name) || `member ${String(user
 const fromLine = (r) => `${safe(r.name)} (${r.place})${r.quote ? `, sending the message of ${safe(r.quote.name)} (${r.quote.place})` : ''}`;
 const kb = (r) => (Buffer.byteLength(r.payload) / 1024).toFixed(1);
 const earlier = (n) => `${n} earlier message${n === 1 ? '' : 's'}`;
+/** The context as the card counts it, with the messages of people outside the crew (F-T247-2): the risk the owner judges on a phone. */
+const contextLine = (r) => {
+  const outside = r.context.filter((c) => c.place === 'not crew').length;
+  return `with ${earlier(r.context.length)}${outside ? ` (${outside} from not crew)` : ''}, ${kb(r)} KB, see payload.txt`;
+};
+/**
+ * The text of a message as the card shows it to people (F-T247-3): each `<@id>` as "@" and the name the record keeps for it (src/crew.js
+ * personName; "member" and the last 4 digits of an id with no name), then `safe`. The payload keeps the raw text.
+ */
+const cardText = (r) => safe(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
 /** The exact payload as a file of the card. */
 const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
 
@@ -65,10 +77,10 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
   }[r.status];
   const embed = {
     title: cut(`Message ${r.id} to sage · ${r.task ? `${r.kind} of ${r.task}` : r.kind} · ${safe(r.project)}`, LIMIT.title),
-    description: cut(safe(r.text) || '(no visible text: see payload.txt)', 1000),
+    description: cut(cardText(r) || '(no visible text: see payload.txt)', 1000),
     fields: [
       { name: 'From', value: cut(fromLine(r), LIMIT.value) },
-      { name: 'Context', value: `with ${earlier(r.context.length)}, ${kb(r)} KB, see payload.txt` },
+      { name: 'Context', value: contextLine(r) },
       { name: 'sha256 of payload.txt', value: short(r.payloadSha256) },
       { name: 'Status', value: status },
     ],
@@ -111,6 +123,8 @@ export const OUTBOX_NOTES = {
   broken: (us) => `Something went wrong on the bridge, so I could not do this. ${us.Owner} sees the details at the terminal.`,
 };
 const note = (why, us, r) => ephemeral(OUTBOX_NOTES[why](us, r));
+/** The rights that a card or a status line needs in its thread (src/channels.js NEEDED checks them at start). */
+const RIGHTS = 'Send Messages in Threads, Embed Links and Attach Files';
 
 /**
  * The outbox side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it) and statePath. `discord` is the port
@@ -142,7 +156,7 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
   /** A call to Discord; an error is logged once with its code and thrown, unless `done` takes its code (then null). */
   async function call(what, fn, done = () => false) {
     try { return await fn(); } catch (e) {
-      sayOnce(`Discord refused ${what}: ${apiError(e)}`);
+      sayOnce(`Discord refused ${what}: ${apiError(e)}${e?.code === NO_PERMISSION ? `. ${us.bot} lacks a right there: a card needs ${RIGHTS}` : ''}`);
       if (done(e?.code)) return null;
       if (Object(e) === e) logged.add(e);
       throw e;
@@ -175,10 +189,11 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
 
   /**
    * One audit log line for a new message (`fresh`) or a decision by `who` (src/crew.js placeOf `p`): the payload goes in as its sha256, so
-   * the line's textSha256 is the message's payloadSha256 (F6 of R917).
+   * the line's textSha256 is the message's payloadSha256 (F6 of R917). A forwarded message keeps its writer and place apart from `who`.
    */
+  const freshText = (r, p) => (r.quote ? forwarded(r.quote, r.where, r.text) : p.owner ? forLead(r.text) : quoted(r.text));
   const audited = (r, who, p, fresh) => record({ message: r.message, author: who, place: p, raw: r.payload,
-    text: !fresh ? `${r.id} ${r.status} · sha256 ${r.payloadSha256}` : p.owner ? forLead(r.text) : quoted(r.text), thread: r.thread, project: r.project, outcome: `${r.id} ${r.status}` });
+    text: fresh ? freshText(r, p) : `${r.id} ${r.status} · sha256 ${r.payloadSha256}`, thread: r.thread, project: r.project, outcome: `${r.id} ${r.status}` });
 
   /**
    * The context of a message from its place: the pages of `history(before)` (newest first, at most 100 each, up to PAGES), read until
@@ -209,7 +224,8 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
     },
     /**
      * Records one message to sage and draws its card (or, for the owner's own message, its status line) in `thread`. `s`:
-     * `{ message, where, thread, entry, author: { id, name, roles }, quote: { user, name, roles } | null, text, history, replied }`, where
+     * `{ message, where, thread, entry, author: { id, name, roles }, quote: { user, name, roles } | null, text, mentions, history, replied,
+     * tell }`, where `mentions` are the names of the people that `text` mentions (user id → Discord name), `tell(text)` answers the sender, and
      * `message` is the Discord message whose text is `text`, `where` its place, `entry` the thread map entry of `thread` (a task thread
      * makes a steer of its task), and `history` and `replied` the port that reads the context. Its audit log line comes first: when the
      * log cannot be written, nothing is recorded. Returns the record, or throws Refused with the line for the sender (PENDING_MAX
@@ -223,9 +239,12 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
         message: s.message, where: s.where, thread: s.thread, project: s.entry.project, task: s.entry.kind === 'task' ? s.entry.task : null,
         author: s.author.id, name: personName(s.author.name) || `a ${CREW} member`,
         place: me.owner ? 'owner' : 'crew', quote, text: s.text,
+        mentions: Object.fromEntries(Object.entries(s.mentions ?? {}).map(([id, n]) => [id, nameFor(n, id)])),
       }, { ownerId: config.ownerId, at: now(), context: (since) => contextOf(s.message, s.history, s.replied, since), audit: (x) => audited(x, s.author.id, me, true), ...(newMarker && { marker: newMarker() }) });
       say(`${r.id}: ${s.author.id} sent a message to sage in ${r.thread}; it is ${r.status} (sha256 ${r.payloadSha256}; node scripts/outbox.mjs show ${r.id})`);
-      try { await draw(r.id); } catch { /* the loop draws it again */ }
+      try { await draw(r.id); } catch (e) { // the loop draws it again; a missing right needs the owner, so the sender hears it (F-T247-4)
+        if (e?.code === NO_PERMISSION) await s.tell?.(`${r.id} is recorded, but I cannot post it in this thread: ${us.bot} lacks a right here (${RIGHTS}). It shows here once ${us.owner} gives the right to ${us.bot}'s role.`);
+      }
       return r;
     },
     /**

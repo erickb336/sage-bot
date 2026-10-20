@@ -2,7 +2,7 @@
 // src/bridge.js uses. The tests never run `start`: it is the only code that connects to Discord.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
+import { ChannelType, Client, Events, GatewayIntentBits, PermissionFlagsBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
 import { askCommand, createAsk, openAskFiles, SEND, sendCommand, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
 import { createOutboxFlow, parseOutboxId } from './outboxFlow.js';
@@ -126,11 +126,30 @@ export const rawOf = (m, guildRoles) => ({
 });
 
 /**
+ * Whether a thread is public (F-T247-11): not a private thread, and its parent channel lets @everyone view it. Only a public thread moves
+ * to the home channel (src/ask.js placeOfMessage), because a move posts its context there. Anything that cannot be read counts as not public.
+ * @param {import('discord.js').Channel | null} t  the thread, with `parent` (or `parentId` and `fetch` for a parent not in the cache)
+ * @param {(id: string) => Promise<import('discord.js').Channel>} fetch
+ */
+export async function publicThread(t, fetch) {
+  if (t?.isThread?.() !== true || t.type === ChannelType.PrivateThread) return false;
+  const parent = t.parent ?? await fetch(t.parentId).catch(() => null);
+  return parent?.permissionsFor?.(t.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === true;
+}
+
+/** The display names of the people that a message mentions (user id → name), for its card (F-T247-3). */
+export const mentionNames = (m) => Object.fromEntries([...(m.mentions?.users?.values() ?? [])]
+  .map((u) => [u.id, m.mentions.members?.get(u.id)?.displayName ?? u.globalName ?? u.username]));
+
+/**
  * The context port of a message `m` in its place (src/ask.js mention and send): `history(before)` reads the 100 messages of the place
  * before the id `before`, newest first (Get Channel Messages, which needs Read Message History); `replied()` the message that `m` replies
- * to, or null; `open(channel, payload, name)` posts a line in a channel and opens a public thread from it (the move of R918 C7); `post`.
+ * to, or null; `open(channel, payload, name)` posts a line in a channel and opens a public thread from it (the move of R918 C7); `post`;
+ * `isPublic()` whether the place is a public thread (publicThread); `mentions` the names of the people that `m` mentions.
  */
 const contextPort = (m, fetch, guildRoles) => ({
+  isPublic: async () => publicThread(await fetch(m.channelId).catch(() => null), fetch),
+  mentions: mentionNames(m),
   history: async (before) => [...(await (await fetch(m.channelId)).messages.fetch({ before, limit: 100, cache: false })).values()]
     .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)).map((x) => rawOf(x, guildRoles)),
   replied: async () => (m.reference?.messageId ? m.fetchReference().then((x) => rawOf(x, guildRoles), () => null) : null),
