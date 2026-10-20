@@ -57,7 +57,7 @@ test('a reason with mentions, markdown, newlines and backticks shows as one iner
   const names = new Map([[MAYA, '**@everyone** <@1>']]);
   const named = card(gate, ASKS.B7, { ...PEOPLE, names });
   assert.match(named.embeds[0].fields[0].value, /1 vote \(\*\*\\\*\\\*@everyone\\\*\\\* \\<@1\\>\*\*\)/); // `<@1>` escaped, so no mention renders (round 6)
-  assert.equal(note('closed', run(openAsk('G5', T0), [{ type: 'press', by: MAYA, option: 'A', at: T0, via: 'discord' }]), names).content,
+  assert.equal(note('closed', run(openAsk('G5', T0), [{ type: 'press', by: MAYA, option: 'A', at: T0, via: 'discord' }]), { ...PEOPLE, names }).content,
     'Already answered by \\*\\*@everyone\\*\\* \\<@1\\>: A');
 });
 

@@ -13,9 +13,11 @@ import { openChannels, withHome } from '../src/channels.js';
 import { ChannelType } from 'discord.js';
 import { inForum, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
-import { DRY_RUN, LINK_OFF, threadsPathOf } from '../src/threads.js';
+import { DRY_RUN, threadsPathOf } from '../src/threads.js';
 import { CONFIG, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
-import { CREW, NOT_CREW } from '../src/crew.js';
+import { CREW } from '../src/crew.js';
+const LINK_OFF = 'The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only Erick can turn the link on again, at the terminal. Read asks still work.';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ASK = '400000000000000009'; // a registered channel (the old #ask-sage)

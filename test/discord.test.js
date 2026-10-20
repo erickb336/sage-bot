@@ -93,10 +93,10 @@ test('F-T28-21: a throw from handle gets a private note and changes nothing', as
   // A batch of 5 parts cannot be a card (5 rows of options and one more for "End vote now"): the reason form's card throws.
   const gate = openGate({ id: 'project/G1+G2+G3+G4+G5', kind: 'batch', parts: Array.from({ length: 5 }, () => ['A', 'B']), askedBy: OWNER, at: 1 });
   const ask = { kind: 'batch', task: 'T1', title: '', parts: Array.from({ length: 5 }, () => ({ question: 'Q?', why: 'w', recommended: 'A', options: { A: 'a', B: 'b' } })) };
-  save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: null, remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
+  save(statePath, [{ gate, ask, sage: ['G1', 'G2', 'G3', 'G4', 'G5'], texts: Array.from({ length: 5 }, () => ['a', 'b']), message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const lines = [];
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [] }]]), own: 'project', discord: fakeDiscord([{ id: MAYA, name: 'Maya', roles: [CREW] }]), config: CONFIG, statePath, now: () => 2, log: (l) => lines.push(l) });
-  const i = fakeInteraction({ user: MAYA, customId: 'reason:project/G1+G2+G3+G4+G5:0:0', fields: { reason: 'r' } });
+  const i = fakeInteraction({ user: MAYA, customId: 'reason:project/G1+G2+G3+G4+G5:0:0', fields: { reason: 'r' }, message: '900000000000000000' });
   await bridge.interaction(i);
   assert.deepEqual(i.replies, [{ kind: 'reply', content: 'The bridge could not handle this press. Nothing changed. Please tell the owner.', flags: 64, allowedMentions: { parse: [] } }]);
   assert.deepEqual(bridge.entry('project/G1+G2+G3+G4+G5').gate, gate);
@@ -112,7 +112,7 @@ test('F-T28-21: a long display name is made safe, then cut to 32 characters, in 
   save(statePath, [{ gate: tied, ask, sage: ['G1'], texts: [['a', 'b']], message: '900000000000000000', remindedAt: 1, sent: {}, folder: null }]); // a sage tool with no folder: null
   const discord = fakeDiscord(people);
   const bridge = createBridge({ sages: new Map([['project', { gates: async () => [], answer: async () => '' }]]), own: 'project', discord, config: CONFIG, statePath, now: () => 2 * 60 * 60_000, log: () => {} });
-  await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:project/G1:0:1' }));
+  await bridge.interaction(fakeInteraction({ user: OWNER, customId: 'tiebreak:project/G1:0:1', message: '900000000000000000' }));
   assert.equal(discord.posts[0].content, `\\*${'Jonathan'.repeat(4).slice(0, 29)}… broke the tie on part 1 of project/G1: B.`);
 });
 

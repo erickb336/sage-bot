@@ -68,9 +68,9 @@ export function readAsk(text) {
 
 /** The reply to the owner's talk while sessions are not on (this step is a dry run). */
 export const DRY_RUN = 'Recorded in the audit log. Sessions with sage are not on yet, so nothing goes to sage. Use /sage board, gates, task or files to read the records.';
-/** The reply to a talk while the kill switch is set. */
-export const LINK_OFF = 'The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only Erick can turn the link on again, at the terminal. Read asks still work.';
+/** The reply to a talk while the kill switch is set. `us` is src/crew.js namesOf (T244). */
+export const linkOffReply = (us) => `The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only ${us.owner} can turn the link on again, at the terminal. Read asks still work.`;
 /** The reply in a thread that sage-bot did not open, or in a forum post. */
 export const foreign = (channel) => `I answer in my own threads. Mention me in <#${channel}> and I open one for you.`;
-/** The reply in place when sage-bot lacks a right for its thread. */
-export const noRight = (right) => `I cannot answer in a thread here: sage-bot lacks the right "${right}" in this channel. Ask Erick to give it to sage-bot's role.`;
+/** The reply in place when sage-bot lacks a right for its thread. `us` is src/crew.js namesOf (T244). */
+export const noRight = (right, us) => `I cannot answer in a thread here: ${us.bot} lacks the right "${right}" in this channel. Ask ${us.owner} to give it to ${us.bot}'s role.`;

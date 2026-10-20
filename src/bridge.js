@@ -4,8 +4,8 @@
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { MessageFlags } from 'discord.js';
-import { card, customId, cut, ephemeral, NO_MENTIONS, OWNER, parseCustomId, safe, settled, stamp } from './cards.js';
-import { crewPings, isOwner, NOT_CREW } from './crew.js';
+import { card, customId, cut, ephemeral, NO_MENTIONS, note, parseCustomId, safe, settled, stamp } from './cards.js';
+import { crewPings, isOwner, namesOf, notCrew } from './crew.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
 import { optionsOf, OTHER } from './sage.js';
@@ -241,6 +241,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
   /** The entries of `project`, as [id, meta]. */
   const entriesOf = (project) => [...meta].filter(([id]) => projectOfKey(id) === project);
   const people = async () => peopleOf(await discord.members(), config); // Sets of ids (F-T28-7)
+  const us = namesOf(config); // the names of the owner and of this bot in the copy (T244)
   /** Whether the entry of `id` still waits for something: its gate is not closed, and not every part is decided or final. */
   const waits = (id) => !settled(gates.get(id).gate, gates.get(id).ask);
   /** A message that pings the crew roles (src/crew.js crewPings, read now) and nobody else; the text is the bridge's own, with untrusted parts made safe. */
@@ -415,7 +416,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const m = meta.get(id);
     const { gate, ask } = gates.get(id);
     const task = `${projectOfKey(id)} ${ask.task}`; // the project name, so that a ping says which project asks (T132)
-    const text = (ask.leads ? `${task} asks the crew for a recommendation to ${OWNER}. The first answer is the recommendation; ${OWNER} decides at the terminal.`
+    const text = (ask.leads ? `${task} asks the crew for a recommendation to ${us.owner}. The first answer is the recommendation; ${us.owner} decides at the terminal.`
       : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
       : `${task} has ${gate.parts.length} product questions. Vote on each part within 30 minutes.`)
       + (m.channel ? ' Its session thread was deleted, so the card is here now, with the votes so far.' : '');
@@ -561,7 +562,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     const i = m.sage.indexOf(sageId);
     const row = rows.find((r) => r.id === sageId);
     if (row && (m.questions === undefined || m.questions[i] === row.question) && optionsOf(row).join('|') === m.texts[i].join('|')) return true;
-    sayOnce(`${keyOf(projectOfKey(id), sageId)}: the logbook of ${projectOfKey(id)} has another question or other options under ${sageId} than its card, so the bridge gives sage no answer; ${OWNER} answers it at the terminal`);
+    sayOnce(`${keyOf(projectOfKey(id), sageId)}: the logbook of ${projectOfKey(id)} has another question or other options under ${sageId} than its card, so the bridge gives sage no answer; ${us.owner} answers it at the terminal`);
     return false;
   }
 
@@ -684,7 +685,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       // The next step follows the advice: only a Yes asks the owner to switch the mode on (F-T73-3).
       const { sage: [sageId], texts: [texts] } = meta.get(id);
       const advice = texts[KEYS.indexOf(answered.outcome.option)];
-      await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${OWNER} decides at the terminal.`, allowedMentions: NO_MENTIONS });
+      await postAbout(id, { content: `Recommendation recorded: ${nameOf(by, ppl.names)} recommends ${ask.parts[0].options[answered.outcome.option]}. ${us.Owner} decides at the terminal.`, allowedMentions: NO_MENTIONS });
       say(`${keyOf(projectOfKey(id), sageId)}: the crew recommends ${advice}. ${advice === 'Yes' ? 'If you agree, switch the mode yourself at the terminal.' : 'If you agree, do nothing; the mode stays off.'}`);
     }
   }
@@ -833,7 +834,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
 
   /**
    * Closes each open card of a project that the config does not serve now (its name left the config, or names another folder), once in
-   * total: its buttons go, and a note says that ${OWNER} answers it at the terminal (F-T132-8, F-T132-21). The mark `shut` in the gate
+   * total: its buttons go, and a note says that the owner answers it at the terminal (F-T132-8, F-T132-21). The mark `shut` in the gate
    * file keeps it closed across restarts (F-T132-16). A card that Discord can never edit (a locked thread, a message or channel that is
    * gone) counts as closed, and the log says so once. Any other refused edit is tried again at the next loop. When the project is in the
    * config again with the same folder, `redraw` gives the card its buttons back (F-T132-15).
@@ -842,7 +843,7 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
     for (const e of parked) {
       const id = e.gate.id;
       if (e.shut || !e.message || settled(e.gate, e.ask)) continue;
-      const payload = { ...card(e.gate, e.ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${OWNER} answers it at the terminal.` };
+      const payload = { ...card(e.gate, e.ask, ppl, { shut: true }), components: [], content: `This question's project is no longer served; ${us.owner} answers it at the terminal.` };
       let why = null;
       try { await discord.edit(e.channel ?? config.channelId, e.message, payload); } catch (x) {
         if (!NO_EDIT.has(x?.code)) { say(`Discord refused the edit of ${id}: ${apiError(x)}`); continue; }
@@ -852,8 +853,8 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
       if (!why) delete e.oldButtons;
       persist();
       const lost = listed(id) ? `its project's name now names another folder than ${e.folder ?? '(none)'}` : 'its project is no longer in the config';
-      say(why ? `${id}: ${lost}, and Discord cannot edit its card (${apiError(why)}), so the bridge leaves it; ${OWNER} answers it at the terminal`
-        : `${id}: ${lost}, so the bridge closed its card; ${OWNER} answers it at the terminal`);
+      say(why ? `${id}: ${lost}, and Discord cannot edit its card (${apiError(why)}), so the bridge leaves it; ${us.owner} answers it at the terminal`
+        : `${id}: ${lost}, so the bridge closed its card; ${us.owner} answers it at the terminal`);
     }
   }
 
@@ -929,14 +930,14 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         if (checked) lastEnd = now();
       }
     },
-    /** One Discord interaction (a button or the reason form). Anyone but the crew and the owner gets NOT_CREW privately, and nothing changes (T239). Never rejects. */
+    /** One Discord interaction (a button or the reason form). Anyone but the crew and the owner gets notCrew privately, and nothing changes (T239). Never rejects. */
     async interaction(i) {
       const by = i?.user?.id;
       try {
         if (!SNOWFLAKE.test(by ?? '')) { await i.reply(ephemeral('I do not know this account. Nothing changed.')); return; }
         const ppl = await people();
         // T239: anyone but the crew and the owner gets one private line, and nothing changes.
-        if (!ppl.holders.has(by) && !isOwner(by, ppl.ownerId)) { await i.reply(ephemeral(NOT_CREW)); return; }
+        if (!ppl.holders.has(by) && !isOwner(by, ppl.ownerId)) { await i.reply(ephemeral(notCrew(us))); return; }
         // The owner's answers at the terminal come first: a press never counts on a part that has one (G10). Only the logbook of the
         // project in the key of the press: a key of a project that the config does not list finds no gate (T132).
         let pressed = parseCustomId(i.customId);
@@ -951,16 +952,20 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         // owner's private confirm is not a card (F-T132-21).
         const twin = pressed && parked.some((e) => e.gate.id === pressed.gateId);
         const confirm = i.message?.flags?.has(MessageFlags.Ephemeral) === true;
-        if (twin && (!gates.has(pressed.gateId) || (!confirm && i.message?.id !== meta.get(pressed.gateId).message))) {
-          if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: ${listed(pressed.gateId) ? "its project's name now names another folder" : 'its project is no longer in the config'}, so its card takes no press; ${OWNER} answers it at the terminal`); }
-          await i.reply(ephemeral(`This question's project is no longer served; ${OWNER} answers it at the terminal.`));
+        // A press counts only on the card's own message, or on the owner's private confirm (F-T244-4: another bot's card can hold the
+        // same key). src/handle.js keeps the confirm's buttons to the confirm.
+        const onCard = confirm || (i.message?.id !== undefined && i.message.id === meta.get(pressed?.gateId)?.message);
+        if (twin && (!gates.has(pressed.gateId) || !onCard)) {
+          if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: ${listed(pressed.gateId) ? "its project's name now names another folder" : 'its project is no longer in the config'}, so its card takes no press; ${us.owner} answers it at the terminal`); }
+          await i.reply(ephemeral(`This question's project is no longer served; ${us.owner} answers it at the terminal.`));
           return;
         }
+        if (!onCard) { await i.reply(note('unknown-gate')); return; }
         if (sages.has(project)) await readOwner(project, await sages.get(project).gates());
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;
         if (final || (target && target.gate.phase !== 'closed' && !waits(pressed.gateId))) {
-          const text = final ? `Already answered by ${target.ask.leads ? OWNER : nameOf(final.by, ppl.names)} at the terminal: ${final.text}. Your press did not count.`
+          const text = final ? `Already answered by ${target.ask.leads ? us.owner : nameOf(final.by, ppl.names)} at the terminal: ${final.text}. Your press did not count.`
             : `Every part of ${pressed.gateId} is decided or answered at the terminal. Your press did not count.`;
           await i.reply(ephemeral(text));
           return;

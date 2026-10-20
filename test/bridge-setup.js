@@ -12,6 +12,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tempFolder } from './temp-folder.js';
 import { createBridge, SETTLE } from '../src/bridge.js';
+import { parseCustomId } from '../src/cards.js';
 import { fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { answerArgs, optionsOf, OTHER, sagePath, sageTool } from '../src/sage.js';
 import { loadVotes, saveVotes } from '../src/state.js';
@@ -76,7 +77,8 @@ export const MEMBERS = [
   { id: BOT, name: 'sage bridge', roles: [CREW], bot: true },
 ];
 export const GUILD = '500000000000000001';
-export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER };
+/** `ownerName` as src/discord.js reads it at the start (T244): the copy names the owner Erick. */
+export const CONFIG = { guildId: GUILD, channelId: CHANNEL, ownerId: OWNER, ownerName: 'Erick' };
 export const T0 = Date.UTC(2026, 9, 4, 14, 0);
 /** The name of the scratch project: its folder is `project`, so a config with no projects names it so (src/ask.js projectsOf). */
 export const NAME = 'project';
@@ -112,8 +114,9 @@ export function setup({ members = MEMBERS, roles = ROLES, markAll = true, tool =
   b.bridge = b.make();
   b.gates = () => readFileSync(join(sh('logbook'), 'gates.tsv'), 'utf8');
   b.answerOf = (id) => b.gates().split('\n').find((l) => l.startsWith(`${id}\t`)).split('\t')[6];
+  /** A press on the card of the gate in `customId`, as Discord sends it: with the id of the card's message (F-T244-4). */
   b.press = async (user, customId, fields) => {
-    const i = fakeInteraction({ user, customId, fields });
+    const i = fakeInteraction({ user, customId, fields, message: discord.cardOf(parseCustomId(customId)?.gateId) });
     await b.bridge.interaction(i);
     return i.replies;
   };

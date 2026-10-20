@@ -4,19 +4,19 @@
 // The bridge answers them itself, with no AI, from the tasks.tsv and gates.tsv of a listed project, read through `pick` (only safe
 // columns). It never reads decisions.tsv, findings, briefs or reports. Every reply is public (G20: everyone can see the questions
 // and the answers), goes through `safe` (the readers are people on Discord) and pings nobody. Anyone but the crew and the owner
-// (src/crew.js placeOf) gets one private line for a command or a press (NOT_CREW, T239), and nothing for a mention. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
+// (src/crew.js placeOf) gets one private line for a command or a press (notCrew, T239), and nothing for a mention. Discord comes in as plain objects (src/discord.js maps the real ones, src/fake-discord.js fakes them).
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, sep } from 'node:path';
 import { SlashCommandBuilder, InteractionContextType } from 'discord.js';
-import { cut, ephemeral, NO_MENTIONS, OWNER, safe, stamp } from './cards.js';
-import { CREW, keptRoles, mayStop, NOT_CREW, placeOf } from './crew.js';
+import { cut, ephemeral, NO_MENTIONS, safe, stamp } from './cards.js';
+import { CREW, keptRoles, mayStop, namesOf, notCrew, placeOf } from './crew.js';
 import { forTerminal } from './clean.js';
 import { sageTool } from './sage.js';
 import { loadProjects, pickProject, TYPES } from './projects.js';
 import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 import { auditPathOf, entryOf, forLead, killPathOf, linkOff, openLog, quoted, setLinkOff } from './audit.js';
-import { DRY_RUN, foreign, isTalk, LINK_OFF, loadThreads, noRight, readAsk, saveThreads, threadName, threadsPathOf } from './threads.js';
+import { DRY_RUN, foreign, isTalk, linkOffReply, loadThreads, noRight, readAsk, saveThreads, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of the crew counts,
  * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
@@ -42,7 +42,8 @@ const QUIET = { ...NO_MENTIONS, repliedUser: false };
 const REPLY = 2000;
 
 export const POINTER = 'I answer read asks here with no AI: mention me with board, gates, files or a task id such as T7, or use /sage. I do not answer free questions yet.';
-export const BUILDS = `Builds are for ${OWNER}: ask ${OWNER}.`;
+/** The reply to a crew member's build ask. `us` is src/crew.js namesOf (T244). */
+export const builds = (us) => `Builds are for ${us.owner}: ask ${us.owner}.`;
 export const LEAD_BUILDS = 'Builds from Discord are not ready yet.';
 /**
  * A mention that asks for a build: a sentence that starts with one of these verbs, also after "please" or "can you" (G18 D3). A word
@@ -53,8 +54,15 @@ const isBuild = (text) => BUILD.test(String(text ?? '').replace(/<[@#][!&]?\d+>/
 /** The name of an attached file, for the people who download it: only A-Z, a-z, 0-9, dot, dash and underscore; any other character becomes "_". */
 export const attachmentName = (name) => name.replace(/[^A-Za-z0-9._-]/gu, '_');
 
-/** The /sage command, for the guild's command list: four subcommands, the project as a choice of the listed projects. */
-export function askCommand(projects) {
+/** Discord's limit for the description of a command or an option, in UTF-16 units. */
+const DESCRIPTION = 100;
+/**
+ * The /sage command, for the guild's command list: its subcommands, the project as a choice of the listed projects. `us` is src/crew.js
+ * namesOf: the descriptions name the owner (T244), so each sage-bot's /sage in a server says whose it is. A name can hold letters of
+ * 2 UTF-16 units each, so each description with a name is cut to DESCRIPTION (F-T244-5). The project names are at most 32 characters.
+ */
+export function askCommand(projects, us) {
+  const named = (s, text) => s.setDescription(cut(text, DESCRIPTION));
   const project = (o) => o.setName('project').setDescription('A shared project (the first one when you leave it out)')
     .addChoices(...projects.map((p) => ({ name: p.name, value: p.name })));
   return new SlashCommandBuilder().setName('sage').setDescription('Read the sage board, a task, the open questions or shared files')
@@ -65,9 +73,9 @@ export function askCommand(projects) {
       .addStringOption(project))
     .addSubcommand((s) => s.setName('gates').setDescription('The open questions with their options').addStringOption(project))
     .addSubcommand((s) => s.setName('files').setDescription('The shared images and PDFs of a project').addStringOption(project))
-    .addSubcommand((s) => s.setName('request').setDescription(`Request a feature: ${OWNER} approves or declines it`).addStringOption(project))
-    .addSubcommand((s) => s.setName('unregister').setDescription(`Stop sage-bot in this channel (${OWNER} only)`))
-    .addSubcommand((s) => s.setName('stop').setDescription(`Turn off the link from Discord to sage at once (the crew and ${OWNER})`))
+    .addSubcommand((s) => named(s.setName('request'), `Request a feature: ${us.owner} approves or declines it`).addStringOption(project))
+    .addSubcommand((s) => named(s.setName('unregister'), `Stop ${us.bot} in this channel (${us.owner} only)`))
+    .addSubcommand((s) => named(s.setName('stop'), `Turn off the link from Discord to sage at once (the crew and ${us.owner})`))
     .toJSON();
 }
 
@@ -200,6 +208,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   const limited = (at) => `You asked ${ASK_LIMIT} times in the last hour; that is the limit. Your next ask works at ${stamp(at)}.`;
   /** Where the person of a command, press or mention is (src/crew.js): the one read of the crew and the owner here. */
   const place = (x) => placeOf(x.user.id, x.roles ?? [], config.ownerId);
+  const us = namesOf(config); // the names of the owner and of this bot in the copy (T244)
   if (auditLog.broken) say(`the audit log ${auditPathOf(config)} has a break at line ${auditLog.broken.line}: it ${auditLog.broken.why}. New lines chain on from its last line. Run: node scripts/leads.mjs verify`);
   /**
    * The registered channel of a place: the channel, or the parent of a thread (F-T71-5, as `accepts` does for the home channel), as its
@@ -224,7 +233,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       const { attached, over } = readShared(sharedFiles(p));
       if (!attached.length && !over.length) return { content: `${p.name} shares no files.` };
       return { content: [`${attached.length} shared file(s) of ${p.name}:`, ...attached.map((f) => `- ${shown(f.name, 200)}`),
-        ...(over.length ? [`${over.length} more file(s) not attached: one reply holds at most ${MAX_FILES} files and 8 MB. Ask ${OWNER} for them.`, ...over.map((name) => `- ${shown(name, 200)}`)] : [])].join('\n'),
+        ...(over.length ? [`${over.length} more file(s) not attached: one reply holds at most ${MAX_FILES} files and 8 MB. Ask ${us.owner} for them.`, ...over.map((name) => `- ${shown(name, 200)}`)] : [])].join('\n'),
         files: attached.map((f) => ({ attachment: f.data, name: attachmentName(basename(f.name)) })) };
     }
     let data;
@@ -240,9 +249,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
 
   /** The answer to /sage unregister: a confirm button for the owner, a refusal for anyone else and for the home channel. */
   function unregisterAsk(p, at) {
-    if (!p.owner) return { content: `Only ${OWNER} can unregister a channel. Ask ${OWNER}.` };
-    if (channels.get(at).home) return { content: `<#${at}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.` };
-    return { content: `Unregister <#${at}>? sage-bot then ignores /sage and mentions here and in its threads. Only Erick can register it again, at the terminal.`,
+    if (!p.owner) return { content: `Only ${us.owner} can unregister a channel. Ask ${us.owner}.` };
+    if (channels.get(at).home) return { content: `<#${at}> is the home channel of the votes and cards. Only ${us.owner} can change it, at the terminal.` };
+    return { content: `Unregister <#${at}>? ${us.bot} then ignores /sage and mentions here and in its threads. Only ${us.owner} can register it again, at the terminal.`,
       components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Unregister this channel', custom_id: `${UNREGISTER}${at}` },
         { type: 2, style: 2, label: 'Cancel', custom_id: CANCEL }] }] };
   }
@@ -252,8 +261,8 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    * (`asker`), so that only they or the owner cancel it (F-T232-11).
    */
   function stopAsk(asker) {
-    if (linkOff(killPath)) return { content: 'The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.' };
-    return { content: `Turn off the link from Discord to sage? Then no message from Discord goes to sage until ${OWNER} turns it on again at the terminal. Read asks keep working.`,
+    if (linkOff(killPath)) return { content: `The link from Discord to sage is already off. Only ${us.owner} can turn it on again, at the terminal.` };
+    return { content: `Turn off the link from Discord to sage? Then no message from Discord goes to sage until ${us.owner} turns it on again at the terminal. Read asks keep working.`,
       components: [{ type: 1, components: [{ type: 2, style: 4, label: 'Turn off the link', custom_id: STOP }, { type: 2, style: 2, label: 'Cancel', custom_id: `${STOP_CANCEL}:${asker}` }] }] };
   }
 
@@ -298,13 +307,13 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         keep(thread);
       }
       record(m, { thread, project: t.project, outcome: off ? 'link-off' : 'dry-run' });
-      return { content: off ? LINK_OFF : DRY_RUN };
+      return { content: off ? linkOffReply(us) : DRY_RUN };
     }
     if (lead) record(m, { thread, project: t.project, outcome: 'read-ask' });
     else { t.held.push({ id: m.id, user: m.user.id, roles: keptRoles(place(m)), content: m.content ?? '' }); keep(thread); }
     const ask = readAsk(m.content);
     if (ask) return answer({ ...m, ...ask }, t.channel);
-    return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : BUILDS}` : POINTER };
+    return { content: isBuild(m.content) ? `${POINTER} ${lead ? LEAD_BUILDS : builds(us)}` : POINTER };
   }
 
   /**
@@ -317,7 +326,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     const fail = (e) => say(`Discord refused the stop reply: code ${e?.code ?? '-'}: ${e?.message}`);
     let content;
     if (b.customId !== STOP && b.customId !== `${STOP_CANCEL}:${b.user.id}` && !place(b).owner) {
-      await b.reply(ephemeral(`Only the person who typed /sage stop, or ${OWNER}, can cancel it. Nothing changed.`)).catch(fail);
+      await b.reply(ephemeral(`Only the person who typed /sage stop, or ${us.owner}, can cancel it. Nothing changed.`)).catch(fail);
       return;
     }
     if (b.customId !== STOP) content = 'Cancelled. Nothing changed.';
@@ -326,7 +335,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     else try {
       setLinkOff(killPath, b.user.id, now());
       say(`${b.user.id} turned off the link from Discord to sage (the kill switch ${killPath}). Turn it on again with: node scripts/leads.mjs restore`);
-      content = `<@${b.user.id}> turned off the link from Discord to sage. No message from Discord goes to sage until ${OWNER} turns it on again at the terminal. Read asks keep working.`;
+      content = `<@${b.user.id}> turned off the link from Discord to sage. No message from Discord goes to sage until ${us.owner} turns it on again at the terminal. Read asks keep working.`;
       try { record({ ...b, roles, content: '/sage stop' }, { outcome: 'link-off-set' }); } catch (e) { say(`the audit log could not record the stop: ${e?.message}`); }
     } catch (e) {
       say(`the kill switch ${killPath} could not be set: ${e?.message}`);
@@ -343,7 +352,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     const fail = (e) => say(`Discord refused a /sage request reply: code ${e?.code ?? '-'}: ${e?.message}`);
     try {
       const at = await registered(i.channelId, i.parentId);
-      if (!at) return await i.reply(ephemeral(`I take requests in ${here()} and the other channels of sage-bot, so please ask there.`)).catch(fail);
+      if (!at) return await i.reply(ephemeral(`I take requests in ${here()} and the other channels of ${us.bot}, so please ask there.`)).catch(fail);
       const next = spend(i.user.id);
       if (next) return await i.reply(ephemeral(limited(next))).catch(fail);
       if (!requests) return await i.reply(ephemeral('Requests are not on in this bridge. Nothing was sent.')).catch(fail);
@@ -373,9 +382,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     if (asked === null) return ['The requests could not be read just now.'];
     if (!asked.length) return [];
     const line = (r) => `- ${r.id} · ${shown(r.title, 70)} · by ${shown(r.requesterName, 32) || `a ${CREW} member`} · `
-      + `${r.status === 'pending' ? `waiting for ${OWNER}` : 'being approved'}${r.thread ? ` · <#${r.thread}>` : ''}`;
+      + `${r.status === 'pending' ? `waiting for ${us.owner}` : 'being approved'}${r.thread ? ` · <#${r.thread}>` : ''}`;
     return [`${asked.length} open request(s):`, ...asked.slice(0, BOARD_REQUESTS).map(line),
-      ...(asked.length > BOARD_REQUESTS ? [`${asked.length - BOARD_REQUESTS} more open request(s): ${OWNER} sees them all with node scripts/requests.mjs list.`] : [])];
+      ...(asked.length > BOARD_REQUESTS ? [`${asked.length - BOARD_REQUESTS} more open request(s): ${us.owner} sees them all with node scripts/requests.mjs list.`] : [])];
   }
   function gates(p, { open }) {
     if (!open.length) return `${p.name} has no open questions.`;
@@ -416,14 +425,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     projects,
     /**
      * One /sage command: `{ user: { id, bot }, name, roles, channelId, parentId, sub, options: { project, id }, defer, edit, reply, showModal }`,
-     * with the NAMES of the member's roles. A bot gets nothing; anyone but the crew and the owner gets NOT_CREW privately (T239), and nothing
+     * with the NAMES of the member's roles. A bot gets nothing; anyone but the crew and the owner gets notCrew privately (T239), and nothing
      * counts. /sage request opens its form with no defer (requestAsk). Every other ask is first deferred in public, before any file
      * or logbook work (F-T71-2), then gets its answer as an edit of that reply, which pings nobody. Never rejects.
      */
     async command(i) {
       if (i.user?.bot || !SNOWFLAKE.test(i.user?.id ?? '')) return;
       if (!(place(i).crew || place(i).owner)) { // T239: one private line, within Discord's 3 s; nothing counts
-        await i.reply(ephemeral(NOT_CREW)).catch((e) => say(`Discord refused the reply to a /sage of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
+        await i.reply(ephemeral(notCrew(us))).catch((e) => say(`Discord refused the reply to a /sage of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
         return;
       }
       if (i.sub === 'request') return requestAsk(i);
@@ -446,7 +455,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
           return;
         }
         const next = at && spend(i.user.id);
-        payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. ${OWNER} can still turn the link off at the terminal.` }
+        payload = burst ? { content: `You used /sage stop ${BURST} times in the last 10 minutes; that is the limit. Your next /sage stop works at ${stamp(burst)}. ${us.Owner} can still turn the link off at the terminal.` }
           : stop ? stopAsk(i.user.id) : !at ? { content: text } : next ? { content: limited(next) } : await answer(i, at);
       } catch (e) {
         say(`/sage ${i.sub}: ${e?.message}`);
@@ -461,14 +470,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * update, reply }`, where `sentAt` is when Discord made the confirm. STOP and STOP_CANCEL (with the asker's id) go to the kill switch (stopPress). The owner's press of
      * the unregister confirm removes the channel from the registry, saves it, logs it at the terminal with the owner's name and id, and
      * replaces the confirm with the result; Cancel, or a confirm older than CONFIRM_FOR, changes nothing and closes the confirm. A crew
-     * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else gets NOT_CREW privately
+     * member's press of the unregister confirm changes nothing and gets a private reply of its own, so the owner's confirm stays. Anyone else gets notCrew privately
      * (T239); a custom_id that is not STOP, STOP_CANCEL, CANCEL or a channel id gets nothing. Never rejects.
      */
     async press(b) {
       const roles = b.roles ?? [];
       if (b.user?.bot || !SNOWFLAKE.test(b.user?.id ?? '')) return;
       if (!(place(b).crew || place(b).owner)) { // T239
-        await b.reply(ephemeral(NOT_CREW)).catch((e) => say(`Discord refused the reply to a press of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
+        await b.reply(ephemeral(notCrew(us))).catch((e) => say(`Discord refused the reply to a press of someone not in the crew: code ${e?.code ?? '-'}: ${e?.message}`));
         return;
       }
       if (b.customId === STOP || String(b.customId).startsWith(STOP_CANCEL)) return stopPress(b, roles);
@@ -476,14 +485,14 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       if (b.customId !== CANCEL && !SNOWFLAKE.test(id)) return;
       let content;
       if (!place(b).owner) {
-        await b.reply(ephemeral(`Only ${OWNER} can unregister a channel. Nothing changed.`)) // only they see it, so presses add nothing to the channel (F-T136-9)
+        await b.reply(ephemeral(`Only ${us.owner} can unregister a channel. Nothing changed.`)) // only they see it, so presses add nothing to the channel (F-T136-9)
           .catch((e) => say(`Discord refused the unregister reply: code ${e?.code ?? '-'}: ${e?.message}`));
         return;
       }
       if (b.customId === CANCEL) content = 'Cancelled. Nothing changed.';
       else if (!(now() - b.sentAt <= CONFIRM_FOR)) content = 'This confirm expired after 10 minutes. Nothing changed. Type /sage unregister again.';
       else if (!channels.has(id)) content = `<#${id}> is not registered. Nothing changed.`;
-      else if (channels.get(id).home) content = `<#${id}> is the home channel of the votes and cards. Only Erick can change it, at the terminal.`;
+      else if (channels.get(id).home) content = `<#${id}> is the home channel of the votes and cards. Only ${us.owner} can change it, at the terminal.`;
       else {
         const { project } = channels.get(id);
         const next = new Map(channels);
@@ -494,7 +503,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         }
         if (!content) {
           say(`the owner ${b.user.name} (${b.user.id}) unregistered the channel ${id} (it was for the project ${project})`);
-          content = `<#${id}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`;
+          content = `<#${id}> is unregistered: ${us.bot} ignores /sage and mentions here now. Only ${us.owner} can register it again.`;
         }
       }
       try { await b.update({ content, components: [], allowedMentions: NO_MENTIONS }); } catch (e) {
@@ -522,7 +531,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       const where = async (target, payload, inPlace) => {
         try { await (inPlace ? m.reply(payload) : m.post(target, payload)); } catch (e) {
           say(`Discord refused a mention reply: code ${e?.code ?? '-'}: ${e?.message}`);
-          if (!inPlace && NO_RIGHT.has(e?.code)) await where(null, { content: noRight('Send Messages in Threads'), allowedMentions: QUIET }, true);
+          if (!inPlace && NO_RIGHT.has(e?.code)) await where(null, { content: noRight('Send Messages in Threads', us), allowedMentions: QUIET }, true);
         }
       };
       try {
@@ -554,7 +563,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
           try { thread = await m.startThread(threadName(m.content)); } catch (e) {
             say(`Discord refused to open a thread for a mention in ${at}: code ${e?.code ?? '-'}: ${e?.message}`);
             if (lead) record(m, { project, outcome: NO_RIGHT.has(e?.code) ? 'no-thread-right' : 'no-thread' });
-            await where(null, { content: NO_RIGHT.has(e?.code) ? noRight('Create Public Threads') : 'I could not open a thread just now. Nothing changed. Please ask again in a minute.', allowedMentions: QUIET }, true);
+            await where(null, { content: NO_RIGHT.has(e?.code) ? noRight('Create Public Threads', us) : 'I could not open a thread just now. Nothing changed. Please ask again in a minute.', allowedMentions: QUIET }, true);
             return;
           }
           t = lead && isTalk(m.content) ? { kind: 'lead', channel: at, project, by: id, at: now() } : { kind: 'answer', channel: at, project, by: id, at: now(), held: [] };

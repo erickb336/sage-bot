@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createAsk } from '../src/ask.js';
 import { createBridge, LOOP, SETTLE } from '../src/bridge.js';
+import { parseCustomId } from '../src/cards.js';
 import { openChannels } from '../src/channels.js';
 import { fakeCommand, fakeDiscord, fakeInteraction } from '../src/fake-discord.js';
 import { loadProjects } from '../src/projects.js';
@@ -32,7 +33,7 @@ const MEMBERS = [
   { id: '100000000000000005', name: 'sage bridge', roles: [CREW], bot: true },
 ];
 const NAMES = new Map(MEMBERS.map((m) => [m.id, m.name]));
-const CONFIG = { channelId: CHANNEL, ownerId: ERICK };
+const CONFIG = { channelId: CHANNEL, ownerId: ERICK, ownerName: 'Erick' }; // ownerName as src/discord.js reads it at the start (T244)
 const SESSION = 'aaaaaaaa-0000-4000-8000-000000000051';
 const T0 = Date.UTC(2026, 9, 4, 14, 0);
 
@@ -89,9 +90,9 @@ const loop = () => bridge.loop();
 async function advance(ms) {
   for (const to = now + ms; now < to;) { now = Math.min(to, now + LOOP); await loop(); }
 }
-/** One press in Discord by a sample person, with its private replies. */
+/** One press in Discord by a sample person, with its private replies: on the card's own message, or on the owner's private confirm. */
 async function press(who, text, customId, { fields, ephemeral, form } = {}) {
-  const i = fakeInteraction({ user: who, customId, fields, ephemeral });
+  const i = fakeInteraction({ user: who, customId, fields, ephemeral, message: ephemeral ? undefined : fake.cardOf(parseCustomId(customId)?.gateId) });
   story.push({ kind: 'press', at: now, who: NAMES.get(who), text, replies: i.replies, form }); // before the posts that the press causes
   await bridge.interaction(i);
 }

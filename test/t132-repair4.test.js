@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from 'node:path';
 import { createBridge } from '../src/bridge.js';
 import { card } from '../src/cards.js';
+import { namesOf } from '../src/crew.js';
 import { prepare } from '../src/discord.js';
 import { sageTool } from '../src/sage.js';
 import { openGate } from '../src/vote.js';
@@ -104,7 +105,7 @@ test('F-T132-20: a closed card\'s body says the vote is closed, as its note does
 test('F-T132-20: a closed batch card has no rule footer and no reminder line, only the closed line', () => {
   const gate = openGate({ id: 'beta/G1+G2', kind: 'batch', parts: [['A', 'B'], ['A', 'B']], askedBy: OWNER, at: T0 });
   const ask = { kind: 'batch', task: 'T1', title: 'Beta colours', parts: gate.parts.map(() => ({ question: 'Which?', why: 'w', recommended: 'A', options: { A: 'Red', B: 'Blue' } })) };
-  const ppl = { holders: new Set(), names: new Map() };
+  const ppl = { holders: new Set(), names: new Map(), us: namesOf(CONFIG) };
   const open = card(gate, ask, ppl).embeds[0];
   assert.match(open.footer.text, /^Rule: 30 minutes/);
   const shut = card(gate, ask, ppl, { shut: true }).embeds[0];

@@ -253,9 +253,9 @@ test('F-T27-33: a blank name falls back to the last 4 digits of a digit id, and 
   assert.match(e.fields[0].value, /\*\*A\.\*\* a · Recommended · 2 votes \(\*\*member …6789\*\*, \*\*member\*\*\)\n/);
   assert.match(e.fields[0].value, /\nVoted: \*\*member …6789\*\*, \*\*member\*\* · Not voted: \*\*Ana\*\*\n/);
   assert.deepEqual(e.fields.slice(1), [{ name: 'member …6789, part 1', value: 'yes' }, { name: 'member, part 1', value: 'also yes' }]);
-  assert.equal(note('not-asker', gate, people.names).content, 'Only member, who asked B, can withdraw it.');
+  assert.equal(note('not-asker', gate, people).content, 'Only member, who asked B, can withdraw it.');
   assert.match(confirmEnd(gate, people).content, /Part 1 goes to A: 2 of 3 votes \(\*\*member …6789\*\*, \*\*member\*\*\)\./);
-  const text = JSON.stringify([e, confirmEnd(gate, people), note('not-asker', gate, people.names)]);
+  const text = JSON.stringify([e, confirmEnd(gate, people), note('not-asker', gate, people)]);
   assert.doesNotMatch(text, /maya|123456789012346789/);
   // On 56e5910 the fallback showed the last 4 characters of any id ("member …maya").
   const maya = peopleOf([{ id: MAYA, name: '', roles: ['sage-crew'] }], { ownerId: digits });

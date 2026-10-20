@@ -9,7 +9,7 @@ import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { restoreLink, setLinkOff } from '../src/audit.js';
 import { createAsk } from '../src/ask.js';
 import { openChannels } from '../src/channels.js';
-import { NOT_CREW, CREW } from '../src/crew.js';
+import { CREW, namesOf } from '../src/crew.js';
 import { routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeInteraction, fakeMention } from '../src/fake-discord.js';
 import { loadProjects } from '../src/projects.js';
@@ -18,6 +18,8 @@ import { createRequestFlow } from '../src/requestFlow.js';
 import { approve, loadRequests, requestsPathOf, RETRY_AFTER } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
 import { CONFIG, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, table, T0 } from './bridge-setup.js';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
+const US = namesOf(CONFIG);
 
 const ASK = '400000000000000009'; // the project channel where people request
 const ROLES = { [OWNER]: [CREW], [MAYA]: [CREW], [JON]: [CREW, 'Moderators'], [SAM]: [] };
@@ -339,12 +341,12 @@ test('/sage request refuses before the form: the link off, an open request, an u
   assert.equal(only(await b.cmd(JON, 'request', { options: { project: '**x** <@&1>' } })), 'I do not know a shared project called "\\*\\*x\\*\\* \\<@&1\\>". Nothing was sent.');
   assert.equal(only(await b.cmd(JON, 'request', { channelId: '400000000000000003' })), `I take requests in <#${ASK}> and the other channels of sage-bot, so please ask there.`);
   await b.request(JON);
-  assert.equal(only(await b.cmd(JON)), `You have an open request: RQ1 · ${TITLE}, waiting for Erick since ${t(b.now)} in <#${b.r().thread}>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
+  assert.equal(only(await b.cmd(JON)), `You have an open request: RQ1 · ${TITLE}, waiting for Erick since ${t(b.now)} in <#${b.r().thread}>. A sage-crew member can have 1 open request at a time on sage-bot. Withdraw it in its thread, or wait for Erick's answer.`);
   // A /sage request in a thread of the project channel opens the form, and the line goes to the channel.
   const inThread = await b.cmd(MAYA, 'request', { channelId: b.r().thread, parentId: ASK });
   assert.equal(inThread[0].kind, 'modal');
   setLinkOff(b.killPath, MAYA, b.now);
-  assert.equal(only(await b.cmd(OWNER)), requestNote('linkOff').content);
+  assert.equal(only(await b.cmd(OWNER)), requestNote('linkOff', US).content);
   restoreLink(b.killPath);
   for (let n = 0; n < 9; n++) await b.cmd(MAYA, 'board'); // with the request in the thread: 10 asks of Maya in the hour
   assert.match(only(await b.cmd(MAYA)), /^You asked 10 times in the last hour; that is the limit\./);
@@ -372,7 +374,7 @@ test('the late note never shows 1 Jan 1970: a request being approved names the t
   const b = world(tt);
   await b.request(JON);
   const claimAt = b.now + 5_000;
-  const note = requestNote('late', { ...b.r(), status: 'approving', claim: { by: OWNER, via: 'discord', pid: 1, start: 'x', at: claimAt } }).content;
+  const note = requestNote('late', US, { ...b.r(), status: 'approving', claim: { by: OWNER, via: 'discord', pid: 1, start: 'x', at: claimAt } }).content;
   assert.equal(note, `RQ1 is being approved since ${t(claimAt)}. Nothing changed.`);
   assert.doesNotMatch(note, /<t:0:/);
   // On Discord: a Decline while the owner's approve runs.

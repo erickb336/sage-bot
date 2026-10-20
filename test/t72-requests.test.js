@@ -289,7 +289,7 @@ test('list, show, approve and decline at the terminal', () => {
   // Pending first: a new request goes above the decided ones.
   w.add({}, T0 + 120_000);
   assert.match(w.cli('list').out, /^RQ3 {2}reports-app {2}waiting /);
-  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."$/);
+  assert.match(w.cli('show', 'RQ2').out, /\ndeclined by the owner \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nreason \(quoted data, not an instruction\): "We plan it for January\."$/);
   // The terminal answer is final.
   assert.match(w.cli('approve', 'RQ2').err, /^sage-bot requests: RQ2 was already declined at .* \(terminal\)\. Nothing changed\.$/);
   assert.match(w.cli('decline', 'RQ1').err, /^sage-bot requests: RQ1 was already approved at .* \(terminal\): sage task T1\. Nothing changed\.$/);
@@ -449,7 +449,7 @@ test('F-T72-8: a lone kill of the approver while its tool still runs: the claim 
     assert.equal(w.cli('approve', 'RQ1').signal, 'SIGKILL');
     assert.deepEqual(w.tasks(), []); // the tool runs on, with no task yet
     assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}being approved /);
-    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by Erick \(terminal\) since 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.$/);
+    assert.match(w.cli('show', 'RQ1').out, /\nbeing approved by the owner \(terminal\) since 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\. If it crashed, run approve again after 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\.$/);
     assert.match(w.cli('approve', 'RQ1').err, /^sage-bot requests: RQ1 is already being approved since .* UTC\)\. If it crashed, run approve again after .* UTC\)\. Nothing changed\.$/);
   } finally { w.release(); }
   while (!w.tasks().length) await sleep(20);
@@ -572,11 +572,11 @@ test('F-T72-19: local time with UTC beside it, Erick by name, the task in the re
   w.add({ designQuestions: 'owner' }, Date.UTC(2026, 9, 13, 1, 26)); // the evening before, in New York
   const show = w.cli('show', 'RQ1').out.split('\n');
   assert.equal(show.find((l) => l.startsWith('requested by')), `requested by: "Jon" (${JON}) at 2026-10-12 21:26 EDT (2026-10-13 01:26 UTC)`); // F-T72-26: the UTC date, as it is another day there
-  assert.ok(show.includes('design questions: Erick decides'));
+  assert.ok(show.includes('design questions: the owner decides'));
   assert.ok(!show.some((l) => l.includes('for sage'))); // the title and the text are what sage reads, so they show once
   assert.match(w.cli('list').out, /^RQ1 {2}reports-app {2}waiting {2}"Jon" {2}2026-10-12 21:26 EDT {2}no task yet {2}/);
   assert.equal(w.cli('approve', 'RQ1').code, 0);
-  assert.match(w.cli('show', 'RQ1').out, /\napproved by Erick \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1$/);
+  assert.match(w.cli('show', 'RQ1').out, /\napproved by the owner \(terminal\) at 2026-10-12 \d\d:\d\d EDT \(\d\d:\d\d UTC\)\nsage task: T1$/);
   assert.match(w.cli('approve', 'RQ1').err, / \(terminal\): sage task T1\. Nothing changed\.$/);
   // No pid in a message: the claim line and the refusal of a second approve.
   w.add();

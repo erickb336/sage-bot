@@ -3,8 +3,8 @@
 import { openGate } from '../src/vote.js';
 import { CREW } from '../src/crew.js';
 
-/** The owner of the sample bot (T232: the owner is a user id, never a role). */
-export const CONFIG = { ownerId: 'sample-erick' };
+/** The owner of the sample bot (T232: the owner is a user id, never a role), and the owner's Discord name for the copy (T244). */
+export const CONFIG = { ownerId: 'sample-erick', ownerName: 'Erick' };
 
 /** The guild members as the bridge sees them: id, display name, role NAMES and whether the account is a bot. */
 export const MEMBERS = [

@@ -6,10 +6,47 @@
 export const CREW = 'sage-crew';
 
 /**
- * The one private line for a person who is neither in the crew nor the owner and uses /sage or presses a button of sage-bot (T239,
- * owner decision). A mention of theirs gets nothing at all.
+ * The one private line for a person who is neither in the crew nor the owner and uses /sage or presses a button of this sage-bot (T239,
+ * owner decision), with the bot's own name from namesOf. A mention of theirs gets nothing at all.
  */
-export const NOT_CREW = `Only the ${CREW} role can use sage-bot.`;
+export const notCrew = (us) => `Only the ${CREW} role can use ${us.bot}.`;
+
+/** The longest name that the copy shows, in code points: Discord's own limit of a display name. */
+export const NAME_MAX = 32;
+const NAME_LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
+const NAME_MARK = /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v;
+const NAME_KEEP = /^[\p{Nd}.'\-]$/v;
+/**
+ * A Discord name as the copy shows it (T244). Who reads it: people on Discord only (cards, buttons, private notes and the /sage
+ * descriptions), never a model. An allow-list (standing order 12): letters, decimal digits, at most 3 marks on a letter, one space
+ * between words, and `. ' -`. Every other character parts words. So no markdown, mention, link, emoji, escape or hidden character
+ * stays, and the name reads the same in a button label (no markdown) and in a card (markdown). The name starts with a letter or a
+ * digit and is cut to NAME_MAX code points; '' when nothing is left.
+ */
+export function personName(text) {
+  let out = '';
+  let marks = -1; // -1: no letter before, so no mark may stay; else the marks on the last letter
+  for (const ch of String(text ?? '').toWellFormed().normalize('NFC')) {
+    if (NAME_LETTER.test(ch)) [out, marks] = [out + ch, 0];
+    else if (NAME_MARK.test(ch)) { if (marks >= 0 && marks < 3) [out, marks] = [out + ch, marks + 1]; }
+    else if (NAME_KEEP.test(ch)) [out, marks] = [out + ch, -1];
+    else [out, marks] = [`${out} `, -1];
+  }
+  const name = out.replace(/ +/g, ' ').trim().replace(/^[^\p{L}\p{Nd}]+/u, '');
+  return Array.from(name).slice(0, NAME_MAX).join('').trim();
+}
+
+/**
+ * The one resolver of the names in the copy of this sage-bot (T244): the owner's Discord display name and the bot's own name, as
+ * src/discord.js reads them at the start into the config (`ownerName`, `botName`), each cleaned by personName. "the owner" and
+ * "sage-bot" when a name is unknown or nothing of it is left. `Owner` is the owner at the start of a sentence: "The owner" or the name.
+ * @param {{ ownerName?: string, botName?: string }} config
+ * @returns {{ owner: string, Owner: string, bot: string }}
+ */
+export function namesOf({ ownerName, botName } = {}) {
+  const owner = personName(ownerName);
+  return { owner: owner || 'the owner', Owner: owner || 'The owner', bot: personName(botName) || 'sage-bot' };
+}
 
 /**
  * Where a person is on this bot, from their user id and the NAMES of their roles: `owner` when the id is the owner's (with or

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { Client, ClientApplication, GatewayIntentBits } from 'discord.js';
 import { tempFolder } from './temp-folder.js';
-import { CREW, crewWarning, NOT_CREW, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
+import { CREW, crewWarning, namesOf, oldRoleKeys, ownerOf, placeOf } from '../src/crew.js';
 import { appOf, rolesOf, watchCrew } from '../src/discord.js';
 import { createBridge } from '../src/bridge.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
@@ -16,10 +16,12 @@ import { askCommand, createAsk, STOP, STOP_CANCEL } from '../src/ask.js';
 import { auditPathOf, killPathOf, verifyLog } from '../src/audit.js';
 import { openChannels, withHome } from '../src/channels.js';
 import { loadProjects } from '../src/projects.js';
-import { LINK_OFF } from '../src/threads.js';
+
 import { peopleOf } from '../src/handle.js';
 import { MINUTE, openGate, step } from '../src/vote.js';
 import { CHANNEL, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
+const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
+const LINK_OFF = 'The link from Discord to sage is off. Your message is recorded in the audit log, and nothing goes to sage. Only Erick can turn the link on again, at the terminal. Read asks still work.';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const GUILD = '200000000000000001';
@@ -239,7 +241,7 @@ test('the crew\'s emergency stop: a crew member cannot turn the link on again; o
   await b.press(MAYA, [CREW]);
   assert.equal(existsSync(b.flag), true);
   // Discord has no command that turns the link on: /sage has no such subcommand.
-  assert.deepEqual(askCommand([]).options.map((o) => o.name), ['board', 'task', 'gates', 'files', 'request', 'unregister', 'stop']);
+  assert.deepEqual(askCommand([], namesOf(CONFIG)).options.map((o) => o.name), ['board', 'task', 'gates', 'files', 'request', 'unregister', 'stop']);
   // A second /sage stop, a press of the old confirm and its Cancel change nothing: the flag stays.
   assert.deepEqual(await b.cmd(MAYA, [CREW], 'stop'), [['The link from Discord to sage is already off. Only Erick can turn it on again, at the terminal.', undefined]]);
   assert.deepEqual(await b.press(MAYA, [CREW]), ['The link from Discord to sage is already off. Nothing changed.']);

@@ -4,24 +4,26 @@
 import { MessageFlags } from 'discord.js';
 import { ballotsOf, step } from './vote.js';
 import { card, confirmEnd, ephemeral, note, parseCustomId, reasonModal, stamp } from './cards.js';
-import { placeOf } from './crew.js';
+import { namesOf, placeOf } from './crew.js';
 
 /**
  * Who may answer and vote, from the guild members (their role NAMES, src/discord.js memberOf) and the owner's id (T232): a holder is
  * in the crew (src/crew.js placeOf). The owner without the crew role does not vote (F-T27-12), but ends a vote and breaks a tie.
- * A bot (discord.js `member.user.bot`) is never a holder.
+ * A bot (discord.js `member.user.bot`) is never a holder. `us` holds the names of the owner and of this bot for the copy (src/crew.js
+ * namesOf, T244).
  * @param {Iterable<{ id: string, name: string, roles: string[], bot?: boolean }>} members
- * @param {{ ownerId: string }} config  the owner as src/crew.js ownerOf resolved it
- * @returns {{ holders: Set<string>, ownerId: string, names: Map<string, string> }}
+ * @param {{ ownerId: string, ownerName?: string, botName?: string }} config  the owner as src/crew.js ownerOf resolved it
+ * @returns {{ holders: Set<string>, ownerId: string, names: Map<string, string>, us: ReturnType<typeof namesOf> }}
  */
-export function peopleOf(members, { ownerId }) {
+export function peopleOf(members, config) {
+  const { ownerId } = config;
   const holders = new Set();
   const names = new Map();
   for (const m of members) {
     names.set(m.id, m.name);
     if (!m.bot && placeOf(m.id, m.roles, ownerId).crew) holders.add(m.id);
   }
-  return { holders, ownerId, names };
+  return { holders, ownerId, names, us: namesOf(config) };
 }
 
 /** The text of a modal field, or undefined when the interaction has no fields or no such field (discord.js throws then). */
@@ -68,16 +70,16 @@ function decide(interaction, { gates, people, clock }) {
     // A confirm exists only for a batch vote; after the vote ended, the cancel says so instead of "The vote goes on" (F-T27-21, F-T27-29),
     // also past the time limit when no event has ended the vote yet (F-T42-1).
     const text = gate.kind === 'single' ? note('wrong-kind') : gate.phase === 'voting' && clock() < gate.endsAt ? ephemeral('Cancelled. The vote goes on.')
-      : gate.outcome.status === 'withdrawn' ? note('closed', gate, people.names)
+      : gate.outcome.status === 'withdrawn' ? note('closed', gate, people)
       : ephemeral(`The vote on ${gate.id} ended at ${stamp(gate.votingEndedAt ?? gate.endsAt)} meanwhile. Nothing to cancel.`);
     return update({ ...text, components: [] }, gate);
   }
   // The option comes from the gate, never from the custom_id: a forged part or index is refused here.
   const options = part === undefined ? [] : gate.kind === 'single' ? (part === 0 ? gate.options : undefined) : gate.parts[part]?.options;
   const option = options?.[index];
-  if (part !== undefined && option === undefined) return reply(note(options ? 'unknown-option' : 'unknown-part', gate, people.names), gate);
+  if (part !== undefined && option === undefined) return reply(note(options ? 'unknown-option' : 'unknown-part', gate, people), gate);
   const reason = action === 'reason' ? fieldOf(interaction, 'reason') : undefined;
-  if (action === 'reason' && reason === undefined) return reply(note('bad-event', gate, people.names), gate);
+  if (action === 'reason' && reason === undefined) return reply(note('bad-event', gate, people), gate);
   const base = { by, at: clock(), via: 'discord' };
   const event = action === 'end' || action === 'end!' ? { type: 'end', ...base }
     : action === 'tiebreak' ? { type: 'tiebreak', ...base, part, option }
@@ -91,7 +93,7 @@ function decide(interaction, { gates, people, clock }) {
   // A reason after the vote ended: the press before the form counted, so the note says that only the reason is late (F-T42-1).
   const late = refused?.why === 'closed' && action === 'reason' && out.gate.votingEndedAt !== null && out.gate.outcome.status !== 'withdrawn' && ballotsOf(out.gate.parts[part]).has(by);
   const why = late ? 'late-reason' : refused?.why;
-  const result = refused ? reply(note(why, out.gate, people.names, ask), out.gate, out.effects)
+  const result = refused ? reply(note(why, out.gate, people, ask), out.gate, out.effects)
     : action === 'end!' ? update({ ...ephemeral(`You ended the vote on ${gate.id} at ${stamp(base.at)}.`), components: [] }, out.gate, out.effects)
     : action === 'press' && gate.kind === 'batch' ? { send: interaction.showModal, payload: reasonModal(out.gate, ask, part, index), gate: out.gate, effects: out.effects } // the vote counts already
     : update(card(out.gate, ask, people), out.gate, out.effects);
