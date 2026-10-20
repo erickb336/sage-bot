@@ -229,8 +229,9 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
   async function answer(i, at) {
     const { sub, options: o } = i;
     if (sub === 'unregister') return unregisterAsk(place(i), at);
-    const p = o.project ? byName.get(o.project) : byName.get(channels.get(at).project);
-    if (!p) return { content: `I do not know a shared project called "${shown(o.project, 40)}".` };
+    const name = o.project || projectOf(threads.get(i.channelId), at); // a /sage in sage-bot's thread: the project of its entry (F-T247-14)
+    const p = byName.get(name);
+    if (!p) return { content: `I do not know a shared project called "${shown(name, 40)}".` };
     if (sub === 'files') {
       const { attached, over } = readShared(sharedFiles(p));
       if (!attached.length && !over.length) return { content: `${p.name} shares no files.` };
@@ -287,7 +288,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    * channel that is not registered) `moves` (R918 C7), to the thread of sage-bot that an earlier move from it opened (`moved`: its id and
    * entry, the entry whose `origin` is that thread), else to a new one. It moves only when it is public (`x.isPublic()`, src/discord.js
    * publicThread: not a private thread, and its parent channel is open to @everyone; F-T247-11): a move posts its context in the home
-   * channel. A thread that is not public is no place for a message to sage (`at` null), so it gets the pointer and its history is not read.
+   * channel. A thread that is not public is no place for a message to sage (`at` null), so its history is not read, and `shut` is the line that says so, every time (F-T247-13).
    * @param {{ channelId: string, parentId: Promise<string | null> | string | null, isPublic: () => Promise<boolean> }} x
    */
   async function placeOfMessage(x) {
@@ -295,8 +296,16 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     const own = parent !== null ? threads.get(x.channelId) ?? null : null;
     const moves = parent !== null && !own && await x.isPublic().catch(() => false);
     const at = parent === null ? (channels.has(x.channelId) ? x.channelId : null) : (own || moves) && channels.has(parent) ? parent : null;
-    return { at, own, moves, inThread: parent !== null, moved: moves ? [...threads].find(([, t]) => t.origin === x.channelId) ?? null : null };
+    const moved = moves ? [...threads].find(([, t]) => t.origin === x.channelId) ?? null : null;
+    // A thread that is not public, and not sage-bot's (F-T247-13): the line names its channel when that is registered.
+    const shut = parent !== null && !own && !moves ? `This thread is private, so I cannot take messages to sage here. Nothing was sent. Ask in ${channels.has(parent) ? `<#${parent}>` : here()}.` : null;
+    return { at, own, moves, inThread: parent !== null, moved, shut, project: projectOf(own ?? moved?.[1], at) };
   }
+  /**
+   * The project of a place (standing order 15, F-T247-5, F-T247-14): of the thread map entry of sage-bot's thread when it has one (a
+   * moved thread keeps the project of the channel it moved from), else of the registered channel `at`, else of the home channel.
+   */
+  const projectOf = (entry, at) => entry?.project ?? channels.get(at ?? config.channelId)?.project ?? null;
 
   /**
    * The thread of a message `x` of `who` (the sender), as `{ thread, t }`, or null after `tell(text)` said why not. In a thread of
@@ -331,7 +340,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
     }
     // The project of the place (F-T247-5): of its registered channel, also when the thread moves from there; of the home channel only
     // for a thread of a channel that is not registered.
-    const t = { kind: 'answer', channel: moves ? home : at, project: channels.get(at ?? home).project, by: who.user.id, at: now(), ...(moves && { origin: x.channelId }) };
+    const t = { kind: 'answer', channel: moves ? home : at, project: projectOf(null, at), by: who.user.id, at: now(), ...(moves && { origin: x.channelId }) };
     threads.set(thread, t);
     keep(thread);
     if (moves) await told(thread);
@@ -559,7 +568,7 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
      * throws Discord's error, code 10003 for one that is gone); `mentions` names the people that it mentions.
      * - In a registered channel: opens a thread named from the message (src/threads.js).
      * - In a thread that sage-bot opened: continues it. In any other public thread, or a forum post: moves to a new thread of sage-bot
-     *   (threadFor). A private thread, or a thread of a channel that @everyone cannot view, gets the pointer, as a channel that is not registered.
+     *   (threadFor). A private thread, or a thread of a channel that @everyone cannot view, gets one line that says it is private, every time (F-T247-13).
      * - Elsewhere: one pointer to a registered channel per person per UTC day (shared with /sage).
      * In the thread, a read ask gets its answer; any other mention is a message to sage (toOutbox): a crew member's waits for the owner
      * on its approval card, the owner's own is approved at once. The owner's mentions on a side path go into the audit log, and every
@@ -578,14 +587,13 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
         const where = await placeOfMessage(m);
         if (!where.at && !where.moves) {
           if (lead) record(m, { outcome: 'not-registered' });
-          const text = pointer(id, `I answer in ${here()}, so everyone can find the answers. Please ask there.`);
+          const text = where.shut ?? pointer(id, `I answer in ${here()}, so everyone can find the answers. Please ask there.`); // F-T247-13: every time
           if (text) await inPlace(text);
           return;
         }
-        const project = channels.get(where.at ?? config.channelId)?.project ?? null;
         const next = spend(id);
         if (next) {
-          if (lead) record(m, { thread: where.inThread ? m.channelId : null, project, outcome: 'over-limit' });
+          if (lead) record(m, { thread: where.inThread ? m.channelId : null, project: where.project, outcome: 'over-limit' });
           if ((warned.get(id) ?? 0) <= now()) { warned.set(id, next); await inPlace(limited(next)); }
           return;
         }
@@ -628,9 +636,11 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
       try {
         const w = c.target;
         if (w.bot || w.webhook) return void await tell(`I send only the messages of people to sage, not of bots or webhooks. Nothing was sent.`);
+        // F-T247-22: a forward or a message of only attachments has no text, and an empty instruction is no message to sage.
+        if (!String(w.content ?? '').trim()) return void await tell('This message has no text for sage. Nothing was sent.');
         const x = { ...w, channelId: c.channelId, startThread: c.startThread, open: c.open, post: c.post, channel: c.channel, history: c.history, replied: c.replied, mentions: c.mentions };
         const where = await placeOfMessage(c);
-        if (!where.at && !where.moves) return void await tell(`I take messages to sage in ${here()} and the other channels of ${us.bot}. Nothing was sent.`);
+        if (!where.at && !where.moves) return void await tell(where.shut ?? `I take messages to sage in ${here()} and the other channels of ${us.bot}. Nothing was sent.`);
         const next = spend(c.user.id);
         if (next) return void await tell(limited(next));
         const refused = outbox ? outbox.full(c.user.id, w.id) : NOT_ON;
