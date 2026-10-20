@@ -108,6 +108,6 @@ test('F-T132-20: a closed batch card has no rule footer and no reminder line, on
   const ppl = { holders: new Set(), names: new Map(), us: namesOf(CONFIG) };
   const open = card(gate, ask, ppl).embeds[0];
   assert.match(open.footer.text, /^Rule: 30 minutes/);
-  const shut = card(gate, ask, ppl, { shut: true }).embeds[0];
+  const shut = card(gate, ask, ppl, { shut: 'project is no longer served' }).embeds[0];
   assert.deepEqual([shut.description, shut.footer, JSON.stringify(shut).includes('every 2 h')], [CLOSED_LINE, undefined, false]);
 });

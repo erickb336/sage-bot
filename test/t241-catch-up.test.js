@@ -198,7 +198,7 @@ test('T241: the heartbeat file is 0600, written whole at each loop turn, with th
   b.catchUp.beat();
   const path = alivePathOf(b);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 1, at: T0, seen: {} });
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 1, at: T0, seen: {}, taken: {}, taking: {} });
   b.now += LOOP;
   b.catchUp.beat();
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).at, T0 + LOOP);
@@ -245,14 +245,14 @@ test('T241: a message that the gateway brings during a catch-up is handled once,
   const run = b.catchUp.run();
   // The gateway brings a new message before the run reads, and replays the missed one: each is handled once.
   const live = b.place.said(ASK, { at: b.now, user: OWNER, mentions: true });
-  await b.catchUp.live(ASK, live, async () => { b.handled.push(live); });
+  await b.catchUp.live(ASK, live, true, async () => { b.handled.push(live); });
   await run;
-  await b.catchUp.live(ASK, missed, async () => { b.handled.push(`again ${missed}`); });
+  await b.catchUp.live(ASK, missed, true, async () => { b.handled.push(`again ${missed}`); });
   assert.deepEqual(b.handled, [live, missed]);
   assert.equal(loadAlive(alivePathOf(b)).seen.get(ASK), live);
   // Out of a run, a live message moves the mark at once, so the next run starts after it.
   const later = b.place.said(ASK, { at: b.now + MIN, user: OWNER, mentions: true });
-  await b.catchUp.live(ASK, later, async () => { b.handled.push(later); });
+  await b.catchUp.live(ASK, later, true, async () => { b.handled.push(later); });
   assert.equal(loadAlive(alivePathOf(b)).seen.get(ASK), later);
   await b.catchUp.run();
   assert.deepEqual(b.handled, [live, missed, later]);
@@ -260,7 +260,7 @@ test('T241: a message that the gateway brings during a catch-up is handled once,
   b.catchUp.down();
   const lost = b.place.said(ASK, { at: b.now + 2 * MIN, user: OWNER, mentions: true });
   const early = b.place.said(ASK, { at: b.now + 3 * MIN, user: OWNER, mentions: true });
-  await b.catchUp.live(ASK, early, async () => { b.handled.push(early); });
+  await b.catchUp.live(ASK, early, true, async () => { b.handled.push(early); });
   assert.equal(loadAlive(alivePathOf(b)).seen.get(ASK), later);
   b.now += 4 * MIN;
   await b.catchUp.run();
@@ -312,7 +312,7 @@ test('T241 F-T241-6: a place whose read failed keeps its missed mention: no live
   assert.deepEqual(b.handled, []);
   b.place.refuseHistory(ASK, null);
   const chat = b.place.said(ASK, { at: b.now, user: MAYA, roles: [CREW], mentions: false }); // any message, after the run
-  await b.catchUp.live(ASK, chat, async () => {});
+  await b.catchUp.live(ASK, chat, false, async () => {});
   b.now += MIN;
   await b.catchUp.run();
   assert.deepEqual(b.handled, [missed]);
@@ -325,12 +325,12 @@ test('T241 F-T241-6: after a run fails part way, the places that it did not read
   b.catchUp.beat();
   b.place.said(ASK, { at: T0 + MIN, user: OWNER, mentions: true });
   const missed = b.place.said(THREAD, { at: T0 + 2 * MIN, user: MAYA, mentions: true });
-  b.rolesDown = true; // Discord fails to give the roles: the run stops in the first place
+  b.rolesDown = true; // Discord fails to give the roles: no place is read to its end (F-T241-10: each place waits on its own)
   b.now = T0 + 10 * MIN;
   await b.catchUp.run();
-  assert.match(b.lines.join('\n'), /the catch-up failed; it runs again at the next gateway ready: Discord is down/);
+  assert.match(b.lines.join('\n'), /could not read the roles of a member in 600000000000000001; it tries again in 3 minutes: .*Discord is down/);
   const chat = b.place.said(THREAD, { at: b.now, user: MAYA, mentions: false });
-  await b.catchUp.live(THREAD, chat, async () => {});
+  await b.catchUp.live(THREAD, chat, false, async () => {});
   b.rolesDown = false;
   b.now += MIN;
   await b.catchUp.run();
@@ -342,7 +342,7 @@ test('T241 F-T241-8: while the open request threads cannot be known, their marks
   const b = light(t, [ASK, REQ]);
   b.catchUp.beat();
   const first = b.place.said(REQ, { at: T0 + MIN, user: MAYA, mentions: false });
-  await b.catchUp.live(REQ, first, async () => {});
+  await b.catchUp.live(REQ, first, false, async () => {});
   b.now = T0 + 2 * MIN;
   await b.catchUp.run();
   assert.equal(loadAlive(alivePathOf(b)).seen.get(REQ), first);
@@ -353,7 +353,7 @@ test('T241 F-T241-8: while the open request threads cannot be known, their marks
   b.now += 5 * MIN;
   await b.catchUp.run();
   const chat = b.place.said(REQ, { at: b.now, user: MAYA, mentions: false });
-  await b.catchUp.live(REQ, chat, async () => {});
+  await b.catchUp.live(REQ, chat, false, async () => {});
   assert.equal(loadAlive(alivePathOf(b)).seen.get(REQ), first); // kept, and not moved past the missed mention
   [b.places, b.partial] = [[ASK, REQ], false];
   b.now += MIN;

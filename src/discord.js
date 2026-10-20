@@ -13,7 +13,7 @@ import { probeTool, sageTool } from './sage.js';
 import { loadProjects, pickProject } from './projects.js';
 import { forTerminal } from './clean.js';
 import { NO_MENTIONS } from './cards.js';
-import { CREW, crewRoleIds, crewWarning, namesOf, oldRoleKeys, ownerOf } from './crew.js';
+import { CREW, crewRoleIds, crewWarning, namesOf, oldRoleKeys, ownerOf, placeOf } from './crew.js';
 import { lock } from './state.js';
 import { isLiveTask } from './threads.js';
 import { alivePathOf, createCatchUp, loadAlive, PAGE } from './catchup.js';
@@ -293,6 +293,17 @@ export const catchUpPort = ({ guild, place, botId, on }) => ({
 });
 
 /**
+ * The gateway's messages of the guild `config.guildId` to the catch-up (src/catchup.js live), with `on` the routes. Only a mention of the
+ * crew or the owner (src/crew.js placeOf, on the roles that the mention path reads) goes on the catch-up's lists, so a crash during any
+ * other mention gives no "please ask again" to a person whom the mention path keeps silent (S2 of T243 repair 2).
+ */
+export const liveOf = ({ config, botId, guildRoles, catchUp, on }) => (m) => {
+  if (m.guildId !== config.guildId) return undefined;
+  const p = placeOf(m.author.id, rolesOf(m.member, guildRoles), config.ownerId);
+  return catchUp.live(m.channelId, m.id, forMe(m, config.guildId, botId) && (p.crew || p.owner), () => on.message(m));
+};
+
+/**
  * The start before Discord: checks the config's ids, the projects and their folders, takes the lock on the gate file (one bridge at a time,
  * F-T28-30) and opens the channel registry (T130: made from channelId and askChannelId when there is none). A config that is not safe,
  * or a bad registry, stops here, before the Keychain. Then it opens the thread map and the audit log (src/ask.js openAskFiles): a file
@@ -435,13 +446,17 @@ export async function start(file) {
     });
     const on = routes({ config, ask, bridge, requests, outbox, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads, channels });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
-    // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
+    // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see. It reads a thread of
+    // the thread map, which is never pruned, only when it was active in the 24 hours before the gap, or when its last message is newer
+    // (F-T241-12). That last message comes with no extra read: each new session fills the channel cache with the active threads, each
+    // with its last message id (discord.js Guild and ThreadChannel); a thread with a message in the gap is active.
     const catchUp = createCatchUp({ config, log, alive: files.alive, ...catchUpPort({ guild, place, botId: client.user.id, on }),
       places: () => {
         const open = requests.threads(); // null while the request file cannot be read: those threads are unknown, not gone
-        return { ids: [...channels.keys(), ...files.threads.keys(), ...(open ?? [])], partial: open === null };
+        const threads = [...files.threads.keys()].map((id) => ({ id, last: guild.channels.cache.get(id)?.lastMessageId ?? null }));
+        return { ids: [...channels.keys(), ...(open ?? [])], threads, partial: open === null };
       } });
-    client.on(Events.MessageCreate, (m) => { if (m.guildId === config.guildId) catchUp.live(m.channelId, m.id, () => on.message(m)); });
+    client.on(Events.MessageCreate, liveOf({ config, botId: client.user.id, guildRoles: guild.roles.cache, catchUp, on }));
     let busy = false;
     const turn = async () => {
       catchUp.beat(); // the heartbeat, also while a long turn runs

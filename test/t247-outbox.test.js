@@ -889,6 +889,24 @@ test('F-T247-20: a second Send to sage of the same message by the same person is
   assert.equal(b.file().messages.filter((r) => r.message === both).length, 1);
 });
 
+test('C1 of R1084: a task thread whose channel Erick registered to another project takes no message to sage and no read ask: the reply for a channel that is not registered, nothing to the outbox', async (tt) => {
+  const b = world(tt);
+  b.channels.set(ASK, { project: 'other' }); // Erick registers ASK to another project at the terminal
+  const steer = await b.mention(JON, '<@1> please use ISO dates');
+  const read = await b.mention(MAYA, '<@1> board');
+  const pointer = `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`;
+  assert.deepEqual([steer.replies.map((r) => r.content), read.replies.map((r) => r.content)], [[pointer], [pointer]]);
+  const target = b.say(TASK, MAYA, 'please also add a PDF');
+  assert.deepEqual((await b.send(OWNER, target)).map((x) => [x.kind, x.content]), [['defer', undefined],
+    ['edit', `I take messages to sage in <#${ASK}> and the other channels of sage-bot. Nothing was sent.`]]);
+  assert.deepEqual(b.file().messages, []);
+  assert.deepEqual(b.place.in(TASK).filter((id) => b.place.latest(id).embeds), []); // no card and no answer in the old thread
+  // Registered again for its own project, the same thread takes the same message for T1.
+  b.channels.set(ASK, { project: NAME });
+  await b.mention(JON, '<@1> please use ISO dates');
+  assert.deepEqual([b.r().project, b.r().task], [NAME, 'T1']);
+});
+
 // ---- T248: the low findings of the PR 67 review. ----
 
 test('F-T247-14: in a moved thread, the over-limit audit line and /sage board take the project of its thread map entry, not of the home channel', async (tt) => {
