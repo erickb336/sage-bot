@@ -8,7 +8,7 @@
 // escaped data (`literal`), framed by a random marker per payload, and its sha256 is on the approval card, in the audit log and here.
 import { createHash, randomBytes } from 'node:crypto';
 import { killPathOf, linkOff } from './audit.js';
-import { apostropheLike, quoteLike } from './clean.js';
+import { apostropheLike, blankFiller, quoteLike, shownMark } from './clean.js';
 import { readOwn, withLock, writeWhole } from './state.js';
 
 /** The outbox file of a config: `<statePath>.outbox`. */
@@ -65,25 +65,26 @@ export const minute = (at) => `${new Date(at).toISOString().slice(0, 16)}Z`;
  * in the payload, and the owner reads the same payload as payload.txt on the approval card before approving it. An allow-list (F-T247-29)
  * keeps only: the space; the printable ASCII punctuation and symbols U+0021 to U+007E,
  * with `"` and `\` escaped by a backslash; a letter or number that is not default-ignorable and not a look-alike of `"` or `\` (ʺ ˮ ײ:
- * src/clean.js quoteLike, F-T247-24); and a mark that is not default-ignorable and not the blank filler U+16FE4 (F-T247-37) on such a
+ * src/clean.js quoteLike, F-T247-24); and a mark that is not default-ignorable and not a blank filler (src/clean.js shownMark) on such a
  * letter or number, or on a mark kept on one. A look-alike of `'` (ʹ ʼ, src/clean.js apostropheLike) next to another one or to `'` is
- * escaped too, because the two look like `"` (F-T247-35); one alone stays.
+ * escaped too, because the two look like `"` (F-T247-35), also with blank fillers between them (T248); one alone stays.
  * Every other code point becomes `\u{…}` with its hex value: every punctuation or symbol outside ASCII (“ 〝 „ ❝ 🙶 ⧵ ∖ and every emoji
  * too), a mark on anything else, a newline, a control, a format, bidi or tag character, a variation selector, a private-use, unassigned or
  * lone surrogate code point, any other space. So nothing hidden reaches the model unseen, no text leaves its quotes or fakes them, no text
  * starts a line of the payload, and the text reads back exactly.
  */
 const BASE = /^[[\p{L}\p{N}]--\p{Default_Ignorable_Code_Point}]$/v;
-const MARK = /^[\p{M}--[\p{Default_Ignorable_Code_Point}\u{16FE4}]]$/v;
 const paired = (ch) => ch === "'" || apostropheLike(ch ?? '');
 export function literal(text) {
   const all = Array.from(String(text));
+  /** The code point next to `i` in direction `step`, past any blank filler: a filler between two look-alikes of ' does not break their run (T248). */
+  const next = (i, step) => { let j = i + step; while (blankFiller(all[j])) j += step; return all[j]; };
   let out = '"';
   let onBase = false; // whether the last code point is a kept letter or number, or a mark kept on one
   for (const [i, ch] of all.entries()) {
-    const run = apostropheLike(ch) && (paired(all[i - 1]) || paired(all[i + 1]));
-    const keep = !run && (ch === ' ' || (ch >= '!' && ch <= '~') || (BASE.test(ch) && !quoteLike(ch)) || (onBase && MARK.test(ch)));
-    onBase = keep && (BASE.test(ch) || MARK.test(ch));
+    const run = apostropheLike(ch) && (paired(next(i, -1)) || paired(next(i, 1)));
+    const keep = !run && (ch === ' ' || (ch >= '!' && ch <= '~') || (BASE.test(ch) && !quoteLike(ch)) || (onBase && shownMark(ch)));
+    onBase = keep && (BASE.test(ch) || shownMark(ch));
     if (ch === '"' || ch === '\\') out += `\\${ch}`;
     else if (keep) out += ch;
     else out += `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`;

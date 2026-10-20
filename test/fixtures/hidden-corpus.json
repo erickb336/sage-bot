@@ -8,7 +8,7 @@
       { "class": "a letter that is not default-ignorable", "rule": "[\\p{L}--\\p{Default_Ignorable_Code_Point}]" },
       { "class": "a number, punctuation or symbol, except the blank Braille cell and the null notehead; a backtick shows escaped (F-T247-30)", "rule": "[[\\p{N}\\p{P}\\p{S}]--[\\u2800\\u{1D159}]]" },
       { "class": "a white space, shown as one space", "rule": "\\p{White_Space}" },
-      { "class": "a non-spacing mark on a letter, at most 3 on one letter, except the blank filler", "rule": "[\\p{Mn}--[\\p{Default_Ignorable_Code_Point}\\u{16FE4}]]", "onLetter": 3 },
+      { "class": "a non-spacing mark on a letter, at most 3 on one letter, except the blank filler", "rule": "[\\p{Mn}--[\\p{Default_Ignorable_Code_Point}\\u{16FE4}\\u{1BC9D}]]", "onLetter": 3 },
       { "class": "a spacing or enclosing mark on a letter, at most 4 on one letter", "rule": "[[\\p{Mc}\\p{Me}]--\\p{Default_Ignorable_Code_Point}]", "onLetter": 4 },
       { "class": "the joiner rule: a joiner U+200C or U+200D right after a kept 'joining' letter or mark, when that is a mark or the next code point is 'joining'; never two joiners in a row", "rule": "[\\u200C\\u200D]", "joiner": true }
     ],
@@ -19,7 +19,7 @@
       { "class": "a bidi control", "rule": "\\p{Bidi_Control}", "examples": ["{U+202E}ok", "a{U+2067}", "{U+200F}"] },
       { "class": "a zero-width character, except under the joiner rule", "rule": "[\\u200B-\\u200D\\u2060\\uFEFF]", "examples": ["a{U+200B}b", "a{U+200D}b", "{U+FEFF}"] },
       { "class": "the blank Braille cell and the null notehead", "rule": "[\\u2800\\u{1D159}]", "examples": ["c{U+2800}d", "{U+1D159}"] },
-      { "class": "a blank filler: a mark that is not default-ignorable but shows nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37)", "rule": "[\\u{16FE4}]", "examples": ["a{U+16FE4}", "{U+16FE4}b"] },
+      { "class": "a blank filler: a mark that is not default-ignorable but shows nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37) and U+1BC9D DUPLOYAN THICK LETTER SELECTOR (T248). Of the code points named *SELECTOR* or *FILLER* in Unicode 17.0, these two are the only marks that are not default-ignorable", "rule": "[\\u{16FE4}\\u{1BC9D}]", "examples": ["a{U+16FE4}", "{U+16FE4}b", "a{U+1BC9D}", "{U+1BC9D}b"] },
       { "class": "a control, private-use, unassigned or surrogate code point that is not a white space", "rule": "[[\\p{Cc}\\p{Co}\\p{Cn}\\p{Cs}]--\\p{White_Space}]", "examples": ["a{U+0007}", "a{U+E000}", "a{U+0378}"] },
       { "class": "a mark after punctuation, a space, the start, or anything else that is not a letter", "rule": "\\p{M}", "where": "not on a letter", "examples": [".{U+0301}", "a {U+0301}", "{U+0903}"] },
       { "class": "a 4th non-spacing mark on one letter, a 5th spacing or enclosing mark", "rule": "\\p{M}", "where": "past the limit on a letter", "examples": ["a{U+0301}{U+0302}{U+0303}{U+0304}", "a{U+0903}{U+0903}{U+0903}{U+0903}{U+0903}"] }
@@ -36,6 +36,7 @@
       { "text": "a `b` c{U+2800}d", "dropped": 1, "why": "the blank Braille cell; the backticks show escaped (F-T247-30)" },
       { "text": "run `npm test`, then ```ok```", "dropped": 0, "why": "F-T247-30: a code span counts nothing" },
       { "text": "a{U+16FE4}b {U+16FE4}", "dropped": 2, "why": "F-T247-37: the blank filler, on a letter or alone" },
+      { "text": "a{U+1BC9D}b {U+1BC9D} {U+02B9}{U+1BC9D}{U+02B9}", "dropped": 3, "why": "T248: the Duployan selector is a blank filler too" },
       { "text": "one{U+200B}space\nand a new line", "dropped": 1, "why": "a zero-width space; a newline is a white space" }
     ],
     "outOfScope": [
@@ -59,7 +60,7 @@
     ],
     "lookalikesAbout": "The letters and numbers that look like \" or \\. Every punctuation or symbol outside ASCII is escaped anyway, so only letters and numbers need this list. The test checks that it holds every letter or number whose NFKC holds \" or \\, or whose confusables 18.0.0 target in src/confusables.json is '' or \\.",
     "drop": [
-      { "class": "a blank filler: a mark that is not default-ignorable but shows nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37)", "rule": "[\\u{16FE4}]", "examples": ["a{U+16FE4}"] }
+      { "class": "a blank filler: a mark that is not default-ignorable but shows nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37) and U+1BC9D DUPLOYAN THICK LETTER SELECTOR (T248). The 'apostrophes' rule looks past a blank filler, so a run with one inside is still a run", "rule": "[\\u{16FE4}\\u{1BC9D}]", "examples": ["a{U+16FE4}", "a{U+1BC9D}"] }
     ],
     "apostrophes": ["U+02B9", "U+02BA", "U+02BB", "U+02BC", "U+02BD", "U+02BE", "U+02BF", "U+02C8", "U+02CA", "U+02CB", "U+02EE", "U+0559", "U+05D9", "U+05F2", "U+07F4", "U+07F5", "U+144A", "U+16CC", "U+A78B", "U+A78C", "U+16F51", "U+16F52", "U+1E94B"],
     "apostrophesAbout": "The kept code points that look like ' (F-T247-35): two of them side by side, or one beside the ASCII ', look like \" in payload.txt. In such a run each of them is \\u{HEX}; the ASCII ' stays. One alone stays raw. The test checks that the list holds every letter, number or mark that is not default-ignorable and whose confusables 18.0.0 target in src/confusables.json is only ' (21 code points, also the Hebrew yod U+05D9), and the letters U+02BF and U+0559 that src/clean.js maps to ' by hand (F-T131-9).",
@@ -69,7 +70,9 @@
       { "text": "ok\u4E36\" fake", "literal": "\"ok\\u{4E36}\\\" fake\"" },
       { "text": "a{U+034F}b .{U+0301} {U+030B}", "literal": "\"a\\u{34F}b .\\u{301} \\u{30B}\"" },
       { "text": "ok{U+02B9}{U+02B9}, it{U+02BC}s {U+02BC}'", "literal": "\"ok\\u{2B9}\\u{2B9}, it\u02BCs \\u{2BC}'\"" },
-      { "text": "a{U+16FE4}b", "literal": "\"a\\u{16FE4}b\"" }
+      { "text": "a{U+16FE4}b", "literal": "\"a\\u{16FE4}b\"" },
+      { "text": "a{U+1BC9D}b", "literal": "\"a\\u{1BC9D}b\"" },
+      { "text": "{U+02B9}{U+1BC9D}{U+02B9} {U+02BC}{U+16FE4}' x{U+02B9}{U+1BC9D}y", "literal": "\"\\u{2B9}\\u{1BC9D}\\u{2B9} \\u{2BC}\\u{16FE4}' xʹ\\u{1BC9D}y\"" }
     ],
     "outOfScope": [
       { "what": "a mark that draws a stroke on a letter, kept raw on it: U+20E5, U+030E, U+030B, U+0338 (and any number of them)", "texts": ["a{U+20E5}", "a{U+030E}", "a{U+030B}", "x{U+0338}"], "why": "the escape grammar stays sound: no raw \" or \\ gets through, every output reads back, and a model reads the escaped JSON, not the shapes" }

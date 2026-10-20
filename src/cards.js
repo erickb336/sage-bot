@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import { ballotsOf, limitOf, MINUTE, REASON_MAX } from './vote.js';
 import { CREW } from './crew.js';
+import { shownMark } from './clean.js';
 
 /** The people who may answer and vote: the crew (T232). */
 const HOLDERS = `${CREW} member`;
@@ -35,7 +36,7 @@ const FINAL_IN_CONFIRM = 200;
  * 2. Any other character stays only when it is a letter that is not default-ignorable (not one of the four Hangul fillers that look blank), a number, punctuation or a
  *    symbol (also a bare pictograph such as ™ or ✔; not a backtick, the blank Braille cell or the null notehead U+1D159, F-T27-49; the approval card of the outbox
  *    shows a backtick escaped, `backticks`, F-T247-30), a space (every white space folds to one
- *    space), a mark that is not default-ignorable and not the blank filler U+16FE4 (F-T247-37) on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
+ *    space), a mark that is not default-ignorable and not a blank filler (U+16FE4, U+1BC9D: src/clean.js blankFiller) on a letter (on one letter at most 3 non-spacing marks, `\p{Mn}`, and at most 4 spacing or enclosing marks, `\p{Mc}`
  *    and `\p{Me}`, so that Burmese ကျော် stays whole: F-T27-46, F-T27-50), or a joiner (U+200C, U+200D) after a letter or mark of a joining script (Arabic, Syriac, the Indic scripts, Myanmar
  *    or Khmer) when the next character is also of one (a Persian word, a Hindi or Bengali conjunct) or the joiner follows a mark (a final
  *    virama, as in a Malayalam legacy chillu); never two joiners in a row.
@@ -46,7 +47,6 @@ const FINAL_IN_CONFIRM = 200;
 const TOKEN = /\p{RGI_Emoji}|./ysv; // the longest RGI sequence at each position, else one code point
 const EMOJI = /^\p{RGI_Emoji}$/v;
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v; // the four Hangul fillers are the only default-ignorable letters
-const MARK = /^[\p{M}--[\p{Default_Ignorable_Code_Point}\u{16FE4}]]$/v; // every variation selector is default-ignorable; U+16FE4 is a blank filler
 const STACKING = /^\p{Mn}$/u; // a non-spacing mark piles on the letter: 3 at most, so no "zalgo" stack grows past the line
 const MARKS_MAX = { stacking: 3, spacing: 4 }; // a spacing or enclosing mark draws a bar, ring or vowel sign: 4 at most (F-T27-50)
 const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;
@@ -75,9 +75,9 @@ export function safeOf(text, { backticks = false } = {}) {
     t = TOKEN.exec(s)[0];
     const letter = LETTER.test(t);
     const joiner = (t === '\u200c' || t === '\u200d') && JOINING.test(last)
-      && (MARK.test(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
+      && (shownMark(last) || JOINING.test(String.fromCodePoint(s.codePointAt(index + 1) ?? 32)));
     const kind = STACKING.test(t) ? 'stacking' : 'spacing';
-    const mark = onLetter && MARK.test(t) && on[kind] < MARKS_MAX[kind];
+    const mark = onLetter && shownMark(t) && on[kind] < MARKS_MAX[kind];
     const keep = letter || EMOJI.test(t) || BASE.test(t) || joiner || mark || (backticks && t === '`') ? t : SPACE.test(t) ? ' ' : '';
     if (!keep) { dropped.push(t); continue; } // a dropped token is one code point: an RGI emoji sequence always stays
     if (letter) [onLetter, on.stacking, on.spacing] = [true, 0, 0];

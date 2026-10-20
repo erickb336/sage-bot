@@ -43,6 +43,14 @@ const QUOTE_LIKE = new Set([...LOOKALIKES].filter(([, t]) => /''|\\/.test(t)).ma
  * (F-T247-29), so this test still decides only the letters ʺ ˮ ײ 丶 (test/fixtures/hidden-corpus.json).
  */
 export const quoteLike = (ch) => QUOTE_LIKE.has(ch) || /["\\]/.test(ch.normalize('NFKC'));
+/**
+ * The blank fillers: the marks that are not default-ignorable but show nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37) and
+ * U+1BC9D DUPLOYAN THICK LETTER SELECTOR (T248). Of the code points named *SELECTOR* or *FILLER* in Unicode 17.0, these are the only such
+ * marks (test/fixtures/hidden-corpus.json). One list for both readers: `shownMark` serves safeOf (src/cards.js) and literal (src/outbox.js).
+ */
+export const blankFiller = (ch) => /^[\u{16FE4}\u{1BC9D}]$/u.test(ch ?? '');
+/** A mark that a reader can see: not default-ignorable (so no variation selector, U+034F, U+17B4 or U+17B5) and not a blank filler. */
+export const shownMark = (ch) => /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v.test(ch) && !blankFiller(ch);
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
 const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
 const KEEP = /^[\p{Nd}.,:\-]$/v;
