@@ -19,7 +19,7 @@ flowchart TD
 
 *A message from Discord to sage. The solid steps work today. The dotted steps are not built: they wait for work in sage (T159, T160). The owner's own message skips the card and is approved at once.*
 
-> **Status: built and tested on a fake Discord. The live trial has not run yet.** Requests, task threads, team votes, lookups, the outbox, the catch-up and the emergency stop run in the tests and in the demo. An approved message waits in the outbox: delivery into a live sage session (T159) and replies in the thread (T160) are not built.
+> **Status: built and tested on a fake Discord. The live trial has not run yet.** Requests, task threads, team votes, lookups, the outbox, the catch-up and the emergency stop run in the tests. The demo plays team votes, a request, its task thread and a message to sage. An approved message waits in the outbox: delivery into a live sage session (T159) and replies in the thread (T160) are not built.
 
 Ids such as T159 are sage task ids in this project's logbook. A G-id, such as G42, is a gate: a question that sage parks for the owner. The [reference](docs/reference.md) gives the gates and findings behind each rule.
 
@@ -108,7 +108,7 @@ sage-bot sits between the two. The team works in Discord, and the owner approves
 
 ## How it works
 
-sage-bot is one small service, the bridge (`scripts/bridge.mjs`), on the owner's Mac. It reads sage's logbook and changes it only through the sage state tool. Code writes every answer: no AI reads Discord text today.
+sage-bot is one small service, the bridge (`scripts/bridge.mjs`), on the owner's Mac. It reads sage's logbook and changes it only through the sage state tool. Code writes every answer. The only Discord text that a model reads today is a voter's typed reason: sage reads it through `scripts/reasons.mjs`, as quoted data cleaned by an allow-list.
 
 | Job | What happens |
 | --- | --- |
@@ -197,7 +197,7 @@ The [setup guide](docs/setup.md) has the full checklist, with each command and t
 
 ## FAQ
 
-**Does a Discord message reach sage today?** No. A lookup only reads the logbook. A vote gives sage only the chosen option. An approved message waits in the outbox until bridge sessions come with T159.
+**Does a Discord message reach sage today?** Not as an instruction. A lookup only reads the logbook. A vote gives sage the chosen option, and sage reads the voters' typed reasons only through `scripts/reasons.mjs`, as cleaned, quoted data. An approved message waits in the outbox until bridge sessions come with T159.
 
 **Can a crew member start work?** A crew member requests a feature, and the owner's Approve adds the sage task. A session still starts only at the owner's terminal until T159.
 
