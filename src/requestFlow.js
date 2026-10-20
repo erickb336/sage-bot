@@ -28,6 +28,8 @@ export const CONFIRM_FOR = 10 * 60_000;
 const OPEN = ['pending', 'approving'];
 /** Discord's codes for a place or a message that is gone, or a locked thread: an edit there can never work. */
 const NO_EDIT = new Set([10003, 10008, 50001, 50083]);
+/** What an edit gives back when it did not happen but can work later: Discord refused to open the thread or to read its lock (C6). */
+const SKIPPED = Symbol('skipped');
 /** A private message as the new content of a private message (an update keeps the flags of the message). */
 const plain = ({ flags, ...payload }) => ({ components: [], embeds: [], ...payload });
 
@@ -97,14 +99,21 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
    * An edit. Discord refuses an edit in a thread that it archived after a quiet week (50083, F-T228-8): the thread opens again first.
    * A thread that a moderator locked stays as it is (F-T228-10): Discord would open it for sage-bot, so the lock is read first, and the
    * request waits in `held` until the thread is unlocked (the loop reads that lock once a turn). The file keeps the status that the card
-   * shows (`cardShown`) only after its edit, so after a restart the loop draws the card again and finds the lock again (C3). When Discord
-   * refuses to open the thread (50013, say), the edit is skipped and logged once (one line, C4), so the rest of the draw goes on.
+   * shows (`cardShown`) only after its edit, so after a restart the loop draws the card again and finds the lock again (C3). Only a read
+   * that says "not locked" opens the thread (S5). When Discord refuses to open the thread (50013, say) or to read its lock, the edit is
+   * skipped (SKIPPED) and logged once (one line, C4), so the rest of the draw goes on, and the loop tries the edit again (C6).
    */
   const held = new Map(); // request id → { thread }: the locked thread where its edit waits, a new object at each lock; only in memory
   const edit = (id, what, target, message, payload) => call(`the edit of the ${what} of ${id}`, () => discord.edit(target, message, payload).catch(async (e) => {
     if (e?.code !== 50083) throw e;
-    if (await discord.locked(target)) { held.set(id, { thread: target }); throw e; }
-    try { await discord.unarchive(target); } catch (u) { sayOnce(`Discord refused to open the thread of the ${what} of ${id}: ${apiError(u)}`); return null; }
+    let lock;
+    try { lock = await discord.locked(target); } catch (u) {
+      if (!NO_EDIT.has(u?.code)) throw u;
+      sayOnce(`Discord refused the lock of the thread of the ${what} of ${id}: ${apiError(u)}`);
+      return SKIPPED;
+    }
+    if (lock !== false) { held.set(id, { thread: target }); throw e; }
+    try { await discord.unarchive(target); } catch (u) { sayOnce(`Discord refused to open the thread of the ${what} of ${id}: ${apiError(u)}`); return SKIPPED; }
     return discord.edit(target, message, payload);
   }), (c) => NO_EDIT.has(c));
   async function drawNow(id) {
@@ -131,9 +140,10 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
     }
     if (!waited && drawn.get(id) === view(r, off) && r.shown === r.status) return r;
     await edit(id, 'line', r.channel, r.line, requestLine(r, { us, linkOff: off }));
-    await edit(id, 'card', r.thread, r.card, requestCard(r, { ownerId: config.ownerId, us, linkOff: off, ping: posted }));
+    const card = await edit(id, 'card', r.thread, r.card, requestCard(r, { ownerId: config.ownerId, us, linkOff: off, ping: posted }));
     if (held.get(id) === waited) held.delete(id); // no edit of this draw met the lock
-    const mark = { shown: r.status, ...(!held.has(id) && { cardShown: r.status }) };
+    const waits = held.has(id) || card === SKIPPED; // the card does not show the status yet: the loop draws it again
+    const mark = { shown: r.status, ...(!waits && { cardShown: r.status }) };
     const shown = () => setDiscord(config, id, mark);
     if (!OPEN.includes(r.status) && r.shown !== r.status) {
       // No post in a thread that a moderator locked: Discord would open it for sage-bot. The line in the channel shows the decision.
@@ -141,7 +151,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const shut = !unsaved.has(`${id}:${r.status}`) && await call(`the lock of the thread of ${id}`, () => discord.locked(r.thread), () => true) !== false;
       r = shut ? shown() : await once(`${id}:${r.status}`, (n) => send(`the post after the decision of ${id}`, r.thread, decidedPost(r, us), n, (c) => NO_EDIT.has(c)), shown);
     } else if (Object.keys(mark).some((k) => r[k] !== mark[k])) r = shown();
-    if (!held.has(id)) drawn.set(id, view(r, off));
+    if (!waits) drawn.set(id, view(r, off));
     return r;
   }
 
@@ -304,7 +314,7 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
       const off = linkOff(killPath);
       for (const r of load().requests) {
         // An edit that waits for a moderator's unlock: one read of the lock a turn, and the draw only once it is gone (a failed read draws).
-        const locked = held.has(r.id) && await discord.locked(held.get(r.id).thread).catch(() => false);
+        const locked = held.has(r.id) && await discord.locked(held.get(r.id).thread).catch(() => false) !== false; // no answer: locked (S5)
         const due = r.channel && !locked && (!r.card || r.shown !== r.status || r.cardShown !== r.status || (OPEN.includes(r.status) && drawn.get(r.id) !== view(r, off)));
         adopt(due ? await draw(r.id).catch(() => r) : r); // a failed draw is logged in `draw`, and tried again at the next turn
       }

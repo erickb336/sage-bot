@@ -709,3 +709,60 @@ test('S4: a read of the lock that Discord refuses, or that gives no answer, coun
     assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the lock of the thread of RQ1')).length, what === 'refused' ? 1 : 0, what);
   }
 });
+
+// Repair round 3 of PR 71 (R1119): S5 and C6.
+test('S5: a lock read with no answer counts as locked for the edit too: the archived thread is not opened, and the card shows the decision once a read says "not locked"', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  let unarchives = 0;
+  b.onUnarchive = () => { unarchives += 1; };
+  b.fake.archive(thread);
+  b.onLocked = () => null;
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  for (let n = 0; n < 3; n += 1) {
+    const reads = b.lockReads;
+    await b.flow.loop();
+    assert.equal(b.lockReads - reads, 1, `loop ${n}`); // one read of the lock a loop while the edit waits
+  }
+  assert.deepEqual([unarchives, b.fake.threads.get(thread).archived], [0, true]); // never opened
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  b.onLocked = undefined; // the read answers: not locked
+  await b.flow.loop();
+  assert.equal(unarchives, 1);
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.fake.in(thread), [b.r().card]); // no post after the decision: it never comes later
+});
+
+test('C6: a card edit skipped because Discord refuses to open the archived thread (50013) is tried again at each loop, also after a restart; once the refusal clears the card shows the decision, and the post after the decision comes once', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  let refuse = true;
+  b.onUnarchive = () => { if (refuse) throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  b.fake.archive(thread);
+  await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+  assert.equal(b.fake.in(thread).length, 2); // the card and the post after the decision
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/); // the edit was skipped
+  assert.notEqual(b.r().cardShown, 'approved');
+  b.fake.archive(thread); // quiet again
+  const reads = b.lockReads;
+  await b.flow.loop();
+  assert.equal(b.lockReads - reads, 1); // one read of the lock a loop
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  b.flow = b.make(); // a restart: what the last process kept in memory is gone
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  refuse = false; // the refusal clears
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick at /);
+  assert.deepEqual(b.card().components, []);
+  assert.equal(b.r().cardShown, 'approved');
+  assert.equal(b.fake.in(thread).length, 2); // no second post
+  const edits = b.fake.messages.get(b.r().card).length;
+  await b.flow.loop();
+  assert.equal(b.fake.messages.get(b.r().card).length, edits); // nothing waits now
+  // One log line for the refusal in each process, not one at each loop.
+  assert.equal(b.lines.filter((l) => l.startsWith('Discord refused to open the thread of the card of RQ1')).length, 2);
+});
