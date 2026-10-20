@@ -108,7 +108,7 @@ sage-bot sits between the two. The team works in Discord, and the owner approves
 
 ## How it works
 
-sage-bot is one small service, the bridge (`scripts/bridge.mjs`), on the owner's Mac. It reads sage's logbook and changes it only through the sage state tool. Code writes every answer. The only Discord text that a model reads today is a voter's typed reason: sage reads it through `scripts/reasons.mjs`, as quoted data cleaned by an allow-list.
+sage-bot is one small service, the bridge (`scripts/bridge.mjs`), on the owner's Mac. It reads sage's logbook and changes it only through the sage state tool. Code writes every answer. Two kinds of Discord text reach sage's model today, and an allow-list cleans both. The first is a voter's typed reason, which sage reads through `scripts/reasons.mjs` as quoted data. The second is the title of a request that the owner approved, which becomes the title of a sage task. No other Discord text reaches a model today.
 
 | Job | What happens |
 | --- | --- |
@@ -197,7 +197,7 @@ The [setup guide](docs/setup.md) has the full checklist, with each command and t
 
 ## FAQ
 
-**Does a Discord message reach sage today?** Not as an instruction. A lookup only reads the logbook. A vote gives sage the chosen option, and sage reads the voters' typed reasons only through `scripts/reasons.mjs`, as cleaned, quoted data. An approved message waits in the outbox until bridge sessions come with T159.
+**Does a Discord message reach sage today?** Not as an instruction. A lookup only reads the logbook. A vote gives sage the chosen option, and sage reads the voters' typed reasons only through `scripts/reasons.mjs`, as cleaned, quoted data. When the owner presses Approve on a request, its title, cleaned by the same allow-list, becomes the title of the new sage task. An approved message waits in the outbox until bridge sessions come with T159.
 
 **Can a crew member start work?** A crew member requests a feature, and the owner's Approve adds the sage task. A session still starts only at the owner's terminal until T159.
 
