@@ -505,9 +505,10 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const b = world(t);
   const pressed = [];
   const sent = [];
-  // THREAD is a public thread (F-T247-11): a public thread type, and its parent lets @everyone view it.
+  // THREAD is a public thread (F-T247-11, F-T247-26): a public thread type, and its parent lets @everyone view it and read its history.
   const everyone = { id: CONFIG_GUILD };
-  const open = { permissionsFor: (role) => ({ has: (flag) => role === everyone && flag === PermissionFlagsBits.ViewChannel }) };
+  const open = { permissionsFor: (role) => ({ has: (flag) => role === everyone
+    && (flag === PermissionFlagsBits.ViewChannel || flag === PermissionFlagsBits.ReadMessageHistory) }) };
   const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK, type: ChannelType.PublicThread, parent: open, guild: { roles: { everyone } } } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
   const guildRoles = new Map([[CREW_ROLE, { name: CREW }]]); // the guild's roles, as discord.js keeps them
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER, guildRoles });

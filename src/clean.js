@@ -25,6 +25,12 @@ LOOKALIKES.delete('\u05D9');
 /** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
 export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([, t]) => /[<>]/.test(t))
   .map(([c, t]) => [c, t.replace(/[^<>]/g, '').replaceAll('<', '(').replaceAll('>', ')')]));
+const QUOTE_LIKE = new Set([...LOOKALIKES].filter(([, t]) => /''|\\/.test(t)).map(([c]) => c));
+/**
+ * For `literal` in src/outbox.js (F-T247-24): whether a character is `"` or `\`, or looks like one of them. A look-alike's confusables
+ * target holds two quotes `''` (the target of `"`, for example “ ” ＂ ʺ 〃) or `\`, or its NFKC holds `"` or `\` (＂ ＼ ﹨).
+ */
+export const quoteLike = (ch) => QUOTE_LIKE.has(ch) || /["\\]/.test(ch.normalize('NFKC'));
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
 const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
 const KEEP = /^[\p{Nd}.,:\-]$/v;

@@ -126,7 +126,8 @@ export const rawOf = (m, guildRoles) => ({
 });
 
 /**
- * Whether a thread is public (F-T247-11): not a private thread, and its parent channel lets @everyone view it. Only a public thread moves
+ * Whether a thread is public (F-T247-11, F-T247-26): not a private thread, and its parent channel lets @everyone view it and read its
+ * history. Only a public thread moves
  * to the home channel (src/ask.js placeOfMessage), because a move posts its context there. Anything that cannot be read counts as not public.
  * @param {import('discord.js').Channel | null} t  the thread, with `parent` (or `parentId` and `fetch` for a parent not in the cache)
  * @param {(id: string) => Promise<import('discord.js').Channel>} fetch
@@ -134,7 +135,8 @@ export const rawOf = (m, guildRoles) => ({
 export async function publicThread(t, fetch) {
   if (t?.isThread?.() !== true || t.type === ChannelType.PrivateThread) return false;
   const parent = t.parent ?? await fetch(t.parentId).catch(() => null);
-  return parent?.permissionsFor?.(t.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === true;
+  const everyone = parent?.permissionsFor?.(t.guild.roles.everyone);
+  return everyone?.has(PermissionFlagsBits.ViewChannel) === true && everyone.has(PermissionFlagsBits.ReadMessageHistory) === true;
 }
 
 /** The display names of the people that a message mentions (user id → name), for its card (F-T247-3). */

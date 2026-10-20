@@ -16,7 +16,7 @@ import { CREW, isOwner, namesOf, notCrew, personName, placeOf } from './crew.js'
 import { forTerminal } from './clean.js';
 import { ActionRowBuilder, ButtonStyle } from 'discord.js';
 import {
-  addMessage, auditFields, CONTEXT, decide, find, GONE, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
+  addMessage, auditFields, CONTEXT, decide, find, GONE, hidden, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
 } from './outbox.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -63,6 +63,11 @@ const contextLine = (r) => {
  * personName; "member" and the last 4 digits of an id with no name), then `safe`. The payload keeps the raw text.
  */
 const cardText = (r) => safe(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
+/** The hidden characters of the text that the card drops and payload.txt shows as `\u{…}` (F-T247-25): a field when there is one or more. */
+const hiddenField = (r) => {
+  const n = [...r.text].filter(hidden).length;
+  return n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'}, see payload.txt` }] : [];
+};
 /** The exact payload as a file of the card. */
 const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
 
@@ -85,6 +90,7 @@ export function outboxCard(r, { ownerId, us, ping = false }) {
     description: cut(cardText(r) || '(no visible text: see payload.txt)', 1000),
     fields: [
       { name: 'From', value: cut(fromLine(r), LIMIT.value) },
+      ...hiddenField(r),
       { name: 'Context', value: contextLine(r) },
       { name: 'sha256 of payload.txt', value: short(r.payloadSha256) },
       { name: 'Status', value: status },

@@ -8,6 +8,7 @@
 // escaped data (`literal`), framed by a random marker per payload, and its sha256 is on the approval card, in the audit log and here.
 import { createHash, randomBytes } from 'node:crypto';
 import { killPathOf, linkOff } from './audit.js';
+import { quoteLike } from './clean.js';
 import { readOwn, withLock, writeWhole } from './state.js';
 
 /** The outbox file of a config: `<statePath>.outbox`. */
@@ -61,16 +62,19 @@ export const minute = (at) => `${new Date(at).toISOString().slice(0, 16)}Z`;
 /**
  * Untrusted text as one JavaScript string literal for a MODEL reader (standing order 12): sage's model reads it in the payload, and no
  * person reads it on Discord. An allow-list: the space and every printable character (a letter, mark, number, punctuation or symbol that is
- * not default-ignorable) stay as they are, with `"` and `\` escaped by a backslash; every other code point (a newline, a control, a format,
- * bidi or tag character, a variation selector, a private-use, unassigned or lone surrogate code point, any other space) becomes `\u{…}`
- * with its hex value. So nothing hidden reaches the model unseen, no text leaves its quotes, and no text starts a line of the payload.
+ * not default-ignorable, and not a look-alike of `"` or `\`: src/clean.js quoteLike, F-T247-24) stay as they are, with `"` and `\` escaped by
+ * a backslash; every other code point (a look-alike of `"` or `\`, a newline, a control, a format, bidi or tag character, a variation
+ * selector, a private-use, unassigned or lone surrogate code point, any other space) becomes `\u{…}` with its hex value. So nothing hidden
+ * reaches the model unseen, no text leaves its quotes or fakes them, and no text starts a line of the payload.
  */
 const PRINTABLE = /^[[\p{L}\p{M}\p{N}\p{P}\p{S}]--\p{Default_Ignorable_Code_Point}]$/v;
+/** Whether the card hides a character that the payload shows as `\u{…}` (F-T247-25): not printable, and not a space of any kind. */
+export const hidden = (ch) => !PRINTABLE.test(ch) && !/^\p{White_Space}$/u.test(ch);
 export function literal(text) {
   let out = '"';
   for (const ch of String(text)) {
     if (ch === '"' || ch === '\\') out += `\\${ch}`;
-    else if (ch === ' ' || PRINTABLE.test(ch)) out += ch;
+    else if (ch === ' ' || (PRINTABLE.test(ch) && !quoteLike(ch))) out += ch;
     else out += `\\u{${ch.codePointAt(0).toString(16).toUpperCase()}}`;
   }
   return `${out}"`;
