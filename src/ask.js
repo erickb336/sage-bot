@@ -19,7 +19,7 @@ import { channelsPathOf, saveChannels } from './channels.js';
 import { loadVotes, votesPathOf } from './state.js';
 import { auditPathOf, killPathOf, linkOff, openLog, recorder, setLinkOff } from './audit.js';
 import { Refused } from './outbox.js';
-import { loadThreads, noRight, readAsk, threadName, threadsPathOf } from './threads.js';
+import { isLiveTask, loadThreads, noRight, readAsk, threadName, threadsPathOf } from './threads.js';
 
 /** Asks per person in a rolling hour across all channels (G18 D5, G27): every /sage command and every mention of the crew counts,
  * also a refused one; a mention that opens a thread counts once. A /sage stop does not count: the kill switch always works. */
@@ -288,12 +288,15 @@ export function createAsk({ config, channels, projects = loadProjects(config), n
    * entry, the entry whose `origin` is that thread), else to a new one. It moves only when it is public (`x.isPublic()`, src/discord.js
    * publicThread: not a private thread, and its parent channel is open to @everyone; F-T247-11): a move posts its context in the home
    * channel. A thread that is not public is no place for a message to sage (`at` null), so it gets the pointer and its history is not read.
+   * A task thread whose channel the registry does not hold now for its task's project (isLiveTask) is no place either, as a thread of a
+   * channel that is not registered: it neither moves nor reaches the old project's task (C1 of R1084).
    * @param {{ channelId: string, parentId: Promise<string | null> | string | null, isPublic: () => Promise<boolean> }} x
    */
   async function placeOfMessage(x) {
     const parent = channels.has(x.channelId) ? null : await x.parentId;
-    const own = parent !== null ? threads.get(x.channelId) ?? null : null;
-    const moves = parent !== null && !own && await x.isPublic().catch(() => false);
+    const entry = parent !== null ? threads.get(x.channelId) ?? null : null;
+    const own = entry?.kind === 'task' && !isLiveTask(entry, channels) ? null : entry;
+    const moves = parent !== null && !entry && await x.isPublic().catch(() => false);
     const at = parent === null ? (channels.has(x.channelId) ? x.channelId : null) : (own || moves) && channels.has(parent) ? parent : null;
     return { at, own, moves, inThread: parent !== null, moved: moves ? [...threads].find(([, t]) => t.origin === x.channelId) ?? null : null };
   }
