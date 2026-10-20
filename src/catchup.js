@@ -29,6 +29,11 @@ export const RETRY = 3 * 60_000;
  * gateway stayed up, nothing was missed, and the pause is forgotten (F-T241-13).
  */
 const PAUSE = 3 * 60_000;
+/**
+ * The most mentions that each list of the file (`taken`, `taking`) holds; a new one drops the oldest. A team of 2 to 5 people never has
+ * this many at once, so a file with more is not one that the bridge wrote (S1 of T243 repair 2).
+ */
+export const MAX = 100;
 /** Discord gives at most this many messages per read. */
 export const PAGE = 100;
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -71,7 +76,8 @@ export function loadAlive(path) {
   const ids = (x) => x && typeof x === 'object' && !Array.isArray(x) && Object.entries(x).every(([k, v]) => SNOWFLAKE.test(k) && SNOWFLAKE.test(v));
   const { taken = {}, taking = {} } = data;
   if (!['at,seen,version', 'at,seen,taken,version', 'at,seen,taken,taking,version'].includes(Object.keys(data).sort().join())
-    || data.version !== 1 || !(data.at === null || Number.isSafeInteger(data.at)) || !ids(data.seen) || !ids(taken) || !ids(taking)) throw bad;
+    || data.version !== 1 || !(data.at === null || Number.isSafeInteger(data.at)) || !ids(data.seen) || !ids(taken) || !ids(taking)
+    || Object.keys(taken).length > MAX || Object.keys(taking).length > MAX) throw bad;
   const map = (x) => new Map(Object.entries(x));
   return { at: data.at, seen: map(data.seen), taken: map(taken), taking: map(taking) };
 }
@@ -96,10 +102,11 @@ export function loadAlive(path) {
  *   ready follows within PAUSE. While a place is unread, the first turn RETRY after the last run runs the catch-up again, and `beat`
  *   returns its promise;
  * - `down()`: the gateway is gone; the gap starts at the last turn, or at the start of a pause just before;
- * - `live(place, id, forMe, handle)`: each message that the gateway brings, with `forMe` as `fetch` gives it and its handling; a
- *   mention that the catch-up already handled is not handled again;
+ * - `live(place, id, forMe, handle)`: each message that the gateway brings, with its handling; `forMe` as `fetch` gives it, and only
+ *   for a mention of the crew or the owner (src/discord.js liveOf); a mention that the catch-up already handled is not handled again;
  * - `run()`: at each gateway ready; never rejects.
- * At the start, each mention whose handling a crash cut off (in `taking`) gets OLD once, before the first run.
+ * At the start, each mention whose handling a crash cut off (in `taking`) gets OLD once, before the first run, when its place is one of
+ * `places()` (an id, or a thread of the map); a mention of any other place gets nothing.
  */
 export function createCatchUp({ config, places, fetch, roles, post, now = Date.now, log = (line) => process.stderr.write(`${line}\n`),
   alive = loadAlive(alivePathOf(config)) }) {
@@ -130,17 +137,28 @@ export function createCatchUp({ config, places, fetch, roles, post, now = Date.n
    * crash during `act` gets OLD at the next start, and never a second answer.
    */
   const take = async (id, place, act) => {
-    taking.set(id, place);
+    put(taking, id, place);
     save();
-    try { await act(); } finally { taking.delete(id); taken.set(id, place); save(); }
+    try { await act(); } finally { taking.delete(id); put(taken, id, place); save(); }
+  };
+  /** Puts `id` of `place` on the list, and drops its oldest entries over MAX. */
+  const put = (list, id, place) => {
+    list.set(id, place);
+    for (const old of list.keys()) if (list.size > MAX) list.delete(old); else break;
   };
   /** Records `id` as seen in `place`; the mark never goes back. */
   const mark = (place, id) => { seen.set(place, newest(seen.get(place), id)); save(); };
   const handled = (place, id) => taken.has(id) || taking.has(id) || (seen.has(place) && !after(id, seen.get(place)));
-  // The mentions that a crash cut off: each goes to `taken` first (no second answer, also when this start crashes too), then gets OLD.
-  const cut = [...taking];
-  for (const [id, place] of cut) { taking.delete(id); taken.set(id, place); }
-  if (cut.length) save();
+  // The mentions that a crash cut off, in a place that the catch-up watches: each goes to `taken` first (no second answer, also when this
+  // start crashes too), then gets OLD. A mention of any other place goes from the file with no reply.
+  const cut = [];
+  if (taking.size) {
+    const { ids, threads = [] } = places();
+    const watched = new Set([...ids, ...threads.map((t) => t.id)]);
+    for (const [id, place] of taking) if (watched.has(place)) { cut.push([id, place]); put(taken, id, place); }
+    taking.clear();
+    save();
+  }
   let chain = Promise.all(cut.map(([id, place]) => post(place, { content: OLD, reply: { messageReference: id }, allowedMentions: AUTHOR_ONLY })
     .catch((e) => say(`Discord refused the reply to an old mention in ${place}: ${apiError(e)}`))));
 
@@ -247,7 +265,7 @@ export function createCatchUp({ config, places, fetch, roles, post, now = Date.n
     down() { gapFrom ??= at; held = true; },
     async live(place, id, forMe, handle) {
       if (handled(place, id)) return;
-      // Only a mention goes on the lists: a run handles nothing else, so the lists grow only with the mentions of sage-bot.
+      // Only a mention of the crew or the owner goes on the lists: a run handles nothing else, so a crash gives OLD to nobody else.
       if (forMe) await take(id, place, handle);
       else await handle();
       // From a drop to the end of the next run, and in a place that no run has read since, the mark waits: a mark past a message that

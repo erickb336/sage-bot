@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { alivePathOf, createCatchUp, idAt, loadAlive, WINDOW } from '../src/catchup.js';
+import { alivePathOf, createCatchUp, idAt, loadAlive, OLD, WINDOW } from '../src/catchup.js';
+import { liveOf } from '../src/discord.js';
 import { fakeDiscord } from '../src/fake-discord.js';
 import { LOOP } from '../src/bridge.js';
 import { CREW } from '../src/crew.js';
@@ -223,4 +224,64 @@ test('T243 F-T241-13: a pause that a drop follows soon keeps its start, as after
   b.now += MIN;
   await b.catchUp.run();
   assert.deepEqual([b.handled, b.notes(ASK)], [[id], [offline(asleep, b.now, 1)]]);
+});
+
+test('T243 repair 2 S2: a mention of a member who is not crew stays silent, also when a crash cut its handling off', async () => {
+  const b = light();
+  b.catchUp.beat();
+  b.now = T0 + MIN;
+  await b.catchUp.run();
+  const guildRoles = new Map([['r1', { id: 'r1', name: CREW }]]);
+  const message = (id, user, roleIds) => ({ id, guildId: CONFIG.guildId, channelId: ASK, author: { id: user, bot: false }, webhookId: null,
+    mentions: { users: new Map([['1', {}]]) }, member: { roles: { cache: new Map(roleIds.map((r) => [r, guildRoles.get(r)])) } } });
+  const STRANGER = '300000000000000201';
+  const stranger = b.place.said(ASK, { at: b.now, user: STRANGER });
+  const crew = b.place.said(ASK, { at: b.now + 1000, user: MAYA });
+  // The process dies during each handling.
+  const live = liveOf({ config: CONFIG, botId: '1', guildRoles, catchUp: b.catchUp, on: { message: () => new Promise(() => {}) } });
+  live(message(stranger, STRANGER, []));
+  live(message(crew, MAYA, ['r1']));
+  b.now += MIN;
+  await b.make().run();
+  assert.deepEqual(b.place.posts.filter((p) => p.content === OLD).map((p) => p.reply.messageReference), [crew]);
+  assert.deepEqual(b.handled, []);
+});
+
+test('T243 repair 2 S1: after a crash, only a cut mention of a watched place gets "please ask again"; a mention of any other place gets nothing', async () => {
+  const OTHER = '400000000000000077'; // a channel that the bridge does not watch
+  const b = light([ASK, THREAD]);
+  b.threads = [THREAD];
+  b.catchUp.beat();
+  const inAsk = b.place.said(ASK, { at: T0, user: OWNER });
+  const inThread = b.place.said(THREAD, { at: T0 + 1000, user: OWNER });
+  const elsewhere = b.place.said(OTHER, { at: T0 + 2000, user: OWNER });
+  writeFileSync(alivePathOf(b), `${JSON.stringify({ version: 1, at: T0, seen: {}, taken: {}, taking: { [inAsk]: ASK, [inThread]: THREAD, [elsewhere]: OTHER } })}\n`, { mode: 0o600 });
+  b.now = T0 + MIN;
+  await b.make().run();
+  assert.deepEqual(b.place.posts.filter((p) => p.content === OLD).map((p) => p.reply.messageReference), [inAsk, inThread]);
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taking], []);
+  assert.equal(loadAlive(alivePathOf(b)).taken.has(elsewhere), false);
+});
+
+test('T243 repair 2 S1: each list of the file holds at most 100 mentions, the oldest go first, and a file with more gets the "Delete it" refusal', async () => {
+  const b = light();
+  b.catchUp.beat();
+  b.now = T0 + MIN;
+  await b.catchUp.run();
+  b.catchUp.down(); // the marks wait, so each mention handled live stays on `taken`
+  const ids = [];
+  for (let i = 1; i <= 101; i++) {
+    const id = b.place.said(ASK, { at: b.now + i * 1000, user: OWNER });
+    ids.push(id);
+    await b.catchUp.live(ASK, id, true, async () => {});
+  }
+  assert.deepEqual([...loadAlive(alivePathOf(b)).taken.keys()], ids.slice(1));
+  const file = (taking) => `${JSON.stringify({ version: 1, at: T0, seen: {}, taken: {}, taking: Object.fromEntries(taking.map((id) => [id, ASK])) })}\n`;
+  writeFileSync(alivePathOf(b), file(ids.slice(1)), { mode: 0o600 });
+  assert.equal(loadAlive(alivePathOf(b)).taking.size, 100);
+  writeFileSync(alivePathOf(b), file(ids), { mode: 0o600 });
+  assert.throws(() => loadAlive(alivePathOf(b)), { name: 'TypeError', message: `the catch-up file ${alivePathOf(b)} is not a version 1 catch-up file that the bridge wrote. Delete it: the next catch-up then starts from now. Nothing was loaded.` });
+  const taken = `${JSON.stringify({ version: 1, at: T0, seen: {}, taken: Object.fromEntries(ids.map((id) => [id, ASK])) })}\n`;
+  writeFileSync(alivePathOf(b), taken, { mode: 0o600 });
+  assert.throws(() => loadAlive(alivePathOf(b)), { name: 'TypeError' });
 });
