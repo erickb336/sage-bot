@@ -514,3 +514,31 @@ test('the bridge itself refuses a press on a card closed in an unregistered task
   await pressCard();
   assert.deepEqual(b.bridge.entry(id).gate.parts[0].ballots.map(([by]) => by), [MAYA]);
 });
+
+// R1096: repair round 2 of PR 69 (T246).
+
+test('a card that is tied before its first post gets one owner tie ping below it when it posts at last (C3 of R1096)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  const real = b.discord.post;
+  b.discord.post = async () => { throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  await ask(b, 'T1', ['Which date format?', 'ISO|Locale']);
+  const id = `${NAME}/G1`;
+  assert.equal(b.discord.cardOf(id), undefined); // every post is refused: the card waits for its first post
+  b.now = b.bridge.entry(id).gate.endsAt;
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.equal(b.bridge.entry(id).gate.phase, 'tied');
+  b.discord.post = real;
+  await b.bridge.loop();
+  const cardId = b.discord.cardOf(id);
+  const at = b.discord.where.get(cardId);
+  const posted = b.discord.messages.get(cardId)[0];
+  assert.deepEqual([posted.content, posted.allowedMentions], [`${NAME} T1 waits for Erick to break a tie.`, { parse: [] }]); // no crew ping
+  const below = b.discord.in(at).slice(b.discord.in(at).indexOf(cardId) + 1).map((m) => b.discord.latest(m));
+  assert.equal(below.length, 1);
+  assert.match(below[0].content, new RegExp(`^<@${OWNER}> ${id} is tied after its vote\\. T1 waits: please break the tie with the buttons on the card\\.`));
+  assert.deepEqual(below[0].allowedMentions, { parse: [], users: [OWNER] });
+  await b.bridge.loop();
+  assert.equal(b.discord.in(at).length, b.discord.in(at).indexOf(cardId) + 2); // once: the next loop posts nothing
+});
