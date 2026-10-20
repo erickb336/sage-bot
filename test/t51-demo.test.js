@@ -65,6 +65,8 @@ test('the demo page shows the session line, the thread in order with the private
   assert.match(text, /Only Sam can see this · Dismiss message Only the sage-crew role can use sage-bot\./);
   assert.match(text, /Only Erick can see this · Dismiss message You approved RQ1\. sage task T5 is added to project\./);
   assert.match(text, /Status Approved by Erick at 14:47 \. sage task T5 is in the sage logbook\./);
+  // The post after the decision, in the request's thread (C8: a port without `locked` read as locked and dropped it).
+  assert.match(text, /Approved\. sage task T5 is in the sage logbook\. sage starts work on it when bridge sessions are on/);
   // The batch: the tie post in the thread, which pings Erick (the owner) only, then Erick's tie-break.
   assert.match(page, /@Erick project\/G2\+G3 is tied after its vote\. T2 waits: please break the tie with the buttons on the card\.<br>Part 2 is tied: A, B\./);
   assert.match(page, /<b>Decided: B<\/b> · tie broken by Erick at <time>14:36<\/time>/);

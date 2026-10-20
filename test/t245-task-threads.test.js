@@ -35,7 +35,7 @@ async function world(tt) {
   const config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
   const projects = loadProjects(config);
   const fake = b.discord;
-  const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+  const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive, locked: fake.locked };
   b.threads = loadThreads(threadsPathOf(config));
   b.channels = openChannels(config, projects); // the one registry of the process, as src/discord.js shares it
   b.flow = createRequestFlow({ config, channels: b.channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.sage, threads: b.threads });

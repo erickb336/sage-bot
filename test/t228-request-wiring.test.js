@@ -5,7 +5,8 @@
 // made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { restoreLink, setLinkOff } from '../src/audit.js';
 import { createAsk } from '../src/ask.js';
 import { openChannels } from '../src/channels.js';
@@ -15,7 +16,7 @@ import { fakeCommand, fakeDiscord, fakeInteraction, fakeMention } from '../src/f
 import { loadProjects } from '../src/projects.js';
 import { requestNote } from '../src/requestCards.js';
 import { createRequestFlow } from '../src/requestFlow.js';
-import { approve, loadRequests, requestsPathOf, RETRY_AFTER } from '../src/requests.js';
+import { approve, loadRequests, Refused, requestsPathOf, RETRY_AFTER, toolOf } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
 import { CONFIG, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, table, T0 } from './bridge-setup.js';
 const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
@@ -39,11 +40,22 @@ function world(tt) {
   const channels = openChannels(config, projects);
   const fake = fakeDiscord([]);
   // `b.onPost` and `b.onThread` run after Discord made the message or the thread, before its id comes back: a test fails a reply there.
-  const port = { post: async (at, payload) => { const id = await fake.post(at, payload); await b.onPost?.(payload); return id; }, edit: fake.edit,
+  // `b.manage`: a post in a locked thread works and opens it, as Discord does for a bot with Manage Threads. `b.onUnarchive` runs before
+  // an unarchive, and `b.onLocked` before a read of a lock: what it gives back, other than undefined, is the read. `b.lockReads` counts
+  // the reads of a lock.
+  const manage = async (at, payload) => {
+    const t = fake.threads.get(at);
+    if (!b.manage || !t?.locked) return fake.post(at, payload);
+    t.locked = false;
+    try { return await fake.post(at, payload); } finally { t.locked = true; }
+  };
+  const port = { post: async (at, payload) => { const id = await manage(at, payload); await b.onPost?.(payload); return id; }, edit: fake.edit,
     startThread: async (at, line, name) => { const id = await fake.startThread(line, name); await b.onThread?.(); return id; },
-    threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+    threadFrom: (at, line) => fake.threadFrom(line), unarchive: async (id) => { await b.onUnarchive?.(id); return fake.unarchive(id); },
+    locked: async (id) => { b.lockReads += 1; const read = await b.onLocked?.(id); return read === undefined ? fake.locked(id) : read; } };
+  b.lockReads = 0;
   b.tool = sageTool({ sagePath: SAGE, project: b.project, env: b.env });
-  b.make = () => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.tool });
+  b.make = (tool = () => b.tool) => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool });
   b.flow = b.make();
   b.ask = createAsk({ config, channels, projects, now: () => b.now, log: (l) => b.lines.push(l), env: b.env, requests: b.flow });
   Object.assign(b, { config, fake, path: requestsPathOf(config), killPath: `${b.statePath}.leads-off` });
@@ -79,6 +91,18 @@ function world(tt) {
   b.tasks = () => table(b, 'tasks').map((r) => r.title);
   return b;
 }
+
+test('the request side refuses a Discord port with no lock read, so a missing method never passes for a moderator\'s lock (C8)', (tt) => {
+  const b = setup({ markAll: false });
+  tt.after(() => rmSync(b.root, { recursive: true, force: true }));
+  const config = { ...CONFIG, askChannelId: ASK, project: b.project, sagePath: SAGE, statePath: b.statePath };
+  const projects = loadProjects(config);
+  const channels = openChannels(config, projects);
+  const fake = fakeDiscord([]);
+  const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+  assert.throws(() => createRequestFlow({ config, channels, projects, discord: port }), { name: 'TypeError', message: 'the Discord port of the request side has no locked(thread)' });
+  assert.equal(typeof createRequestFlow({ config, channels, projects, discord: { ...port, locked: fake.locked } }).interaction, 'function');
+});
 
 test('a crew member requests a feature end to end: the form with no defer, the confirm, Send, one line, one thread, one card that pings the owner once; the owner approves', async (tt) => {
   const b = world(tt);
@@ -154,13 +178,14 @@ test('a crew member cannot approve or decline; the owner can decline with a reas
   const b = world(tt);
   await b.request(JON);
   const card = b.r().card;
+  const drawn = b.fake.messages.get(card).length; // the post, and the edit of the draw that posted it (F-T228-11)
   for (const user of [MAYA, JON]) {
     for (const id of ['rq1:approve:RQ1', 'rq1:decline:RQ1']) assert.deepEqual((await b.press(user, id, { message: card }))[0].content, 'Only Erick approves or declines a request. Nothing changed.');
     assert.deepEqual((await b.press(user, 'rq1:decline!:RQ1', { message: card, fields: { reason: 'no' } }))[0].content, 'Only Erick approves or declines a request. Nothing changed.');
   }
   assert.equal(b.r().status, 'pending');
   assert.deepEqual(b.tasks(), []);
-  assert.equal(b.fake.messages.get(card).length, 1); // the card was never edited
+  assert.equal(b.fake.messages.get(card).length, drawn); // no refused press edited the card
 
   const form = await b.press(OWNER, 'rq1:decline:RQ1', { message: card });
   assert.deepEqual([form[0].kind, form[0].custom_id], ['modal', 'rq1:decline!:RQ1']);
@@ -491,4 +516,265 @@ test('T241 F-T241-8: the open request threads are unknown (null), not none, whil
   assert.deepEqual(b.flow.threads(), [b.r().thread]);
   writeFileSync(b.path, 'not a request file');
   assert.equal(b.flow.threads(), null);
+});
+
+test('F-T228-9: an Approve whose project left the config gets a note with no folder path; the terminal log has the full text', async (tt) => {
+  const b = world(tt);
+  mkdirSync(join(b.root, 'other'));
+  // The config now serves only another folder (the project left it), or names a folder that is gone (the config cannot be read).
+  const cases = [
+    [join(b.root, 'other'), 'the project project is not in the config. Add it back, or decline RQ1.', b.project],
+    [join(b.root, 'gone'), 'the projects in the config cannot be read now. The details are at the terminal. Nothing changed.', join(b.root, 'gone')],
+  ];
+  await b.request(JON);
+  for (const [folder, note, path] of cases) {
+    b.flow = b.make((r) => toolOf({ ...b.config, project: folder }, r));
+    b.lines.length = 0;
+    const replies = await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+    assert.deepEqual(replies.map((x) => [x.kind, x.content]), [['defer', undefined], ['editReply', note]]);
+    assert.ok(!JSON.stringify(replies).includes(b.root), folder); // no folder path reaches Discord
+    assert.ok(b.lines.some((l) => l.startsWith('RQ1: ') && l.includes(path)), folder); // the full text is in the terminal log
+    assert.equal(b.r().status, 'pending');
+  }
+});
+
+test('F-T228-10: a thread that a moderator locked and archived stays locked and archived; the edit of its card is skipped and logged', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  const before = b.fake.messages.get(b.r().card).length;
+  await b.fake.setLocked(thread, true); // a moderator locks the thread: Discord archives it too
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  await b.flow.loop();
+  assert.deepEqual([b.fake.threads.get(thread).archived, b.fake.threads.get(thread).locked], [true, true]);
+  assert.equal(b.fake.messages.get(b.r().card).length, before); // the card is as it was
+  assert.match(b.line().content, /approved/); // the line in the channel shows the decision
+  assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the edit of the card of RQ1')).length, 1);
+});
+
+test('F-T228-11: when the id write of the line or the card fails and the link goes off before the retry, the line and the card show the link off at the next loop', async (tt) => {
+  for (const what of ['line', 'card']) {
+    const b = world(tt);
+    let free;
+    const is = { line: (p) => p.content?.startsWith('**Jon'), card: (p) => p.embeds }[what];
+    b.onPost = (p) => { if (is(p) && !free) free = hold(b); };
+    await b.request(JON);
+    assert.equal(b.r()[what], null, what); // the post is on Discord; the file did not take its id
+    setLinkOff(b.killPath, MAYA, b.now);
+    free();
+    await b.flow.loop(); // writes the id
+    await b.flow.loop();
+    assert.ok(b.card().embeds[0].fields.some((f) => f.name === 'The link from Discord to sage is off'), what);
+    assert.match(b.line().content, /· the link to sage is off$/, what);
+    // The card pings only while the link is on (requestCard): it was posted before the link went off, or after it.
+    assert.equal(pings(b), what === 'card' ? 1 : 0, what);
+  }
+});
+
+// Repair round 1 of PR 71 (R1086): C1, C2, S2, S3 and Q2.
+test('C1: a restart between the post of the line or the card and the write of its id, while the link goes off: Discord gives back the old post by its nonce, and the next loop shows the link off', async (tt) => {
+  for (const what of ['line', 'card']) {
+    const b = world(tt);
+    let free;
+    const is = { line: (p) => p.content?.startsWith('**Jon'), card: (p) => p.embeds }[what];
+    b.onPost = (p) => { if (is(p) && !free) free = hold(b); };
+    await b.request(JON);
+    assert.equal(b.r()[what], null, what); // the post is on Discord; the file did not take its id
+    setLinkOff(b.killPath, MAYA, b.now);
+    b.flow = b.make(); // a restart: what the last process kept in memory is gone
+    free();
+    await b.flow.loop(); // posts again with the same nonce: Discord gives back the old message, which shows the link on
+    await b.flow.loop();
+    assert.deepEqual(b.fake.in(ASK), [b.r().line], what); // one line
+    assert.match(b.line().content, /· the link to sage is off$/, what);
+    assert.ok(b.card().embeds[0].fields.some((f) => f.name === 'The link from Discord to sage is off'), what);
+  }
+});
+
+test('C2: when Discord refuses to open an archived thread (50013), the edit of the card is skipped and logged once, and the post after the decision still comes', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  b.onUnarchive = () => { throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  b.fake.archive(thread);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  await b.flow.loop();
+  assert.equal(b.r().shown, 'approved');
+  assert.equal(b.fake.in(thread).length, 2); // the card and the post after the decision
+  assert.match(b.fake.latest(b.fake.in(thread)[1]).content, /^\*\*Approved\.\*\*/);
+  assert.match(b.line().content, /approved/);
+  // C4: one line for the refusal, and no second line for the edit that it skipped. Every line of the log about RQ1:
+  assert.deepEqual(b.lines.filter((l) => l.includes('RQ1')), [
+    `RQ1: ${JON} requested a feature in project; it waits for the owner (node scripts/requests.mjs show RQ1)`,
+    'Discord refused to open the thread of the card of RQ1: code 50013, status 403: Missing Permissions',
+    `RQ1: its thread ${thread} is now the thread of T1 in project`,
+  ]);
+});
+
+test('S2: a Refused needs its line for Discord; the approve refused while the link is off names no command or path on Discord', async (tt) => {
+  assert.throws(() => new Refused('the terminal text'), TypeError);
+  assert.equal(new Refused('at /Users/someone/project', 'on Discord').forDiscord, 'on Discord');
+  const b = world(tt);
+  await b.request(JON);
+  setLinkOff(b.killPath, MAYA, b.now);
+  const replies = await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+  assert.deepEqual(replies.map((x) => [x.kind, x.content]), [['defer', undefined],
+    ['editReply', 'the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link at the terminal first. Nothing changed.']]);
+  assert.ok(b.lines.includes('RQ1: the link from Discord to sage is off, so RQ1 cannot be approved. Restore the link first: node scripts/leads.mjs restore. Nothing changed.'));
+});
+
+test('S3: no post after the decision in a thread that a moderator locked, although sage-bot could post there; the line in the channel shows the decision', async (tt) => {
+  const b = world(tt);
+  b.manage = true; // sage-bot has Manage Threads: Discord takes its post in a locked thread and opens the thread
+  await b.request(JON);
+  const thread = b.r().thread;
+  await b.fake.setLocked(thread, true);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  await b.flow.loop();
+  assert.deepEqual([b.fake.threads.get(thread).archived, b.fake.threads.get(thread).locked], [true, true]);
+  assert.deepEqual(b.fake.in(thread), [b.r().card]); // no post after the decision
+  assert.equal(b.r().shown, 'approved');
+  assert.match(b.line().content, /approved/);
+});
+
+test('Q2: a card edit skipped in a locked thread waits, with one read of the lock a loop, and shows the decision once a moderator unlocks the thread', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  await b.fake.setLocked(thread, true);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  assert.ok(b.card().components.length > 0); // the card still has its buttons: the thread is locked
+  for (let n = 0; n < 3; n += 1) {
+    const reads = b.lockReads;
+    await b.flow.loop();
+    assert.equal(b.lockReads - reads, 1, `loop ${n}`); // one read of the lock, and no edit
+  }
+  await b.fake.setLocked(thread, false); // a moderator unlocks the thread
+  b.fake.archive(thread); // it is still quiet
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.card().components, []);
+  const reads = b.lockReads;
+  await b.flow.loop();
+  assert.equal(b.lockReads, reads); // nothing waits now
+});
+
+// Repair round 2 of PR 71 (R1103): C3, C4 (in the C2 test above) and S4.
+test('C3: a card edit that waits for a moderator\'s unlock waits over a restart too, with one read of the lock a loop; after the unlock the card shows the decision, and no post comes', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  await b.fake.setLocked(thread, true);
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  b.flow = b.make(); // a restart: what the last process kept in memory is gone
+  for (let n = 0; n < 3; n += 1) {
+    const reads = b.lockReads;
+    await b.flow.loop();
+    assert.equal(b.lockReads - reads, 1, `loop ${n}`); // one read of the lock a loop
+  }
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/); // the thread is locked: the card is as it was
+  await b.fake.setLocked(thread, false); // a moderator unlocks the thread
+  b.fake.archive(thread); // it is still quiet
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.card().components, []);
+  assert.deepEqual(b.fake.in(thread), [b.r().card]); // no post after the decision: it never comes later
+  const reads = b.lockReads;
+  const edits = b.fake.messages.get(b.r().card).length;
+  await b.flow.loop();
+  assert.deepEqual([b.lockReads, b.fake.messages.get(b.r().card).length], [reads, edits]); // nothing waits now
+});
+
+test('C3: a requests file of before C3 (no cardShown) loads with the status that its line shows, and a restart draws no decided card again', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+  await b.flow.loop();
+  const old = JSON.parse(readFileSync(b.path, 'utf8'));
+  old.requests = old.requests.map(({ cardShown, ...r }) => r);
+  writeFileSync(b.path, `${JSON.stringify(old)}\n`);
+  assert.equal(b.r().cardShown, 'approved');
+  const edits = [b.r().line, b.r().card].map((m) => b.fake.messages.get(m).length);
+  b.flow = b.make(); // a restart
+  await b.flow.loop();
+  assert.deepEqual([b.r().line, b.r().card].map((m) => b.fake.messages.get(m).length), edits);
+});
+
+test('S4: a read of the lock that Discord refuses, or that gives no answer, counts as locked: no post after the decision; the line and the card show it', async (tt) => {
+  for (const [what, read] of [['refused', () => { throw Object.assign(new Error('Missing Access'), { code: 50001, status: 403 }); }], ['no answer', () => null]]) {
+    const b = world(tt);
+    await b.request(JON);
+    const thread = b.r().thread;
+    b.onLocked = read;
+    await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+    await b.flow.loop();
+    await b.flow.loop();
+    assert.deepEqual(b.fake.in(thread), [b.r().card], what); // no post after the decision
+    assert.equal(b.r().shown, 'approved', what);
+    assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/, what);
+    assert.match(b.line().content, /approved/, what);
+    assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the lock of the thread of RQ1')).length, what === 'refused' ? 1 : 0, what);
+  }
+});
+
+// Repair round 3 of PR 71 (R1119): S5 and C6.
+test('S5: a lock read with no answer counts as locked for the edit too: the archived thread is not opened, and the card shows the decision once a read says "not locked"', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  let unarchives = 0;
+  b.onUnarchive = () => { unarchives += 1; };
+  b.fake.archive(thread);
+  b.onLocked = () => null;
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  for (let n = 0; n < 3; n += 1) {
+    const reads = b.lockReads;
+    await b.flow.loop();
+    assert.equal(b.lockReads - reads, 1, `loop ${n}`); // one read of the lock a loop while the edit waits
+  }
+  assert.deepEqual([unarchives, b.fake.threads.get(thread).archived], [0, true]); // never opened
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  b.onLocked = undefined; // the read answers: not locked
+  await b.flow.loop();
+  assert.equal(unarchives, 1);
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick \(terminal\)/);
+  assert.deepEqual(b.fake.in(thread), [b.r().card]); // no post after the decision: it never comes later
+});
+
+test('C6: a card edit skipped because Discord refuses to open the archived thread (50013) is tried again at each loop, also after a restart; once the refusal clears the card shows the decision, and the post after the decision comes once', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  let refuse = true;
+  b.onUnarchive = () => { if (refuse) throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  b.fake.archive(thread);
+  await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+  assert.equal(b.fake.in(thread).length, 2); // the card and the post after the decision
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/); // the edit was skipped
+  assert.notEqual(b.r().cardShown, 'approved');
+  b.fake.archive(thread); // quiet again
+  const reads = b.lockReads;
+  await b.flow.loop();
+  assert.equal(b.lockReads - reads, 1); // one read of the lock a loop
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  b.flow = b.make(); // a restart: what the last process kept in memory is gone
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^Waiting for Erick/);
+  refuse = false; // the refusal clears
+  await b.flow.loop();
+  assert.match(b.status(b.card().embeds[0]), /^\*\*Approved by Erick at /);
+  assert.deepEqual(b.card().components, []);
+  assert.equal(b.r().cardShown, 'approved');
+  assert.equal(b.fake.in(thread).length, 2); // no second post
+  const edits = b.fake.messages.get(b.r().card).length;
+  await b.flow.loop();
+  assert.equal(b.fake.messages.get(b.r().card).length, edits); // nothing waits now
+  // One log line for the refusal in each process, not one at each loop.
+  assert.equal(b.lines.filter((l) => l.startsWith('Discord refused to open the thread of the card of RQ1')).length, 2);
 });

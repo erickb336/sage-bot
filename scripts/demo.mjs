@@ -214,7 +214,7 @@ const split = story.length; // the events of the request come after this one
 let drafts = 0;
 const requests = createRequestFlow({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), tool: () => sageTool({ sagePath: SAGE, project, env }),
   newKey: () => `D${++drafts}`, threads, // fixed keys, so that two runs give the same page
-  discord: { post: discord.post, edit: discord.edit, startThread: (at, line, name) => discord.startThread(line, name), threadFrom: (at, line) => discord.threadFrom(line), unarchive: discord.unarchive } });
+  discord: { post: discord.post, edit: discord.edit, startThread: (at, line, name) => discord.startThread(line, name), threadFrom: (at, line) => discord.threadFrom(line), unarchive: discord.unarchive, locked: discord.locked } });
 const files = { ...openAskFiles(rconfig, projects), threads }; // one audit log and one thread map for the ask and the outbox
 let markers = 0;
 const outbox = createOutboxFlow({ config: rconfig, files, now: () => now, log: (l) => log.push(l), newMarker: () => String(++markers).padStart(12, '0'), // fixed markers: the same page each run
