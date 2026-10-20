@@ -431,11 +431,12 @@ export async function start(file) {
     });
     const on = routes({ config, ask, bridge, requests, outbox, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads, channels });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
-    // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
+    // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see. It reads a thread of
+    // the thread map, which is never pruned, only when it was active in the 24 hours before the gap (F-T241-12).
     const catchUp = createCatchUp({ config, log, alive: files.alive, ...catchUpPort({ guild, place, botId: client.user.id, on }),
       places: () => {
         const open = requests.threads(); // null while the request file cannot be read: those threads are unknown, not gone
-        return { ids: [...channels.keys(), ...files.threads.keys(), ...(open ?? [])], partial: open === null };
+        return { ids: [...channels.keys(), ...(open ?? [])], threads: [...files.threads.keys()], partial: open === null };
       } });
     client.on(Events.MessageCreate, (m) => { if (m.guildId === config.guildId) catchUp.live(m.channelId, m.id, () => on.message(m)); });
     let busy = false;

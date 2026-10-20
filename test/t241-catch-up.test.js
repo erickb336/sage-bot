@@ -198,7 +198,7 @@ test('T241: the heartbeat file is 0600, written whole at each loop turn, with th
   b.catchUp.beat();
   const path = alivePathOf(b);
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 1, at: T0, seen: {} });
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { version: 1, at: T0, seen: {}, taken: {} });
   b.now += LOOP;
   b.catchUp.beat();
   assert.equal(JSON.parse(readFileSync(path, 'utf8')).at, T0 + LOOP);
@@ -325,10 +325,10 @@ test('T241 F-T241-6: after a run fails part way, the places that it did not read
   b.catchUp.beat();
   b.place.said(ASK, { at: T0 + MIN, user: OWNER, mentions: true });
   const missed = b.place.said(THREAD, { at: T0 + 2 * MIN, user: MAYA, mentions: true });
-  b.rolesDown = true; // Discord fails to give the roles: the run stops in the first place
+  b.rolesDown = true; // Discord fails to give the roles: no place is read to its end (F-T241-10: each place waits on its own)
   b.now = T0 + 10 * MIN;
   await b.catchUp.run();
-  assert.match(b.lines.join('\n'), /the catch-up failed; it runs again at the next gateway ready: Discord is down/);
+  assert.match(b.lines.join('\n'), /could not read the roles of a member in 600000000000000001; it tries again in 3 minutes: .*Discord is down/);
   const chat = b.place.said(THREAD, { at: b.now, user: MAYA, mentions: false });
   await b.catchUp.live(THREAD, chat, async () => {});
   b.rolesDown = false;
