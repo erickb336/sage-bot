@@ -4,7 +4,7 @@
 // src/discord.js, the tests use src/fake-discord.js. Each sage session that has a team vote gets one line in the parent channel and
 // one thread, started from that line; the cards go to the thread of their session, and every post about a card goes where the card is (T29, src/sessions.js). It posts only the gates that sage marked as team votes (G13, src/state.js loadVotes). Every event time comes from the bridge's own clock, never from Discord (F-T28-2).
 import { MessageFlags } from 'discord.js';
-import { card, customId, cut, ephemeral, NO_MENTIONS, parseCustomId, safe, settled, stamp } from './cards.js';
+import { card, customId, cut, ephemeral, NO_MENTIONS, note, parseCustomId, safe, settled, stamp } from './cards.js';
 import { crewPings, isOwner, namesOf, notCrew } from './crew.js';
 import { forTerminal } from './clean.js';
 import { handle, peopleOf } from './handle.js';
@@ -952,11 +952,15 @@ export function createBridge({ sages, own, discord, config, statePath, now = Dat
         // owner's private confirm is not a card (F-T132-21).
         const twin = pressed && parked.some((e) => e.gate.id === pressed.gateId);
         const confirm = i.message?.flags?.has(MessageFlags.Ephemeral) === true;
-        if (twin && (!gates.has(pressed.gateId) || (!confirm && i.message?.id !== meta.get(pressed.gateId).message))) {
+        // A press counts only on the card's own message, or on the owner's private confirm (F-T244-4: another bot's card can hold the
+        // same key). src/handle.js keeps the confirm's buttons to the confirm.
+        const onCard = confirm || (i.message?.id !== undefined && i.message.id === meta.get(pressed?.gateId)?.message);
+        if (twin && (!gates.has(pressed.gateId) || !onCard)) {
           if (!gone.has(pressed.gateId)) { gone.add(pressed.gateId); say(`${pressed.gateId}: ${listed(pressed.gateId) ? "its project's name now names another folder" : 'its project is no longer in the config'}, so its card takes no press; ${us.owner} answers it at the terminal`); }
           await i.reply(ephemeral(`This question's project is no longer served; ${us.owner} answers it at the terminal.`));
           return;
         }
+        if (!onCard) { await i.reply(note('unknown-gate')); return; }
         if (sages.has(project)) await readOwner(project, await sages.get(project).gates());
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;

@@ -66,7 +66,7 @@ const editRow = (key) => new ActionRowBuilder().addComponents(
  * The private confirm after the form: the title and the text as typed (made safe), the sentence on what sage gets, then Send (the crew
  * votes, or the owner decides the design questions), Edit and Cancel. When the title or the text has no letter or digit, the refusal of
  * newRequest (src/requests.js) with Edit and Cancel instead: the task title in sage is the title's letters and digits (forModel).
- * @param {string} key  the draft's key  @param {{ project: string, title: string, text: string }} draft  @param {{ owner: string }} us
+ * @param {string} key  the draft's key  @param {{ project: string, title: string, text: string }} draft  @param {{ owner: string, bot: string }} us
  */
 export function confirmMessage(key, { project, title, text }, us) {
   for (const [k, v] of [['title', title], ['text', text]]) {
@@ -75,7 +75,7 @@ export function confirmMessage(key, { project, title, text }, us) {
   const embed = {
     title: cut(`Your request · ${safe(project)}`, LIMIT.title),
     description: cut(`**Title:** ${safe(title)}\n\n**What and why:** ${safe(text)}`, LIMIT.description),
-    footer: { text: `${SAGE_GETS} This confirm expires after 10 minutes. You can have 1 open request at a time.` },
+    footer: { text: `${SAGE_GETS} This confirm expires after 10 minutes. You can have 1 open request at a time on ${us.bot}.` },
     color: COLOR.open,
   };
   const row = new ActionRowBuilder().addComponents(
@@ -181,7 +181,7 @@ export function decidedPost(r, us) {
 export const REQUEST_NOTES = {
   linkOff: (us) => `The link from Discord to sage is off, so I cannot take a request. Nothing was sent. Only ${us.owner} can turn it on again, at the terminal. Read asks still work.`,
   open: (us, r) => `You have an open request: ${r.id} · ${safe(r.title)}, waiting for ${us.owner} since ${stamp(r.createdAt)}${r.thread ? ` in <#${r.thread}>` : ''}. `
-    + `A ${CREW} member can have 1 open request at a time. Withdraw it in its thread, or wait for ${us.owner}'s answer.`,
+    + `A ${CREW} member can have 1 open request at a time on ${us.bot}. Withdraw it in its thread, or wait for ${us.owner}'s answer.`,
   name: (us, r) => `Your name in this server has ${Array.from(r.requesterName).length} characters, and a request takes a name of 1 to ${MAX_NAME}. `
     + 'Change your server nickname, then try again. Nothing was sent.',
   cancelled: () => 'Cancelled. Nothing was sent.',

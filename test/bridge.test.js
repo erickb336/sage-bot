@@ -98,7 +98,7 @@ test('F-T28-2: an event gets the bridge clock, never Discord data, and the clock
   b.sh('gate', 'add', 'T1', '--question', 'Q?', '--options', 'x|y', '--recommend', 'x');
   await b.post();
   b.now += 5 * MINUTE;
-  const i = Object.assign(fakeInteraction({ user: MAYA, customId: 'press:project/G1:0:0' }), { createdTimestamp: 1, createdAt: new Date(1) });
+  const i = Object.assign(fakeInteraction({ user: MAYA, customId: 'press:project/G1:0:0', message: b.discord.cardOf('project/G1') }), { createdTimestamp: 1, createdAt: new Date(1) });
   await b.bridge.interaction(i);
   assert.equal(b.bridge.entry('project/G1').gate.lastAt, T0 + SETTLE + 5 * MINUTE);
   let wall = 100;

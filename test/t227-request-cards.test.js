@@ -72,7 +72,7 @@ test('the confirm: the title and the text as typed, made safe, with no marks; wh
   // The hidden character shows nothing; the brackets, the dash and the apostrophe stay; the markdown and the link are escaped. No ~~.
   assert.equal(e.description, "**Title:** Add CSV export\n\n**What and why:** Users need it (for Excel) now — it's \\*urgent\\*! See https:// x.test");
   assert.equal(e.fields, undefined);
-  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. This confirm expires after 10 minutes. You can have 1 open request at a time.');
+  assert.equal(e.footer.text, 'sage gets this text exactly, as quoted data. This confirm expires after 10 minutes. You can have 1 open request at a time on sage-bot.');
   assert.deepEqual(c.components[0].components.map((b) => [b.custom_id, b.label, b.style]), [
     ['rq1:send-team:D7', 'Send: the crew votes on design questions', 3], ['rq1:send-owner:D7', 'Send: Erick decides design questions', 1],
     ['rq1:edit:D7', 'Edit', 2], ['rq1:cancel:D7', 'Cancel', 2]]);
@@ -152,7 +152,7 @@ test('the decline form, the withdraw confirm, the posts after a decision and the
   assert.equal(decidedPost(R.withdrawn, US).content, '**Withdrawn.** Nothing goes to sage. Jon can send a new request with /sage request.');
   const note = (why, r) => requestNote(why, US, r).content;
   assert.equal(note('linkOff'), 'The link from Discord to sage is off, so I cannot take a request. Nothing was sent. Only Erick can turn it on again, at the terminal. Read asks still work.');
-  assert.equal(note('open', { ...R.pending, thread: '100000000000000009' }), `You have an open request: RQ3 · Add CSV export to the reports page, waiting for Erick since ${t(T0)} in <#100000000000000009>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
+  assert.equal(note('open', { ...R.pending, thread: '100000000000000009' }), `You have an open request: RQ3 · Add CSV export to the reports page, waiting for Erick since ${t(T0)} in <#100000000000000009>. A sage-crew member can have 1 open request at a time on sage-bot. Withdraw it in its thread, or wait for Erick's answer.`);
   assert.equal(note('sent', { ...R.pending, thread: '100000000000000009' }), 'Sent to Erick as RQ3. Its thread is <#100000000000000009>. You can withdraw it there until Erick decides.');
   assert.equal(note('notOwner'), 'Only Erick approves or declines a request. Nothing changed.');
   assert.equal(note('notRequester', R.pending), 'Only Jon, who sent RQ3, can withdraw it. Nothing changed.');

@@ -3,6 +3,7 @@
 import { EventEmitter } from 'node:events';
 import { Events, MessageFlags, MessageFlagsBitField } from 'discord.js';
 import { idAt } from './catchup.js';
+import { parseCustomId } from './cards.js';
 
 /**
  * An interaction-like object. `replies` records each answer as `{ kind, ...payload }`,
@@ -85,6 +86,8 @@ export function fakeDiscord(members, roles = []) {
     threads,
     /** The latest payload of a message. */
     latest: (id) => messages.get(id).at(-1),
+    /** The id of the last message whose latest payload has a button of the gate `gateId` (a vote card), else undefined. */
+    cardOf: (gateId) => [...messages].findLast(([, p]) => p.at(-1).components?.some((row) => row.components?.some((c) => parseCustomId(c.custom_id ?? '')?.gateId === gateId)))?.[0],
     /** The ids of the messages posted in one channel or thread, in order. */
     in: (target) => [...where].filter(([, t]) => t === target).map(([id]) => id),
     deleteThread: (id, { keepOnLine = false } = {}) => {

@@ -54,11 +54,15 @@ const isBuild = (text) => BUILD.test(String(text ?? '').replace(/<[@#][!&]?\d+>/
 /** The name of an attached file, for the people who download it: only A-Z, a-z, 0-9, dot, dash and underscore; any other character becomes "_". */
 export const attachmentName = (name) => name.replace(/[^A-Za-z0-9._-]/gu, '_');
 
+/** Discord's limit for the description of a command or an option, in UTF-16 units. */
+const DESCRIPTION = 100;
 /**
  * The /sage command, for the guild's command list: its subcommands, the project as a choice of the listed projects. `us` is src/crew.js
- * namesOf: the descriptions name the owner (T244), so each sage-bot's /sage in a server says whose it is.
+ * namesOf: the descriptions name the owner (T244), so each sage-bot's /sage in a server says whose it is. A name can hold letters of
+ * 2 UTF-16 units each, so each description with a name is cut to DESCRIPTION (F-T244-5). The project names are at most 32 characters.
  */
 export function askCommand(projects, us) {
+  const named = (s, text) => s.setDescription(cut(text, DESCRIPTION));
   const project = (o) => o.setName('project').setDescription('A shared project (the first one when you leave it out)')
     .addChoices(...projects.map((p) => ({ name: p.name, value: p.name })));
   return new SlashCommandBuilder().setName('sage').setDescription('Read the sage board, a task, the open questions or shared files')
@@ -69,9 +73,9 @@ export function askCommand(projects, us) {
       .addStringOption(project))
     .addSubcommand((s) => s.setName('gates').setDescription('The open questions with their options').addStringOption(project))
     .addSubcommand((s) => s.setName('files').setDescription('The shared images and PDFs of a project').addStringOption(project))
-    .addSubcommand((s) => s.setName('request').setDescription(`Request a feature: ${us.owner} approves or declines it`).addStringOption(project))
-    .addSubcommand((s) => s.setName('unregister').setDescription(`Stop ${us.bot} in this channel (${us.owner} only)`))
-    .addSubcommand((s) => s.setName('stop').setDescription(`Turn off the link from Discord to sage at once (the crew and ${us.owner})`))
+    .addSubcommand((s) => named(s.setName('request'), `Request a feature: ${us.owner} approves or declines it`).addStringOption(project))
+    .addSubcommand((s) => named(s.setName('unregister'), `Stop ${us.bot} in this channel (${us.owner} only)`))
+    .addSubcommand((s) => named(s.setName('stop'), `Turn off the link from Discord to sage at once (the crew and ${us.owner})`))
     .toJSON();
 }
 

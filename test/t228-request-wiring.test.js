@@ -341,7 +341,7 @@ test('/sage request refuses before the form: the link off, an open request, an u
   assert.equal(only(await b.cmd(JON, 'request', { options: { project: '**x** <@&1>' } })), 'I do not know a shared project called "\\*\\*x\\*\\* \\<@&1\\>". Nothing was sent.');
   assert.equal(only(await b.cmd(JON, 'request', { channelId: '400000000000000003' })), `I take requests in <#${ASK}> and the other channels of sage-bot, so please ask there.`);
   await b.request(JON);
-  assert.equal(only(await b.cmd(JON)), `You have an open request: RQ1 · ${TITLE}, waiting for Erick since ${t(b.now)} in <#${b.r().thread}>. A sage-crew member can have 1 open request at a time. Withdraw it in its thread, or wait for Erick's answer.`);
+  assert.equal(only(await b.cmd(JON)), `You have an open request: RQ1 · ${TITLE}, waiting for Erick since ${t(b.now)} in <#${b.r().thread}>. A sage-crew member can have 1 open request at a time on sage-bot. Withdraw it in its thread, or wait for Erick's answer.`);
   // A /sage request in a thread of the project channel opens the form, and the line goes to the channel.
   const inThread = await b.cmd(MAYA, 'request', { channelId: b.r().thread, parentId: ASK });
   assert.equal(inThread[0].kind, 'modal');
