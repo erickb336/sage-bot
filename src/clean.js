@@ -23,6 +23,14 @@ const LOOKALIKES = new Map([
   // Kept by hand: the letter \u4E36 (U+4E36) looks like `\`, and confusables 18.0.0 does not map it to `\` (F-T247-34).
   ['\u4E36', '\\'],
 ]);
+/**
+ * For `literal` in src/outbox.js (F-T247-35): whether a character is a letter, number or mark that `literal` can keep and that looks
+ * like `'` (its target is only `'`, also the Hebrew yod, which forModel keeps below). Two of them side by side, or one beside `'`, look
+ * like `"`, so `literal` escapes such a run. Every punctuation or symbol that looks like `'` is escaped anyway.
+ */
+const KEPT = /^[[\p{L}\p{N}\p{M}]--\p{Default_Ignorable_Code_Point}]$/v;
+const APOSTROPHE_LIKE = new Set([...LOOKALIKES].filter(([c, t]) => /^'+$/.test(t) && KEPT.test(c)).map(([c]) => c));
+export const apostropheLike = (ch) => APOSTROPHE_LIKE.has(ch);
 LOOKALIKES.delete('\u05D9');
 /** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
 export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([, t]) => /[<>]/.test(t))

@@ -87,7 +87,7 @@ test('F-T27-39 to F-T27-42, F-T27-46: the sweep over all of Unicode: safe keeps 
   const EMOJI = /^\p{RGI_Emoji}$/v;
   const LETTER = /^[\p{L}--[\u115F\u1160\u3164\uFFA0]]$/v;
   const BASE = /^[[\p{N}\p{P}\p{S}]--[\x60\u2800\u{1D159}]]$/v;
-  const MARK = /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v; // no variation selector, no U+034F, U+17B4, U+17B5 (F-T247-31)
+  const MARK = /^[\p{M}--[\p{Default_Ignorable_Code_Point}\u{16FE4}]]$/v; // no variation selector, no U+034F, U+17B4, U+17B5 (F-T247-31), no blank filler U+16FE4 (F-T247-37)
   const STACKING = /^\p{Mn}$/u;
   const SPACE = /^\p{White_Space}$/u;
   // Every character of an output is an RGI emoji, a letter, a number, punctuation, a mark, a joiner, a space or a symbol (not a backtick, the blank
