@@ -475,9 +475,9 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     if (!message) return message;
     // A tied card gets one tie ping below it, before the other held messages: a card that moved (Q1 of R1084), and a card tied before its
     // first post, whose tie ping postAbout could not post (C3 of R1096). It replaces the owner's pings that waited for the card (a tie
-    // post or a reminder), so the owner gets one ping at once, not none until the next reminder.
+    // post or a reminder), so the owner gets one ping at once, not none until the next reminder. The 2-hour reminders count from it (C4 of R1107).
     if (tied) m.held = [tieMessage(gate, ask, ppl), ...(m.held ?? []).filter((p) => !p.allowedMentions?.users?.includes(config.ownerId))];
-    Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() });
+    Object.assign(m, { message, channel: at }, (tied || moved(m)) && { remindedAt: clock() });
     persist();
     return message;
   }

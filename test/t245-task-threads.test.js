@@ -18,7 +18,7 @@ import { createRequestFlow } from '../src/requestFlow.js';
 import { approve as approveAt, loadRequests, requestsPathOf } from '../src/requests.js';
 import { writeWhole } from '../src/state.js';
 import { isLiveTask, loadThreads, threadsPathOf } from '../src/threads.js';
-import { BATCH_LIMIT, MINUTE, openGate, parseGate, step } from '../src/vote.js';
+import { BATCH_LIMIT, HOUR, MINUTE, openGate, parseGate, step } from '../src/vote.js';
 import { CHANNEL, CONFIG, CREW_ROLE, GUILD, JON, MAYA, NAME, OWNER, SAGE, SAM, setup, T0 } from './bridge-setup.js';
 
 const ASK = '400000000000000009'; // the project channel where the crew requests: not the home channel
@@ -541,4 +541,69 @@ test('a card that is tied before its first post gets one owner tie ping below it
   assert.deepEqual(below[0].allowedMentions, { parse: [], users: [OWNER] });
   await b.bridge.loop();
   assert.equal(b.discord.in(at).length, b.discord.in(at).indexOf(cardId) + 2); // once: the next loop posts nothing
+});
+
+// R1107: repair round 3 of PR 69 (T246).
+
+// The posts since `refusePosts` that ping the owner, and those that ping a crew role.
+const since = (b) => b.discord.posts.slice(b.from);
+const ownerPings = (b) => since(b).filter((p) => p.allowedMentions?.users?.includes(OWNER));
+const crewPings = (b) => since(b).filter((p) => p.allowedMentions?.roles?.length);
+// Every post is refused (50013) until the returned function puts the real post back.
+function refusePosts(b) {
+  const real = b.discord.post;
+  b.from = b.discord.posts.length;
+  b.discord.post = async () => { throw Object.assign(new Error('Missing Permissions'), { code: 50013, status: 403 }); };
+  return () => { b.discord.post = real; };
+}
+
+test('a card tied before its first post that posts 125 minutes after the tie gets its tie ping, and no 2-hour reminder right after it (C4 of R1107)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  const allow = refusePosts(b);
+  await ask(b, 'T1', ['Which date format?', 'ISO|Locale']);
+  const id = `${NAME}/G1`;
+  const tiedAt = b.bridge.entry(id).gate.endsAt;
+  b.now = tiedAt;
+  await b.bridge.loop();
+  assert.equal(b.bridge.entry(id).gate.phase, 'tied');
+  allow();
+  b.now = tiedAt + 125 * MINUTE;
+  await b.bridge.loop();
+  await b.bridge.loop();
+  assert.equal(b.discord.cardOf(id) !== undefined, true);
+  assert.deepEqual(ownerPings(b).map((p) => /is tied after its vote/.test(p.content)), [true]); // one owner ping: the tie ping
+  b.now = tiedAt + 4 * HOUR - MINUTE; // 114 minutes after the tie ping: the 2-hour mark at 4 hours is not due yet
+  await b.bridge.loop();
+  assert.equal(ownerPings(b).length, 1);
+  b.now = tiedAt + 4 * HOUR;
+  await b.bridge.loop();
+  assert.deepEqual(ownerPings(b).map((p) => /^<@\d+> reminder: /.test(p.content)), [false, true]); // the reminder, about 2 hours later
+  assert.equal(crewPings(b).length, 0);
+});
+
+test('a bridge restart while a tied task-thread card waits for its first post: one card with the tie text, one owner ping, no crew ping (Q5 of R1107)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  const allow = refusePosts(b);
+  await ask(b, 'T1', ['Which date format?', 'ISO|Locale']);
+  const id = `${NAME}/G1`;
+  b.now = b.bridge.entry(id).gate.endsAt;
+  await b.bridge.loop();
+  assert.equal(b.bridge.entry(id).gate.phase, 'tied');
+  assert.equal(b.discord.cardOf(id), undefined);
+  // A new process: a new thread map and a new bridge from the same files.
+  b.bridge = b.newBridge(loadThreads(threadsPathOf(b.config)));
+  allow();
+  b.now += MINUTE;
+  await b.bridge.loop();
+  const cardId = b.discord.cardOf(id);
+  assert.equal(b.discord.where.get(cardId), b.thread); // in the task thread
+  assert.deepEqual(since(b).filter((p) => p.components).map((p) => p.content), [`${NAME} T1 waits for Erick to break a tie.`]); // one card
+  assert.deepEqual(ownerPings(b).map((p) => /is tied after its vote/.test(p.content)), [true]);
+  assert.equal(crewPings(b).length, 0);
+  const posts = b.discord.posts.length;
+  b.now += MINUTE;
+  await b.bridge.loop();
+  assert.equal(b.discord.posts.length, posts); // the next loop posts nothing
 });
