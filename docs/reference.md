@@ -59,13 +59,13 @@ It also exports these constants, all in ms except the last:
 | `MINUTE` | 60,000 |
 | `HOUR` | 60 minutes |
 | `BATCH_LIMIT` | 30 minutes: the time limit of a batch vote in the home channel or a session thread, and of a gate with no `limit` |
-| `THREAD_LIMIT` | 10 minutes: the time limit of a batch vote in a task thread (T245) |
-
-`limitOf(gate)` gives the time limit of a batch gate: its `limit`, or `BATCH_LIMIT` for a gate saved before T245. The bridge, the cards and `parseGate` read the limit only through it.
+| `THREAD_LIMIT` | 10 minutes: the time limit of a batch vote of a task with a task thread (T245) |
 | `REMINDER_EVERY` | 2 hours |
 | `REASON_MAX` | 500: the most characters (code points) in a ballot reason; a longer one is cut |
 | `MAX_OPTIONS` | 5: the most options of a single gate or of one batch part (one row of Discord buttons) |
 | `MAX_BALLOTS` | 1000: the most voters on one part; the next new voter gets `full` |
+
+`limitOf(gate)` gives the time limit of a batch gate: its `limit`, or `BATCH_LIMIT` for a gate saved before T245. The bridge, the cards and `parseGate` read the limit only through it.
 
 ### openGate({ id, kind, options, parts, askedBy, at, limit })
 
@@ -754,11 +754,12 @@ A team steers sage on a task inside one Discord thread (T245, issue 60 PR 5 and 
 2. **The questions.** When sage marks an open gate of that task as a team vote, the bridge posts its card in the task thread, not in the home channel or a session thread. The task counts by its id, the project's name and the project's folder now (G45 A), so a task of another folder with the same name gets no task thread. The card is always a vote, also for one question alone, so that the crew decides together; its limit is `THREAD_LIMIT`, 10 minutes, and the gate stores it. The alert pings the roles named sage-crew: "project T5 has 1 product question. Vote on it within 10 minutes. Then the votes decide, and Erick breaks a tie." The card's footer says "Rule: 10 minutes, then each part goes to the option with the most votes · a tied part waits for Erick".
 3. **The vote.** Every member with the role named sage-crew votes, one vote per part; there is no join step and no decider. At 10 minutes the votes decide each part. A tied part waits for the owner: only the owner (`ownerId`) breaks the tie, or ends the vote early, as on every card.
 4. **Other gates.** A gate of a task with no task thread stays where it went before: in the home channel or its session thread, with 30 minutes. A crew recommendation (the automatic-merge question) never goes to a task thread.
-5. **The buttons.** The routes (`src/discord.js` `accepts`) take a press of the bridge's buttons in the home channel, in its threads, and in each thread whose entry in the thread map is a task thread, in any registered channel (F3 of R917). A press in any other thread gets nothing; on a known thread, the press still counts only on the card's own message.
+5. **The buttons.** The routes (`src/discord.js` `accepts`) take a press of the bridge's buttons in the home channel, in its threads, and in each thread whose entry in the thread map is a task thread of a registered channel (F3 of R917). A press in any other thread gets nothing; on a known thread, the press still counts only on the card's own message.
+6. **An unregistered channel** (F-T245-3). A task thread counts only while the channel registry holds its channel: `isLiveTask` in `src/threads.js` is the one check, and the routes, the bridge and the request flow all use it. After the owner unregisters a channel, a press in its task threads gets nothing, and a mention there gets the reply for a channel that is not registered. The next design question of such a task goes to the home channel, still as a vote of 10 minutes, and the old thread gets no card and no ping. An approve of a request of that channel makes no task thread. The entries stay in the thread map, so a channel that Erick registers again at the terminal gets its task threads back. A card that was already in the thread before the unregister stays there; T245 does not move it.
 
 When Discord refuses the card in the task thread (the thread is gone, or a right is missing), the card goes to the home channel, as for a session thread that Discord refuses.
 
-**The tests.** `test/t245-task-threads.test.js` plays each of these on the fake Discord with the pinned sage copy in a scratch HOME: Approve turns the request thread into the task thread; a design gate of that task posts in its thread with a 10-minute limit; the crew votes and the votes decide at 10 minutes; a tie waits for the owner and only the owner breaks it; a gate with no task thread stays in the home channel with 30 minutes; a version 1 thread map loads; an old gate with no limit reads as 30 minutes; a press in a task thread is accepted, and one in an unknown thread is not.
+**The tests.** `test/t245-task-threads.test.js` plays each of these on the fake Discord with the pinned sage copy in a scratch HOME: Approve turns the request thread into the task thread; a design gate of that task posts in its thread with a 10-minute limit; the crew votes and the votes decide at 10 minutes; a tie waits for the owner and only the owner breaks it; a gate with no task thread stays in the home channel with 30 minutes; a version 1 thread map loads; an old gate with no limit reads as 30 minutes; a press in a task thread is accepted, and one in an unknown thread is not; after the owner unregisters the channel, the thread takes no card, ping or press, and an approve there makes no task thread; a bridge restart in the middle of a vote keeps it, and the vote decides once at 10 minutes.
 
 ## Sage sessions and their threads
 

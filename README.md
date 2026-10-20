@@ -78,7 +78,8 @@ The bridge only reads the logbook, and it changes it only through the sage state
 ### A request thread becomes the task thread
 
 - After the owner approves a request, its thread becomes the thread of the new sage task.
-- sage's design questions for that task appear there as cards. Every sage-crew member votes, within 10 minutes.
+- When sage marks a design question of that task as a team vote, it appears there as a card. Every sage-crew member votes, within 10 minutes.
+- A design question that sage does not mark as a team vote stays with the owner at the terminal.
 - At 10 minutes the votes decide. A tie waits for the owner, and only the owner breaks it or ends the vote early.
 - Other questions stay in the home channel, with 30 minutes, as before.
 
