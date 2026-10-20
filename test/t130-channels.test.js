@@ -119,7 +119,7 @@ test('T130 terminal: Erick registers a channel for a project and unregisters it;
   let r = script(b, 'register', OTHER, 'beta');
   assert.equal(r.status, 0, r.err);
   assert.match(r.out, new RegExp(`^made the channel registry .+ from the config: ${ASK} -> alpha, ${CHANNEL} -> alpha \\(home\\)\nregistered the channel ${OTHER} for the project beta\n`));
-  assert.match(r.out, /At its next start the bridge checks that sage-bot has these permissions there, and logs each missing one: View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links\./);
+  assert.match(r.out, /At its next start the bridge checks that sage-bot has these permissions there, and logs each missing one: View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links, Attach Files\./);
   assert.deepEqual(file(b).channels, { [ASK]: { project: 'alpha' }, [CHANNEL]: { project: 'alpha', home: true }, [OTHER]: { project: 'beta' } });
   assert.equal(mode(b.registry), 0o600);
   r = script(b, 'register', NOWHERE, 'payroll');
@@ -151,12 +151,13 @@ test('T130 terminal: the script refuses while a bridge holds the lock, and chang
 
 test('T130 permissions: the start names each permission that sage-bot lacks in a registered channel, and a channel it cannot see', async () => {
   const all = new PermissionsBitField([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
-    PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.ManageThreads, PermissionFlagsBits.EmbedLinks]);
+    PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.ManageThreads, PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.AttachFiles]);
   const some = new PermissionsBitField([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]);
   const map = new Map([[CHANNEL, { project: 'alpha', home: true }], [ASK, { project: 'alpha' }], [OTHER, { project: 'beta' }]]);
   const perms = { [CHANNEL]: all, [ASK]: some };
   assert.deepEqual(await checkChannels(map, async (id) => { if (id === OTHER) throw new Error('Missing Access'); return perms[id]; }), [
-    `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links. Give them to its role in that channel`,
+    `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links, Attach Files. Give them to its role in that channel`,
     `sage-bot cannot see the registered channel ${OTHER} (beta): add it to the channel, or unregister the channel`,
   ]);
   assert.deepEqual(await checkChannels(new Map([[CHANNEL, { project: 'alpha', home: true }]]), async () => all), []);
@@ -355,9 +356,9 @@ test('F-T130-9 permission check: after the login, the start logs each permission
   const lines = [];
   const channels = new Map([[CHANNEL, { project: 'alpha', home: true }], [ASK, { project: 'alpha' }], [OTHER, { project: 'beta' }]]);
   assert.equal(await enter(client, { config: { guildId: GUILD }, channels, ask: { projects: [] }, log: (l) => lines.push(l) }), guild);
-  assert.deepEqual(set, [['sage']]);
+  assert.deepEqual(set, [['sage', 'Send to sage']]); // /sage and the message command of T247
   assert.deepEqual(lines, [
-    `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links. Give them to its role in that channel`,
+    `sage-bot lacks these permissions in the registered channel ${ASK} (alpha): Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links, Attach Files. Give them to its role in that channel`,
     `sage-bot cannot see the registered channel ${OTHER} (beta): add it to the channel, or unregister the channel`,
   ]);
 });
@@ -368,7 +369,7 @@ const button = ({ user = OWNER, roles = [CREW], channelId = ASK, customId, age =
   const calls = [];
   return { calls, guildId: GUILD, channelId, channel: null, customId, user: { id: user, bot: false, username: 'jon_l' },
     member: { roles: { cache: new Map(roles.map((r) => [r, { name: r }])) }, displayName: 'Erick <Owner>' }, message: { createdTimestamp: Date.now() - age },
-    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false,
+    isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => true, isModalSubmit: () => false,
     update: async (p) => { calls.push(['update', p.content]); }, reply: async (p) => { calls.push(['reply', p.content]); } };
 };
 

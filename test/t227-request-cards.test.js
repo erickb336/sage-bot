@@ -79,12 +79,12 @@ test('the confirm: the title and the text as typed, made safe, with no marks; wh
   assert.doesNotMatch(JSON.stringify(c), /~~|sage drops|sage reads|does not get/);
 });
 
-test('the confirm refuses a title or a text with nothing that sage can read, and keeps Edit', () => {
-  for (const [k, draft] of [['title', { project: 'p', title: '😀😀😀😀', text: 'Some words here' }], ['text', { project: 'p', title: 'Add CSV', text: '"<>" ** !! ??' }]]) {
-    const c = confirmMessage('D7', draft, US);
-    assert.equal(c.content, `Your ${k} has nothing that sage can read: it needs letters or digits. Nothing was sent.`);
-    assert.deepEqual([c.embeds, c.components[0].components.map((b) => b.custom_id)], [undefined, ['rq1:edit:D7', 'rq1:cancel:D7']]);
-  }
+test('the confirm refuses a title with nothing that sage can read, and keeps Edit; a text with no letter or digit goes (R950 Q2)', () => {
+  const c = confirmMessage('D7', { project: 'p', title: '😀😀😀😀', text: 'Some words here' }, US);
+  assert.equal(c.content, 'Your title has nothing that sage can read: it needs letters or digits. Nothing was sent.');
+  assert.deepEqual([c.embeds, c.components[0].components.map((b) => b.custom_id)], [undefined, ['rq1:edit:D7', 'rq1:cancel:D7']]);
+  const ok = confirmMessage('D7', { project: 'p', title: 'Add CSV', text: '"<>" ** !! ??' }, US);
+  assert.deepEqual(ok.components[0].components.map((b) => b.custom_id), ['rq1:send-team:D7', 'rq1:send-owner:D7', 'rq1:edit:D7', 'rq1:cancel:D7']);
   assert.deepEqual(expired('D7').components[0].components.map((b) => b.label), ['Edit', 'Cancel']);
   assert.equal(expired('D7').content, 'This confirm expired after 10 minutes. Nothing was sent. Press Edit to check your text again.');
 });

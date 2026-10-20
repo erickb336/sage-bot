@@ -50,7 +50,7 @@ test('F-T244-5: a /sage that cannot be built stops only /sage: enter logs it and
   assert.equal(await enter(client, { config: { guildId: GUILD }, channels: new Map(), ask: { projects }, log: (l) => lines.push(l) }), guild);
   assert.equal(set, 0);
   assert.equal(lines.length, 1);
-  assert.match(lines[0], /^Discord refused to set \/sage, so \/sage keeps the commands of the last start that worked, or there is no \/sage; the votes and cards work: /);
+  assert.match(lines[0], /^Discord refused to set \/sage and Send to sage, so they keep the commands of the last start that worked, or there are none; the votes and cards work: /);
 });
 
 test('F-T244-6: the owner\'s name is their own Discord name (global name, else user name), never a server nickname', async () => {

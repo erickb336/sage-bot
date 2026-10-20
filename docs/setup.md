@@ -13,7 +13,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
 - [ ] **1. Make a Discord app only for sage-bot, with your own Discord account.** In the Discord Developer Portal, make a new application with a bot user. Make it with your own account, not in a Developer Team, so that sage-bot knows you as its owner (step 3).
   - On the **Installation** page, keep only **Guild Install**: turn off **User Install**.
   - On the **Bot** page, turn off **Public Bot**, so that only you can add it to a server.
-  - Turn on the **Server Members** intent. Leave the **Message Content** intent off.
+  - Turn on the **Server Members** intent and the **Message Content** intent. Under 100 servers each one is a switch on the Bot page, with no review by Discord. sage-bot reads the text of the messages before a message to sage, as its context ("implement what we discussed above"); without the intent, Discord refuses its login (close code 4014).
   - Invite it to your server with the `bot` and `applications.commands` scopes and the permission integer `326417632256`. It includes Read Message History: after the Mac sleeps, sage-bot reads back the mentions that it missed (see [the catch-up](reference.md#the-catch-up)).
   - On the Bot page, choose **Reset Token**, and keep the token only for step 5.
 
@@ -38,7 +38,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | --- | --- |
   | @everyone | Deny Send Messages, Send Messages in Threads, Create Public Threads, Create Private Threads and Use Application Commands. |
   | sage-crew | Deny the same five permissions. |
-  | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. |
+  | The sage-bot app | Allow View Channel, Send Messages, Embed Links, Attach Files, Read Message History, Create Public Threads, Send Messages in Threads and Manage Threads. The approval card of a message to sage carries payload.txt, so it needs Attach Files. |
 
   **Do not let the Discord plugin watch the parent channel.** Chat with sage in a separate channel.
   **The server owner and members with the Administrator permission ignore these denies.** Discord lets them type and use `/sage` in the parent channel and every session thread, so they must not.
@@ -49,7 +49,7 @@ The owner does each step by hand. sage-bot changes no settings file, and it neve
   | --- | --- |
   | @everyone | Allow View Channel. Deny Send Messages and Use Application Commands. |
   | sage-crew | Allow Send Messages and Use Application Commands. |
-  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks the first seven at each start and logs each one that is missing. |
+  | The sage-bot app | Allow View Channel, Send Messages, Read Message History, Create Public Threads, Send Messages in Threads, Manage Threads, Embed Links and Attach Files. The bridge checks all eight at each start and logs each one that is missing. |
 
   **Do not let the Discord plugin watch #ask-sage.** If it does, an @sage message in any session thread reaches every running sage session, and its `fetch_messages` tool can read the tie posts.
   *Why:* the crew asks here with `/sage` or a mention, and everyone who can view the channel reads the questions and the answers. A `/sage request` here posts one line and opens its thread, where you approve or decline it. You and the crew type `/sage stop` here: it turns the link off at once. Only you turn it on again, at the terminal. sage-bot ignores everyone else. If you do not hold sage-crew, allow yourself Send Messages and Use Application Commands here too.
@@ -215,10 +215,10 @@ The second owner, for example Maya, does these steps:
 | A button or a form | Discord sends a press only to the app that posted the message. The vote and request buttons also check the message id that the bot keeps for each card, so a press from any other message changes nothing. |
 | A mention | Discord tells each bot which users a message mentions. A bot answers only a mention of itself, so a mention of Maya's bot in Erick's thread is not Erick's bot's. |
 | `/sage` | Each bot sets its own `/sage` in the server. Discord shows the bot's name beside each one, and the descriptions name its owner. |
-| A thread | Each bot keeps its own thread map. In a thread of another bot, a bot only points to its own channel. |
+| A thread | Each bot keeps its own thread map. A mention of a bot in a thread of another bot moves: the bot opens its own thread from a line in its home channel, and posts one line in the old thread that pings nobody. |
 | The files | Each bridge keeps its requests, thread map, audit log and votes beside its own `statePath`, on its own Mac. |
 
-A mention of one bot in a thread of another bot gets only that pointer for now. A later pull request (PR 7) adds a move of the mention to the bot's own thread.
+A message to sage from the crew waits for the owner of that bot: its approval card in the thread has Approve and Decline for that owner only (see [Messages to sage](reference.md#messages-to-sage)).
 
 ## The audit log and the kill switch
 

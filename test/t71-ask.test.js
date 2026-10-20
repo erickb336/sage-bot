@@ -7,15 +7,15 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tempFolder } from './temp-folder.js';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { ChannelType, Client, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
 import { openChannels } from '../src/channels.js';
-import { askCommand, attachmentName, createAsk as rawAsk, HOUR, MAX_BYTES, POINTER, readShared, sharedFiles } from '../src/ask.js';
+import { askCommand, attachmentName, createAsk as rawAsk, HOUR, MAX_BYTES, NOT_ON, readShared, sharedFiles } from '../src/ask.js';
 import { loadProjects, projectsOf } from '../src/projects.js';
 import { enter, rolesOf, routes } from '../src/discord.js';
 import { fakeCommand, fakeDiscord, fakeMention } from '../src/fake-discord.js';
 import { BOT, CONFIG, CREW_ROLE, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, T0 } from './bridge-setup.js';
 import { CREW, namesOf } from '../src/crew.js';
-const BUILDS = 'Builds are for Erick: ask Erick.';
+const IN_PLACE = { parse: [], repliedUser: false };
 const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
 
 const ASK = '400000000000000009';
@@ -181,7 +181,7 @@ test('G20, T239: a member with neither sage role gets one private line for a com
   assert.deepEqual(b.lines, []);
   // Nothing counted: with a role, Sam gets his daily pointer elsewhere, 9 pointers and a 10th answer here, then the limit note.
   assert.deepEqual(await say(SAM, [CREW], '<@1> board?', ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: { parse: [], repliedUser: false } }]);
-  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [CREW], 'hi'), [{ content: POINTER, allowedMentions: { parse: [] } }], `ask ${n}`);
+  for (let n = 1; n <= 9; n++) assert.deepEqual(await say(SAM, [CREW], 'hi'), [{ content: NOT_ON, allowedMentions: IN_PLACE }], `ask ${n}`); // T247: a message to sage, no outbox here
   assert.deepEqual(await b.cmd(SAM, 'board', {}, { roles: [CREW] }), [{ content: BOARD, ...PUBLIC }]);
   assert.match((await b.cmd(SAM, 'board', {}, { roles: [CREW] }))[0].content, /^You asked 10 times in the last hour/);
   assert.deepEqual(await b.cmd(BOT, 'board', {}, { roles: [CREW], bot: true }), []);
@@ -214,11 +214,13 @@ test('the 11th ask in a rolling hour is refused in public with the time of the n
   assert.equal((await b.cmd(MAYA, 'board'))[0].content, BOARD);
 });
 
-test('a mention in #ask-sage gets its answer in a new thread that pings nobody; a build ask gets the build line; the limit holds with one note', async (t) => {
+test('a read ask in #ask-sage gets its answer in a new thread that pings nobody; any other mention is a message to sage (T247: with no outbox here, one line in place); the limit holds with one note', async (t) => {
   const b = world(t);
   const quiet = { parse: [] };
-  assert.deepEqual(await b.mention(MAYA, '<@1> what is new?'), [{ content: POINTER, allowedMentions: quiet }]);
-  assert.deepEqual(await b.mention(MAYA, '<@1> add a dark mode'), [{ content: `${POINTER} ${BUILDS}`, allowedMentions: quiet }]);
+  assert.deepEqual(await b.mention(MAYA, '<@1> board'), [{ content: BOARD, allowedMentions: quiet }]);
+  assert.equal(b.place.threads.size, 1);
+  assert.deepEqual(await b.mention(MAYA, '<@1> add a dark mode'), [{ content: NOT_ON, allowedMentions: IN_PLACE }]);
+  assert.equal(b.place.threads.size, 1); // no thread opens for a message that is not sent
   for (let n = 3; n <= 10; n++) assert.equal((await b.mention(MAYA, 'hi')).length, 1);
   assert.deepEqual((await b.mention(MAYA, 'hi'))[0].content, `You asked 10 times in the last hour; that is the limit. Your next ask works at <t:${Math.floor((T0 + HOUR) / 1000)}:t>.`);
   assert.deepEqual(await b.mention(MAYA, 'hi'), []); // one note, not one per mention
@@ -337,7 +339,6 @@ test('launchd.mjs refuses a config whose projects the bridge would refuse, with 
 
 // ---- Repair round 1 (R333): the findings of R329, R330 and R332. ----
 
-const POINTER_TEXT = POINTER;
 const THREAD = '400000000000000077';
 
 /** A project folder `site` with the given files (name → content), and an ask whose only project is it, with `files` as its allow-list. */
@@ -462,22 +463,12 @@ test('F-T71-5: a /sage command and a mention in a thread of #ask-sage count as #
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ASK }), [{ content: BOARD, ...PUBLIC }]);
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: Promise.resolve(ASK) }), [{ content: BOARD, ...PUBLIC }]);
   assert.deepEqual(await b.cmd(MAYA, 'board', {}, { channelId: THREAD, parentId: ELSEWHERE }), [{ content: `I answer /sage in <#${ASK}>, so please ask there.`, ...PUBLIC }]);
-  const quiet = { parse: [], repliedUser: false };
-  // T131: a thread of #ask-sage that sage-bot did not open gets the pointer to the channel, where a mention opens a thread.
-  assert.deepEqual(await b.mention(MAYA, '<@1> hi', THREAD, false, ASK), [{ content: `I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`, allowedMentions: quiet }]);
-  assert.deepEqual(await b.mention(JON, '<@1> hi', THREAD, false, ELSEWHERE), [{ content: `I answer in <#${ASK}>, so everyone can find the answers. Please ask there.`, allowedMentions: quiet }]);
-});
-
-test('F-T71Q-3 and F-T71Q-4: the mention copy fits the reader: the owner, a crew member, a build verb that starts a sentence', async (t) => {
-  const b = world(t);
-  const say = async (who, text) => (await b.mention(who, text))[0]?.content;
-  assert.equal(await say(MAYA, '<@1> what is new?'), POINTER_TEXT);
-  assert.equal(await say(OWNER, '<@1> add a dark mode'), `${POINTER_TEXT} Builds from Discord are not ready yet.`);
-  assert.equal(await say(JON, '<@1> add a dark mode'), `${POINTER_TEXT} Builds are for Erick: ask Erick.`);
-  for (const text of ['<@1> any update?', '<@1> does that make sense?', '<@1> is the merge done?']) assert.equal(await say(MAYA, text), POINTER_TEXT, text);
-  b.now += HOUR; // a new hour, so that the limit does not end the list
-  for (const text of ['<@1> add a dark mode', '<@1> please fix the login', '<@1> can you update the README?', '<@1> Thanks. Merge it now']) {
-    assert.equal(await say(MAYA, text), `${POINTER_TEXT} Builds are for Erick: ask Erick.`, text);
+  // T247 (R918 C7): a thread that sage-bot did not open, of #ask-sage or of a channel that is not registered, moves to a thread of sage-bot:
+  // a line in the home channel, a thread from it, one quiet line in the old thread, and the answer in the new thread.
+  for (const [user, thread, parent] of [[MAYA, THREAD, ASK], [JON, '400000000000000078', ELSEWHERE]]) {
+    const posts = await b.mention(user, '<@1> board', thread, false, parent);
+    const opened = [...b.place.threads.keys()].at(-1);
+    assert.deepEqual(posts.map((p) => p.content.replace(/\/\d+ in/, '/<id> in')), [`From https://discord.com/channels/${CONFIG.guildId}/${thread}/<id> in <#${thread}>`, `Moved to sage-bot: <#${opened}>`, BOARD]);
   }
 });
 
@@ -514,7 +505,11 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   const b = world(t);
   const pressed = [];
   const sent = [];
-  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
+  // THREAD is a public thread (F-T247-11, F-T247-26): a public thread type, and its parent lets @everyone view it and read its history.
+  const everyone = { id: CONFIG_GUILD };
+  const open = { permissionsFor: (role) => ({ has: (flag) => role === everyone
+    && (flag === PermissionFlagsBits.ViewChannel || flag === PermissionFlagsBits.ReadMessageHistory) }) };
+  const fetch = async (id) => (id === THREAD ? { isThread: () => true, parentId: ASK, type: ChannelType.PublicThread, parent: open, guild: { roles: { everyone } } } : id === OPENED ? { send: async (p) => { sent.push(p.content); return { id: '1' }; } } : { isThread: () => false });
   const guildRoles = new Map([[CREW_ROLE, { name: CREW }]]); // the guild's roles, as discord.js keeps them
   const on = routes({ config: { ...CONFIG, guildId: CONFIG_GUILD }, ask: b.ask, bridge: { interaction: async (i) => { pressed.push(i); } }, fetch, botId: BOT_USER, guildRoles });
   const run = async (i, f = 'interaction') => { await on[f](i); return i.calls; };
@@ -533,9 +528,10 @@ test('F-T71-4: routes take roles from the member, never from options, and answer
   assert.deepEqual(await run(message({ mentions: [JON] }), 'message'), []);
   // T131: a mention in the channel opens a thread named from the request, and the answer goes there.
   // The owner, by id and with no role, is answered too.
-  assert.deepEqual(await run(message({ author: OWNER, roles: [], content: '<@1> fix the login' }), 'message'), ['thread: fix the login']);
-  assert.deepEqual(sent, [`${POINTER_TEXT} Builds from Discord are not ready yet.`]);
-  assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [`I answer in my own threads. Mention me in <#${ASK}> and I open one for you.`]);
+  assert.deepEqual(await run(message({ author: OWNER, roles: [], content: '<@1> board' }), 'message'), ['thread: board']);
+  assert.deepEqual(sent, [BOARD]);
+  // T247: any other mention is a message to sage; this bridge has no outbox, so one line in place.
+  assert.deepEqual(await run(message({ channelId: THREAD }), 'message'), [NOT_ON]);
   assert.deepEqual(pressed, []);
 });
 
@@ -604,12 +600,12 @@ test('F-T71-13: a mention or a command from a user id that is not a Discord id g
     await b.ask.command(i);
     assert.deepEqual(i.replies, [], id);
   }
-  assert.deepEqual(await b.mention(MAYA, '<@1> hi'), [{ content: POINTER_TEXT, allowedMentions: { parse: [] } }]); // a real id still gets the pointer, in a thread
+  assert.deepEqual(await b.mention(MAYA, '<@1> board'), [{ content: BOARD, allowedMentions: { parse: [] } }]); // a real id still gets its answer, in a thread
 });
 
 /** A button press or a form as discord.js gives it, for `routes`. SAMPLE DATA ONLY. */
 const press = ({ guildId = CONFIG_GUILD, channelId = CONFIG.channelId, channel = null, customId, modal = false }) => ({ guildId, channelId, channel, customId,
-  isChatInputCommand: () => false, isButton: () => !modal, isModalSubmit: () => modal });
+  isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => !modal, isModalSubmit: () => modal });
 
 test('F-T71-9: routes send a button or a form in the bridge channel or its thread to the bridge; another guild or channel gets nothing', async (t) => {
   const b = world(t);
@@ -705,7 +701,7 @@ test('F-T93-4: a refused /sage registration is logged and the start goes on, so 
   const client = { user: { id: '100000000000000099' }, guilds: { fetch: async () => guild }, channels: { fetch: async () => null } };
   const lines = [];
   assert.equal(await enter(client, { config: { guildId: '200000000000000001' }, channels: new Map(), ask: { projects: [] }, log: (l) => lines.push(l) }), guild);
-  assert.deepEqual(lines, ['Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: code 50001, status 403: Missing Access']);
+  assert.deepEqual(lines, ['Discord refused to set /sage and Send to sage, so they keep the commands of the last start that worked, or there are none; the votes and cards work: code 50001, status 403: Missing Access']);
 });
 
 test('F-T93-5: a gate question and its options, a task state and the board counts are made safe; a pr that is not a number is no pull request', async (t) => {

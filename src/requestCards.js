@@ -64,14 +64,12 @@ const editRow = (key) => new ActionRowBuilder().addComponents(
 
 /**
  * The private confirm after the form: the title and the text as typed (made safe), the sentence on what sage gets, then Send (the crew
- * votes, or the owner decides the design questions), Edit and Cancel. When the title or the text has no letter or digit, the refusal of
- * newRequest (src/requests.js) with Edit and Cancel instead: the task title in sage is the title's letters and digits (forModel).
+ * votes, or the owner decides the design questions), Edit and Cancel. When the title has no letter or digit, the refusal of newRequest
+ * (src/requests.js) with Edit and Cancel instead: the task title in sage is the title's letters and digits (forModel).
  * @param {string} key  the draft's key  @param {{ project: string, title: string, text: string }} draft  @param {{ owner: string, bot: string }} us
  */
 export function confirmMessage(key, { project, title, text }, us) {
-  for (const [k, v] of [['title', title], ['text', text]]) {
-    if (!forModel(v)) return { ...ephemeral(`Your ${k} has nothing that sage can read: it needs letters or digits. Nothing was sent.`), components: [editRow(key)] };
-  }
+  if (!forModel(title)) return { ...ephemeral('Your title has nothing that sage can read: it needs letters or digits. Nothing was sent.'), components: [editRow(key)] };
   const embed = {
     title: cut(`Your request · ${safe(project)}`, LIMIT.title),
     description: cut(`**Title:** ${safe(title)}\n\n**What and why:** ${safe(text)}`, LIMIT.description),

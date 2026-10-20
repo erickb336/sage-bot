@@ -241,7 +241,7 @@ test('the routes send a request press in any registered channel to the requests,
     requests: { interaction: (x) => calls.push(x) }, fetch: async () => null, botId: '1', guildRoles: new Map([['300000000000000001', { name: CREW }]]) });
   const press = (customId, guildId = '500000000000000001') => ({
     guildId, customId, channelId: '400000000000000009', user: { id: JON, bot: false }, member: { roles: ['300000000000000001'] },
-    message: { id: '900000000000000001', createdTimestamp: T0 }, isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false,
+    message: { id: '900000000000000001', createdTimestamp: T0 }, isChatInputCommand: () => false, isMessageContextMenuCommand: () => false, isButton: () => true, isModalSubmit: () => false,
   });
   await on.interaction(press('rq1:approve:RQ1'));
   await on.interaction(press('rq1:approve:RQ1', '500000000000000002')); // another guild: nothing

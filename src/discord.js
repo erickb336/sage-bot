@@ -2,9 +2,10 @@
 // src/bridge.js uses. The tests never run `start`: it is the only code that connects to Discord.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ChannelType, Client, Events, GatewayIntentBits, ThreadAutoArchiveDuration } from 'discord.js';
+import { ChannelType, Client, Events, GatewayIntentBits, MessageReferenceType, PermissionFlagsBits, ThreadAutoArchiveDuration } from 'discord.js';
 import { apiError, createBridge, LOOP } from './bridge.js';
-import { askCommand, createAsk, openAskFiles, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { askCommand, createAsk, openAskFiles, SEND, sendCommand, STOP, STOP_CANCEL, UNREGISTER } from './ask.js';
+import { createOutboxFlow, parseOutboxId } from './outboxFlow.js';
 import { parseRequestId } from './requestCards.js';
 import { createRequestFlow } from './requestFlow.js';
 import { checkChannels, openChannels, withHome } from './channels.js';
@@ -19,12 +20,16 @@ import { alivePathOf, createCatchUp, loadAlive, PAGE } from './catchup.js';
 import { notDiscordIds } from './launchd.js';
 
 /**
- * The options of the discord.js Client. GuildMessages (not privileged) brings the messages that mention the bot, with their text; no
- * MessageContent intent (PE R314). `allowedMentions` (C5): a message that sets no allowedMentions of its own pings nobody, so a missed
+ * The options of the discord.js Client. GuildMessages (not privileged) brings the messages of the server; MessageContent (privileged, R918
+ * C6, owner decision) gives their text, so that a message to sage can take the messages before it as its context ("implement what we
+ * discussed above", T247). With it off in the Developer Portal, Discord refuses the login (close code 4014). `allowedMentions` (C5): a message that sets no allowedMentions of its own pings nobody, so a missed
  * NO_MENTIONS can never ping @everyone, a role or a person. A message that sets its own (the owner's ping on a request card, the
  * crew alert) keeps it: discord.js takes the message's allowedMentions in place of the client's.
  */
-export const CLIENT_OPTIONS = { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages], allowedMentions: { parse: [] } };
+export const CLIENT_OPTIONS = {
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  allowedMentions: { parse: [] },
+};
 
 /**
  * One sage-bot serves one server (C4): it leaves each server that is not `guildId`, the ones it is in at the start and each one it is
@@ -109,11 +114,55 @@ export async function parentOf(x, fetch) {
   return channel?.isThread() === true ? channel.parentId : null;
 }
 
-/** Whether a message is in a forum post (or a post of a media channel): a thread whose parent is a forum. */
-export async function inForum(x, fetch) {
-  const channel = x.channel ?? await fetch(x.channelId).catch(() => null);
-  return channel?.isThread() === true && [ChannelType.GuildForum, ChannelType.GuildMedia].includes(channel.parent?.type);
+/**
+ * A discord.js Message as the context of a message to sage reads it (src/outboxFlow.js): its id, author, the author's name as the server
+ * shows it and the NAMES of their roles (from the member cache, which the GuildMembers intent keeps; none for a person who left), whether a
+ * bot, a system message or a webhook wrote it, its time and its text.
+ * @param {import('discord.js').Message} m
+ */
+export const rawOf = (m, guildRoles) => ({
+  id: m.id, user: m.author.id, name: m.member?.displayName ?? m.author.globalName ?? m.author.username, roles: rolesOf(m.member, guildRoles),
+  bot: m.author.bot === true || m.system === true, webhook: !!m.webhookId, at: m.createdTimestamp, text: m.content ?? '',
+});
+
+/**
+ * Whether a thread is public (F-T247-11, F-T247-26): not a private thread, and its parent channel lets @everyone view it and read its
+ * history. Only a public thread moves
+ * to the home channel (src/ask.js placeOfMessage), because a move posts its context there. Anything that cannot be read counts as not public.
+ * @param {import('discord.js').Channel | null} t  the thread, with `parent` (or `parentId` and `fetch` for a parent not in the cache)
+ * @param {(id: string) => Promise<import('discord.js').Channel>} fetch
+ */
+export async function publicThread(t, fetch) {
+  if (t?.isThread?.() !== true || t.type === ChannelType.PrivateThread) return false;
+  const parent = t.parent ?? await fetch(t.parentId).catch(() => null);
+  const everyone = parent?.permissionsFor?.(t.guild.roles.everyone);
+  return everyone?.has(PermissionFlagsBits.ViewChannel) === true && everyone.has(PermissionFlagsBits.ReadMessageHistory) === true;
 }
+
+/** The display names of the people that a message mentions (user id → name), for its card (F-T247-3). */
+export const mentionNames = (m) => Object.fromEntries([...(m.mentions?.users?.values() ?? [])]
+  .map((u) => [u.id, m.mentions.members?.get(u.id)?.displayName ?? u.globalName ?? u.username]));
+
+/**
+ * The context port of a message `m` in its place (src/ask.js mention and send): `history(before)` reads the 100 messages of the place
+ * before the id `before`, newest first (Get Channel Messages, which needs Read Message History); `replied()` the message that `m` replies
+ * to, or null: only a reply in the same place, never a forward, whose source can be a channel that the place's readers cannot see
+ * (F-T247-19); `open(channel, payload, name)` posts a line in a channel and opens a public thread from it (the move of R918 C7); `post`;
+ * `channel(id)` fetches a channel or thread; `isPublic()` whether the place is a public thread (publicThread); `mentions` the names of
+ * the people that `m` mentions.
+ */
+const contextPort = (m, fetch, guildRoles) => ({
+  isPublic: async () => publicThread(await fetch(m.channelId).catch(() => null), fetch),
+  mentions: mentionNames(m),
+  history: async (before) => [...(await (await fetch(m.channelId)).messages.fetch({ before, limit: 100, cache: false })).values()]
+    .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)).map((x) => rawOf(x, guildRoles)),
+  replied: async () => (m.reference?.messageId && m.reference.type === MessageReferenceType.Default && m.reference.channelId === m.channelId
+    ? m.fetchReference().then((x) => rawOf(x, guildRoles), () => null) : null),
+  channel: (id) => fetch(id),
+  open: async (channel, payload, name) => (await (await (await fetch(channel)).send(payload)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
+  post: async (place, payload) => (await (await fetch(place)).send(payload)).id,
+  startThread: async (name) => (await m.startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
+});
 
 /** The name of the person of an interaction, as the server shows it. */
 const nameOf = (i) => i.member?.displayName ?? i.user.globalName ?? i.user.username;
@@ -130,6 +179,30 @@ export const commandOf = (i, fetch, guildRoles) => ({
   remove: () => i.deleteReply(),
   reply: (payload) => i.reply(payload),
   showModal: (payload) => i.showModal(payload),
+});
+
+/**
+ * The "Send to sage" message command (T247) as src/ask.js send reads it: the sender, the target message (rawOf) and its context port, and
+ * the private answers of Discord.
+ */
+export const sendOf = (i, fetch, guildRoles) => {
+  const target = rawOf(i.targetMessage, guildRoles);
+  return {
+    user: { id: i.user.id, bot: i.user.bot === true }, name: nameOf(i), roles: rolesOf(i.member, guildRoles), channelId: i.channelId, parentId: parentOf(i, fetch),
+    target: { ...target, user: { id: target.user }, content: target.text },
+    defer: (payload) => i.deferReply(payload), edit: (payload) => i.editReply(payload), reply: (payload) => i.reply(payload),
+    ...contextPort(i.targetMessage, fetch, guildRoles),
+  };
+};
+
+/**
+ * A press of an approval card (a custom_id `ob1:…`) as src/outboxFlow.js reads it: the person, the NAMES of their roles, the message with
+ * the button, and the answers of Discord.
+ */
+export const outboxPressOf = (i, guildRoles) => ({
+  user: { id: i.user.id, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles), customId: i.customId,
+  message: i.message ? { id: i.message.id } : null,
+  reply: (payload) => i.reply(payload), deferReply: (payload) => i.deferReply(payload), editReply: (payload) => i.editReply(payload),
 });
 
 /**
@@ -171,18 +244,21 @@ export function watchGateway(client, { ready, down }) {
 }
 
 /**
- * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js, the buttons and forms of a request (in any
- * registered channel and its threads: the request route, T228) to src/requestFlow.js, and the bridge's buttons and forms to the bridge;
- * `message` takes a message that mentions the bot (`botId`) and is not from a bot or a webhook (forMe) to src/ask.js. Anything from another guild gets nothing.
+ * The handlers of the Discord events, for one guild: `interaction` takes /sage and the "Send to sage" message command to src/ask.js, the
+ * buttons and forms of a request (in any registered channel and its threads: the request route, T228) to src/requestFlow.js, the buttons of
+ * an approval card (T247) to src/outboxFlow.js, and the bridge's buttons and forms to the bridge; `message` takes a message that mentions
+ * the bot (`botId`) and is not from a bot or a webhook (forMe) to src/ask.js. Anything from another guild gets nothing.
  * Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf); `threads` the thread map and
  * `channels` the channel registry (accepts).
  */
-export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles, threads = new Map(), channels = new Map() }) => ({
+export const routes = ({ config, ask, bridge, requests, outbox, fetch, botId, guildRoles, threads = new Map(), channels = new Map() }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch, guildRoles)) : undefined;
-    // The request's own record decides who may press (src/requestFlow.js), so the place of the press does not.
+    if (i.isMessageContextMenuCommand()) return i.commandName === SEND ? ask.send(sendOf(i, fetch, guildRoles)) : undefined;
+    // The request's own record decides who may press (src/requestFlow.js), so the place of the press does not; so does a message's (T247).
     if ((i.isButton() || i.isModalSubmit()) && parseRequestId(i.customId)) return requests.interaction(requestPressOf(i, guildRoles));
+    if (i.isButton() && parseOutboxId(i.customId)) return outbox.interaction(outboxPressOf(i, guildRoles));
     if (i.isButton() && (i.customId.startsWith(UNREGISTER) || i.customId === STOP || i.customId.startsWith(STOP_CANCEL))) {
       return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles),
         customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
@@ -191,11 +267,10 @@ export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles
   },
   message(m) {
     if (!forMe(m, config.guildId, botId)) return undefined;
-    return ask.mention({ id: m.id, user: { id: m.author.id, bot: false }, roles: rolesOf(m.member, guildRoles), channelId: m.channelId,
-      parentId: parentOf(m, fetch), forum: inForum(m, fetch), content: m.content, reply: (payload) => m.reply(payload),
-      // A public thread from the message (T131). Discord archives a quiet thread after a day; a mention in it opens it again.
-      startThread: async (name) => (await m.startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay })).id,
-      post: async (thread, payload) => (await (await fetch(thread)).send(payload)).id });
+    // A public thread from the message (T131, contextPort). Discord archives a quiet thread after a day; a mention in it opens it again.
+    return ask.mention({ id: m.id, user: { id: m.author.id, bot: false }, name: m.member?.displayName ?? m.author.globalName ?? m.author.username,
+      roles: rolesOf(m.member, guildRoles), channelId: m.channelId, parentId: parentOf(m, fetch), content: m.content, reply: (payload) => m.reply(payload),
+      ...contextPort(m, fetch, guildRoles) });
   },
 });
 
@@ -272,7 +347,7 @@ export async function enter(client, { config, channels, ask, log }) {
   await guild.members.fetch();
   // A refused /sage stops only /sage: the votes and cards start all the same (F-T93-4). The build of /sage is inside the guard too:
   // discord.js refuses a command that Discord would refuse (F-T244-5).
-  await Promise.try(() => guild.commands.set([askCommand(ask.projects, namesOf(config))])).catch((e) => log(`Discord refused to set /sage, so /sage keeps the commands of the last start that worked, or there is no /sage; the votes and cards work: ${apiError(e)}`));
+  await Promise.try(() => guild.commands.set([askCommand(ask.projects, namesOf(config)), sendCommand()])).catch((e) => log(`Discord refused to set /sage and ${SEND}, so they keep the commands of the last start that worked, or there are none; the votes and cards work: ${apiError(e)}`));
   for (const line of await checkChannels(channels, async (id) => (await client.channels.fetch(id))?.permissionsFor(client.user) ?? null)) log(line);
   return guild;
 }
@@ -318,7 +393,15 @@ export async function start(file) {
       threadFrom: async (at, lineId) => (await place(lineId)).id, // the thread that a message started has the message's id
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
     } });
-    const ask = createAsk({ config, channels, projects, log, audit, files, requests });
+    // The outbox (T247): the approval cards of the messages to sage, in their threads.
+    const outbox = createOutboxFlow({ config, files, audit, log, discord: {
+      post: async (target, payload) => (await (await place(target)).send(payload)).id,
+      edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
+      unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
+      // Get Channel Message, never from the cache, so a card that a member deleted shows as gone (code 10008, F-T247-16).
+      seen: async (target, id) => { await (await place(target)).messages.fetch({ message: id, force: true }); },
+    } });
+    const ask = createAsk({ config, channels, projects, log, audit, files, requests, outbox });
     const guild = await enter(client, { config, channels, ask, log });
     const roles = () => guild.roles.cache.values();
     const crewCheck = watchCrew(roles, { log, audit });
@@ -346,7 +429,7 @@ export async function start(file) {
         setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
       },
     });
-    const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads, channels });
+    const on = routes({ config, ask, bridge, requests, outbox, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads, channels });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
     // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
     const catchUp = createCatchUp({ config, log, alive: files.alive, ...catchUpPort({ guild, place, botId: client.user.id, on }),
@@ -363,6 +446,7 @@ export async function start(file) {
       try {
         await bridge.loop().catch((e) => log(`the loop failed: ${e?.message}`));
         await requests.loop(); // never rejects
+        await outbox.loop(); // never rejects
       } finally { busy = false; }
     };
     // The requests and the sessions reconcile, and the cards redraw, in the turn at each ready too.
