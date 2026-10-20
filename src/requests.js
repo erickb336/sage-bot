@@ -28,7 +28,7 @@ const STATUSES = Object.keys(STATUS_WORDS);
 const DECIDED = ['approved', 'declined', 'withdrawn'];
 const SNOWFLAKE = /^\d{17,20}$/;
 /** The keys of every record, in the order the file holds them. `claim` is set only while approving. */
-const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'textForSage', 'designQuestions', 'requester', 'requesterName',
+const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'designQuestions', 'requester', 'requesterName',
   'status', 'claim', 'createdAt', 'decidedAt', 'decidedBy', 'via', 'reason', 'task', 'channel', 'line', 'card', 'thread', 'shown'];
 /** The Discord fields that the bridge sets with setDiscord. */
 const DISCORD = ['line', 'card', 'thread', 'shown'];
@@ -78,7 +78,7 @@ function isRequest(r) {
   const decided = DECIDED.includes(r.status);
   const c = r.claim;
   return text(r.id) && REQUEST_ID.test(r.id) && text(r.project) && PROJECT_NAME.test(r.project) && text(r.folder) && r.folder.startsWith('/')
-    && [r.title, r.text, r.titleForSage, r.textForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= MAX_NAME
+    && [r.title, r.text, r.titleForSage, r.requesterName].every(text) && length(r.requesterName) >= 1 && length(r.requesterName) <= MAX_NAME
     && ['team', 'owner'].includes(r.designQuestions) && id(r.requester) && STATUSES.includes(r.status) && time(r.createdAt)
     && (r.status === 'approving'
       // `tool`, the state tool of step 2, comes once it starts (T210). The time to approve again is a time of the file too (T223).
@@ -97,7 +97,8 @@ const checked = (r) => {
 };
 
 /**
- * A new request, and the file with it (pure). Refuses a field out of its limits, and a title or text with nothing that sage can read.
+ * A new request, and the file with it (pure). Refuses a field out of its limits, and a title with nothing that sage can read: the task
+ * title in sage is titleForSage. The text goes to sage only as quoted data (src/outbox.js), so it needs no letter or digit (R950 Q2).
  * @param {{ next: number, requests: object[] }} file
  * @param {{ project: string, folder: string, title: string, text: string, designQuestions: 'team' | 'owner', requester: string,
  *   requesterName: string, channel?: string | null }} f
@@ -109,11 +110,10 @@ export function newRequest(file, f, at) {
     const [min, max] = LIMITS[k];
     if (typeof f[k] !== 'string' || length(f[k]) < min || length(f[k]) > max) refuse(`the ${k} must have ${min} to ${max} characters. Nothing changed.`);
   }
-  const [titleForSage, textForSage] = [forModel(f.title), forModel(f.text)];
+  const titleForSage = forModel(f.title);
   if (!titleForSage) refuse('the title has nothing that sage can read: it needs letters or digits. Nothing changed.');
-  if (!textForSage) refuse('the text has nothing that sage can read: it needs letters or digits. Nothing changed.');
   const request = checked({
-    id: `RQ${file.next}`, project: f.project, folder: f.folder, title: f.title, text: f.text, titleForSage, textForSage,
+    id: `RQ${file.next}`, project: f.project, folder: f.folder, title: f.title, text: f.text, titleForSage,
     designQuestions: f.designQuestions, requester: f.requester, requesterName: f.requesterName, status: 'pending', claim: null,
     createdAt: at, decidedAt: null, decidedBy: null, via: null, reason: null, task: null,
     channel: f.channel ?? null, line: null, card: null, thread: null, shown: null,
@@ -164,10 +164,13 @@ export function loadRequests(path) {
   let data;
   try { data = JSON.parse(text); } catch { throw bad; }
   if (!data || Object.keys(data).sort().join() !== 'next,requests,version' || data.version !== 1 || !Number.isSafeInteger(data.next) || data.next < 1
-    || !Array.isArray(data.requests) || !data.requests.every(isRequest)) throw bad;
-  const ids = data.requests.map((r) => Number(r.id.slice(2)));
+    || !Array.isArray(data.requests)) throw bad;
+  // A record of before T247 has textForSage, which no code reads now (R950 Q2): it loads without it, and the next save drops it.
+  const requests = data.requests.map((r) => { if (!r || typeof r !== 'object' || !('textForSage' in r)) return r; const { textForSage, ...rest } = r; return rest; });
+  if (!requests.every(isRequest)) throw bad;
+  const ids = requests.map((r) => Number(r.id.slice(2)));
   if (new Set(ids).size !== ids.length || ids.some((n) => n >= data.next)) throw bad;
-  return { next: data.next, requests: data.requests };
+  return { next: data.next, requests };
 }
 const save = (path, file) => writeWhole(path, `${JSON.stringify({ version: 1, next: file.next, requests: file.requests })}\n`);
 
