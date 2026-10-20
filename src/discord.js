@@ -392,6 +392,7 @@ export async function start(file) {
       startThread: async (at, lineId, name) => (await (await (await place(at)).messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
       threadFrom: async (at, lineId) => (await place(lineId)).id, // the thread that a message started has the message's id
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
+      locked: async (thread) => (await client.channels.fetch(thread, { force: true })).locked === true, // fresh: a moderator may lock it at any time
     } });
     // The outbox (T247): the approval cards of the messages to sage, in their threads.
     const outbox = createOutboxFlow({ config, files, audit, log, discord: {

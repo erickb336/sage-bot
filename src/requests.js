@@ -33,9 +33,14 @@ const KEYS = ['id', 'project', 'folder', 'title', 'text', 'titleForSage', 'desig
 /** The Discord fields that the bridge sets with setDiscord. */
 const DISCORD = ['line', 'card', 'thread', 'shown'];
 
-/** A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. */
-export class Refused extends Error {}
-const refuse = (text) => { throw new Refused(text); };
+/**
+ * A refusal for a person: one line that ends "Nothing changed." or with the next step. The file is as it was. `forDiscord` is the text
+ * for a note on Discord when the text names a folder (a folder path never goes to Discord); the full text is for the terminal.
+ */
+export class Refused extends Error {
+  constructor(text, forDiscord = text) { super(text); this.forDiscord = forDiscord; }
+}
+const refuse = (text, forDiscord) => { throw new Refused(text, forDiscord); };
 
 const length = (s) => Array.from(s).length;
 const two = (n) => String(n).padStart(2, '0');
@@ -214,10 +219,12 @@ export function setDiscord(config, id, fields) {
 export function toolOf(config, r) {
   let projects;
   try { projects = loadProjects(config); } catch (e) {
-    refuse(`${String(e?.message ?? e).replace(/ Nothing (was started|changed)\.$/, '').replace(/\.$/, '')}. Nothing changed.`);
+    refuse(`${String(e?.message ?? e).replace(/ Nothing (was started|changed)\.$/, '').replace(/\.$/, '')}. Nothing changed.`,
+      'the projects in the config cannot be read now. The details are at the terminal. Nothing changed.');
   }
   const p = projects.find((x) => x.name === r.project && x.project === r.folder);
-  if (!p) refuse(`the project ${r.project} (${r.folder}) is not in the config. ${r.status === 'pending' ? `Add it back, or decline ${r.id}.` : 'Add it back, then run the command again.'}`);
+  const next = r.status === 'pending' ? `Add it back, or decline ${r.id}.` : 'Add it back, then run the command again.';
+  if (!p) refuse(`the project ${r.project} (${r.folder}) is not in the config. ${next}`, `the project ${r.project} is not in the config. ${next}`);
   return sageTool(p);
 }
 

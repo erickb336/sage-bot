@@ -34,7 +34,8 @@ const plain = ({ flags, ...payload }) => ({ components: [], embeds: [], ...paylo
 /**
  * The request side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it) and statePath; `channels` is the registry;
  * `projects` are the bridge's (loadProjects). `discord` is the port `{ post(target, payload) → id, edit(target, id, payload),
- * startThread(channel, lineId, name) → id, threadFrom(channel, lineId) → id, unarchive(thread) }` (src/discord.js, or src/fake-discord.js for the tests).
+ * startThread(channel, lineId, name) → id, threadFrom(channel, lineId) → id, unarchive(thread),
+ * locked(thread) → boolean }` (src/discord.js, or src/fake-discord.js for the tests).
  * `tool(r)` gives the state tool of a request (default: its project's, src/requests.js toolOf); the tests give one with a scratch HOME.
  * `newKey` makes the key of a draft: a random one by default, so a key is hard to guess; the demo gives fixed ones. `threads` is the
  * process's one thread map (src/threads.js loadThreads; src/discord.js gives the one that src/ask.js and the bridge share).
@@ -92,17 +93,26 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
     return r;
   }
   const send = (what, target, payload, nonce, done) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), done);
-  /** An edit. Discord refuses an edit in a thread that it archived after a quiet week (50083, F-T228-8): the thread opens again first. */
+  /**
+   * An edit. Discord refuses an edit in a thread that it archived after a quiet week (50083, F-T228-8): the thread opens again first.
+   * A thread that a moderator locked stays as it is (F-T228-10): Discord would open it for sage-bot, so the lock is read first.
+   */
   const edit = (what, target, message, payload) => call(`the edit of ${what}`, () => discord.edit(target, message, payload).catch(async (e) => {
-    if (e?.code !== 50083) throw e;
-    try { await discord.unarchive(target); } catch { throw e; } // a locked thread stays as it is
+    if (e?.code !== 50083 || await discord.locked(target)) throw e;
+    await discord.unarchive(target);
     return discord.edit(target, message, payload);
   }), (c) => NO_EDIT.has(c));
   async function drawNow(id) {
     let r = find(load(), id);
     if (!r.channel) return r;
     const off = linkOff(killPath);
-    if (!r.line) r = await once(`${id}:line`, (n) => send(`the line of ${id}`, r.channel, requestLine(r, { us, linkOff: off }), n), (line) => setDiscord(config, id, { line }));
+    // A post keeps the view that it shows with its id until the file takes the id (F-T228-11). `drawn` holds a view only while the line
+    // and the card both show it, so a card posted before the link went off is edited at this draw.
+    const shows = view(r, off);
+    if (!r.line) {
+      r = await once(`${id}:line`, async (n) => ({ line: await send(`the line of ${id}`, r.channel, requestLine(r, { us, linkOff: off }), n), shows }),
+        ({ line, shows: v }) => { const x = setDiscord(config, id, { line }); drawn.set(id, v); return x; });
+    }
     if (!r.thread) {
       // Code 160004: the line has its thread already, but the reply that named it was lost.
       r = await once(`${id}:thread`, () => call(`the thread of ${id}`, () => discord.startThread(r.channel, r.line, requestThreadName(r)).catch((e) => {
@@ -112,9 +122,12 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
     }
     if (!r.card) {
       // The first post of the card pings the owner once (only while it waits and the link is on: requestCard).
-      r = await once(`${id}:card`, (n) => send(`the card of ${id}`, r.thread, requestCard(r, { ownerId: config.ownerId, us, linkOff: off, ping: true }), n),
-        (card) => setDiscord(config, id, { card, ...(OPEN.includes(r.status) && { shown: r.status }) }));
-      drawn.set(id, view(r, off));
+      r = await once(`${id}:card`, async (n) => ({ card: await send(`the card of ${id}`, r.thread, requestCard(r, { ownerId: config.ownerId, us, linkOff: off, ping: true }), n), shows }),
+        ({ card, shows: v }) => {
+          const x = setDiscord(config, id, { card, ...(OPEN.includes(r.status) && { shown: r.status }) });
+          if (drawn.get(id) !== v) drawn.delete(id);
+          return x;
+        });
     }
     if (drawn.get(id) === view(r, off) && r.shown === r.status) return r;
     await edit(`the line of ${id}`, r.channel, r.line, requestLine(r, { us, linkOff: off }));
@@ -151,9 +164,15 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
   // ---- The presses ----
   /** Answers a press with a private note; a refusal of Discord is logged. */
   const answer = (i, payload, how = 'reply') => i[how](payload).catch((e) => say(`Discord refused a request reply: ${apiError(e)}`));
-  /** The note for a Refused of src/requests.js; any other error is logged and gets a fixed line, so no path reaches Discord (F-T228-5). */
+  /**
+   * The note for a Refused of src/requests.js, in its text for Discord; any other error gets a fixed line, so no path reaches Discord
+   * (F-T228-5, F-T228-9). The full text goes to the terminal log.
+   */
   const failed = (e, id) => {
-    if (e instanceof Refused) return ephemeral(cut(forTerminal(e.message), LIMIT.content));
+    if (e instanceof Refused) {
+      if (e.forDiscord !== e.message) say(`${id}: ${e.message}`);
+      return ephemeral(cut(forTerminal(e.forDiscord), LIMIT.content));
+    }
     say(`${id}: ${e?.message ?? e}`);
     return requestNote('broken', us);
   };

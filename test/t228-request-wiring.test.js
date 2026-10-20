@@ -5,7 +5,8 @@
 // made up. Nothing connects to Discord or reads the Keychain.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { restoreLink, setLinkOff } from '../src/audit.js';
 import { createAsk } from '../src/ask.js';
 import { openChannels } from '../src/channels.js';
@@ -15,7 +16,7 @@ import { fakeCommand, fakeDiscord, fakeInteraction, fakeMention } from '../src/f
 import { loadProjects } from '../src/projects.js';
 import { requestNote } from '../src/requestCards.js';
 import { createRequestFlow } from '../src/requestFlow.js';
-import { approve, loadRequests, requestsPathOf, RETRY_AFTER } from '../src/requests.js';
+import { approve, loadRequests, requestsPathOf, RETRY_AFTER, toolOf } from '../src/requests.js';
 import { sageTool } from '../src/sage.js';
 import { CONFIG, JON, MAYA, OWNER, SAGE, SAM, setup, spawnSync, table, T0 } from './bridge-setup.js';
 const NOT_CREW = 'Only the sage-crew role can use sage-bot.'; // src/crew.js notCrew with the bot's name unknown
@@ -41,9 +42,9 @@ function world(tt) {
   // `b.onPost` and `b.onThread` run after Discord made the message or the thread, before its id comes back: a test fails a reply there.
   const port = { post: async (at, payload) => { const id = await fake.post(at, payload); await b.onPost?.(payload); return id; }, edit: fake.edit,
     startThread: async (at, line, name) => { const id = await fake.startThread(line, name); await b.onThread?.(); return id; },
-    threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
+    threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive, locked: fake.locked };
   b.tool = sageTool({ sagePath: SAGE, project: b.project, env: b.env });
-  b.make = () => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.tool });
+  b.make = (tool = () => b.tool) => createRequestFlow({ config, channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool });
   b.flow = b.make();
   b.ask = createAsk({ config, channels, projects, now: () => b.now, log: (l) => b.lines.push(l), env: b.env, requests: b.flow });
   Object.assign(b, { config, fake, path: requestsPathOf(config), killPath: `${b.statePath}.leads-off` });
@@ -491,4 +492,57 @@ test('T241 F-T241-8: the open request threads are unknown (null), not none, whil
   assert.deepEqual(b.flow.threads(), [b.r().thread]);
   writeFileSync(b.path, 'not a request file');
   assert.equal(b.flow.threads(), null);
+});
+
+test('F-T228-9: an Approve whose project left the config gets a note with no folder path; the terminal log has the full text', async (tt) => {
+  const b = world(tt);
+  mkdirSync(join(b.root, 'other'));
+  // The config now serves only another folder (the project left it), or names a folder that is gone (the config cannot be read).
+  const cases = [
+    [join(b.root, 'other'), 'the project project is not in the config. Add it back, or decline RQ1.', b.project],
+    [join(b.root, 'gone'), 'the projects in the config cannot be read now. The details are at the terminal. Nothing changed.', join(b.root, 'gone')],
+  ];
+  await b.request(JON);
+  for (const [folder, note, path] of cases) {
+    b.flow = b.make((r) => toolOf({ ...b.config, project: folder }, r));
+    b.lines.length = 0;
+    const replies = await b.press(OWNER, 'rq1:approve:RQ1', { message: b.r().card });
+    assert.deepEqual(replies.map((x) => [x.kind, x.content]), [['defer', undefined], ['editReply', note]]);
+    assert.ok(!JSON.stringify(replies).includes(b.root), folder); // no folder path reaches Discord
+    assert.ok(b.lines.some((l) => l.startsWith('RQ1: ') && l.includes(path)), folder); // the full text is in the terminal log
+    assert.equal(b.r().status, 'pending');
+  }
+});
+
+test('F-T228-10: a thread that a moderator locked and archived stays locked and archived; the edit of its card is skipped and logged', async (tt) => {
+  const b = world(tt);
+  await b.request(JON);
+  const thread = b.r().thread;
+  const before = b.fake.messages.get(b.r().card).length;
+  await b.fake.setLocked(thread, true); // a moderator locks the thread: Discord archives it too
+  await approve(b.config, 'RQ1', { by: 'owner', via: 'terminal', tool: b.tool, now: () => b.now });
+  await b.flow.loop();
+  await b.flow.loop();
+  assert.deepEqual([b.fake.threads.get(thread).archived, b.fake.threads.get(thread).locked], [true, true]);
+  assert.equal(b.fake.messages.get(b.r().card).length, before); // the card is as it was
+  assert.match(b.line().content, /approved/); // the line in the channel shows the decision
+  assert.equal(b.lines.filter((l) => l.startsWith('Discord refused the edit of the card of RQ1')).length, 1);
+});
+
+test('F-T228-11: when the id write of the line or the card fails and the link goes off before the retry, the line and the card show the link off at the next loop', async (tt) => {
+  for (const what of ['line', 'card']) {
+    const b = world(tt);
+    let free;
+    const is = { line: (p) => p.content?.startsWith('**Jon'), card: (p) => p.embeds }[what];
+    b.onPost = (p) => { if (is(p) && !free) free = hold(b); };
+    await b.request(JON);
+    assert.equal(b.r()[what], null, what); // the post is on Discord; the file did not take its id
+    setLinkOff(b.killPath, MAYA, b.now);
+    free();
+    await b.flow.loop(); // writes the id
+    await b.flow.loop();
+    assert.ok(b.card().embeds[0].fields.some((f) => f.name === 'The link from Discord to sage is off'), what);
+    assert.match(b.line().content, /· the link to sage is off$/, what);
+    assert.equal(pings(b), 1, what);
+  }
 });
