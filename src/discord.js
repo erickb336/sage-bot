@@ -382,6 +382,8 @@ export async function start(file) {
     if (ownerName === undefined) log(`Discord did not give the name of the owner ${owner.ownerId}: the copy says "the owner"`);
     const config = { ...prepared.config, ownerId: owner.ownerId, ownerName, botName: client.user.globalName ?? client.user.username };
     const place = (id) => client.channels.fetch(id); // the channel or one of its threads, from the cache when it is there
+    // Get Channel, never from the cache: a moderator may lock a thread at any time. The one lock read of the requests and the outbox.
+    const locked = async (thread) => (await client.channels.fetch(thread, { force: true })).locked === true;
     // The requests (T228): a line in the request's channel, a thread from it, and the card in the thread. Discord archives a quiet
     // thread after a week; a post opens it again.
     // The one thread map of the process (F4 of R917): the requests write its task threads, src/ask.js its mention threads, and the bridge
@@ -392,13 +394,14 @@ export async function start(file) {
       startThread: async (at, lineId, name) => (await (await (await place(at)).messages.fetch(lineId)).startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek })).id,
       threadFrom: async (at, lineId) => (await place(lineId)).id, // the thread that a message started has the message's id
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
-      locked: async (thread) => (await client.channels.fetch(thread, { force: true })).locked === true, // fresh: a moderator may lock it at any time
+      locked,
     } });
     // The outbox (T247): the approval cards of the messages to sage, in their threads.
     const outbox = createOutboxFlow({ config, files, audit, log, discord: {
       post: async (target, payload) => (await (await place(target)).send(payload)).id,
       edit: async (target, id, payload) => (await (await place(target)).messages.fetch(id)).edit(payload),
       unarchive: async (thread) => { await (await place(thread)).setArchived(false); },
+      locked,
       // Get Channel Message, never from the cache, so a card that a member deleted shows as gone (code 10008, F-T247-16).
       seen: async (target, id) => { await (await place(target)).messages.fetch({ message: id, force: true }); },
     } });

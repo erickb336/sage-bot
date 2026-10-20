@@ -107,7 +107,9 @@ export function openLog(path, projects) {
   const found = verifyLog(path);
   let prev = found.last; // after a break: the hash of the last line as it is
   let torn = found.torn; // the file does not end in a newline: the next append writes one first
-  let size = lstatSync(path, { throwIfNoEntry: false })?.size ?? 0; // the size of the file after this process's last read or append
+  // The size of the file after this process's last append; -1 until then, so the first append reads the chain again under the lock: a
+  // size taken here, after the unlocked read above, can already hold another process's line (F-T247-21).
+  let size = -1;
   const messages = new Set([...found.lines, ...found.rest.map((r) => { try { return JSON.parse(r); } catch { return null; } })].map((x) => x?.message));
   return {
     broken: found.broken,

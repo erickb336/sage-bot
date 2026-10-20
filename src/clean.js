@@ -23,6 +23,14 @@ const LOOKALIKES = new Map([
   // Kept by hand: the letter \u4E36 (U+4E36) looks like `\`, and confusables 18.0.0 does not map it to `\` (F-T247-34).
   ['\u4E36', '\\'],
 ]);
+/**
+ * For `literal` in src/outbox.js (F-T247-35): whether a character is a letter, number or mark that `literal` can keep and that looks
+ * like `'` (its target is only `'`, also the Hebrew yod, which forModel keeps below). Two of them side by side, or one beside `'`, look
+ * like `"`, so `literal` escapes such a run. Every punctuation or symbol that looks like `'` is escaped anyway.
+ */
+const KEPT = /^[[\p{L}\p{N}\p{M}]--\p{Default_Ignorable_Code_Point}]$/v;
+const APOSTROPHE_LIKE = new Set([...LOOKALIKES].filter(([c, t]) => /^'+$/.test(t) && KEPT.test(c)).map(([c]) => c));
+export const apostropheLike = (ch) => APOSTROPHE_LIKE.has(ch);
 LOOKALIKES.delete('\u05D9');
 /** For forLead: `<`, `>` and each look-alike of them, as the plain parentheses of its angles (≪ is `((`, ⪥ is `)(`), never ‹ or › (F-T143-3). */
 export const ANGLES = new Map([['<', '<'], ['>', '>'], ...LOOKALIKES].filter(([, t]) => /[<>]/.test(t))
@@ -35,6 +43,14 @@ const QUOTE_LIKE = new Set([...LOOKALIKES].filter(([, t]) => /''|\\/.test(t)).ma
  * (F-T247-29), so this test still decides only the letters ʺ ˮ ײ 丶 (test/fixtures/hidden-corpus.json).
  */
 export const quoteLike = (ch) => QUOTE_LIKE.has(ch) || /["\\]/.test(ch.normalize('NFKC'));
+/**
+ * The blank fillers: the marks that are not default-ignorable but show nothing, U+16FE4 KHITAN SMALL SCRIPT FILLER (F-T247-37) and
+ * U+1BC9D DUPLOYAN THICK LETTER SELECTOR (T248). Of the code points named *SELECTOR* or *FILLER* in Unicode 17.0, these are the only such
+ * marks (test/fixtures/hidden-corpus.json). One list for both readers: `shownMark` serves safeOf (src/cards.js) and literal (src/outbox.js).
+ */
+export const blankFiller = (ch) => /^[\u{16FE4}\u{1BC9D}]$/u.test(ch ?? '');
+/** A mark that a reader can see: not default-ignorable (so no variation selector, U+034F, U+17B4 or U+17B5) and not a blank filler. */
+export const shownMark = (ch) => /^[\p{M}--\p{Default_Ignorable_Code_Point}]$/v.test(ch) && !blankFiller(ch);
 const LETTER = /^[\p{L}--\p{Default_Ignorable_Code_Point}]$/v;
 const MARK = /^[\p{M}--[\p{Variation_Selector}\p{Default_Ignorable_Code_Point}]]$/v;
 const KEEP = /^[\p{Nd}.,:\-]$/v;

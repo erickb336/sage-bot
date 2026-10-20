@@ -16,7 +16,7 @@ import { CREW, isOwner, namesOf, notCrew, personName, placeOf } from './crew.js'
 import { forTerminal } from './clean.js';
 import { ActionRowBuilder, ButtonStyle } from 'discord.js';
 import {
-  addMessage, auditFields, CONTEXT, decide, find, GONE, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf,
+  addMessage, auditFields, CONTEXT, decide, find, GONE, SHUT_OUT, loadOutbox, MESSAGE_ID, outboxPathOf, Refused, refusalOf, setDiscord, short, windowOf, withNames,
 } from './outbox.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -58,20 +58,34 @@ const contextLine = (r) => {
   const outside = r.context.filter((c) => c.place === 'not crew').length;
   return `with ${earlier(r.context.length)}${outside ? ` (${outside} from not crew)` : ''}, ${kb(r)} KB, see payload.txt`;
 };
+/** A text as the card shows it: `safeOf` with backticks shown escaped, so that a code span hides nothing (F-T247-30). */
+const shownOf = (text) => safeOf(text, { backticks: true });
 /**
- * The text of a message as the card shows it to people (F-T247-3): each `<@id>` as "@" and the name the record keeps for it (src/crew.js
- * personName; "member" and the last 4 digits of an id with no name), then `safeOf`: the text and the count of code points that it drops.
- * The payload keeps the raw text.
+ * The text of a message as the card shows it to people: its mentions as names (src/outbox.js withNames, F-T247-3), then `shownOf`: the
+ * text and the code points that it drops. The payload keeps the raw text.
  */
-const cardText = (r) => safeOf(r.text.replace(/<@!?(\d{1,20})>/g, (_, id) => `@${r.mentions[id] ?? nameFor('', id)}`));
+const cardText = (r) => shownOf(withNames(r));
+/** At most this many different hidden code points are named for one message, and this many messages on the Hidden field (F-T247-36). */
+const NAMED = { codes: 8, messages: 4 };
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const codeOf = (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
 /**
- * The hidden characters of a message (F-T247-25, F-T247-29, F-T247-32): exactly the code points that `safe` drops, by its own allow-list,
- * from the card text and from each context text (the card shows no context text, but sage reads it). payload.txt shows each one: as
- * `\u{…}`, or raw (a backtick, a fourth mark on a letter). A field when there is one or more.
+ * The hidden characters of a message (F-T247-25, F-T247-29, F-T247-32, F-T247-36): exactly the code points that the card drops, by the
+ * allow-list of `safe`, from the card text and from each context text (the card shows no context text, but sage reads it). One line
+ * for each message that has any, with whose words they are and each different code point by name: "1 hidden character in Sam's message
+ * (not crew): U+200B". The text of a forwarded message is its writer's. A field when there is one or more.
  */
 const hiddenField = (r, shown) => {
-  const n = r.context.reduce((sum, c) => sum + safeOf(c.text).dropped, shown.dropped);
-  return n ? [{ name: 'Hidden', value: `${n} hidden character${n === 1 ? '' : 's'} in the message or its context, see payload.txt` }] : [];
+  const found = [[r.quote ?? r, shown.dropped], ...r.context.map((c) => [c, shownOf(c.text).dropped])].filter(([, d]) => d.length);
+  if (!found.length) return [];
+  const line = ([who, d]) => {
+    const codes = [...new Set(d.map(codeOf))];
+    const more = codes.length > NAMED.codes ? ` and ${codes.length - NAMED.codes} more` : '';
+    return `${plural(d.length, 'hidden character')} in ${safe(who.name)}'s message (${who.place}): ${codes.slice(0, NAMED.codes).join(', ')}${more}`;
+  };
+  const rest = found.length - NAMED.messages;
+  const lines = [...found.slice(0, NAMED.messages).map(line), ...(rest > 0 ? [`and hidden characters in ${plural(rest, 'more message')}`] : [])];
+  return [{ name: 'Hidden', value: cut(lines.join('\n'), LIMIT.value) }];
 };
 /** The exact payload as a file of the card. */
 const payloadFile = (r) => ({ attachment: Buffer.from(r.payload, 'utf8'), name: 'payload.txt' });
@@ -134,7 +148,7 @@ export function statusLine(r, us, home = false) {
       declined: `**${it} declined** by ${us.owner}${reasonOf(r)}. Nothing goes to sage.`,
       withdrawn: `**${it} withdrawn** by ${decider(r, us)}${reasonOf(r)}. Nothing goes to sage.`,
     }[r.status];
-  return { content, allowedMentions: NO_MENTIONS, ...(own && { files: [payloadFile(r)] }) };
+  return { content, allowedMentions: NO_MENTIONS, ...(own && !home && { files: [payloadFile(r)] }) }; // payload.txt holds thread text: never home
 }
 
 /** The private notes of the outbox, each a function of `us` and the message. */
@@ -154,7 +168,7 @@ const RIGHTS = 'Send Messages in Threads, Embed Links and Attach Files';
 
 /**
  * The outbox side of one bridge. `config` has ownerId (as src/crew.js ownerOf resolved it), statePath and channelId (the home channel).
- * `discord` is the port `{ post(target, payload) → id, edit(target, id, payload), unarchive(thread), seen(target, id) }`, where `seen`
+ * `discord` is the port `{ post(target, payload) → id, edit(target, id, payload), unarchive(thread), locked(thread) → boolean, seen(target, id) }`, where `seen`
  * resolves when the message is there (src/discord.js, or src/fake-discord.js for the tests).
  * `files` are src/ask.js openAskFiles (the audit log); `audit` posts the #sage-audit copy of each audit log line. `newMarker` makes the
  * marker of each payload: src/outbox.js newMarker (random) by default; the demo gives fixed ones, so that two runs give the same page.
@@ -198,32 +212,45 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
     return r;
   }
   const send = (what, target, payload, nonce, done = NO_EDIT) => call(what, () => discord.post(target, { ...payload, nonce, enforceNonce: true }), (c) => done.has(c));
+  /**
+   * A post in the thread of a message, or null when the thread is shut: a moderator locked it, or Discord refuses the post (SHUT). sage-bot
+   * with Manage Threads could post in a locked thread that is not archived, so the lock is read first (T248 S2, as `edit`).
+   */
+  const inThread = async (what, thread, payload, nonce) => {
+    const locked = await discord.locked(thread).catch((e) => { if (SHUT.has(e?.code)) return true; throw e; });
+    return locked ? null : send(what, thread, payload, nonce, SHUT);
+  };
+  /**
+   * An edit. Discord refuses an edit in a thread that it archived (50083): the thread opens again first. A thread that a moderator locked
+   * stays as it is (F-T242-out, as src/requestFlow.js in T242): Discord would open it for sage-bot, so the lock is read first.
+   */
   const edit = (what, target, message, payload) => call(`the edit of ${what}`, () => discord.edit(target, message, payload).catch(async (e) => {
-    if (e?.code !== 50083) throw e;
-    try { await discord.unarchive(target); } catch { throw e; } // a locked thread stays as it is
+    if (e?.code !== 50083 || await discord.locked(target)) throw e;
+    await discord.unarchive(target);
     return discord.edit(target, message, payload);
   }), (c) => NO_EDIT.has(c));
   const lost = (e) => LOST.has(e?.code);
   /**
-   * sage-bot withdraws a waiting message whose thread or card Discord says is gone (F-T247-16), so it frees its sender's place; it is in
-   * the audit log, and its status line goes to the home channel. A decision that came first stays. Returns the message after it.
+   * sage-bot withdraws a waiting message whose thread or card Discord says is gone (F-T247-16), or whose first card Discord refuses
+   * because its thread is locked or hidden from sage-bot (`SHUT_OUT`, F-T247-23), so it frees its sender's place; it is in the audit
+   * log, and its status line goes to the home channel. A decision that came first stays. Returns the message after it.
    */
-  function withdrawLost(r) {
+  function withdrawLost(r, reason = GONE) {
     try {
-      return decide(config, r.id, { type: 'withdraw', by: 'sage-bot', at: now(), reason: GONE }, (x) => audited(x, 'sage-bot', place('sage-bot'), false));
+      return decide(config, r.id, { type: 'withdraw', by: 'sage-bot', at: now(), reason }, (x) => audited(x, 'sage-bot', place('sage-bot'), false));
     } catch (e) {
       if (e instanceof Refused) return find(load(), r.id);
       throw e;
     }
   }
   /**
-   * The status line of a message: in its thread, or in the home channel when sage-bot withdrew it or its thread is gone, so that the
-   * line names the sender. Each line once (`nonce`), wherever it goes.
+   * The status line of a message: in its thread, or in the home channel when sage-bot withdrew it, or its thread is gone or shut (a
+   * moderator locked it: T248 C2), so that the line names the sender. Each line once (`nonce`), wherever it goes.
    */
   async function line(r, nonce) {
     const what = `the status line of ${r.id}`;
     if (r.decidedBy !== 'sage-bot') {
-      try { return await send(what, r.thread, statusLine(r, us), nonce, SHUT); } catch (e) { if (!lost(e)) throw e; }
+      try { const posted = await inThread(what, r.thread, statusLine(r, us), nonce); if (posted) return posted; } catch (e) { if (!lost(e)) throw e; }
     }
     return send(what, config.channelId, statusLine(r, us, true), nonce);
   }
@@ -233,7 +260,8 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
       try {
         if (!r.card) {
           const posted = { ...outboxCard(r, { ownerId: config.ownerId, us, ping: true }), files: [payloadFile(r)] };
-          r = await once(`${mid}:card`, (n) => send(`the card of ${mid}`, r.thread, posted, n, SHUT), (card) => setDiscord(config, mid, { card, shown: 'pending' }));
+          r = await once(`${mid}:card`, (n) => inThread(`the card of ${mid}`, r.thread, posted, n),
+            (card) => (card ? setDiscord(config, mid, { card, shown: 'pending' }) : withdrawLost(r, SHUT_OUT))); // SHUT: no card, ever (F-T247-23)
         } else if (r.shown === 'pending') await call(`the read of the card of ${mid}`, () => discord.seen(r.thread, r.card)).catch((e) => { if (lost(e)) throw e; });
       } catch (e) {
         if (!lost(e)) throw e;
@@ -305,6 +333,9 @@ export function createOutboxFlow({ config, discord, files, audit, now = Date.now
       try { await draw(r.id); } catch (e) { // the loop draws it again; a missing right needs the owner, so the sender hears it (F-T247-4)
         if (e?.code === NO_PERMISSION) await s.tell?.(`${r.id} is recorded, but I cannot post it in this thread: ${us.bot} lacks a right here (${RIGHTS}). It shows here once ${us.owner} gives the right to ${us.bot}'s role.`);
       }
+      let after = r;
+      try { after = find(load(), r.id); } catch { /* the loop reads it again */ }
+      if (after.reason === SHUT_OUT) await s.tell?.(`I could not post the card of ${r.id} in <#${r.thread}>: the thread is locked, or ${us.bot} cannot see it. ${us.bot} withdrew ${r.id}, so nothing goes to sage.`);
       return r;
     },
     /**
