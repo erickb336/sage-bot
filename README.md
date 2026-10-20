@@ -3,6 +3,8 @@
 **sage-bot is a Discord bot that lets a small team steer one person's [sage](https://github.com/erickb336/sage) session in Claude Code, with that person's approval for every action.**
 A team of 2 to 5 people requests features, votes on design questions and sends instructions from Discord. Nobody on the team needs a terminal, and no instruction from Discord reaches sage until the owner approves it.
 
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg"><img src="docs/assets/hero-light.svg" alt="The round trip: the team posts in a Discord thread, the owner approves each message on a card, sage builds the project in Claude Code, and the results come back to the thread, where delivery to sage (T159) and the replies (T160) are planned." width="100%"></picture>
+
 [![check](https://github.com/erickb336/sage-bot/actions/workflows/check.yml/badge.svg)](https://github.com/erickb336/sage-bot/actions/workflows/check.yml) · [MIT licence](LICENSE) · **Contents:** [Quick start](#quick-start) · [Usage](#usage) · [How it works](#how-it-works) · [Set up a live trial](#set-up-a-live-trial) · [FAQ](#faq)
 
 ```mermaid

@@ -129,7 +129,7 @@ for (const doc of DOCS) {
 
   test(`${doc}: every relative link points to a file that exists, and every anchor to a heading`, () => {
     const text = readFileSync(join(ROOT, doc), 'utf8');
-    const targets = [...text.matchAll(/\]\(([^)\s]+)\)|(?:href|src)="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
+    const targets = [...text.matchAll(/\]\(([^)\s]+)\)|(?:href|src|srcset)="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
     assert.ok(targets.length > 0);
     for (const target of targets) {
       if (/^(https?|mailto):/.test(target)) continue;
