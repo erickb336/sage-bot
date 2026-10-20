@@ -178,7 +178,7 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
   /**
    * Whether the card of `id` is a waiting card in an unregistered task thread (F-T245-5): no press there reaches the bridge, so the card is
    * closed. It gets no tick, no tie ping, no reminder and no held message; the owner answers it at the terminal. When Erick registers the
-   * channel again for its project, the loop gives the card its buttons back, and its vote goes on.
+   * channel again for its project, the loop gives the card its buttons back; a vote whose limit passed meanwhile ends at once.
    */
   const closedHere = (id) => Boolean(meta.get(id).message) && waits(id) && unregistered(meta.get(id).channel);
   /** The note of a closed card: the reason, then that the owner answers at the terminal. */
@@ -460,16 +460,24 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
     const { gate, ask } = gates.get(id);
     const task = `${projectOfKey(id)} ${ask.task}`; // the project name, so that a ping says which project asks (T132)
     const n = gate.parts?.length;
+    const tied = gate.phase === 'tied';
     const text = (ask.leads ? `${task} asks the crew for a recommendation to ${us.owner}. The first answer is the recommendation; ${us.owner} decides at the terminal.`
       : gate.kind === 'single' ? `${task} needs one product answer. The first answer is final.`
+      : tied ? `${task} waits for ${us.owner} to break a tie.`
       : `${task} has ${n === 1 ? '1 product question. Vote on it' : `${n} product questions. Vote on each part`} within ${limitOf(gate) / MINUTE} minutes.`
         + (m.thread ? ` Then the votes decide, and ${us.owner} breaks a tie.` : ''))
       + (m.channel ? ` Its ${m.thread ? 'task' : 'session'} thread was deleted, so the card is here now, with the votes so far.` : '');
-    const payload = { ...card(gate, ask, ppl), ...crewAlert(text) };
+    // A tied card pings nobody: only the owner can act on it, and the tie ping below it calls the owner.
+    const payload = { ...card(gate, ask, ppl), ...(tied ? { content: text, allowedMentions: NO_MENTIONS } : crewAlert(text)) };
     let message = await post(at, payload);
     // A refused post in a task thread, or in a session thread that is gone, goes to the parent channel at once (T245, F-T29-9).
     if (!message && at !== config.channelId && (at === m.thread || !sessions.get(m.session)?.thread)) message = await post((at = config.channelId), payload);
-    if (message) { Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() }); persist(); }
+    if (!message) return message;
+    // A tied card that moved gets one tie ping below it, before the other held messages; it replaces the owner's pings that waited for
+    // the card (a tie post or a reminder), so the owner gets one ping at once, not none until the next reminder (Q1 of R1084).
+    if (moved(m) && tied) m.held = [tieMessage(gate, ask, ppl), ...(m.held ?? []).filter((p) => !p.allowedMentions?.users?.includes(config.ownerId))];
+    Object.assign(m, { message, channel: at }, moved(m) && { remindedAt: clock() });
+    persist();
     return message;
   }
 
@@ -1021,6 +1029,8 @@ export function createBridge({ sages, own, discord, config, statePath, threads =
           return;
         }
         if (!onCard) { await i.reply(note('unknown-gate')); return; }
+        // A card closed in an unregistered task thread takes no press, also one that reaches the bridge past the routes (Q4 of R1084).
+        if (meta.has(pressed?.gateId) && closedHere(pressed.gateId)) { await i.reply(ephemeral(closedNote(UNREGISTERED))); return; }
         if (sages.has(project)) await readOwner(project, await sages.get(project).gates());
         const target = pressed && gates.get(pressed.gateId);
         const final = target?.ask.parts[target.gate.kind === 'single' ? 0 : pressed.part]?.final;

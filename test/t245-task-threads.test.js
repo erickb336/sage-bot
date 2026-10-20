@@ -458,6 +458,59 @@ test('a waiting card in a task thread that Discord deleted moves to the home cha
   assert.equal(b.bridge.entry(id).gate.parts[0].ballots.length, 2);
   const after = b.discord.in(CHANNEL);
   assert.equal(after.at(-1) !== cardId && b.discord.where.get(after.at(-1)), CHANNEL);
+  assert.equal(after.length - after.indexOf(cardId), 2); // the card and one tie ping (Q1 of R1084)
   assert.match(b.discord.latest(after.at(-1)).content, new RegExp(`^<@${OWNER}> ${id} is tied after its vote`));
   assert.equal(b.lines.includes(`${id}: its card moves to the parent channel, because its task thread ${b.thread} is gone (G17)`), true);
+});
+
+// R1084: the repair of PR 69 (T246).
+
+const TIED_HOME = `${NAME} T1 waits for Erick to break a tie. Its task thread was deleted, so the card is here now, with the votes so far.`;
+
+test('a tied card whose task thread Discord deleted moves home with the tie text, and the owner gets one tie ping there at once (Q1 of R1084)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  await ask(b, 'T1', ['Which date format?', 'ISO|Locale']);
+  const id = `${NAME}/G1`;
+  await press(b, MAYA, `press:${id}:0:0`);
+  await press(b, JON, `press:${id}:0:1`);
+  b.now = b.bridge.entry(id).gate.endsAt;
+  await b.bridge.loop(); // the tie, and its ping in the task thread
+  assert.equal(b.bridge.entry(id).gate.phase, 'tied');
+  b.discord.deleteThread(b.thread);
+  b.now += 2 * 60 * MINUTE; // the first reminder finds the thread gone
+  await b.bridge.loop();
+  const cardId = b.discord.cardOf(id);
+  assert.equal(b.discord.where.get(cardId), CHANNEL);
+  const posted = b.discord.messages.get(cardId)[0];
+  assert.deepEqual([posted.content, posted.allowedMentions], [TIED_HOME, { parse: [] }]); // no crew ping: only the owner can act
+  const below = b.discord.in(CHANNEL).slice(b.discord.in(CHANNEL).indexOf(cardId) + 1).map((m) => b.discord.latest(m));
+  assert.equal(below.length, 1); // one ping for the owner, not the tie ping and the reminder
+  assert.match(below[0].content, new RegExp(`^<@${OWNER}> ${id} is tied after its vote\\. T1 waits: please break the tie with the buttons on the card\\.`));
+  assert.deepEqual(below[0].allowedMentions, { parse: [], users: [OWNER] });
+  await b.bridge.loop();
+  assert.equal(b.discord.in(CHANNEL).length, below.length + 1 + b.discord.in(CHANNEL).indexOf(cardId)); // once: the next loop posts nothing
+});
+
+test('the bridge itself refuses a press on a card closed in an unregistered task thread: the closed note, no ballot (Q4 of R1084)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  await ask(b, 'T1', ['Which date format?', 'ISO|Locale']);
+  const id = `${NAME}/G1`;
+  const cardId = b.discord.cardOf(id);
+  await unregister(b);
+  await b.bridge.loop(); // the card closes
+  // A press on the card's own message (a client that still shows the old buttons) reaches bridge.interaction directly, past the routes.
+  const pressCard = async () => {
+    const i = fakeInteraction({ user: MAYA, customId: `press:${id}:0:0`, message: cardId });
+    await b.bridge.interaction(i);
+    return i.replies.map((r) => [r.kind, r.content, r.flags]);
+  };
+  assert.deepEqual(await pressCard(), [['reply', CLOSED_NOTE, 64]]);
+  assert.deepEqual(b.bridge.entry(id).gate.parts[0].ballots, []);
+  // Registered again for its project, the same press counts.
+  b.channels.set(ASK, { project: NAME });
+  await b.bridge.loop();
+  await pressCard();
+  assert.deepEqual(b.bridge.entry(id).gate.parts[0].ballots.map(([by]) => by), [MAYA]);
 });
