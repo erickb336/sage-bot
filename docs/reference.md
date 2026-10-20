@@ -613,18 +613,40 @@ node scripts/leads.mjs read 5
 
 `src/catchup.js` (T241, R918 C9). Discord does not send again the messages of a time when sage-bot was not connected: the Mac slept, the network went, or the bridge restarted. A sleep does not restart the process, and launchd restarts it only after a crash or at login. So the bridge reads those messages back at each gateway ready: the first ready after the login, each new session (`shardReady`) and each resume (`shardResume`).
 
-**The file.** `<statePath>.alive`, beside the gate file and safe like it (0600, written whole, read with no symlink). It holds the time of the last loop turn (the heartbeat, written at each turn) and the last message id that the bridge saw in each watched place. The bridge records a place's id at each message that the gateway brings, so the first catch-up has a start point. A file that the bridge did not write stops the start.
+**The file.** `<statePath>.alive`, beside the gate file and safe like it (0600, written whole, read with no symlink). It holds:
 
-**The gap.** It starts at the last loop turn before a pause of more than 2 loop turns (30 s), or before the gateway went (`shardDisconnect`, `shardReconnecting`). It ends at the ready.
+- the time of the last loop turn (the heartbeat, written at each turn);
+- the last message id that the bridge saw in each watched place (its mark);
+- the ids of the mentions that the bridge took while their place's mark waits ("taken"), so a restart does not answer them again;
+- the ids of the mentions whose answer started and did not end ("taking").
 
-**What a catch-up does.** For each watched place (each registered channel, each thread of the thread map, each thread of an open request):
+The bridge records a place's mark at each message that the gateway brings, so the first catch-up has a start point. A file that the bridge did not write stops the start, with a line that tells you to delete it. A file of an earlier version, with no "taken" or "taking" list, still loads.
+
+**A crash during an answer.** The bridge records a mention as "taking" before it answers it, and as "taken" after. When the bridge starts and a mention is still "taking", the answer did not end. That mention gets one reply, which pings only its author: "This is old, please ask again." It never gets a second answer.
+
+**The gap.** It starts at the last loop turn before the gateway went (`shardDisconnect`, `shardReconnecting`). A pause of the loop of more than 2 loop turns (30 s), as in a sleep, also starts a gap at the last turn before it, but only when a drop of the gateway or a ready follows within 3 minutes. Otherwise the gateway stayed up, nothing was missed, and the bridge forgets the pause. The gap ends at the ready.
+
+**The places that a catch-up reads.**
+
+- each registered channel;
+- each thread of an open request;
+- each thread of the thread map that was made, or had a message that the bridge saw, in the 24 hours before the gap;
+- each other thread of the thread map whose last message is newer than its mark, or newer than the start of the gap. The bridge knows the last message of each active thread from the gateway at each new session, with no extra read.
+
+A thread of the thread map that is quiet (none of the above) is not read, and loses its mark.
+
+**What a catch-up does.** For each place that it reads:
 
 1. It reads the messages after the place's last id, 100 at a time (Get Channel Messages with `after`), until a page has fewer than 100. A place with no id gets the start of the gap as its id, so nothing older comes; the first run ever (no heartbeat) starts now. A place that Discord refuses is logged once ("sage-bot needs View Channel and Read Message History there" for codes 50001 and 50013), and the others go on. A place that a run did not read (Discord refused, or the run failed before it) keeps its id until a later run reads it: no message of the gateway moves it.
 2. It keeps the mentions of sage-bot from the crew and the owner (`src/crew.js` placeOf). It reads each author's roles fresh from Discord, once in a run, so a role given or taken while sage-bot was offline counts; an author who left the server gets nothing. A message from a bot or a webhook, a message with no mention, and a mention from anyone else get nothing, as in the mention path.
 3. When it kept any, it posts one line in the place, with no ping. The times show the date, because a gap can pass midnight or last days. For example: "I was offline from 4 October 2026 22:10 to 6 October 2026 05:10. I picked up 1 message; 1 was too old." A place where it kept nothing gets no line.
 4. It gives each kept mention to the normal mention path ([Mention threads](#mention-threads)), oldest first, and records its id after each one, so a later run skips it. A mention older than 24 hours (owner decision) gets no answer. Each person gets at most one reply in place for such mentions in each place in a run, which pings only that person: "This is old, please ask again."
 
-A message that the gateway brings while a catch-up waits or runs, or between a drop of the gateway and the next ready, is handled at once, and the catch-up skips it. The place's id moves past such a message only after the run, so the run never skips a message that it has still to read. While the request file cannot be read, the threads of the open requests are unknown: every place keeps its id, and waits for a run that knows them all. At each ready the bridge also runs a loop turn: the requests and the sessions reconcile, and the cards redraw.
+A failure to read the roles of an author stops only that author's place; the other places go on in the same run.
+
+**Try again.** While a run left a place unread, the bridge runs the catch-up again every 3 minutes (at the first loop turn 3 minutes after the last run), not only at the next ready. The line for a failed run says so: "it tries again in 3 minutes".
+
+A message that the gateway brings while a catch-up waits or runs, or between a drop of the gateway and the next ready, is handled at once, and the catch-up skips it. The place's id moves past such a message only after the run, so the run never skips a message that it has still to read. Only a mention of sage-bot goes on the "taken" list, so the list grows only with real mentions. While the request file cannot be read, the threads of the open requests are unknown: every place keeps its id, and waits for a run that knows them all. At each ready the bridge also runs a loop turn: the requests and the sessions reconcile, and the cards redraw.
 
 **The buttons (R918 C11).** A press while sage-bot is offline never reaches the bridge, and Discord says that the interaction failed. So the footer of an open card, of a batch vote that still waits and of an open request card ends with "If a button does not respond, sage-bot is offline. Press it again later."
 
