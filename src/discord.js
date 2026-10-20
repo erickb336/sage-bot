@@ -14,6 +14,7 @@ import { forTerminal } from './clean.js';
 import { NO_MENTIONS } from './cards.js';
 import { CREW, crewRoleIds, crewWarning, namesOf, oldRoleKeys, ownerOf } from './crew.js';
 import { lock } from './state.js';
+import { isLiveTask } from './threads.js';
 import { alivePathOf, createCatchUp, loadAlive, PAGE } from './catchup.js';
 import { notDiscordIds } from './launchd.js';
 
@@ -149,12 +150,12 @@ export const requestPressOf = (i, guildRoles) => ({
 
 /**
  * Whether an interaction is the bridge's: a button or a form in the configured channel, in a thread of it (T29), or in a task thread of
- * the thread map `threads` (T245, F3 of R917), in any registered channel. A press in any other channel or thread is not, also on a
- * message with the bridge's custom ids.
+ * the thread map `threads` (T245, F3 of R917) whose channel the registry `channels` holds now (isLiveTask). A press in any other channel
+ * or thread is not, also on a message with the bridge's custom ids.
  */
-export async function accepts(i, channelId, fetch, threads) {
+export async function accepts(i, channelId, fetch, threads, channels) {
   if (!(i.isButton() || i.isModalSubmit())) return false;
-  return i.channelId === channelId || threads.get(i.channelId)?.kind === 'task' || await parentOf(i, fetch) === channelId;
+  return i.channelId === channelId || isLiveTask(threads.get(i.channelId), channels) || await parentOf(i, fetch) === channelId;
 }
 
 /** Whether a message goes to the mention path: in the guild `guildId`, not from a bot or a webhook, and it mentions the bot `botId`. */
@@ -173,9 +174,10 @@ export function watchGateway(client, { ready, down }) {
  * The handlers of the Discord events, for one guild: `interaction` takes /sage to src/ask.js, the buttons and forms of a request (in any
  * registered channel and its threads: the request route, T228) to src/requestFlow.js, and the bridge's buttons and forms to the bridge;
  * `message` takes a message that mentions the bot (`botId`) and is not from a bot or a webhook (forMe) to src/ask.js. Anything from another guild gets nothing.
- * Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf); `threads` the thread map (accepts).
+ * Each returns the promise of its work, or nothing. `guildRoles` is the guild's Map of roles (rolesOf); `threads` the thread map and
+ * `channels` the channel registry (accepts).
  */
-export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles, threads = new Map() }) => ({
+export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles, threads = new Map(), channels = new Map() }) => ({
   interaction(i) {
     if (i.guildId !== config.guildId) return undefined;
     if (i.isChatInputCommand()) return i.commandName === 'sage' ? ask.command(commandOf(i, fetch, guildRoles)) : undefined;
@@ -185,7 +187,7 @@ export const routes = ({ config, ask, bridge, requests, fetch, botId, guildRoles
       return ask.press({ user: { id: i.user.id, name: i.member?.displayName ?? i.user.globalName ?? i.user.username, bot: i.user.bot === true }, roles: rolesOf(i.member, guildRoles),
         customId: i.customId, sentAt: i.message?.createdTimestamp, update: (payload) => i.update(payload), reply: (payload) => i.reply(payload) });
     }
-    return accepts(i, config.channelId, fetch, threads).then((ok) => ok && bridge.interaction(i));
+    return accepts(i, config.channelId, fetch, threads, channels).then((ok) => ok && bridge.interaction(i));
   },
   message(m) {
     if (!forMe(m, config.guildId, botId)) return undefined;
@@ -330,6 +332,7 @@ export async function start(file) {
       config,
       statePath: config.statePath,
       threads: files.threads,
+      channels,
       log,
       discord: {
         members: () => guild.members.cache.map(memberOf),
@@ -343,7 +346,7 @@ export async function start(file) {
         setLocked: async (thread, locked) => (await place(thread)).edit({ archived: locked, locked }),
       },
     });
-    const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads });
+    const on = routes({ config, ask, bridge, requests, fetch: place, botId: client.user.id, guildRoles: guild.roles.cache, threads: files.threads, channels });
     client.on(Events.InteractionCreate, (i) => { on.interaction(i); });
     // The catch-up (T241): at each gateway ready, the messages of the watched places that the bridge did not see.
     const catchUp = createCatchUp({ config, log, alive: files.alive, ...catchUpPort({ guild, place, botId: client.user.id, on }),

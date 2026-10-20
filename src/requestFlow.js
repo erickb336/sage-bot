@@ -20,7 +20,7 @@ import {
   requestThreadName, withdrawConfirm,
 } from './requestCards.js';
 import { addRequest, approve, decline, find, loadRequests, MAX_NAME, reconcile, Refused, requestsPathOf, setDiscord, withdraw } from './requests.js';
-import { loadThreads, taskThread, threadsPathOf } from './threads.js';
+import { isLiveTask, loadThreads, taskThread, threadsPathOf } from './threads.js';
 
 const SNOWFLAKE = /^\d{17,20}$/;
 /** How long a draft's confirm works after the form, and a withdraw confirm after its press. */
@@ -129,12 +129,15 @@ export function createRequestFlow({ config, channels, projects, discord, now = D
 
   /**
    * Makes the thread of an approved request the thread of its task (T245), once: approved on Discord or at the terminal, also before a
-   * restart. A save that fails is logged and tried again at the next loop; until then the map in memory holds the task thread.
+   * restart. A save that fails is logged and tried again at the next loop; until then the map in memory holds the task thread. A request
+   * of a channel that the registry does not hold now gets no task thread (isLiveTask, F-T245-3).
    */
   const unsavedThreads = new Set();
   function adopt(r) {
     if (r.status !== 'approved' || !r.thread || (threads.has(r.thread) && !unsavedThreads.has(r.thread))) return;
-    threads.set(r.thread, taskThread(r));
+    const entry = taskThread(r);
+    if (!isLiveTask(entry, channels)) return;
+    threads.set(r.thread, entry);
     try {
       threads.save();
       unsavedThreads.delete(r.thread);

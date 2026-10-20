@@ -9,7 +9,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import { createBridge, SETTLE } from '../src/bridge.js';
 import { card } from '../src/cards.js';
 import { openChannels } from '../src/channels.js';
-import { createAsk, openAskFiles } from '../src/ask.js';
+import { createAsk, openAskFiles, UNREGISTER } from '../src/ask.js';
 import { CREW, namesOf } from '../src/crew.js';
 import { routes } from '../src/discord.js';
 import { fakeCommand, fakeInteraction, fakeMention } from '../src/fake-discord.js';
@@ -37,9 +37,14 @@ async function world(tt) {
   const fake = b.discord;
   const port = { post: fake.post, edit: fake.edit, startThread: (at, line, name) => fake.startThread(line, name), threadFrom: (at, line) => fake.threadFrom(line), unarchive: fake.unarchive };
   b.threads = loadThreads(threadsPathOf(config));
-  b.flow = createRequestFlow({ config, channels: openChannels(config, projects), projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.sage, threads: b.threads });
-  b.bridge = createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord: fake, config: CONFIG, statePath: b.statePath, threads: b.threads, now: () => b.now, log: (l) => b.lines.push(l) });
+  b.channels = openChannels(config, projects); // the one registry of the process, as src/discord.js shares it
+  b.flow = createRequestFlow({ config, channels: b.channels, projects, discord: port, now: () => b.now, log: (l) => b.lines.push(l), tool: () => b.sage, threads: b.threads });
+  b.newBridge = (threads = b.threads) => createBridge({ sages: new Map([[NAME, b.sage]]), own: NAME, discord: fake, config: CONFIG, statePath: b.statePath,
+    threads, channels: b.channels, now: () => b.now, log: (l) => b.lines.push(l) });
+  b.bridge = b.newBridge();
   b.config = config;
+  b.asker = () => createAsk({ config, channels: b.channels, projects, now: () => b.now, log: (l) => b.lines.push(l), env: b.env,
+    requests: b.flow, files: { ...openAskFiles(config, projects), threads: b.threads } });
   b.r = () => loadRequests(requestsPathOf(config)).requests[0];
   b.ask = async (user, customId, o = {}) => {
     const i = fakeInteraction({ user, customId, roles: ROLES[user], fields: o.fields, message: o.message, sentAt: b.now });
@@ -254,7 +259,7 @@ test('the routes take a press of the bridge in a task thread of any registered c
   const id = `${NAME}/G1`;
   const reached = [];
   const on = routes({ config: CONFIG, ask: {}, requests: {}, bridge: { interaction: (i) => { reached.push(i.channelId); return b.bridge.interaction(i); } },
-    fetch: async () => ({ isThread: () => true, parentId: ASK }), botId: '1', threads: b.threads });
+    fetch: async () => ({ isThread: () => true, parentId: ASK }), botId: '1', threads: b.threads, channels: b.channels });
   const pressIn = (channelId) => ({ ...fakeInteraction({ user: MAYA, customId: `press:${id}:0:1`, message: b.discord.cardOf(id) }), guildId: GUILD, channelId,
     isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false });
   const unknown = '900000000000000077'; // another thread of the same registered channel
@@ -269,12 +274,90 @@ test('the routes take a press of the bridge in a task thread of any registered c
 test('a crew member\'s mention in a task thread is a read ask, and nothing is held for it', async (tt) => {
   const b = await world(tt);
   await approve(b);
-  const projects = loadProjects(b.config);
-  const asker = createAsk({ config: b.config, channels: openChannels(b.config, projects), projects, now: () => b.now, log: (l) => b.lines.push(l), env: b.env,
-    requests: b.flow, files: { ...openAskFiles(b.config, projects), threads: b.threads } });
+  const asker = b.asker();
   const m = fakeMention({ user: MAYA, roles: [CREW], channelId: b.thread, parentId: ASK, content: '<@1> board', place: b.discord });
   await asker.mention(m);
   const reply = b.discord.latest(b.discord.in(b.thread).at(-1));
   assert.match(reply.content, /^\*\*Board · project\*\*/);
   assert.deepEqual(b.threads.get(b.thread), { kind: 'task', task: 'T1', request: 'RQ1', project: NAME, folder: b.project, channel: ASK });
+});
+
+/** The owner's /sage unregister confirm for the request channel ASK, pressed in time, through src/ask.js. */
+async function unregister(b) {
+  const replies = [];
+  await b.asker().press({ user: { id: OWNER, name: 'Erick', bot: false }, roles: [CREW], customId: `${UNREGISTER}${ASK}`, sentAt: b.now,
+    update: async (p) => { replies.push(p); }, reply: async (p) => { replies.push(p); } });
+  assert.equal(replies[0].content, `<#${ASK}> is unregistered: sage-bot ignores /sage and mentions here now. Only Erick can register it again.`);
+}
+
+test('after the owner unregisters its channel, a task thread takes no card, ping or press: the gate votes in the home channel with 10 minutes (F-T245-3)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  await unregister(b);
+  const before = b.discord.in(b.thread).length;
+  await ask(b, 'T1', ['Which columns go in the export?', 'Visible only|All fields']);
+  const id = `${NAME}/G1`;
+  const { gate } = b.bridge.entry(id);
+  assert.deepEqual([gate.kind, gate.limit], ['batch', 10 * MINUTE]); // still the task's crew vote of 10 minutes
+  assert.equal(b.discord.where.get(b.discord.cardOf(id)), CHANNEL); // in the home channel
+  assert.equal(b.discord.in(b.thread).length, before); // no card and no crew ping in the old thread
+  assert.equal(pinged(b).at(-1), `<@&${CREW_ROLE}> ${NAME} T1 has 1 product question. Vote on it within 10 minutes. Then the votes decide, and Erick breaks a tie.`);
+  // A press in the old thread does not reach the bridge; the same press in the home channel does.
+  const reached = [];
+  const on = routes({ config: CONFIG, ask: {}, requests: {}, bridge: { interaction: (i) => { reached.push(i.channelId); return b.bridge.interaction(i); } },
+    fetch: async () => ({ isThread: () => true, parentId: ASK }), botId: '1', threads: b.threads, channels: b.channels });
+  const pressIn = (channelId) => ({ ...fakeInteraction({ user: MAYA, customId: `press:${id}:0:1`, message: b.discord.cardOf(id) }), guildId: GUILD, channelId,
+    isChatInputCommand: () => false, isButton: () => true, isModalSubmit: () => false });
+  await on.interaction(pressIn(b.thread));
+  assert.deepEqual(reached, []);
+  assert.equal(b.bridge.entry(id).gate.parts[0].ballots.length, 0);
+  await on.interaction(pressIn(CHANNEL));
+  assert.deepEqual(reached, [CHANNEL]);
+  // A mention in the old thread gets the reply for a channel that is not registered.
+  const m = fakeMention({ user: MAYA, roles: [CREW], channelId: b.thread, parentId: ASK, content: '<@1> board', place: b.discord });
+  await b.asker().mention(m);
+  assert.deepEqual(m.replies.map((r) => r.content), [`I answer in <#${CHANNEL}>, so everyone can find the answers. Please ask there.`]);
+});
+
+test('an approve after the owner unregistered the request channel makes no task thread (F-T245-3)', async (tt) => {
+  const b = await world(tt);
+  await unregister(b);
+  const replies = await approve(b);
+  assert.equal(replies.at(-1).content.includes('sage task T1'), true); // the approve itself works
+  await b.flow.loop();
+  assert.equal(b.threads.has(b.thread), false);
+  assert.deepEqual([...loadThreads(threadsPathOf(b.config))], []); // nothing saved either
+  // The bridge sends the task's gates to the home channel, as for any task with no task thread.
+  await ask(b, 'T1', ['Which columns?', 'Visible only|All fields']);
+  assert.equal(b.discord.where.get(b.discord.cardOf(`${NAME}/G1`)), CHANNEL);
+  assert.equal(b.bridge.entry(`${NAME}/G1`).gate.kind, 'single');
+});
+
+test('a bridge restart in the middle of a task-thread vote keeps the vote: still open 1 ms before 10 minutes, decided once at 10 minutes (F-T245-4)', async (tt) => {
+  const b = await world(tt);
+  await approve(b);
+  await ask(b, 'T1', ['Which columns go in the export?', 'Visible only|All fields']);
+  const id = `${NAME}/G1`;
+  await press(b, MAYA, `press:${id}:0:1`);
+  const cardId = b.discord.cardOf(id);
+  // A new process: a new thread map and a new bridge from the same files.
+  const threads = loadThreads(threadsPathOf(b.config));
+  assert.deepEqual(threads.get(b.thread).kind, 'task');
+  b.bridge = b.newBridge(threads);
+  const { gate } = b.bridge.entry(id);
+  assert.deepEqual([gate.limit, gate.endsAt - gate.openedAt, gate.parts[0].ballots.map(([by]) => by)], [10 * MINUTE, 10 * MINUTE, [MAYA]]);
+  b.now = gate.endsAt - 1;
+  await b.bridge.loop();
+  assert.equal(b.bridge.entry(id).gate.phase, 'voting');
+  assert.equal(b.answerOf('G1'), '');
+  b.now = gate.endsAt;
+  await b.bridge.loop();
+  const posts = b.discord.posts.length;
+  b.now += MINUTE;
+  await b.bridge.loop();
+  assert.equal(b.discord.posts.length, posts); // decided once: the next loop posts nothing more
+  assert.deepEqual(b.bridge.entry(id).gate.parts[0].outcome, { status: 'decided', option: 'B', how: 'votes' });
+  assert.equal(b.discord.cardOf(id), cardId); // the same card, still in the task thread
+  assert.equal(b.discord.where.get(cardId), b.thread);
+  assert.equal(b.answerOf('G1'), 'All fields');
 });

@@ -86,7 +86,10 @@ const discord = { ...fake, async post(target, payload) {
 } };
 const log = [];
 const threads = loadThreads(threadsPathOf({ statePath })); // the one thread map of the process: the bridge, the requests and the mentions share it
-const bridge = createBridge({ sages: new Map([['project', sageTool({ sagePath: SAGE, project, env })]]), own: 'project', discord, config: CONFIG, statePath, threads, now: () => now, log: (l) => log.push(l) });
+const rconfig = { ...CONFIG, askChannelId: ASK, project, sagePath: SAGE, statePath }; // the crew requests in #ask-sage (docs/setup.md)
+const projects = loadProjects(rconfig);
+const channels = openChannels(rconfig, projects);
+const bridge = createBridge({ sages: new Map([['project', sageTool({ sagePath: SAGE, project, env })]]), own: 'project', discord, config: CONFIG, statePath, threads, channels, now: () => now, log: (l) => log.push(l) });
 const loop = () => bridge.loop();
 /** Moves the clock on by `ms`, with a loop of the bridge every LOOP, as the running bridge does (a longer gap is a sleep of the Mac). */
 async function advance(ms) {
@@ -206,9 +209,6 @@ step(`SessionEnd: the line says ended; the thread is ${thread.locked ? 'locked' 
 
 // ---- A request (T228): a crew member asks for a feature in the channel, and the owner approves it -------------------------------
 const split = story.length; // the events of the request come after this one
-const rconfig = { ...CONFIG, askChannelId: ASK, project, sagePath: SAGE, statePath }; // the crew requests in #ask-sage (docs/setup.md)
-const projects = loadProjects(rconfig);
-const channels = openChannels(rconfig, projects);
 let drafts = 0;
 const requests = createRequestFlow({ config: rconfig, channels, projects, now: () => now, log: (l) => log.push(l), tool: () => sageTool({ sagePath: SAGE, project, env }),
   newKey: () => `D${++drafts}`, threads, // fixed keys, so that two runs give the same page

@@ -63,6 +63,13 @@ export function loadThreads(path) {
  */
 export const taskThread = (r) => ({ kind: 'task', task: r.task, request: r.id, project: r.project, folder: r.folder, channel: r.channel });
 
+/**
+ * Whether the thread map entry `t` is a task thread of a channel that the registry `channels` (src/channels.js) holds now (F-T245-3): the
+ * one check of the registry for a task thread. A task thread of a channel that the owner unregistered takes no card and no press, and an
+ * approve there makes none; its entry stays in the map, so a channel that Erick registers again at the terminal gets its task threads back.
+ */
+export const isLiveTask = (t, channels) => t?.kind === 'task' && channels.has(t.channel);
+
 /** The words of a mention, with every Discord mention, role and channel tag taken out. */
 const words = (text) => String(text ?? '').replace(/<(?:@[!&]?|#)\d+>/g, ' ').replace(/\s+/g, ' ').trim();
 
