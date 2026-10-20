@@ -543,6 +543,7 @@ test('F-T228-11: when the id write of the line or the card fails and the link go
     await b.flow.loop();
     assert.ok(b.card().embeds[0].fields.some((f) => f.name === 'The link from Discord to sage is off'), what);
     assert.match(b.line().content, /· the link to sage is off$/, what);
-    assert.equal(pings(b), 1, what);
+    // The card pings only while the link is on (requestCard): it was posted before the link went off, or after it.
+    assert.equal(pings(b), what === 'card' ? 1 : 0, what);
   }
 });
